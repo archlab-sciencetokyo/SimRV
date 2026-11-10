@@ -2383,6 +2383,12 @@ void test_instruction_explainer_is_side_effect_free() {
     const auto before_tlb_lru = cpu.tlb.inst_r_lru;
 
     simrv::tui::InspectorPane pane(machine);
+    cpu.pipeline_sim.config.record_snapshots = true;
+    cpu.pipeline_sim.advance_cycle({
+        .fetch = {.instruction = {.pc = pc, .op_id = simrv::isa::OperationId::ADDI}, .valid = true},
+    });
+    expect(pane.get_pipeline_pc_at_row(2) == simrv::xlen::VirtAddr{pc},
+           "timeline selection returns the displayed instruction's PC");
     pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
     expect(pane.get_pipeline_pc_at_row(-1) == simrv::xlen::VirtAddr{},
            "non-pipeline row has no selectable virtual PC");

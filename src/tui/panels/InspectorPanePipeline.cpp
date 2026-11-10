@@ -39,6 +39,37 @@ using simrv::isa::InstFormat;
 
 namespace {
 
+struct TimelineInstruction {
+    uint64_t inst_id = 0;
+    simrv::xlen::VirtAddr pc{};
+    isa::OperationId op_id = isa::OperationId::ILLEGAL;
+
+    auto operator==(const TimelineInstruction& other) const -> bool {
+        return inst_id != 0 && other.inst_id != 0 ? inst_id == other.inst_id : pc == other.pc;
+    }
+};
+
+auto timeline_instructions(simrv::pipeline::PipelineHistoryView history)
+    -> std::vector<TimelineInstruction> {
+    std::vector<TimelineInstruction> instructions;
+    const int history_size = static_cast<int>(history.size());
+    for (int i = std::max(0, history_size - 14); i < history_size; ++i) {
+        const auto& snap = history.at(i);
+        const std::array stages = {&snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+        for (const auto* stage : stages) {
+            if (stage->valid && stage->pc != 0) {
+                const TimelineInstruction ref{stage->inst_id, stage->pc, stage->op_id};
+                if (!std::ranges::contains(instructions, ref)) instructions.push_back(ref);
+            }
+        }
+    }
+    constexpr size_t kMaxRows = 5;
+    if (instructions.size() > kMaxRows) {
+        instructions.erase(instructions.begin(), instructions.end() - kMaxRows);
+    }
+    return instructions;
+}
+
 // -----------------------------------------------------------------------
 // Shared helpers
 // -----------------------------------------------------------------------
@@ -956,39 +987,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
 
     int const history_size = static_cast<int>(history.size());
 
-    // Collect unique instruction instances in this window chronologically.
-    struct InstRef {
-        uint64_t inst_id = 0;
-        simrv::xlen::VirtAddr pc{};
-        isa::OperationId op_id = isa::OperationId::ILLEGAL;
-
-        auto operator==(const InstRef& o) const -> bool {
-            return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
-        }
-    };
-    std::vector<InstRef> active_insts;
-    int const scan_start = std::max(0, history_size - 14);
-    for (int i = scan_start; i < history_size; ++i) {
-        auto const& snap = history.at(i);
-        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
-            &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
-        for (auto const* stage : stages) {
-            if (stage->valid && stage->pc != 0) {
-                InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
-                if (!std::ranges::contains(active_insts, ref)) {
-                    active_insts.push_back(ref);
-                }
-            }
-        }
-    }
-
-    // Keep only the 5 most-recently-seen instructions to avoid overflow
-    constexpr int kMaxInstRows = 5;
-    if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-        active_insts.erase(
-            active_insts.begin(),
-            active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
-    }
+    const auto active_insts = timeline_instructions(history);
 
     // Determine max PC width dynamically (10 for 8-digit hex e.g. 0x8000002a, 18 for full 64-bit)
     int max_pc_width = 10;
@@ -1102,39 +1101,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
     if (logical_row >= 2 && logical_row <= 6) {
         auto const history = ps.cycle_history();
         if (history.empty()) return 0;
-        int const history_size = static_cast<int>(history.size());
-
-        struct InstRef {
-            uint64_t inst_id = 0;
-            simrv::xlen::VirtAddr pc{};
-            isa::OperationId op_id = isa::OperationId::ILLEGAL;
-            auto operator==(const InstRef& o) const -> bool {
-                return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
-            }
-        };
-        std::vector<InstRef> active_insts;
-        int const scan_start = std::max(0, history_size - 14);
-        for (int i = scan_start; i < history_size; ++i) {
-            auto const& snap = history.at(i);
-            std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
-                &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
-            for (auto const* stage : stages) {
-                if (stage->valid && stage->pc != 0) {
-                    InstRef ref{.inst_id = stage->inst_id,
-                                .pc = stage->pc,
-                                .op_id = stage->op_id};
-                    if (!std::ranges::contains(active_insts, ref)) {
-                        active_insts.push_back(ref);
-                    }
-                }
-            }
-        }
-        constexpr int kMaxInstRows = 5;
-        if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-            active_insts.erase(
-                active_insts.begin(),
-                active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
-        }
+        const auto active_insts = timeline_instructions(history);
 
         int const inst_row = logical_row - 2;
         if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size()) {
