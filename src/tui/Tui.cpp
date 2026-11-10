@@ -250,16 +250,14 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
 Tui::~Tui() {
     shutdown();
     if (mission_breakpoint_addr_)
-        machine_.breakpoint_manager().remove_pc_breakpoint(
-            simrv::xlen::VirtAddr{*mission_breakpoint_addr_},
-            simrv::debug::BreakpointOwner::Mission);
+        machine_.breakpoint_manager().remove_pc_breakpoint(*mission_breakpoint_addr_,
+                                                           simrv::debug::BreakpointOwner::Mission);
 }
 
 void Tui::sync_mission_checkpoint() {
     if (mission_breakpoint_addr_) {
-        machine_.breakpoint_manager().remove_pc_breakpoint(
-            simrv::xlen::VirtAddr{*mission_breakpoint_addr_},
-            simrv::debug::BreakpointOwner::Mission);
+        machine_.breakpoint_manager().remove_pc_breakpoint(*mission_breakpoint_addr_,
+                                                           simrv::debug::BreakpointOwner::Mission);
         mission_breakpoint_addr_.reset();
     }
     const auto progress = mission_.checkpoint_progress();
@@ -274,7 +272,7 @@ void Tui::sync_mission_checkpoint() {
     }
     machine_.breakpoint_manager().add_pc_breakpoint(*address,
                                                     simrv::debug::BreakpointOwner::Mission);
-    mission_breakpoint_addr_ = address->raw();
+    mission_breakpoint_addr_ = *address;
 }
 
 void Tui::apply_mission_guidance_layout() {
@@ -3685,7 +3683,7 @@ void Tui::observe_current_pc_symbol() {
     const auto pc = machine_.primary_hart().state().pc;
     // The address installed for the mission checkpoint is authoritative. Symbol lookup by
     // address can return a different alias at the same PC, which would otherwise lose evidence.
-    if (mission_breakpoint_addr_ && pc == *mission_breakpoint_addr_) {
+    if (mission_breakpoint_addr_ && simrv::xlen::VirtAddr{pc} == *mission_breakpoint_addr_) {
         if (const auto progress = mission_.checkpoint_progress())
             mission_.observe_symbol(progress->symbol);
     }

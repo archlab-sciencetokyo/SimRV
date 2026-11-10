@@ -8,10 +8,12 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "simrv/core/Cpu.hpp"
@@ -74,9 +76,11 @@ struct TuiTestAccess {
     static void set_execution_paused(Tui& tui, bool paused) { tui.set_paused(paused); }
     static void update_tui(Tui& tui) { tui.update(); }
     static void set_mission_breakpoint(Tui& tui, simrv::xlen::Address address) {
+        static_assert(std::is_same_v<decltype(tui.mission_breakpoint_addr_),
+                                     std::optional<simrv::xlen::VirtAddr>>);
         tui.machine_.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{address},
                                                             simrv::debug::BreakpointOwner::Mission);
-        tui.mission_breakpoint_addr_ = address;
+        tui.mission_breakpoint_addr_ = simrv::xlen::VirtAddr{address};
     }
     static void configure_mission(Tui& tui, std::string_view path, std::string_view binary) {
         tui.mission_.configure(path, binary);

@@ -406,7 +406,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool mission_execution_stopped_{false};
     uint64_t mission_revision_seen_ = 0;
     std::optional<bool> mission_layout_fits_;
-    std::optional<simrv::xlen::Address> mission_breakpoint_addr_;
+    std::optional<simrv::xlen::VirtAddr> mission_breakpoint_addr_;
     bool inspection_overwrite_armed_{false};
     framework::PointerRouter pointer_router_{};
     framework::Workbench<WorkbenchSlot, 4> workbench_{
