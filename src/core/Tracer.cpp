@@ -2027,8 +2027,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     return static_cast<bool>(out);
 }
 
-void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
-                                          simrv::xlen::Register jmp_pc, Opcode r_opcode,
+void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::VirtAddr cpc,
+                                          simrv::xlen::VirtAddr jmp_pc, Opcode r_opcode,
                                           bool r_tkn) {
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (!bpred_opened_) {
@@ -2045,8 +2045,8 @@ void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xle
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
     const int ir_branch = static_cast<int>(opcode == Opcode::Branch);
 
-    const simrv::xlen::Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
-    std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
+    const simrv::xlen::Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc.raw() : 0;
+    std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc.raw(),
                  D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn),
                  ir_jump, ir_branch);
 }

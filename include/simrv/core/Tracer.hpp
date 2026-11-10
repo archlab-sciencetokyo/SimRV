@@ -91,8 +91,8 @@ class Tracer {
     void print_summary();
     /** Write a stable machine-readable execution summary for automation. */
     [[nodiscard]] auto write_summary_json(const std::string& path) -> bool;
-    void emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
-                                      simrv::xlen::Register jmp_pc, isa::Opcode r_opcode,
+    void emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::VirtAddr cpc,
+                                      simrv::xlen::VirtAddr jmp_pc, isa::Opcode r_opcode,
                                       bool r_tkn);
     void write_trace_snapshot();
     void log_mmio(simrv::xlen::HartId hart, std::string_view dev_name, simrv::xlen::Address addr,
