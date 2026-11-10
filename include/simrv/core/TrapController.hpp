@@ -23,7 +23,7 @@ struct ArchState;
  * @brief Architectural state transitions produced by an MRET or SRET instruction.
  */
 struct TrapReturnState {
-    simrv::xlen::Address target_pc{0};
+    simrv::xlen::VirtAddr target_pc{};
     simrv::xlen::PrivilegeLevel target_priv{simrv::xlen::PrivilegeLevel::Machine};
     bool target_virtualization{false};
     simrv::xlen::CsrValue next_mstatus{0};

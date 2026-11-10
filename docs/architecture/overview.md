@@ -148,6 +148,8 @@ for the measurements and their limitations.
 The strong-typing migration is also incomplete: some trace records and TUI address entry points
 still use scalar address types. Spike lockstep commit PCs, pipeline-stall trace PCs, trap and SBI
 trace PCs, and TUI instruction telemetry PCs use `VirtAddr`.
+Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their
+separate cause-dependent representation.
 These are remaining C++ interface boundaries to review; their presence does not by itself establish
 a guest-visible bug.
 

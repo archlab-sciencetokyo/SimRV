@@ -48,6 +48,10 @@ concept MmioRoutable = requires(const simrv::memory::MmioRouter& router, Address
 static_assert(MmioRoutable<simrv::xlen::PhysAddr>);
 static_assert(!MmioRoutable<simrv::xlen::VirtAddr>);
 static_assert(!MmioRoutable<simrv::xlen::Address>);
+static_assert(
+    std::same_as<decltype(simrv::core::TrapDescriptor::origin_pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::core::TrapReturnState::target_pc), simrv::xlen::VirtAddr>);
 
 template <typename Address>
 concept MmioRangeAddress = requires(const simrv::memory::MmioRouter& router, Address address) {
@@ -4977,7 +4981,7 @@ void test_formalized_trap_semantics() {
         simrv::core::TrapDescriptor desc{
             .cause =
                 static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::IllegalInstruction),
-            .origin_pc = 0x1000,
+            .origin_pc = simrv::xlen::VirtAddr{0x1000},
             .tval = 0xDEADBEEF,
             .origin_priv = simrv::xlen::PrivilegeLevel::Machine,
         };
@@ -4994,7 +4998,7 @@ void test_formalized_trap_semantics() {
                "Machine is still running after first delivered trap");
 
         // Second trap dispatch without retirement
-        desc.origin_pc = 0x80000000;
+        desc.origin_pc = simrv::xlen::VirtAddr{0x80000000};
         auto disp2 = simrv::core::TrapController::dispatch_trap(cpu, desc);
         expect(disp2 == simrv::core::TrapDisposition::Delivered, "Second trap is delivered");
         expect(state.consecutive_traps == 2, "consecutive_traps incremented to 2");

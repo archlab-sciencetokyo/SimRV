@@ -8,7 +8,7 @@
 #include <string>
 
 #include "simrv/isa/TrapTypes.hpp"
-#include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 
@@ -33,7 +33,7 @@ enum class TrapDisposition : std::uint8_t {
 
 struct TrapDescriptor {
     simrv::xlen::TrapCause cause{0};
-    simrv::xlen::Address origin_pc{0};
+    simrv::xlen::VirtAddr origin_pc{};
     simrv::xlen::CsrValue tval{0};
     simrv::xlen::CsrValue htval{0};
     simrv::xlen::CsrValue htinst{0};

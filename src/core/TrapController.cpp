@@ -237,7 +237,8 @@ auto TrapController::predict_mret(const ArchState& state) noexcept -> TrapReturn
         mstatus &= ~MstatusBit::Mprv;
     }
 
-    ret.target_pc = sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa));
+    ret.target_pc = simrv::xlen::VirtAddr{
+        sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa))};
     ret.target_priv = target_priv;
     ret.target_virtualization = return_to_guest;
     ret.next_mstatus = mstatus;
@@ -265,7 +266,8 @@ auto TrapController::predict_sret(const ArchState& state) noexcept -> TrapReturn
     ret.target_virtualization = state.virt || return_to_guest;
     ret.target_priv = target_priv;
     const auto return_pc = state.virt ? state.vsepc : state.sepc;
-    ret.target_pc = sign_extend_return_pc(state, isa::epc_read_value(return_pc, state.misa));
+    ret.target_pc = simrv::xlen::VirtAddr{
+        sign_extend_return_pc(state, isa::epc_read_value(return_pc, state.misa))};
     return ret;
 }
 
@@ -287,13 +289,13 @@ void TrapController::sret(ArchState& state) {
     state.virt = ret.target_virtualization;
     state.priv = ret.target_priv;
     state.update_xlen();
-    state.pc = sign_extend_return_pc(state, ret.target_pc);
+    state.pc = sign_extend_return_pc(state, ret.target_pc.raw());
     state.lr_reservation_active = false;
 }
 
 auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> TrapDisposition {
     ArchState& state = cpu.state();
-    const simrv::xlen::Address trap_pc = desc.origin_pc;
+    const simrv::xlen::Address trap_pc = desc.origin_pc.raw();
     const simrv::xlen::PrivilegeLevel source_mode = desc.origin_priv;
     const simrv::xlen::CsrValue reported_tval =
         !desc.is_interrupt() && to_exception_code(desc.cause) == isa::ExceptionCode::Breakpoint
@@ -495,7 +497,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
                                      simrv::xlen::CsrValue tval) {
     const TrapDescriptor desc{
         .cause = cause,
-        .origin_pc = cpu.state().pc,
+        .origin_pc = simrv::xlen::VirtAddr{cpu.state().pc},
         .tval = tval,
         .htval = cpu.active_context().pending_htval,
         .htinst = cpu.active_context().pending_htinst,

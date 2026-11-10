@@ -652,7 +652,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                             ctrl.condition_met ? "TAKEN" : "NOT TAKEN");
         } else if (expl.op_id == MRET) {
             const auto ret = simrv::core::TrapController::predict_mret(*st);
-            ctrl.target_pc = ret.target_pc;
+            ctrl.target_pc = ret.target_pc.raw();
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "return from M-mode trap (mepc)";
@@ -660,7 +660,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
             expl.predicted_effect.next_virtualization = ret.target_virtualization;
         } else if (expl.op_id == SRET) {
             const auto ret = simrv::core::TrapController::predict_sret(*st);
-            ctrl.target_pc = ret.target_pc;
+            ctrl.target_pc = ret.target_pc.raw();
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation =
