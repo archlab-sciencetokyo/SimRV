@@ -1094,7 +1094,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     return format_to_width("", width);
 }
 
-auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register {
+auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::VirtAddr {
     auto const& cpu = current_cpu();
     auto const& ps = cpu.pipeline_sim;
 
@@ -1106,7 +1106,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
 
         struct InstRef {
             uint64_t inst_id = 0;
-            simrv::xlen::Register pc = 0;
+            simrv::xlen::VirtAddr pc{};
             isa::OperationId op_id = isa::OperationId::ILLEGAL;
             auto operator==(const InstRef& o) const -> bool {
                 return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
@@ -1120,7 +1120,9 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
                 &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
             for (auto const* stage : stages) {
                 if (stage->valid && stage->pc != 0) {
-                    InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
+                    InstRef ref{.inst_id = stage->inst_id,
+                                .pc = simrv::xlen::VirtAddr{stage->pc},
+                                .op_id = stage->op_id};
                     if (!std::ranges::contains(active_insts, ref)) {
                         active_insts.push_back(ref);
                     }
@@ -1144,7 +1146,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
     if (machine_.runtime_profile.is_cycle_mode()) {
         const auto stage_pc = [&ps](PipelineStage stage) {
             const auto& reg = ps.stage_reg(stage);
-            return reg.valid ? reg.pc : simrv::xlen::Register{0};
+            return simrv::xlen::VirtAddr{reg.valid ? reg.pc : simrv::xlen::Register{0}};
         };
         switch (logical_row) {
             case 11:

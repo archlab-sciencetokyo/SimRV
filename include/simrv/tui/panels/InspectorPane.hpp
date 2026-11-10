@@ -138,7 +138,7 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;
     }
-    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register;
+    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::VirtAddr;
     [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const
         -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const
