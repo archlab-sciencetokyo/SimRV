@@ -111,11 +111,12 @@ class BlockCache {
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto calc_set(
-        simrv::xlen::Register pc) noexcept -> size_t {
-        return ((pc >> 1) ^ (pc >> 13)) & kBlockSetMask;
+        simrv::xlen::VirtAddr pc) noexcept -> size_t {
+        const auto raw_pc = pc.raw();
+        return ((raw_pc >> 1) ^ (raw_pc >> 13)) & kBlockSetMask;
     }
 
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::Register pc) noexcept
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::VirtAddr pc) noexcept
         -> BasicBlock* {
         auto& bb = blocks_[calc_set(pc)];
         if (simrv::compiler::likely(bb.pc == pc && bb.valid())) {
@@ -124,7 +125,7 @@ class BlockCache {
         return nullptr;
     }
 
-    [[nodiscard]] auto build_block(simrv::xlen::Register pc, DecodeCache& decode_cache) noexcept
+    [[nodiscard]] auto build_block(simrv::xlen::VirtAddr pc, DecodeCache& decode_cache) noexcept
         -> BasicBlock*;
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto block_by_index(uint16_t idx) noexcept -> BasicBlock* {

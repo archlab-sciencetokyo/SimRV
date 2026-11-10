@@ -6,9 +6,9 @@
 
 namespace simrv::core {
 
-auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache) noexcept
+auto BlockCache::build_block(simrv::xlen::VirtAddr pc, DecodeCache& decode_cache) noexcept
     -> BasicBlock* {
-    auto* head_op = decode_cache.lookup_aligned(pc);
+    auto* head_op = decode_cache.lookup_aligned(pc.raw());
     if (simrv::compiler::unlikely(head_op == nullptr)) {
         return nullptr;
     }
@@ -16,7 +16,7 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
     auto& bb = blocks_[calc_set(pc)];
     bb.invalidate();
     dirty_ = true;
-    bb.pc = simrv::xlen::VirtAddr{pc};
+    bb.pc = pc;
     bb.num_guest_ops = 0;
     bb.num_ops = 0;
     bb.num_compressed = 0;
@@ -26,7 +26,7 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
     bb.generation = generation_;
 
     CachedOp* cur = head_op;
-    simrv::xlen::Register cur_pc = pc;
+    simrv::xlen::Register cur_pc = pc.raw();
     CachedOp* next_op = nullptr;
 
     while (bb.num_ops < kMaxBlockOps && cur != nullptr && cur->cpc == cur_pc) {
