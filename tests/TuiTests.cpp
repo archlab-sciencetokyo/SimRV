@@ -201,6 +201,14 @@ struct TuiTestAccess {
 
 namespace {
 
+template <typename T>
+concept FlightTracePc = requires(simrv::core::ITelemetrySink& sink, T pc) {
+    sink.record_flight_instruction(pc, simrv::isa::Opcode::OpImm, simrv::isa::ADDI, 0);
+};
+static_assert(FlightTracePc<simrv::xlen::VirtAddr>);
+static_assert(!FlightTracePc<simrv::xlen::PhysAddr>);
+static_assert(!FlightTracePc<simrv::xlen::Register>);
+
 auto failures = 0;
 
 [[nodiscard]] auto fnv1a64(std::string_view text) -> std::uint64_t {
@@ -2873,18 +2881,19 @@ void test_stack_vertical_scrolling() {
 void test_flight_recorder_merge_and_wraparound() {
     simrv::core::Machine machine;
     simrv::tui::Tui tui(machine);
-    tui.record_flight_instruction(0x1000, simrv::isa::Opcode::OpImm, simrv::isa::OperationId::ADDI,
-                                  1);
-    tui.record_flight_instruction(0x1004, simrv::isa::Opcode::OpImm, simrv::isa::OperationId::ADDI,
-                                  0);
+    tui.record_flight_instruction(simrv::xlen::VirtAddr{0x1000}, simrv::isa::Opcode::OpImm,
+                                  simrv::isa::OperationId::ADDI, 1);
+    tui.record_flight_instruction(simrv::xlen::VirtAddr{0x1004}, simrv::isa::Opcode::OpImm,
+                                  simrv::isa::OperationId::ADDI, 0);
     simrv::tui::TuiTestAccess::drain_trace(tui);
     const auto& rows = simrv::tui::TuiTestAccess::trace_rows(tui);
-    expect(rows.size() == 2 && rows[0].contains("[H1]") && rows[1].contains("[H0]"),
+    expect(rows.size() == 2 && rows[0].contains("0x1000 [H1]") && rows[1].contains("0x1004 [H0]"),
            "flight recorder merges per-hart records by global retirement order");
 
     for (size_t i = 0; i < simrv::tui::Tui::kTraceBufferSize + 4; ++i) {
-        tui.record_flight_instruction(0x2000 + i * 4, simrv::isa::Opcode::OpImm,
-                                      simrv::isa::OperationId::ADDI, 1);
+        tui.record_flight_instruction(
+            simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(0x2000 + i * 4)},
+            simrv::isa::Opcode::OpImm, simrv::isa::OperationId::ADDI, 1);
     }
     simrv::tui::TuiTestAccess::drain_trace(tui);
     expect(simrv::tui::TuiTestAccess::trace_rows(tui).size() == simrv::tui::Tui::kTraceBufferSize,

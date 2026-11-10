@@ -2966,13 +2966,13 @@ void Tui::update_trace_active_cache() {
     pipeline_or_detail_visible_.store(detail_visible, std::memory_order_release);
 }
 
-void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+void Tui::record_instruction(simrv::xlen::VirtAddr pc, simrv::isa::Opcode opcode,
                              simrv::isa::OperationId op_id, uint8_t rd,
                              simrv::xlen::Register rd_val, uint8_t rs1,
                              simrv::xlen::Register rs1_val, uint8_t rs2,
                              simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) {
     if (mission_.enabled()) {
-        if (const auto symbol = machine_.symbol_table().lookup_symbol(simrv::xlen::VirtAddr{pc});
+        if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
             symbol && symbol->is_exact()) {
             mission_.observe_symbol(symbol->name);
         }
@@ -2999,7 +2999,7 @@ void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode
     ring.write_sequence.store(slot + 1, std::memory_order_release);
 }
 
-void Tui::record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+void Tui::record_flight_instruction(simrv::xlen::VirtAddr pc, simrv::isa::Opcode opcode,
                                     simrv::isa::OperationId op_id, uint8_t hart) {
     auto& ring = flight_rings_.at(hart % kFlightRecorderHarts);
     const uint64_t slot = ring.write_sequence.load(std::memory_order_relaxed);
@@ -3067,10 +3067,10 @@ void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, 
         side_effect = std::format("{} = {:#x}", get_reg_name(rec.rd, rd_fp), rec.rd_val);
     } else if (is_jal) {
         if (rec.rd == 0)
-            inst_str = std::format("j {:#x}", rec.pc + rec.imm);
+            inst_str = std::format("j {:#x}", rec.pc.raw() + rec.imm);
         else {
-            inst_str =
-                std::format("{} {}, {:#x}", op_name, get_reg_name(rec.rd, rd_fp), rec.pc + rec.imm);
+            inst_str = std::format("{} {}, {:#x}", op_name, get_reg_name(rec.rd, rd_fp),
+                                   rec.pc.raw() + rec.imm);
             side_effect = std::format("{} = {:#x}", get_reg_name(rec.rd, rd_fp), rec.rd_val);
         }
     } else if (is_jalr || is_load) {
@@ -3079,7 +3079,7 @@ void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, 
         side_effect = std::format("{} = {:#x}", get_reg_name(rec.rd, rd_fp), rec.rd_val);
     } else if (is_branch) {
         inst_str = std::format("{} {}, {}, {:#x}", op_name, get_reg_name(rec.rs1, rs1_fp),
-                               get_reg_name(rec.rs2, rs2_fp), rec.pc + rec.imm);
+                               get_reg_name(rec.rs2, rs2_fp), rec.pc.raw() + rec.imm);
     } else if (is_store) {
         inst_str = std::format("{} {}, {}({})", op_name, get_reg_name(rec.rs2, rs2_fp), rec.imm,
                                get_reg_name(rec.rs1, rs1_fp));
@@ -3121,7 +3121,7 @@ auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
     }
 
     if (!rec.detailed) {
-        return std::format("{:#x} [H{}] {}", rec.pc, rec.hart, op_name);
+        return std::format("{:#x} [H{}] {}", rec.pc.raw(), rec.hart, op_name);
     }
 
     const bool rd_fp = isa::is_destination_fp(rec.opcode, rec.op_id);
@@ -3132,14 +3132,15 @@ auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
     std::string side_effect;
     format_trace_inst(rec, op_name, rd_fp, rs1_fp, rs2_fp, inst_str, side_effect);
 
-    std::string sym = machine_.symbol_table().lookup(simrv::xlen::VirtAddr{rec.pc});
+    std::string sym = machine_.symbol_table().lookup(rec.pc);
     if (sym.empty()) {
-        return side_effect.empty() ? std::format("{:#x}: {}", rec.pc, inst_str)
-                                   : std::format("{:#x}: {} [{}]", rec.pc, inst_str, side_effect);
+        return side_effect.empty()
+                   ? std::format("{:#x}: {}", rec.pc.raw(), inst_str)
+                   : std::format("{:#x}: {} [{}]", rec.pc.raw(), inst_str, side_effect);
     }
     return side_effect.empty()
-               ? std::format("{:#x} <{}>: {}", rec.pc, sym, inst_str)
-               : std::format("{:#x} <{}>: {} [{}]", rec.pc, sym, inst_str, side_effect);
+               ? std::format("{:#x} <{}>: {}", rec.pc.raw(), sym, inst_str)
+               : std::format("{:#x} <{}>: {} [{}]", rec.pc.raw(), sym, inst_str, side_effect);
 }
 
 void Tui::scroll(int lines) {

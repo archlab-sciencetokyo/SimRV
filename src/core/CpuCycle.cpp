@@ -516,7 +516,7 @@ void CPU::record_trace_for_tui(Machine& machine) {
     const auto rs2 = pipeline_context.rs2;
 
     if (!sink->is_trace_active()) {
-        sink->record_flight_instruction(pipeline_context.cpc.raw(), opcode, op_id,
+        sink->record_flight_instruction(pipeline_context.cpc, opcode, op_id,
                                         static_cast<uint8_t>(state_.mhartid));
         return;
     }
@@ -547,9 +547,9 @@ void CPU::record_trace_for_tui(Machine& machine) {
         rs2_val = state_.regs.read(rs2);
     }
 
-    sink->record_instruction(pipeline_context.cpc.raw(), opcode, op_id, std::to_underlying(rd),
-                             rd_val, std::to_underlying(rs1), rs1_val, std::to_underlying(rs2),
-                             rs2_val, pipeline_context.imm, static_cast<uint8_t>(state_.mhartid));
+    sink->record_instruction(pipeline_context.cpc, opcode, op_id, std::to_underlying(rd), rd_val,
+                             std::to_underlying(rs1), rs1_val, std::to_underlying(rs2), rs2_val,
+                             pipeline_context.imm, static_cast<uint8_t>(state_.mhartid));
 }
 
 void CPU::run_cycle_baremetal_miss(Machine& machine) {
