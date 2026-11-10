@@ -348,8 +348,8 @@ auto json_string_array(const std::vector<std::string>& values) -> std::string {
     return json;
 }
 
-auto event_function_field(const Machine& machine, simrv::xlen::Address pc) -> std::string {
-    const auto symbol = machine.symbol_table().lookup_function(simrv::xlen::VirtAddr{pc});
+auto event_function_field(const Machine& machine, simrv::xlen::VirtAddr pc) -> std::string {
+    const auto symbol = machine.symbol_table().lookup_function(pc);
     return symbol ? std::format(",\"function\":{}", json_quote(symbol->name)) : "";
 }
 
@@ -427,13 +427,13 @@ auto Tracer::trace_event_selected(std::string_view event) const noexcept -> bool
 }
 
 auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle, uint32_t hart,
-                                 std::optional<simrv::xlen::Address> pc,
+                                 std::optional<simrv::xlen::VirtAddr> pc,
                                  std::string_view component) const noexcept -> bool {
     const auto& config = machine_.configuration().debug;
     if (!config.trace_device.empty() && component != config.trace_device) return false;
     if (!config.trace_function.empty()) {
         if (!pc) return false;
-        const auto symbol = machine_.symbol_table().lookup_function(simrv::xlen::VirtAddr{*pc});
+        const auto symbol = machine_.symbol_table().lookup_function(*pc);
         if (!symbol || symbol->name != config.trace_function) return false;
     }
     if (config.trace_hart &&
@@ -791,7 +791,8 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
     if (!interrupt) return;
     const auto depth =
         std::ranges::count_if(frames, [](const TrapTraceFrame& frame) { return frame.interrupt; });
-    if (!accepts_trace_event("interrupt_entry", cycle, static_cast<uint32_t>(hart), state.pc))
+    if (!accepts_trace_event("interrupt_entry", cycle, static_cast<uint32_t>(hart),
+                             simrv::xlen::VirtAddr{state.pc}))
         return;
     std::println(fp_interrupts,
                  "{{\"schema_version\":2,\"event\":\"interrupt_entry\","
@@ -803,7 +804,8 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
                  "\"tval\":\"0x{:x}\","
                  "\"source_mode\":\"{}\",\"nesting_depth\":{}}}}}",
                  trace_timestamp(), cpu.clint_mmio.mcycle, static_cast<unsigned>(state.mhartid),
-                 static_cast<uint64_t>(state.pc), event_function_field(machine_, state.pc),
+                 static_cast<uint64_t>(state.pc),
+                 event_function_field(machine_, simrv::xlen::VirtAddr{state.pc}),
                  privilege_mode(state.priv), static_cast<uint64_t>(trap_exception_code(cause)),
                  static_cast<uint64_t>(cause), trap_cause_name(cause),
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "scause" : "mcause",
@@ -850,7 +852,7 @@ void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
                      simrv::xlen::kXLenHexDigits, size, data, size * 2);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event(event, cycle, hart.val, cpu.active_context().cpc.raw(), dev_name)) {
+        accepts_trace_event(event, cycle, hart.val, cpu.active_context().cpc, dev_name)) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"{}_{}\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -862,7 +864,7 @@ void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
                      mapped ? "mmio" : "unmapped", is_write ? "write" : "read", trace_timestamp(),
                      cycle, static_cast<unsigned>(hart.val),
                      static_cast<uint64_t>(cpu.active_context().cpc.raw()),
-                     event_function_field(machine_, cpu.active_context().cpc.raw()),
+                     event_function_field(machine_, cpu.active_context().cpc),
                      privilege_mode(cpu.state().priv), dev_name, static_cast<uint64_t>(addr),
                      static_cast<uint64_t>(data), size, mapped ? "mmio" : "unmapped",
                      faulted ? "true" : "false");
@@ -922,7 +924,7 @@ void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRe
     const auto& state = cpu.state();
     const auto cycle = cpu.clint_mmio.mcycle;
     if (!accepts_trace_event("pipeline_stall", cycle, static_cast<uint32_t>(state.mhartid),
-                             stalls.front().pc.raw()))
+                             stalls.front().pc))
         return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_pipeline_,
@@ -990,7 +992,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event("trap", cycle, static_cast<uint32_t>(state.mhartid), trap_pc.raw())) {
+        accepts_trace_event("trap", cycle, static_cast<uint32_t>(state.mhartid), trap_pc)) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"trap\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -998,9 +1000,8 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                      "\"cause_name\":\"{}\",\"pc\":\"0x{:x}\","
                      "\"tval\":\"0x{:x}\",\"privilege\":{}}}}}",
                      trace_timestamp(), cycle, static_cast<unsigned>(state.mhartid),
-                     static_cast<uint64_t>(trap_pc.raw()),
-                     event_function_field(machine_, trap_pc.raw()), privilege_mode(priv),
-                     static_cast<uint64_t>(cause), trap_cause_name(cause),
+                     static_cast<uint64_t>(trap_pc.raw()), event_function_field(machine_, trap_pc),
+                     privilege_mode(priv), static_cast<uint64_t>(cause), trap_cause_name(cause),
                      static_cast<uint64_t>(trap_pc.raw()), static_cast<uint64_t>(tval),
                      std::to_underlying(priv));
     }
@@ -1067,8 +1068,8 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             region = "unmapped";
         }
     }
-    if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid),
-                             trap_pc.raw(), component))
+    if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid), trap_pc,
+                             component))
         return;
     const auto store_value =
         static_cast<uint64_t>(opcode == Opcode::StoreFp ? context.fp_mem_wdata : context.mem_wdata);
@@ -1082,7 +1083,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                  "\"width\":{},\"value\":{},\"cause\":{},\"cause_name\":{},"
                  "\"tval\":\"0x{:x}\",\"faulted\":true,\"latency_cycles\":null}}}}",
                  cycle, static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(trap_pc.raw()),
-                 event_function_field(machine_, trap_pc.raw()), privilege_mode(access_privilege),
+                 event_function_field(machine_, trap_pc), privilege_mode(access_privilege),
                  component.empty() ? "" : std::format("\"component\":{},", json_quote(component)),
                  static_cast<uint64_t>(effective_address),
                  physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
@@ -1110,7 +1111,7 @@ void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, uns
                      static_cast<uint64_t>(pc.raw()), kLogHexWidth);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event("sbi", cycle, hart.val, pc.raw())) {
+        accepts_trace_event("sbi", cycle, hart.val, pc)) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"sbi\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1119,7 +1120,7 @@ void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, uns
                      "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\","
                      "\"pc\":\"0x{:x}\"}}}}",
                      trace_timestamp(), cycle, hart.val, static_cast<uint64_t>(pc.raw()),
-                     event_function_field(machine_, pc.raw()), cause, static_cast<uint64_t>(ext_id),
+                     event_function_field(machine_, pc), cause, static_cast<uint64_t>(ext_id),
                      static_cast<uint64_t>(func_id), static_cast<uint64_t>(a0),
                      static_cast<uint64_t>(a1), static_cast<uint64_t>(pc.raw()));
     }
@@ -1161,9 +1162,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          (retiring_context.opcode == isa::Opcode::Jal ||
                           retiring_context.opcode == isa::Opcode::Jalr) &&
                          is_link_register;
-    const bool emit_retire =
-        trace_level_at_least(3) &&
-        accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc.raw());
+    const bool emit_retire = trace_level_at_least(3) &&
+                             accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc);
     const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2) &&
                             (is_call || is_return) &&
                             (trace_event_selected("call") || trace_event_selected("return"));
@@ -1172,7 +1172,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                                  trace_event_selected("interrupt_return");
     const bool emit_registers =
         fp_registers_.is_open() &&
-        accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc.raw());
+        accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc);
     if (!emit_retire && !emit_calls && !emit_interrupts && !emit_memory && !emit_registers) return;
     const auto& state = cpu.state();
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
@@ -1296,8 +1296,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
             opcode == Opcode::LoadFp ? retiring_context.fp_mem_rdata : retiring_context.mem_rdata);
         const auto write_value = static_cast<uint64_t>(
             opcode == Opcode::StoreFp ? retiring_context.fp_mem_wdata : retiring_context.mem_wdata);
-        if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc.raw(),
-                                component)) {
+        if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc, component)) {
             if (memory_kind == pipeline::operation::MemoryAccessKind::Atomic) {
                 std::println(
                     fp_memory,
@@ -1309,7 +1308,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     "\"read_value\":\"0x{:x}\",\"write_value\":\"0x{:x}\","
                     "\"faulted\":false,\"latency_cycles\":null}}}}",
                     cycle, hart_id, static_cast<uint64_t>(retiring_context.cpc.raw()),
-                    event_function_field(machine_, retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
                     privilege_mode(access_privilege),
                     component.empty() ? ""
                                       : std::format("\"component\":{},", json_quote(component)),
@@ -1330,7 +1329,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     "\"faulted\":false,\"latency_cycles\":null}}}}",
                     json_quote(memory_event), cycle, hart_id,
                     static_cast<uint64_t>(retiring_context.cpc.raw()),
-                    event_function_field(machine_, retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
                     privilege_mode(access_privilege),
                     component.empty() ? ""
                                       : std::format("\"component\":{},", json_quote(component)),
@@ -1377,7 +1376,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
             trap_frames_[hart_id].pop_back();
             if (frame.interrupt &&
                 accepts_trace_event("interrupt_return", cycle, static_cast<uint32_t>(hart_id),
-                                    retiring_context.cpc.raw())) {
+                                    retiring_context.cpc)) {
                 const auto depth = std::ranges::count_if(
                     trap_frames_[hart_id],
                     [](const TrapTraceFrame& trap_frame) { return trap_frame.interrupt; });
@@ -1390,7 +1389,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     "\"target_pc\":\"0x{:x}\",\"nesting_depth\":{}}}}}",
                     trace_timestamp(), cpu.clint_mmio.mcycle, static_cast<unsigned>(state.mhartid),
                     static_cast<uint64_t>(retiring_context.cpc.raw()),
-                    event_function_field(machine_, retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
                     privilege_mode(state.priv),
                     static_cast<uint64_t>(trap_exception_code(frame.cause)),
                     static_cast<uint64_t>(frame.epc.raw()), static_cast<uint64_t>(state.pc), depth);
@@ -1403,7 +1402,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     if (hart >= call_depth_.size()) call_depth_.resize(hart + 1);
     if (is_call) {
         const auto depth = ++call_depth_[hart];
-        if (fp_calls.is_open() && accepts_trace_event("call", cycle, hart_id, source_pc)) {
+        if (fp_calls.is_open() &&
+            accepts_trace_event("call", cycle, hart_id, retiring_context.cpc)) {
             std::println(fp_calls,
                          "{{\"schema_version\":2,\"event\":\"call\","
                          "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1412,13 +1412,14 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          "\"return_pc\":\"0x{:x}\",\"call_depth\":{}}}}}",
                          trace_timestamp(), cpu.clint_mmio.mcycle,
                          static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(source_pc),
-                         event_function_field(machine_, source_pc), privilege_mode(state.priv),
-                         static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc),
-                         static_cast<uint64_t>(return_pc), depth);
+                         event_function_field(machine_, retiring_context.cpc),
+                         privilege_mode(state.priv), static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), static_cast<uint64_t>(return_pc), depth);
         }
     } else if (is_return) {
         const auto depth = call_depth_[hart] == 0 ? 0 : --call_depth_[hart];
-        if (fp_calls.is_open() && accepts_trace_event("return", cycle, hart_id, source_pc)) {
+        if (fp_calls.is_open() &&
+            accepts_trace_event("return", cycle, hart_id, retiring_context.cpc)) {
             std::println(fp_calls,
                          "{{\"schema_version\":2,\"event\":\"return\","
                          "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1427,8 +1428,9 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          "\"call_depth\":{}}}}}",
                          trace_timestamp(), cpu.clint_mmio.mcycle,
                          static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(source_pc),
-                         event_function_field(machine_, source_pc), privilege_mode(state.priv),
-                         static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc), depth);
+                         event_function_field(machine_, retiring_context.cpc),
+                         privilege_mode(state.priv), static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), depth);
         }
     }
 }

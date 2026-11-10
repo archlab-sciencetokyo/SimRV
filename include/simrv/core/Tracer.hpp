@@ -154,7 +154,7 @@ class Tracer {
     [[nodiscard]] auto trace_event_selected(std::string_view event) const noexcept -> bool;
     [[nodiscard]] auto accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle,
                                            uint32_t hart,
-                                           std::optional<simrv::xlen::Address> pc = std::nullopt,
+                                           std::optional<simrv::xlen::VirtAddr> pc = std::nullopt,
                                            std::string_view component = {}) const noexcept -> bool;
 
     Machine& machine_;
