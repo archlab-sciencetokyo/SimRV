@@ -64,6 +64,14 @@ static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
 static_assert(!LockstepPc<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::core::PipelineStallRecord::pc), simrv::xlen::VirtAddr>);
+template <typename T>
+concept TrapTracePc =
+    requires(simrv::core::Tracer& tracer, const simrv::core::CPU& cpu, simrv::xlen::TrapCause cause,
+             simrv::xlen::PrivilegeLevel privilege, simrv::xlen::CsrValue tval,
+             T pc) { tracer.log_architectural_trap_entry(cpu, cause, pc, privilege, tval); };
+static_assert(TrapTracePc<simrv::xlen::VirtAddr>);
+static_assert(!TrapTracePc<simrv::xlen::PhysAddr>);
+static_assert(!TrapTracePc<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
                                std::declval<const std::string&>())),
                            std::optional<simrv::xlen::VirtAddr>>);
@@ -631,6 +639,25 @@ void test_arch_trace_device_filter() {
         std::filesystem::remove(sibling_path(path, name));
 }
 
+void test_sbi_trace_virtual_pc() {
+    Machine machine;
+    const auto path = trace_path("sbi-virtual-pc");
+    machine.trace().init_architecture_trace(path.string());
+    machine.trace().log_sbi(1, 2, 9, 3, 4, 5, 6, simrv::xlen::VirtAddr{0x1234},
+                            simrv::xlen::HartId{0});
+    machine.trace().flush_all();
+    const auto devices = read_trace(sibling_path(path, "devices.jsonl"));
+    if (std::none_of(devices.begin(), devices.end(), [](const auto& line) {
+            return line.find("\"event\":\"sbi\"") != std::string::npos &&
+                   line.find("\"pc\":\"0x1234\"") != std::string::npos;
+        }))
+        std::abort();
+    for (const auto name : {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
+                            "bus.jsonl", "memory.jsonl", "pipeline.jsonl", "metadata.json"})
+        std::filesystem::remove(sibling_path(path, name));
+    std::filesystem::remove(path);
+}
+
 void test_arch_trace_function_filter(std::string_view executable_path) {
     simrv::core::MachineConfig config;
     config.debug.trace_function = "main";
@@ -1133,6 +1160,7 @@ int main(int argc, char** argv) {
     test_trace_hart_identity();
     test_arch_trace_event_hart_and_cycle_filters();
     test_arch_trace_device_filter();
+    test_sbi_trace_virtual_pc();
     test_arch_trace_function_filter(argv[0]);
     test_retired_memory_events_and_address_classification();
     test_precise_memory_fault_event();

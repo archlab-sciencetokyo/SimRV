@@ -653,7 +653,7 @@ auto Sbi::handle_ecall(simrv::xlen::TrapCause cause) -> bool {
                                        cpu_.clint_mmio.mcycle, static_cast<unsigned>(cause), ext_id,
                                        func_id, cpu_.state().regs.read(simrv::xlen::RegId::A0),
                                        cpu_.state().regs.read(simrv::xlen::RegId::A1),
-                                       cpu_.pipeline_context.cpc.raw(), cpu_.hart_id());
+                                       cpu_.pipeline_context.cpc, cpu_.hart_id());
     }
 
     switch (static_cast<ExtId>(ext_id)) {

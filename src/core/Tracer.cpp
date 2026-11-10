@@ -776,7 +776,7 @@ void Tracer::flush_all() {
 }
 
 void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
-                                          simrv::xlen::Address epc,
+                                          simrv::xlen::VirtAddr epc,
                                           simrv::xlen::PrivilegeLevel source_mode,
                                           simrv::xlen::CsrValue tval) {
     if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
@@ -808,7 +808,7 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
                  static_cast<uint64_t>(cause), trap_cause_name(cause),
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "scause" : "mcause",
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "sepc" : "mepc",
-                 static_cast<uint64_t>(epc),
+                 static_cast<uint64_t>(epc.raw()),
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "stval" : "mtval",
                  static_cast<uint64_t>(tval), privilege_mode(source_mode), depth);
 }
@@ -965,7 +965,7 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
 }
 
 void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
-                      simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
+                      simrv::xlen::TrapCause cause, simrv::xlen::VirtAddr trap_pc,
                       simrv::xlen::PrivilegeLevel priv, const ArchState& state,
                       simrv::xlen::CsrValue tval, const CPU& cpu) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
@@ -978,7 +978,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             "tp={:0{}x} a0={:0{}x} a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} "
             "sepc={:0{}x} satp={:0{}x} tval={:0{}x}",
             mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
-            static_cast<uint64_t>(trap_pc), kLogHexWidth, static_cast<unsigned>(priv),
+            static_cast<uint64_t>(trap_pc.raw()), kLogHexWidth, static_cast<unsigned>(priv),
             static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Ra)), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Sp)), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Tp)), kLogHexWidth,
@@ -990,7 +990,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event("trap", cycle, static_cast<uint32_t>(state.mhartid), trap_pc)) {
+        accepts_trace_event("trap", cycle, static_cast<uint32_t>(state.mhartid), trap_pc.raw())) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"trap\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -998,9 +998,10 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                      "\"cause_name\":\"{}\",\"pc\":\"0x{:x}\","
                      "\"tval\":\"0x{:x}\",\"privilege\":{}}}}}",
                      trace_timestamp(), cycle, static_cast<unsigned>(state.mhartid),
-                     static_cast<uint64_t>(trap_pc), event_function_field(machine_, trap_pc),
-                     privilege_mode(priv), static_cast<uint64_t>(cause), trap_cause_name(cause),
-                     static_cast<uint64_t>(trap_pc), static_cast<uint64_t>(tval),
+                     static_cast<uint64_t>(trap_pc.raw()),
+                     event_function_field(machine_, trap_pc.raw()), privilege_mode(priv),
+                     static_cast<uint64_t>(cause), trap_cause_name(cause),
+                     static_cast<uint64_t>(trap_pc.raw()), static_cast<uint64_t>(tval),
                      std::to_underlying(priv));
     }
     const auto& context = cpu.active_context();
@@ -1066,8 +1067,8 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             region = "unmapped";
         }
     }
-    if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid), trap_pc,
-                             component))
+    if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid),
+                             trap_pc.raw(), component))
         return;
     const auto store_value =
         static_cast<uint64_t>(opcode == Opcode::StoreFp ? context.fp_mem_wdata : context.mem_wdata);
@@ -1080,8 +1081,8 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                  "\"region\":\"{}\",\"direction\":\"{}\",\"operation\":{},"
                  "\"width\":{},\"value\":{},\"cause\":{},\"cause_name\":{},"
                  "\"tval\":\"0x{:x}\",\"faulted\":true,\"latency_cycles\":null}}}}",
-                 cycle, static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(trap_pc),
-                 event_function_field(machine_, trap_pc), privilege_mode(access_privilege),
+                 cycle, static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(trap_pc.raw()),
+                 event_function_field(machine_, trap_pc.raw()), privilege_mode(access_privilege),
                  component.empty() ? "" : std::format("\"component\":{},", json_quote(component)),
                  static_cast<uint64_t>(effective_address),
                  physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
@@ -1095,7 +1096,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
 
 void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
                      simrv::xlen::Word ext_id, simrv::xlen::Word func_id, simrv::xlen::Word a0,
-                     simrv::xlen::Word a1, simrv::xlen::Address pc, simrv::xlen::HartId hart) {
+                     simrv::xlen::Word a1, simrv::xlen::VirtAddr pc, simrv::xlen::HartId hart) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
@@ -1106,10 +1107,10 @@ void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, uns
                      mtime, cause, static_cast<uint64_t>(ext_id), kLogHexWidth,
                      static_cast<uint64_t>(func_id), kLogHexWidth, static_cast<uint64_t>(a0),
                      kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth,
-                     static_cast<uint64_t>(pc), kLogHexWidth);
+                     static_cast<uint64_t>(pc.raw()), kLogHexWidth);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event("sbi", cycle, hart.val, pc)) {
+        accepts_trace_event("sbi", cycle, hart.val, pc.raw())) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"sbi\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1117,10 +1118,10 @@ void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, uns
                      "\"extension\":\"0x{:x}\",\"function\":\"0x{:x}\","
                      "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\","
                      "\"pc\":\"0x{:x}\"}}}}",
-                     trace_timestamp(), cycle, hart.val, static_cast<uint64_t>(pc),
-                     event_function_field(machine_, pc), cause, static_cast<uint64_t>(ext_id),
+                     trace_timestamp(), cycle, hart.val, static_cast<uint64_t>(pc.raw()),
+                     event_function_field(machine_, pc.raw()), cause, static_cast<uint64_t>(ext_id),
                      static_cast<uint64_t>(func_id), static_cast<uint64_t>(a0),
-                     static_cast<uint64_t>(a1), static_cast<uint64_t>(pc));
+                     static_cast<uint64_t>(a1), static_cast<uint64_t>(pc.raw()));
     }
 }
 
@@ -1392,7 +1393,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     event_function_field(machine_, retiring_context.cpc.raw()),
                     privilege_mode(state.priv),
                     static_cast<uint64_t>(trap_exception_code(frame.cause)),
-                    static_cast<uint64_t>(frame.epc), static_cast<uint64_t>(state.pc), depth);
+                    static_cast<uint64_t>(frame.epc.raw()), static_cast<uint64_t>(state.pc), depth);
             }
         }
     }

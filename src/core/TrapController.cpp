@@ -303,9 +303,9 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
     if (cpu.machine_ != nullptr &&
         simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled() ||
                                   cpu.machine_->trace().is_architecture_trace_enabled())) {
-        cpu.machine_->trace().log_trap(cpu.clint_mmio.mtime.load(std::memory_order_relaxed),
-                                       cpu.clint_mmio.mcycle, desc.cause, trap_pc, state.priv,
-                                       state, desc.tval, cpu);
+        cpu.machine_->trace().log_trap(
+            cpu.clint_mmio.mtime.load(std::memory_order_relaxed), cpu.clint_mmio.mcycle, desc.cause,
+            simrv::xlen::VirtAddr{trap_pc}, state.priv, state, desc.tval, cpu);
     }
 
     if (cpu.sbi.handle_ecall(desc.cause)) {
@@ -425,8 +425,8 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
     }
 
     if (cpu.machine_ != nullptr) {
-        cpu.machine_->trace().log_architectural_trap_entry(cpu, desc.cause, trap_pc, source_mode,
-                                                           desc.tval);
+        cpu.machine_->trace().log_architectural_trap_entry(
+            cpu, desc.cause, simrv::xlen::VirtAddr{trap_pc}, source_mode, desc.tval);
     }
 
     const uint32_t max_consecutive =

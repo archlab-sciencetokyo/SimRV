@@ -104,18 +104,26 @@ class Tracer {
     void log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRecord> stalls);
     void log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer);
     void log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
-                  simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
+                  simrv::xlen::TrapCause cause, simrv::xlen::VirtAddr trap_pc,
                   simrv::xlen::PrivilegeLevel priv, const ArchState& state,
                   simrv::xlen::CsrValue tval, const CPU& cpu);
+    void log_trap(simrv::xlen::Counter, simrv::xlen::Counter, simrv::xlen::TrapCause,
+                  simrv::xlen::Address, simrv::xlen::PrivilegeLevel, const ArchState&,
+                  simrv::xlen::CsrValue, const CPU&) = delete;
     void log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
-                                      simrv::xlen::Address epc,
+                                      simrv::xlen::VirtAddr epc,
                                       simrv::xlen::PrivilegeLevel source_mode,
                                       simrv::xlen::CsrValue tval);
+    void log_architectural_trap_entry(const CPU&, simrv::xlen::TrapCause, simrv::xlen::Address,
+                                      simrv::xlen::PrivilegeLevel, simrv::xlen::CsrValue) = delete;
     void log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, bool asserted,
                               std::string_view source);
     void log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
                  simrv::xlen::Word ext_id, simrv::xlen::Word func_id, simrv::xlen::Word a0,
-                 simrv::xlen::Word a1, simrv::xlen::Address pc, simrv::xlen::HartId hart);
+                 simrv::xlen::Word a1, simrv::xlen::VirtAddr pc, simrv::xlen::HartId hart);
+    void log_sbi(simrv::xlen::Counter, simrv::xlen::Counter, unsigned, simrv::xlen::Word,
+                 simrv::xlen::Word, simrv::xlen::Word, simrv::xlen::Word, simrv::xlen::Address,
+                 simrv::xlen::HartId) = delete;
     void log_architecture_retirement(const CPU& cpu,
                                      const pipeline::PipelineContext& retiring_context);
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_register_write_trace_enabled() const noexcept
@@ -160,7 +168,7 @@ class Tracer {
     bool retirement_context_needed_ = false;
     struct TrapTraceFrame {
         simrv::xlen::TrapCause cause{};
-        simrv::xlen::Address epc{};
+        simrv::xlen::VirtAddr epc{};
         bool interrupt = false;
     };
     std::vector<std::vector<TrapTraceFrame>> trap_frames_;

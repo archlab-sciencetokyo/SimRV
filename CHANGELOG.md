@@ -16,6 +16,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Use guest virtual addresses for C++ Spike lockstep program counters.
 - Use guest virtual addresses for C++ pipeline-stall trace program counters.
 - Use guest virtual addresses for C++ instruction telemetry program counters.
+- Use guest virtual addresses for C++ trap and SBI trace program counters.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
 - Fix missing UART line interrupts when the receive FIFO overruns.
 
