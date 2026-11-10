@@ -19,21 +19,24 @@
 
 namespace simrv::tui {
 
-auto InspectorPane::translate_safe(const simrv::core::CPU& cpu, simrv::xlen::Register vaddr) const
-    -> std::optional<simrv::xlen::Register> {
+auto InspectorPane::translate_safe(const simrv::core::CPU& cpu, simrv::xlen::VirtAddr vaddr) const
+    -> std::optional<simrv::xlen::PhysAddr> {
     const auto eff_priv = cpu.effective_data_privilege();
     const bool translation_enabled =
         (eff_priv != simrv::xlen::PrivilegeLevel::Machine &&
          simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen));
     if (!translation_enabled) {
-        return (cpu.state().regs.xlen == 32) ? (vaddr & 0xFFFFFFFFULL) : vaddr;
+        if constexpr (sizeof(simrv::xlen::Word) > sizeof(uint32_t)) {
+            if (cpu.state().regs.xlen == 32) vaddr &= 0xFFFFFFFFULL;
+        }
+        return simrv::xlen::PhysAddr{vaddr.raw()};
     }
     auto* mmu = const_cast<Mmu*>(machine_.memory_.mmu());
     auto res =
         mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp,
                        cpu.state().regs.xlen, /*update_access_bits=*/false);
     if (res.has_value()) {
-        return res.value().raw();
+        return res.value();
     }
     return std::nullopt;
 }
@@ -49,7 +52,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     const simrv::xlen::Register base_addr = is_mem_watch ? inspect_addr_ : sp;
 
     // Check if the base address is valid and mapped in DRAM
-    auto base_phys = translate_safe(cpu, base_addr);
+    auto base_phys = translate_safe(cpu, simrv::xlen::VirtAddr{base_addr});
     const bool base_valid = (base_addr != 0 && base_phys.has_value() &&
                              machine_.memory_geometry().contains(*base_phys));
 
@@ -179,15 +182,15 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     std::string ascii_str = "";
     std::string sym_str = "";
 
-    auto paddr_opt = translate_safe(cpu, target_vaddr);
+    auto paddr_opt = translate_safe(cpu, simrv::xlen::VirtAddr{target_vaddr});
     if (paddr_opt) {
-        simrv::xlen::Register paddr = *paddr_opt;
+        simrv::xlen::PhysAddr paddr = *paddr_opt;
         if (machine_.memory_geometry().contains(paddr)) {
             simrv::xlen::Register raw_val = 0;
             std::array<uint8_t, 8> bytes{};
             if (xlen == 64) {
                 uint64_t data = simrv::memory::ram_read_fast(
-                    paddr, static_cast<simrv::xlen::Instruction>(isa::Funct3::Sd),
+                    paddr.raw(), static_cast<simrv::xlen::Instruction>(isa::Funct3::Sd),
                     machine_.ram_view());
                 val_str = std::format("0x{:016x}", data);
                 raw_val = data;
@@ -198,7 +201,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
                 }
             } else {
                 uint32_t data = simrv::memory::ram_read_fast(
-                    paddr, static_cast<simrv::xlen::Instruction>(isa::Funct3::Sw),
+                    paddr.raw(), static_cast<simrv::xlen::Instruction>(isa::Funct3::Sw),
                     machine_.ram_view());
                 val_str = std::format("0x{:08x}", data);
                 raw_val = data;
