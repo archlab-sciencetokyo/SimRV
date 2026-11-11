@@ -36,6 +36,7 @@
 #include <format>
 #include <limits>
 #include <string_view>
+#include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
@@ -222,7 +223,8 @@ auto SpikeLockstep::parse_commit_line(const std::string& line, SpikeCommitRecord
     if (ec_pc != std::errc{}) {
         return std::nullopt;
     }
-    rec.pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(pc_val)};
+    if (!std::in_range<simrv::xlen::Word>(pc_val)) return std::nullopt;
+    rec.pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(pc_val)};
 
     // Parse register write after the closing parenthesis of the instruction
     const auto close_paren_pos = sv.find(')', paren_pos);
@@ -272,11 +274,10 @@ auto SpikeLockstep::parse_commit_line(const std::string& line, SpikeCommitRecord
             i += 2;
             uint64_t val = 0;
             const auto [pv, ecv] = std::from_chars(sv.data() + i, sv.data() + sv.size(), val, 16);
-            if (ecv == std::errc{}) {
-                rec.gpr.at(static_cast<std::size_t>(reg_idx)) =
-                    static_cast<simrv::xlen::Register>(val);
-                rec.gpr_valid.at(static_cast<std::size_t>(reg_idx)) = true;
-            }
+            if (ecv != std::errc{} || !std::in_range<simrv::xlen::Register>(val))
+                return std::nullopt;
+            rec.gpr.at(static_cast<std::size_t>(reg_idx)) = static_cast<simrv::xlen::Register>(val);
+            rec.gpr_valid.at(static_cast<std::size_t>(reg_idx)) = true;
         }
     }
 

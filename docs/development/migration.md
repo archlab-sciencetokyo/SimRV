@@ -93,4 +93,5 @@ Breakpoint and watchpoint APIs use virtual addresses. MMIO routing, DMA, cache t
 tracking use physical addresses. An address read from an ELF or device-tree file is not assigned a
 domain by its integer type: use the format's semantics, then construct the appropriate type at the
 parser boundary. A guest physical value wider than the simulator's configured XLEN must be rejected
-before constructing `PhysAddr`.
+before constructing `PhysAddr`. Spike lockstep and RTL retirement records carry architectural PCs as
+`VirtAddr`; their parsers reject PCs that cannot be represented by the build's `Word` type.

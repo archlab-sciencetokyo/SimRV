@@ -13,6 +13,7 @@
 #include <format>
 #include <regex>
 #include <sstream>
+#include <utility>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/rtl/ParityTarget.hpp"
@@ -290,10 +291,13 @@ auto parse_retirement_trace(std::string_view text) -> std::vector<RetirementEven
 
     for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
         const std::smatch& match = *i;
+        const uint64_t pc = std::stoull(match[3].str(), nullptr, 16);
+        if (!std::in_range<simrv::xlen::Word>(pc)) return {};
+
         RetirementEvent ev;
         ev.cycle = std::stoull(match[1].str());
         ev.inst = std::stoull(match[2].str());
-        ev.pc = std::stoull(match[3].str(), nullptr, 16);
+        ev.pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(pc)};
         ev.ir = static_cast<uint32_t>(std::stoul(match[4].str(), nullptr, 16));
         events.push_back(ev);
     }

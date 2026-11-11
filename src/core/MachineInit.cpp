@@ -1015,16 +1015,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
             std::vector<simrv::util::FdtCustomDevice> fdt_devices;
             auto patched = simrv::util::patch_fdt(
-                input_blob, config.memory.dram_base.raw(), effective_dram_size,
+                input_blob, config.memory.dram_base, effective_dram_size,
                 config.execution.num_harts, &fb_info, config.execution.timebase_hz,
                 config.execution.cpu_clock_hz, &fdt_devices, config.files.bootargs);
             if (!patched) return std::unexpected(patched.error());
             final_blob = std::move(*patched);
             for (const auto& dev : fdt_devices) {
-                if (dev.base > std::numeric_limits<simrv::xlen::Address>::max()) {
-                    return std::unexpected("device-tree MMIO base exceeds the guest address width");
-                }
-                const simrv::xlen::PhysAddr base{static_cast<simrv::xlen::Address>(dev.base)};
+                const auto base = dev.base;
                 if (memory().system_bus().router().is_range_mapped(base, dev.size)) {
                     continue;
                 }
@@ -1084,14 +1081,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 (fb_info.format == simrv::util::FdtFramebufferFormat::R5G6B5)
                     ? FramebufferFormat::R5G6B5
                     : FramebufferFormat::A8R8G8B8;
-            if (fb_info.base != 0) {
-                if (!std::in_range<simrv::xlen::Address>(fb_info.base)) {
-                    return std::unexpected(
-                        "device-tree framebuffer base exceeds the guest address width");
-                }
-                framebuffer_geometry_.base =
-                    simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(fb_info.base)};
-            }
+            framebuffer_geometry_.base = fb_info.base;
         }
         const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
         if (final_blob.size() > dt_cap)

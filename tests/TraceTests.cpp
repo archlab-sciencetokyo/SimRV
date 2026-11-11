@@ -32,6 +32,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/rtl/ParityTarget.hpp"
 #include "simrv/util/Sha256.hpp"
 
 namespace {
@@ -63,6 +64,8 @@ static_assert(LockstepPc<simrv::xlen::VirtAddr>);
 static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
 static_assert(!LockstepPc<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::RetirementEvent::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::TimingDivergence::pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::core::PipelineStallRecord::pc), simrv::xlen::VirtAddr>);
 template <typename T>
 concept TrapTracePc =
@@ -1133,7 +1136,8 @@ void test_function_symbol_lookup(std::string_view executable_path) {
 
 void test_lockstep_virtual_pc(std::string_view executable_path) {
     const auto path = std::filesystem::absolute(executable_path).string();
-    simrv::debug::SpikeLockstep lockstep(path, "", "", "", "rv64gc");
+    constexpr auto isa = simrv::xlen::kIsXLen64 ? "rv64gc" : "rv32gc";
+    simrv::debug::SpikeLockstep lockstep(path, "", "", "", isa);
     if (!lockstep.start()) std::abort();
     Machine machine;
     machine.primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(5), 2);
@@ -1147,7 +1151,12 @@ void test_lockstep_virtual_pc(std::string_view executable_path) {
 
 int main(int argc, char** argv) {
     if (argc < 1) std::abort();
-    if (argc > 1 && std::string_view(argv[1]) == "--isa=rv64gc") {
+    constexpr auto isa_arg = simrv::xlen::kIsXLen64 ? "--isa=rv64gc" : "--isa=rv32gc";
+    if (argc > 1 && std::string_view(argv[1]) == isa_arg) {
+#if SIMRV_XLEN == 32
+        std::fputs("core   0: 3 0x0000000100001000 (0x00000013) x5 0xdead\n", stderr);
+        std::fputs("core   0: 3 0x00001000 (0x00000013) x5 0x100000000\n", stderr);
+#endif
         std::fputs(
             "core   0: 3 0x00001000 (0x00000293) x5 0x00000002\n"
             "core   0: 3 0x00001004 (0x00000013)\n",

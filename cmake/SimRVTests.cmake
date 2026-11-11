@@ -36,7 +36,7 @@ if(BUILD_TESTING)
   file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 
   function(simrv_add_runtime_test target source test_name labels)
-    add_executable(${target} ${source})
+    add_executable(${target} ${source} ${ARGN})
     set_property(GLOBAL APPEND PROPERTY SIMRV_NATIVE_TEST_TARGETS ${target})
     target_link_libraries(${target} PRIVATE simrv-runtime)
     simrv_configure_native_test(${target})
@@ -84,6 +84,10 @@ if(BUILD_TESTING)
     "gate;regress;semantic;device;mmio;pcie;aia")
   simrv_add_runtime_test(simrv-trace-tests tests/TraceTests.cpp architectural-trace
                          "gate;regress;core;trace")
+  simrv_add_runtime_test(
+    simrv-rtl-parity-tests tests/ParityTests.cpp rtl-parity "gate;regress;trace;rtl"
+    src/rtl/ParityRegistry.cpp src/rtl/targets/RvcompTarget.cpp
+    src/rtl/targets/CfuPgTarget.cpp)
   if(SIMRV_ENABLE_TSAN)
     set_property(
       TEST platform-integration

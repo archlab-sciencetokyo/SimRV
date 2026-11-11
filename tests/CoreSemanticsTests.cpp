@@ -4422,7 +4422,7 @@ void test_fdt_patcher() {
     header(32, static_cast<uint32_t>(strings.size()));
     header(36, static_cast<uint32_t>(structure.size()));
 
-    auto patched = simrv::util::patch_fdt(blob, 0x80000000, 0x40000000, 1);
+    auto patched = simrv::util::patch_fdt(blob, simrv::xlen::PhysAddr{0x80000000}, 0x40000000, 1);
     expect(patched.has_value(), "valid supplied FDT is patched");
     if (!patched) return;
     expect(patched->size() % 8 == 0, "FDT output size is 8-byte aligned");
@@ -4444,7 +4444,7 @@ void test_fdt_patcher() {
         "FDT patching updates the memory node to configured RAM size");
     expect(bytes.find("disabled") != std::string::npos,
            "FDT patching disables CPU nodes above the configured hart count");
-    auto too_many = simrv::util::patch_fdt(blob, 0x80000000, 0x40000000, 3);
+    auto too_many = simrv::util::patch_fdt(blob, simrv::xlen::PhysAddr{0x80000000}, 0x40000000, 3);
     expect(!too_many, "FDT patching rejects a hart count without enough CPU nodes");
 
     {
@@ -4474,7 +4474,8 @@ void test_fdt_patcher() {
         nop_header(28, 0);
         nop_header(32, static_cast<uint32_t>(strings.size()));
         nop_header(36, static_cast<uint32_t>(nop_structure.size()));
-        auto nop_patched = simrv::util::patch_fdt(nop_blob, 0x80000000, 0x40000000, 1);
+        auto nop_patched =
+            simrv::util::patch_fdt(nop_blob, simrv::xlen::PhysAddr{0x80000000}, 0x40000000, 1);
         expect(nop_patched.has_value(), "FDT patching tolerates kNop token before root node");
     }
 }

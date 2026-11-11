@@ -10,6 +10,7 @@
 #include <set>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 #include "simrv/core/GuestCapabilityCatalog.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -238,7 +239,7 @@ auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
     }
 }
 
-auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
+auto patch_fdt(std::span<const uint8_t> blob, simrv::xlen::PhysAddr dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
                uint64_t cpu_clock_hz, std::vector<FdtCustomDevice>* out_devices,
                std::string_view bootargs) -> std::expected<std::vector<uint8_t>, std::string> {
@@ -304,10 +305,16 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                         const auto ac = cells(root, "#address-cells", 2);
                         const auto sc = cells(root, "#size-cells", 1);
                         if (ac == 2 && rp->data.size() >= 8 + sc * 4) {
-                            out_fb->base = be64(rp->data, 0);
+                            const auto raw_base = be64(rp->data, 0);
+                            if (!std::in_range<simrv::xlen::Word>(raw_base))
+                                return std::unexpected(
+                                    "framebuffer physical address exceeds the configured word "
+                                    "width");
+                            out_fb->base =
+                                simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(raw_base)};
                             out_fb->size = (sc == 2) ? be64(rp->data, 8) : be32(rp->data, 8);
                         } else if (ac == 1 && rp->data.size() >= 4 + sc * 4) {
-                            out_fb->base = be32(rp->data, 0);
+                            out_fb->base = simrv::xlen::PhysAddr{be32(rp->data, 0)};
                             out_fb->size = (sc == 2) ? be64(rp->data, 4) : be32(rp->data, 4);
                         }
                     }
@@ -339,10 +346,16 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                                 dev.compatible = reinterpret_cast<const char*>(comp->data.data());
                             }
                             if (soc_ac == 2) {
-                                dev.base = be64(rp->data, 0);
+                                const auto raw_base = be64(rp->data, 0);
+                                if (!std::in_range<simrv::xlen::Word>(raw_base))
+                                    return std::unexpected(
+                                        "device physical address exceeds the configured word "
+                                        "width");
+                                dev.base =
+                                    simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(raw_base)};
                                 dev.size = (soc_sc == 2) ? be64(rp->data, 8) : be32(rp->data, 8);
                             } else {
-                                dev.base = be32(rp->data, 0);
+                                dev.base = simrv::xlen::PhysAddr{be32(rp->data, 0)};
                                 dev.size = (soc_sc == 2) ? be64(rp->data, 4) : be32(rp->data, 4);
                             }
                             out_devices->push_back(std::move(dev));
@@ -359,14 +372,15 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             return std::unexpected(
                 "device tree must describe SimRV RAM with exactly one memory node");
         auto* memory = memory_nodes.front();
-        memory->name = std::format("memory@{:x}", dram_base);
+        memory->name = std::format("memory@{:x}", dram_base.raw());
         set_prop(*memory, "device_type", {'m', 'e', 'm', 'o', 'r', 'y', '\0'});
         const auto ac = cells(root, "#address-cells", 2), sc = cells(root, "#size-cells", 1);
         if ((ac != 1 && ac != 2) || (sc != 1 && sc != 2))
             return std::unexpected("memory node uses unsupported address/size cells");
-        if ((ac == 1 && dram_base > UINT32_MAX) || (sc == 1 && dram_size > UINT32_MAX))
+        if ((ac == 1 && dram_base.raw() > UINT32_MAX) || (sc == 1 && dram_size > UINT32_MAX))
             return std::unexpected("configured DRAM range does not fit the device tree cells");
-        std::vector<uint8_t> reg = encode_cells(dram_base, ac), size = encode_cells(dram_size, sc);
+        std::vector<uint8_t> reg = encode_cells(dram_base.raw(), ac),
+                             size = encode_cells(dram_size, sc);
         reg.insert(reg.end(), size.begin(), size.end());
         set_prop(*memory, "reg", std::move(reg));
         auto* cpus = child(root, "cpus");

@@ -16,13 +16,14 @@
 #include <vector>
 
 #include "simrv/rtl/ParityPlugin.h"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::rtl {
 
 struct RetirementEvent {
     uint64_t cycle{0};
     uint64_t inst{0};
-    uint64_t pc{0};
+    simrv::xlen::VirtAddr pc{};
     uint32_t ir{0};
 
     auto operator==(const RetirementEvent&) const noexcept -> bool = default;
@@ -30,7 +31,7 @@ struct RetirementEvent {
 
 struct TimingDivergence {
     std::size_t index{0};
-    uint64_t pc{0};
+    simrv::xlen::VirtAddr pc{};
     uint64_t rtl_step_cycles{0};
     uint64_t simrv_step_cycles{0};
 };

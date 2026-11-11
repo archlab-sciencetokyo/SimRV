@@ -230,10 +230,11 @@ class RvcompTarget final : public ParityTarget {
                                   comp.first_architectural_divergence.value());
                 } else if (comp.first_timing_divergence.has_value()) {
                     out_result.divergence_cycle = comp.first_timing_divergence->index;
-                    std::snprintf(out_result.error_message, sizeof(out_result.error_message),
-                                  "Timing divergence at event #%zu (pc 0x%lx)",
-                                  comp.first_timing_divergence->index,
-                                  comp.first_timing_divergence->pc);
+                    std::snprintf(
+                        out_result.error_message, sizeof(out_result.error_message),
+                        "Timing divergence at event #%zu (pc 0x%llx)",
+                        comp.first_timing_divergence->index,
+                        static_cast<unsigned long long>(comp.first_timing_divergence->pc.raw()));
                 }
                 return true;
             }
