@@ -25,11 +25,12 @@ void VirtioMmioSound::on_queue_notify(uint32_t q_idx) {
     if (q_idx >= queues_.size()) return;
     auto& q = queues_[q_idx];
 
-    auto dma_read_fn = [this](uint64_t addr, void* dst, std::size_t len) -> bool {
-        return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(dst), len);
+    auto dma_read_fn = [this](simrv::xlen::PhysAddr addr, void* dst, std::size_t len) -> bool {
+        return dma_read_bytes(addr, static_cast<std::byte*>(dst), len);
     };
-    auto dma_write_fn = [this](uint64_t addr, const void* src, std::size_t len) -> bool {
-        return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(src), len);
+    auto dma_write_fn = [this](simrv::xlen::PhysAddr addr, const void* src,
+                               std::size_t len) -> bool {
+        return dma_write_bytes(addr, static_cast<const std::byte*>(src), len);
     };
     auto trigger_irq_fn = [this]() { trigger_irq(); };
 

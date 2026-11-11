@@ -6,8 +6,25 @@
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace simrv::device::virtio {
+
+namespace {
+
+auto dma_read_wire_address(const VirtioSoundBackend::DmaReadFn& dma_read, uint64_t address,
+                           void* dst, std::size_t len) -> bool {
+    if (!std::in_range<simrv::xlen::Word>(address)) return false;
+    return dma_read(simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(address)}, dst, len);
+}
+
+auto dma_write_wire_address(const VirtioSoundBackend::DmaWriteFn& dma_write, uint64_t address,
+                            const void* src, std::size_t len) -> bool {
+    if (!std::in_range<simrv::xlen::Word>(address)) return false;
+    return dma_write(simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(address)}, src, len);
+}
+
+}  // namespace
 
 void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_read,
                                           const DmaWriteFn& dma_write,
@@ -15,35 +32,38 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
     if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
-    if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
+    if (!dma_read_wire_address(dma_read, q.driver_addr + 2, &avail_idx, 2)) return;
 
     bool processed_any = false;
     while (q.last_avail_idx != avail_idx) {
         const uint16_t ring_idx = q.last_avail_idx % q.num;
         uint16_t head_desc_idx = 0;
-        if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, 2)) break;
+        if (!dma_read_wire_address(dma_read, q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, 2))
+            break;
 
         if (head_desc_idx >= q.num) break;
         VirtqDesc desc0{};
-        if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc0, sizeof(desc0)))
+        if (!dma_read_wire_address(dma_read, q.desc_addr + head_desc_idx * sizeof(VirtqDesc),
+                                   &desc0, sizeof(desc0)))
             break;
 
         VirtioSndHdr hdr{};
         if (desc0.len >= sizeof(hdr)) {
-            dma_read(desc0.addr, &hdr, sizeof(hdr));
+            dma_read_wire_address(dma_read, desc0.addr, &hdr, sizeof(hdr));
         }
 
         uint32_t written_len = 0;
         if ((desc0.flags & kVirtqDescFNext) != 0) {
             VirtqDesc desc1{};
             if (desc0.next < q.num &&
-                dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
+                dma_read_wire_address(dma_read, q.desc_addr + desc0.next * sizeof(VirtqDesc),
+                                      &desc1, sizeof(desc1))) {
                 switch (hdr.code) {
                     case kVirtioSndRJackInfo: {
                         VirtioSndJackInfo info{};
                         info.connected = 1;
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(info));
-                        dma_write(desc1.addr, &info, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &info, to_write);
                         written_len = to_write;
                         break;
                     }
@@ -56,7 +76,7 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
                         info.rates =
                             (1ULL << kVirtioSndPcmRate44100) | (1ULL << kVirtioSndPcmRate48000);
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(info));
-                        dma_write(desc1.addr, &info, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &info, to_write);
                         written_len = to_write;
                         break;
                     }
@@ -67,14 +87,14 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
                         info.positions[0] = kVirtioSndChmapFl;
                         info.positions[1] = kVirtioSndChmapFr;
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(info));
-                        dma_write(desc1.addr, &info, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &info, to_write);
                         written_len = to_write;
                         break;
                     }
                     case kVirtioSndRPcmSetParams: {
                         VirtioSndPcmSetParams params{};
                         if (desc0.len >= sizeof(params)) {
-                            dma_read(desc0.addr, &params, sizeof(params));
+                            dma_read_wire_address(dma_read, desc0.addr, &params, sizeof(params));
                         }
                         const uint32_t rate =
                             (params.rate == kVirtioSndPcmRate44100) ? 44100 : 48000;
@@ -84,7 +104,7 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
 
                         VirtioSndHdr resp{.code = kVirtioSndSOk};
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(resp));
-                        dma_write(desc1.addr, &resp, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &resp, to_write);
                         written_len = to_write;
                         break;
                     }
@@ -93,7 +113,7 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
                         HostAudioSink::instance().start();
                         VirtioSndHdr resp{.code = kVirtioSndSOk};
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(resp));
-                        dma_write(desc1.addr, &resp, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &resp, to_write);
                         written_len = to_write;
                         break;
                     }
@@ -102,14 +122,14 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
                         HostAudioSink::instance().stop();
                         VirtioSndHdr resp{.code = kVirtioSndSOk};
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(resp));
-                        dma_write(desc1.addr, &resp, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &resp, to_write);
                         written_len = to_write;
                         break;
                     }
                     default: {
                         VirtioSndHdr resp{.code = kVirtioSndSNotSupp};
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(resp));
-                        dma_write(desc1.addr, &resp, to_write);
+                        dma_write_wire_address(dma_write, desc1.addr, &resp, to_write);
                         written_len = to_write;
                         break;
                     }
@@ -118,11 +138,12 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
         }
 
         uint16_t used_idx = 0;
-        dma_read(q.device_addr + 2, &used_idx, 2);
+        dma_read_wire_address(dma_read, q.device_addr + 2, &used_idx, 2);
         VirtqUsedElem elem{.id = head_desc_idx, .len = written_len};
-        dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
+        dma_write_wire_address(dma_write, q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                               &elem, sizeof(elem));
         used_idx++;
-        dma_write(q.device_addr + 2, &used_idx, 2);
+        dma_write_wire_address(dma_write, q.device_addr + 2, &used_idx, 2);
 
         q.last_avail_idx++;
         processed_any = true;
@@ -139,13 +160,14 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
     if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
-    if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
+    if (!dma_read_wire_address(dma_read, q.driver_addr + 2, &avail_idx, 2)) return;
 
     bool processed_any = false;
     while (q.last_avail_idx != avail_idx) {
         const uint16_t ring_idx = q.last_avail_idx % q.num;
         uint16_t head_desc_idx = 0;
-        if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, 2)) break;
+        if (!dma_read_wire_address(dma_read, q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, 2))
+            break;
 
         uint16_t cur_desc_idx = head_desc_idx;
         VirtqDesc desc{};
@@ -156,7 +178,8 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
 
         for (size_t n = 0; n < q.num; ++n) {
             if (cur_desc_idx >= q.num) break;
-            if (!dma_read(q.desc_addr + cur_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc))) {
+            if (!dma_read_wire_address(dma_read, q.desc_addr + cur_desc_idx * sizeof(VirtqDesc),
+                                       &desc, sizeof(desc))) {
                 break;
             }
 
@@ -167,18 +190,18 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
                 if (is_first) {
                     is_first = false;
                     if (desc.len > sizeof(VirtioSndPcmXfer) &&
-                        desc.addr <= std::numeric_limits<uint64_t>::max() -
-                                         sizeof(VirtioSndPcmXfer)) {
+                        desc.addr <=
+                            std::numeric_limits<uint64_t>::max() - sizeof(VirtioSndPcmXfer)) {
                         const std::size_t sample_bytes = desc.len - sizeof(VirtioSndPcmXfer);
                         const std::size_t offset = pcm_data.size();
                         pcm_data.resize(offset + sample_bytes);
-                        dma_read(desc.addr + sizeof(VirtioSndPcmXfer), pcm_data.data() + offset,
-                                 sample_bytes);
+                        dma_read_wire_address(dma_read, desc.addr + sizeof(VirtioSndPcmXfer),
+                                              pcm_data.data() + offset, sample_bytes);
                     }
                 } else {
                     const std::size_t offset = pcm_data.size();
                     pcm_data.resize(offset + desc.len);
-                    dma_read(desc.addr, pcm_data.data() + offset, desc.len);
+                    dma_read_wire_address(dma_read, desc.addr, pcm_data.data() + offset, desc.len);
                 }
             }
 
@@ -195,15 +218,16 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
                 .status = kVirtioSndSOk,
                 .latency_bytes = 0,
             };
-            dma_write(status_addr, &st, sizeof(st));
+            dma_write_wire_address(dma_write, status_addr, &st, sizeof(st));
         }
 
         uint16_t used_idx = 0;
-        dma_read(q.device_addr + 2, &used_idx, 2);
+        dma_read_wire_address(dma_read, q.device_addr + 2, &used_idx, 2);
         VirtqUsedElem elem{.id = head_desc_idx, .len = status_len};
-        dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
+        dma_write_wire_address(dma_write, q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                               &elem, sizeof(elem));
         used_idx++;
-        dma_write(q.device_addr + 2, &used_idx, 2);
+        dma_write_wire_address(dma_write, q.device_addr + 2, &used_idx, 2);
 
         q.last_avail_idx++;
         processed_any = true;
