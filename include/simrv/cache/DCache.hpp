@@ -34,9 +34,8 @@ class DCache : public BaseCache<512, 64, 8> {
     [[nodiscard]] auto prefetcher() const noexcept -> const DataPrefetcher& { return prefetcher_; }
 
     auto zero_line(simrv::xlen::PhysAddr paddr) -> bool {
-        const auto addr = paddr.raw();
-        const uint32_t set_idx = get_set_index(addr);
-        const auto tag = get_tag(addr);
+        const uint32_t set_idx = get_set_index(paddr);
+        const auto tag = get_tag(paddr);
         auto* line_ptr = &lines_[set_idx * active_ways_];
         for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& l = line_ptr[w];
@@ -68,10 +67,10 @@ inline auto DCache::read(simrv::xlen::PhysAddr paddr, simrv::xlen::Word& data,
     const auto addr = paddr.raw();
     const auto funct3 = std::to_underlying(operation);
     if (simrv::compiler::unlikely(prefetcher_.is_enabled())) {
-        (void)prefetcher_.observe(addr, kLineBytes);
+        (void)prefetcher_.observe(paddr, kLineBytes);
     }
-    const uint32_t set_idx = get_set_index(addr);
-    const auto tag = get_tag(addr);
+    const uint32_t set_idx = get_set_index(paddr);
+    const auto tag = get_tag(paddr);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     // A native RV32 cache result holds at most four bytes. Wider FP/vector accesses
     // are split by their callers; reject a direct oversized request without copying.
@@ -121,7 +120,7 @@ inline auto DCache::write(simrv::xlen::PhysAddr paddr, simrv::xlen::Word data,
     const auto addr = paddr.raw();
     const auto funct3 = std::to_underlying(operation);
     if (simrv::compiler::unlikely(prefetcher_.is_enabled())) {
-        (void)prefetcher_.observe(addr, kLineBytes);
+        (void)prefetcher_.observe(paddr, kLineBytes);
     }
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     // A native RV32 cache result holds at most four bytes. Wider FP/vector accesses
@@ -137,8 +136,8 @@ inline auto DCache::write(simrv::xlen::PhysAddr paddr, simrv::xlen::Word data,
     const uint32_t byte_offset = addr & (kLineBytes - 1u);
 
     if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
-        const uint32_t set_idx = get_set_index(addr);
-        const auto tag = get_tag(addr);
+        const uint32_t set_idx = get_set_index(paddr);
+        const auto tag = get_tag(paddr);
         last_accessed_set_ = set_idx;
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
         if (cache_line != nullptr) {

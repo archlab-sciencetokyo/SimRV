@@ -21,7 +21,7 @@
 namespace simrv::core {
 
 auto CPU::advance_sequential_miss_baremetal(CachedOp* chained,
-                                            simrv::xlen::Register next_pc) noexcept -> CachedOp* {
+                                            simrv::xlen::VirtAddr next_pc) noexcept -> CachedOp* {
     const auto* current_set = DecodeCache::set_of(chained);
     const auto* candidate = ((next_pc & 2) != 0 && chained->op_len == 2)
                                 ? current_set
@@ -40,7 +40,7 @@ auto CPU::advance_sequential_miss_baremetal(CachedOp* chained,
 }
 
 auto CPU::resolve_branch_target_baremetal(CachedOp* chained,
-                                          simrv::xlen::Register target_pc) noexcept -> CachedOp* {
+                                          simrv::xlen::VirtAddr target_pc) noexcept -> CachedOp* {
     auto* hit = decode_cache.lookup_baremetal_aligned(target_pc);
     if (simrv::compiler::likely(hit != nullptr)) {
         chained->target_idx = decode_cache.index_of(hit);
@@ -71,15 +71,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     [&]<bool kGuestXlen64>(CachedOp* initial_op, uint32_t& b_ref)
                         __attribute__((always_inline)) -> CachedOp* {
                     auto* const __restrict__ ram_data = ram.data();
-                    const simrv::xlen::Address ram_base = ram.base();
+                    const simrv::xlen::Address ram_base = ram.base().raw();
                     const simrv::xlen::Address ram_size = ram.size();
                     auto* const __restrict__ gpr = state_.regs.gpr_data();
                     auto* const __restrict__ ops_base = decode_cache.ops_data();
                     auto* chained = initial_op;
                     CachedOp* fallback_op = nullptr;
-                    simrv::xlen::Register next_pc = state_.pc.raw();
+                    simrv::xlen::VirtAddr next_pc = state_.pc;
                     uint32_t local_b = b_ref;
-                    simrv::xlen::Register seg_start_pc = next_pc;
+                    simrv::xlen::VirtAddr seg_start_pc = next_pc;
                     uint32_t seg_start_b = local_b;
                     uint32_t compressed_count = 0;
                     BasicBlock* cur_bb = nullptr;
@@ -89,7 +89,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         EnterBlock = 2,
                     };
 
-                    const auto commit_linear_segment = [&](simrv::xlen::Register end_pc) noexcept {
+                    const auto commit_linear_segment = [&](simrv::xlen::VirtAddr end_pc) noexcept {
                         const uint32_t seg_ops = local_b - seg_start_b;
                         if (seg_ops != 0) {
                             compressed_count += (2u * seg_ops) -
@@ -109,7 +109,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 chained = ops_base + seq_idx;
                                 return true;
                             }
-                            next_pc = chained->cpc.raw() + chained->op_len;
+                            next_pc = chained->cpc + chained->op_len;
                             if (local_b >= batch_size) {
                                 return false;
                             }
@@ -119,7 +119,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 return false;
                             }
                             auto* next_op = ops_base + chained->next_seq_idx;
-                            if (simrv::compiler::likely(next_op->cpc.raw() == next_pc &&
+                            if (simrv::compiler::likely(next_op->cpc == next_pc &&
                                                         next_op->ctx == active_ctx)) {
                                 chained = next_op;
                                 return true;
@@ -163,17 +163,18 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         record_hpm_instruction_classes<kHpmClassMode>(
                             chained->op_id, chained->opcode(), chained->cinsn != 0);
                         ++local_b;
-                        commit_linear_segment(chained->cpc.raw() + chained->op_len);
-                        next_pc = target_pc;
-                        seg_start_pc = target_pc;
+                        commit_linear_segment(chained->cpc + chained->op_len);
+                        next_pc = simrv::xlen::VirtAddr{target_pc};
+                        seg_start_pc = simrv::xlen::VirtAddr{target_pc};
                         seg_start_b = local_b;
                         if (simrv::compiler::unlikely(local_b >= batch_size)) {
                             return BranchAction::Exit;
                         }
                         if (state_.fetch_align_mask == 1) {
-                            auto* target_bb = block_cache.lookup(target_pc);
+                            auto* target_bb = block_cache.lookup(simrv::xlen::VirtAddr{target_pc});
                             if (target_bb == nullptr) {
-                                target_bb = block_cache.build_block(target_pc, decode_cache);
+                                target_bb = block_cache.build_block(
+                                    simrv::xlen::VirtAddr{target_pc}, decode_cache);
                             }
                             if (target_bb != nullptr &&
                                 target_bb->num_guest_ops <= batch_size - local_b) {
@@ -783,7 +784,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 seg_start_pc = next_pc;
                                 goto chain_exit;
                             }
-                            const auto build_successor = [&](simrv::xlen::Register pc) noexcept {
+                            const auto build_successor = [&](simrv::xlen::VirtAddr pc) noexcept {
                                 return block_cache.build_block(pc, decode_cache);
                             };
                             const uint32_t num_ops = cur_bb->num_ops;
@@ -810,7 +811,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     }
                                     local_b += loop_count * cur_bb->num_guest_ops;
                                     compressed_count += loop_count * cur_bb->num_compressed;
-                                    next_pc = cur_bb->pc.raw();
+                                    next_pc = cur_bb->pc;
                                     next_bb = cur_bb;
                                     goto block_transition;
                                 }
@@ -831,7 +832,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             }
                                         }
                                         if (simrv::compiler::unlikely(mem_fault)) {
-                                            simrv::xlen::Register fault_pc = cur_bb->pc.raw();
+                                            simrv::xlen::VirtAddr fault_pc = cur_bb->pc;
                                             for (uint32_t j = 0; j < mem_i; ++j) {
                                                 fault_pc += cur_bb->ops[j].op_len;
                                             }
@@ -858,7 +859,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             goto block_transition;
                                         }
                                     }
-                                    next_pc = cur_bb->pc.raw();
+                                    next_pc = cur_bb->pc;
                                     next_bb = cur_bb;
                                     goto block_transition;
                                 }
@@ -878,7 +879,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         }
                                     }
                                     if (simrv::compiler::unlikely(mem_fault)) {
-                                        simrv::xlen::Register fault_pc = cur_bb->pc.raw();
+                                        simrv::xlen::VirtAddr fault_pc = cur_bb->pc;
                                         for (uint32_t j = 0; j < mem_i; ++j) {
                                             fault_pc += cur_bb->ops[j].op_len;
                                         }
@@ -932,7 +933,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         }
                                         case FastOp::Jal:
                                             taken = true;
-                                            write_rd(term->rd, cur_bb->fallthrough_pc);
+                                            write_rd(term->rd, cur_bb->fallthrough_pc.raw());
                                             break;
                                         default:
                                             break;
@@ -954,7 +955,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         goto block_transition;
                                     }
                                 }
-                                next_pc = cur_bb->pc.raw();
+                                next_pc = cur_bb->pc;
                                 next_bb = cur_bb;
                                 goto block_transition;
                             }
@@ -972,7 +973,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                             }
 
                             if (simrv::compiler::unlikely(block_fault)) {
-                                simrv::xlen::Register fault_pc = cur_bb->pc.raw();
+                                simrv::xlen::VirtAddr fault_pc = cur_bb->pc;
                                 for (uint32_t j = 0; j < i; ++j) {
                                     fault_pc += cur_bb->ops[j].op_len;
                                 }
@@ -1031,7 +1032,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         }
                                         case FastOp::Jal: {
                                             taken = true;
-                                            write_rd(term->rd, cur_bb->fallthrough_pc);
+                                            write_rd(term->rd, cur_bb->fallthrough_pc.raw());
                                             if (term->rd == simrv::xlen::RegId::Ra) {
                                                 if (simrv::compiler::unlikely(
                                                         cur_bb->fallthrough_bb == nullptr)) {
@@ -1039,7 +1040,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                         block_cache.lookup(cur_bb->fallthrough_pc);
                                                 }
                                                 if (cur_bb->fallthrough_bb != nullptr) {
-                                                    ras_push(cur_bb->fallthrough_pc,
+                                                    ras_push(cur_bb->fallthrough_pc.raw(),
                                                              cur_bb->fallthrough_bb);
                                                 }
                                             }
@@ -1055,8 +1056,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                     static_cast<int64_t>(
                                                         static_cast<int32_t>(target_pc)));
                                             }
-                                            write_rd(term->rd, cur_bb->fallthrough_pc);
-                                            next_pc = target_pc;
+                                            write_rd(term->rd, cur_bb->fallthrough_pc.raw());
+                                            next_pc = simrv::xlen::VirtAddr{target_pc};
                                             if (term->rs1 == simrv::xlen::RegId::Ra &&
                                                 term->rd == simrv::xlen::RegId::Discard) {
                                                 if (auto* ras_bb = ras_peek_match(target_pc);
@@ -1073,7 +1074,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                         block_cache.lookup(cur_bb->fallthrough_pc);
                                                 }
                                                 if (cur_bb->fallthrough_bb != nullptr) {
-                                                    ras_push(cur_bb->fallthrough_pc,
+                                                    ras_push(cur_bb->fallthrough_pc.raw(),
                                                              cur_bb->fallthrough_bb);
                                                 }
                                             }
@@ -1088,7 +1089,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                 if (simrv::compiler::unlikely(next_bb == nullptr)) {
                                                     next_bb = build_successor(next_pc);
                                                 }
-                                                cur_bb->cached_jalr_target = target_pc;
+                                                cur_bb->cached_jalr_target =
+                                                    simrv::xlen::VirtAddr{target_pc};
                                                 cur_bb->cached_jalr_bb = next_bb;
                                             }
                                             goto block_branch_done;
@@ -1101,7 +1103,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 next_pc = taken ? cur_bb->target_pc : cur_bb->fallthrough_pc;
                                 next_bb = taken ? cur_bb->target_bb : cur_bb->fallthrough_bb;
                                 if (simrv::compiler::unlikely(next_bb == nullptr ||
-                                                              next_bb->pc.raw() != next_pc)) {
+                                                              next_bb->pc != next_pc)) {
                                     next_bb = block_cache.lookup(next_pc);
                                     if (next_bb == nullptr) {
                                         next_bb = build_successor(next_pc);
@@ -1116,7 +1118,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 next_pc = cur_bb->fallthrough_pc;
                                 next_bb = cur_bb->fallthrough_bb;
                                 if (simrv::compiler::unlikely(next_bb == nullptr ||
-                                                              next_bb->pc.raw() != next_pc)) {
+                                                              next_bb->pc != next_pc)) {
                                     next_bb = block_cache.lookup(next_pc);
                                     if (next_bb == nullptr) {
                                         next_bb = build_successor(next_pc);
@@ -1523,7 +1525,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
                                 write_rd(chained->rd, link_pc);
                                 if (chained->rd == simrv::xlen::RegId::Ra) {
-                                    ras_push(link_pc, block_cache.lookup(link_pc));
+                                    ras_push(link_pc,
+                                             block_cache.lookup(simrv::xlen::VirtAddr{link_pc}));
                                 }
                                 const auto action = commit_taken_branch(target_pc);
                                 if (action == BranchAction::ContinueScalar) {
@@ -1581,7 +1584,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     ras_pop();
                                 }
                                 if (chained->rd == simrv::xlen::RegId::Ra) {
-                                    ras_push(link_pc, block_cache.lookup(link_pc));
+                                    ras_push(link_pc,
+                                             block_cache.lookup(simrv::xlen::VirtAddr{link_pc}));
                                 }
                                 const auto action = commit_taken_branch(target_pc);
                                 if (action == BranchAction::ContinueScalar) {
@@ -1845,7 +1849,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     }
                 chain_exit:
                     if (fallback_op != nullptr) {
-                        next_pc = fallback_op->cpc.raw();
+                        next_pc = fallback_op->cpc;
                     }
                     commit_linear_segment(next_pc);
                     state_.pc = next_pc;

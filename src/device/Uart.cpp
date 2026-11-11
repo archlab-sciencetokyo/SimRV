@@ -43,7 +43,7 @@ auto frame_half_bits(uint8_t lcr) -> uint32_t {
 }
 }  // namespace
 
-Uart::Uart(simrv::core::Machine& machine, simrv::xlen::Address base, simrv::xlen::Address size,
+Uart::Uart(simrv::core::Machine& machine, simrv::xlen::PhysAddr base, simrv::xlen::Address size,
            uint32_t irq, uint64_t clock_hz, uint64_t cpu_clock_hz)
     : machine_(machine),
       base_(base),
@@ -278,7 +278,7 @@ void Uart::advance_cycles(uint64_t cycles) {
 }
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const auto reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_, base_);
+    const auto reg = simrv::mmio::uart_reg(req.address, uart_reg_shift_, base_);
     if (reg == simrv::mmio::kUartRegInvalid) {
         if (req.opcode == memory::TlOpcodeA::Get) resp.data = 0;
         return true;

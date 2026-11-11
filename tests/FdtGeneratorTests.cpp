@@ -139,7 +139,7 @@ void test_generate_platform_fdt_pcie() {
     cfg.soc.devices.push_back(simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Uart));
     cfg.platform_profile = simrv::core::PlatformProfile::Pcie;
     cfg.execution.num_harts = 4;
-    cfg.memory.dram_base = 0x80000000ULL;
+    cfg.memory.dram_base = simrv::xlen::PhysAddr{0x80000000ULL};
     cfg.memory.dram_size = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
     cfg.files.bootargs = "console=ttyS0 earlycon root=/dev/vda rw";
     if constexpr (simrv::xlen::kIsXLen64) {
@@ -265,11 +265,11 @@ void test_generate_platform_fdt_custom_pcie_topology() {
     cfg.soc = simrv::core::SoCConfig::virt_pcie();
     cfg.platform_profile = simrv::core::PlatformProfile::Pcie;
     cfg.soc.disable_unlisted_devices = true;
-    cfg.soc.pcie.ecam_base = 0x34000000;
+    cfg.soc.pcie.ecam_base = simrv::xlen::PhysAddr{0x34000000};
     cfg.soc.pcie.ecam_size = 1U << 20U;
     cfg.soc.pcie.first_bus = 4;
     cfg.soc.pcie.last_bus = 4;
-    cfg.soc.pcie.mmio_base = 0x44000000;
+    cfg.soc.pcie.mmio_base = simrv::xlen::PhysAddr{0x44000000};
     cfg.soc.pcie.mmio_size = 16U << 20U;
     auto block = simrv::core::soc_device_default(simrv::core::SoCDeviceKind::VirtioMmioBlock);
     block.pci_bus = 4;
@@ -375,7 +375,7 @@ void test_generate_platform_fdt_mmio() {
     simrv::core::MachineConfig cfg{};
     cfg.platform_profile = simrv::core::PlatformProfile::Mmio;
     cfg.execution.num_harts = 2;
-    cfg.memory.dram_base = 0x80000000ULL;
+    cfg.memory.dram_base = simrv::xlen::PhysAddr{0x80000000ULL};
     cfg.memory.dram_size = 256ULL * 1024ULL * 1024ULL;  // 256 MiB
 
     const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
@@ -409,12 +409,13 @@ void test_generated_fdt_uses_explicit_soc_devices() {
     cfg.soc.enable_mmio = true;
     cfg.soc.disable_unlisted_devices = true;
     cfg.soc.devices = {
-        {simrv::core::SoCDeviceKind::Uart, "serial", 0x12345000, 0x2000, 3},
+        {simrv::core::SoCDeviceKind::Uart, "serial", simrv::xlen::PhysAddr{0x12345000}, 0x2000, 3},
         simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Plic),
-        {simrv::core::SoCDeviceKind::VirtioMmioBlock, "storage", 0x12348000, 0x4000, 5},
+        {simrv::core::SoCDeviceKind::VirtioMmioBlock, "storage", simrv::xlen::PhysAddr{0x12348000},
+         0x4000, 5},
         {simrv::core::SoCDeviceKind::CustomMmio,
          "watchdog",
-         0x1234a000,
+         simrv::xlen::PhysAddr{0x1234a000},
          0x1000,
          0,
          true,

@@ -20,8 +20,8 @@ class L3Cache : public BaseCache<8192, 64, 16> {
     [[nodiscard]] auto lookup_line(simrv::xlen::PhysAddr line_base,
                                    std::array<simrv::xlen::Byte, kLineBytes>& out_data,
                                    simrv::memory::MesiState& out_state) -> bool {
-        const uint32_t set_idx = get_set_index(line_base.raw());
-        const auto tag = get_tag(line_base.raw());
+        const uint32_t set_idx = get_set_index(line_base);
+        const auto tag = get_tag(line_base);
         last_accessed_set_ = set_idx;
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);

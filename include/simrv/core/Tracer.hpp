@@ -95,12 +95,13 @@ class Tracer {
                                       simrv::xlen::VirtAddr jmp_pc, isa::Opcode r_opcode,
                                       bool r_tkn);
     void write_trace_snapshot();
-    void log_mmio(simrv::xlen::HartId hart, std::string_view dev_name, simrv::xlen::Address addr,
+    void log_mmio(simrv::xlen::HartId hart, std::string_view dev_name, simrv::xlen::PhysAddr addr,
                   uint32_t size, simrv::xlen::Word data, bool is_write, bool faulted = false,
                   bool mapped = true);
     void log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::string_view opcode,
-                             std::uint16_t source, std::uint16_t sink, simrv::xlen::Address address,
-                             std::string_view detail, const BusTraceContext& context = {});
+                             std::uint16_t source, std::uint16_t sink,
+                             simrv::xlen::PhysAddr address, std::string_view detail,
+                             const BusTraceContext& context = {});
     void log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRecord> stalls);
     void log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer);
     void log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,

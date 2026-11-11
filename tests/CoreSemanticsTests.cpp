@@ -80,6 +80,13 @@ static_assert(
     std::same_as<decltype(simrv::memory::MmioRouter::DeviceEntry::base), simrv::xlen::PhysAddr>);
 static_assert(
     std::same_as<decltype(simrv::memory::MmioRouter::DeviceEntry::end), simrv::xlen::PhysAddr>);
+template <typename Address>
+concept FastTlbHostPointer = requires(const simrv::core::SoftTlbEntry& entry, Address address) {
+    { entry.host_ptr(address) } -> std::same_as<simrv::xlen::Byte*>;
+};
+static_assert(FastTlbHostPointer<simrv::xlen::VirtAddr>);
+static_assert(!FastTlbHostPointer<simrv::xlen::PhysAddr>);
+static_assert(!FastTlbHostPointer<simrv::xlen::Address>);
 
 template <typename Address>
 concept DmaAddress = requires(simrv::memory::MemorySubsystem& memory, Address address, void* dst) {
@@ -113,6 +120,14 @@ static_assert(DataCacheAccess<simrv::xlen::PhysAddr, simrv::isa::Funct3>);
 static_assert(!DataCacheAccess<simrv::xlen::VirtAddr, simrv::isa::Funct3>);
 static_assert(!DataCacheAccess<simrv::xlen::Address, simrv::isa::Funct3>);
 static_assert(!DataCacheAccess<simrv::xlen::PhysAddr, simrv::xlen::Instruction>);
+template <typename Address>
+concept PrefetchPhysicalAddress =
+    requires(simrv::cache::DataPrefetcher& prefetcher, Address address) {
+        { prefetcher.observe(address, 32) } -> std::same_as<std::optional<simrv::xlen::PhysAddr>>;
+    };
+static_assert(PrefetchPhysicalAddress<simrv::xlen::PhysAddr>);
+static_assert(!PrefetchPhysicalAddress<simrv::xlen::VirtAddr>);
+static_assert(!PrefetchPhysicalAddress<simrv::xlen::Address>);
 
 template <typename Address>
 concept CacheLineAddress =
@@ -144,7 +159,42 @@ concept SharedCacheAddress =
 static_assert(SharedCacheAddress<simrv::xlen::PhysAddr>);
 static_assert(!SharedCacheAddress<simrv::xlen::VirtAddr>);
 static_assert(!SharedCacheAddress<simrv::xlen::Address>);
+static_assert(std::same_as<simrv::memory::LineAddress, simrv::xlen::PhysAddr>);
+static_assert(std::same_as<decltype(simrv::memory::TileLinkBus::TlTransactionRecord::address),
+                           simrv::xlen::PhysAddr>);
+static_assert(
+    std::same_as<decltype(simrv::pipeline::DataTransferState::address), simrv::xlen::PhysAddr>);
+static_assert(sizeof(simrv::xlen::PhysAddr) == sizeof(simrv::xlen::Word));
+static_assert(sizeof(simrv::xlen::VirtAddr) == sizeof(simrv::xlen::Word));
+static_assert(std::is_standard_layout_v<simrv::xlen::PhysAddr>);
+static_assert(std::is_standard_layout_v<simrv::xlen::VirtAddr>);
+static_assert(std::is_trivially_copyable_v<simrv::xlen::PhysAddr>);
+static_assert(std::is_trivially_copyable_v<simrv::xlen::VirtAddr>);
+template <typename Address>
+concept RamViewAddress = requires(const simrv::memory::RamView& ram, Address address) {
+    ram.contains(address);
+    ram.try_get_ptr(address);
+    ram.try_get_ptr_fast(address, 1);
+    ram.unchecked_ptr(address);
+};
+static_assert(RamViewAddress<simrv::xlen::PhysAddr>);
+static_assert(!RamViewAddress<simrv::xlen::VirtAddr>);
+static_assert(!RamViewAddress<simrv::xlen::Address>);
+template <typename Address>
+concept MemoryGeometryAddress = requires(const simrv::core::MemoryGeometry& geometry,
+                                         Address address) { geometry.contains(address); };
+static_assert(MemoryGeometryAddress<simrv::xlen::PhysAddr>);
+static_assert(!MemoryGeometryAddress<simrv::xlen::VirtAddr>);
+static_assert(!MemoryGeometryAddress<simrv::xlen::Address>);
+static_assert(
+    std::same_as<decltype(simrv::core::MemoryGeometry::dram_base), simrv::xlen::PhysAddr>);
 static_assert(std::same_as<decltype(simrv::core::ArchState::pc), simrv::xlen::VirtAddr>);
+static_assert(!std::is_convertible_v<simrv::xlen::Address, simrv::xlen::VirtAddr>);
+static_assert(!std::is_convertible_v<simrv::xlen::Address, simrv::xlen::PhysAddr>);
+static_assert(!std::is_assignable_v<simrv::xlen::VirtAddr&, simrv::xlen::Address>);
+static_assert(!std::is_assignable_v<simrv::xlen::PhysAddr&, simrv::xlen::Address>);
+static_assert(
+    std::same_as<decltype(simrv::core::ExecutionConfig::start_pc), simrv::xlen::VirtAddr>);
 
 template <typename V, typename P>
 concept TlbInsertable = requires(simrv::core::Tlb& tlb, V virt, P phys) {
@@ -156,6 +206,9 @@ concept TlbLookupable = requires(simrv::core::Tlb& tlb, V virt) {
     tlb.lookup_data_r(virt, Asid{}, simrv::xlen::PrivilegeLevel::Supervisor);
 };
 
+template <typename V>
+concept TlbSetAddress = requires(V virt) { simrv::core::Tlb::calc_set(virt); };
+
 static_assert(TlbInsertable<simrv::xlen::VirtAddr, simrv::xlen::PhysAddr>);
 static_assert(!TlbInsertable<simrv::xlen::PhysAddr, simrv::xlen::VirtAddr>);
 static_assert(!TlbInsertable<simrv::xlen::Address, simrv::xlen::PhysAddr>);
@@ -163,6 +216,9 @@ static_assert(!TlbInsertable<simrv::xlen::VirtAddr, simrv::xlen::Address>);
 static_assert(TlbLookupable<simrv::xlen::VirtAddr>);
 static_assert(!TlbLookupable<simrv::xlen::PhysAddr>);
 static_assert(!TlbLookupable<simrv::xlen::Address>);
+static_assert(TlbSetAddress<simrv::xlen::VirtAddr>);
+static_assert(!TlbSetAddress<simrv::xlen::PhysAddr>);
+static_assert(!TlbSetAddress<simrv::xlen::Address>);
 
 template <typename A>
 concept DecodeCacheAddress = requires(simrv::core::DecodeCache& cache, A address) {
@@ -401,7 +457,7 @@ void test_decode_cache_compact_round_robin() {
     expect(restored_immediate.imm == wide_immediate.imm,
            "RV64 decode-cache storage preserves the signed U-type immediate range");
 
-    const simrv::xlen::Register first_pc = decoded.cpc.raw();
+    const simrv::xlen::VirtAddr first_pc = decoded.cpc;
     simrv::core::DecodeCache sequential_cache;
     sequential_cache.insert(first_pc, first);
     auto* sequential_predecessor = sequential_cache.lookup(first_pc);
@@ -409,9 +465,10 @@ void test_decode_cache_compact_round_robin() {
     sequential_cache.insert(sequential_pc, first);
     expect(sequential_cache.lookup_aligned(first_pc) == sequential_predecessor,
            "aligned fast lookup finds a valid decoded instruction");
-    expect(sequential_cache.lookup(~simrv::xlen::Register{0}) == nullptr,
+    expect(sequential_cache.lookup(simrv::xlen::VirtAddr{~simrv::xlen::Register{0}}) == nullptr,
            "general decode-cache lookup rejects the odd invalid-entry tag");
-    expect(sequential_cache.lookup_aligned(~simrv::xlen::Register{0}) == nullptr,
+    expect(sequential_cache.lookup_aligned(simrv::xlen::VirtAddr{~simrv::xlen::Register{0}}) ==
+               nullptr,
            "fast decode-cache lookup treats the invalid-entry tag as a cache miss");
     expect(sequential_cache.lookup_next_aligned(*sequential_predecessor, sequential_pc) ==
                sequential_cache.lookup(sequential_pc),
@@ -419,7 +476,7 @@ void test_decode_cache_compact_round_robin() {
     expect(sequential_cache.lookup_next(*sequential_predecessor, sequential_pc) ==
                sequential_cache.lookup(sequential_pc),
            "decode cache uses the predecessor's precomputed sequential set");
-    sequential_cache.flush_page(simrv::xlen::VirtAddr{sequential_pc & ~simrv::xlen::Address{0xFFF}});
+    sequential_cache.flush_page(sequential_pc & ~simrv::xlen::Address{0xFFF});
     expect(sequential_cache.lookup_next_aligned(*sequential_predecessor, sequential_pc) == nullptr,
            "aligned successor lookup observes page invalidation");
     expect(sequential_cache.lookup_next(*sequential_predecessor, sequential_pc) == nullptr,
@@ -436,12 +493,12 @@ void test_decode_cache_compact_round_robin() {
                sequential_cache.lookup(compressed_next_pc),
            "sequential lookup accounts for compressed instruction length");
 
-    simrv::xlen::Register second_pc = first_pc + 2;
+    simrv::xlen::VirtAddr second_pc = first_pc + 2;
     while (simrv::core::DecodeCache::calc_set(second_pc) !=
            simrv::core::DecodeCache::calc_set(first_pc)) {
         second_pc += 2;
     }
-    simrv::xlen::Register third_pc = second_pc + 2;
+    simrv::xlen::VirtAddr third_pc = second_pc + 2;
     while (simrv::core::DecodeCache::calc_set(third_pc) !=
            simrv::core::DecodeCache::calc_set(first_pc)) {
         third_pc += 2;
@@ -516,16 +573,16 @@ void test_decode_cache_compact_round_robin() {
     simrv::core::DecodeCache prelink_cache;
     simrv::core::CachedOp target_inst{};
     target_inst.op_len = 4;
-    prelink_cache.insert(0x80000010, target_inst);
+    prelink_cache.insert(simrv::xlen::VirtAddr{0x80000010}, target_inst);
 
     // Insert backward branch pointing to 0x80000010: target_pc = 0x80000020 + (-16) = 0x80000010
     simrv::core::CachedOp branch_inst{};
     branch_inst.branch_kind = simrv::core::BranchKind::Bne;
     branch_inst.imm = -16;
     branch_inst.op_len = 4;
-    prelink_cache.insert(0x80000020, branch_inst);
+    prelink_cache.insert(simrv::xlen::VirtAddr{0x80000020}, branch_inst);
 
-    auto* inserted_branch = prelink_cache.lookup(0x80000020);
+    auto* inserted_branch = prelink_cache.lookup(simrv::xlen::VirtAddr{0x80000020});
     expect(inserted_branch != nullptr, "branch inserted");
     expect(inserted_branch->target_idx != simrv::core::kInvalidSeqIndex,
            "backward branch target is immediately pre-linked on insertion");
@@ -536,8 +593,8 @@ void test_decode_cache_compact_round_robin() {
     // Insert sequential predecessor at 0x8000001C (pc + 4 = 0x80000020)
     simrv::core::CachedOp pred_inst{};
     pred_inst.op_len = 4;
-    prelink_cache.insert(0x8000001C, pred_inst);
-    auto* inserted_pred = prelink_cache.lookup(0x8000001C);
+    prelink_cache.insert(simrv::xlen::VirtAddr{0x8000001C}, pred_inst);
+    auto* inserted_pred = prelink_cache.lookup(simrv::xlen::VirtAddr{0x8000001C});
     expect(inserted_pred != nullptr, "predecessor inserted");
     expect(inserted_pred->next_seq_idx != simrv::core::kInvalidSeqIndex,
            "sequential successor is pre-linked on insertion");
@@ -657,7 +714,7 @@ void test_hosted_rv32_cached_shift_width() {
         // must stop the chain and run through the existing generic cached fallback.
         cpu.sync_decode_context();
         cpu.decode_cache.flush();
-        state.pc = 0x1000;
+        state.pc = simrv::xlen::VirtAddr{0x1000};
         state.regs.write(simrv::xlen::RegId::A1, 21);
         state.regs.write(simrv::xlen::RegId::A2, 3);
         simrv::pipeline::DecodedInstruction addi_decoded{};
@@ -721,7 +778,7 @@ void test_hosted_rv32_cycle_accurate_alu_width() {
         state.misa =
             (state.misa & ~(simrv::xlen::CsrValue{3} << 62U)) | (simrv::xlen::CsrValue{1} << 62U);
         state.initialize_lower_xlen_fields();
-        state.pc = simrv::memory::kDramBaseAddress;
+        state.pc = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
 
         uint32_t cycles = 0;
         while (cpu.e_icount < program.size() && cycles < 128) {
@@ -824,7 +881,7 @@ void test_privilege_returns_flush_cached_instructions() {
     cpu.state().medeleg = static_cast<simrv::xlen::CsrValue>(1)
                           << static_cast<unsigned>(ExceptionCode::IllegalInstruction);
     cpu.state().stvec = decoded.cpc.raw();
-    cpu.state().pc = 0x1000;
+    cpu.state().pc = simrv::xlen::VirtAddr{0x1000};
     cpu.decode_cache.insert(decoded.cpc, cached);
     cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::IllegalInstruction), 0);
     expect(cpu.state().priv == simrv::xlen::PrivilegeLevel::Supervisor,
@@ -835,7 +892,7 @@ void test_privilege_returns_flush_cached_instructions() {
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
     cpu.state().mstatus = std::to_underlying(simrv::core::MstatusBit::Mprv);
     cpu.state().mtvec = decoded.cpc.raw();
-    cpu.state().pc = 0x1000;
+    cpu.state().pc = simrv::xlen::VirtAddr{0x1000};
     cpu.decode_cache.insert(decoded.cpc, cached);
     cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::IllegalInstruction), 0);
     expect(cpu.state().priv == simrv::xlen::PrivilegeLevel::Machine,
@@ -857,18 +914,18 @@ void test_selective_tlb_and_decode_cache_flush() {
     const size_t idxB = simrv::core::CPU::soft_tlb_index(vpnB);
 
     cpu.soft_tlb_read[idxA].set(vpnA, 0, simrv::xlen::PrivilegeLevel::Supervisor,
-                                cpu.soft_tlb_epoch, kPageA, nullptr);
+                                cpu.soft_tlb_epoch, simrv::xlen::PhysAddr{kPageA}, nullptr);
     cpu.soft_tlb_write[idxA].set(vpnA, 0, simrv::xlen::PrivilegeLevel::Supervisor,
-                                 cpu.soft_tlb_epoch, kPageA, nullptr);
+                                 cpu.soft_tlb_epoch, simrv::xlen::PhysAddr{kPageA}, nullptr);
     cpu.soft_tlb_inst[idxA].set(vpnA, 0, simrv::xlen::PrivilegeLevel::Supervisor,
-                                cpu.soft_tlb_epoch, kPageA, nullptr);
+                                cpu.soft_tlb_epoch, simrv::xlen::PhysAddr{kPageA}, nullptr);
 
     cpu.soft_tlb_read[idxB].set(vpnB, 0, simrv::xlen::PrivilegeLevel::Supervisor,
-                                cpu.soft_tlb_epoch, kPageB, nullptr);
+                                cpu.soft_tlb_epoch, simrv::xlen::PhysAddr{kPageB}, nullptr);
     cpu.soft_tlb_write[idxB].set(vpnB, 0, simrv::xlen::PrivilegeLevel::Supervisor,
-                                 cpu.soft_tlb_epoch, kPageB, nullptr);
+                                 cpu.soft_tlb_epoch, simrv::xlen::PhysAddr{kPageB}, nullptr);
     cpu.soft_tlb_inst[idxB].set(vpnB, 0, simrv::xlen::PrivilegeLevel::Supervisor,
-                                cpu.soft_tlb_epoch, kPageB, nullptr);
+                                cpu.soft_tlb_epoch, simrv::xlen::PhysAddr{kPageB}, nullptr);
 
     simrv::core::CachedOp copA{};
     copA.cpc = simrv::xlen::VirtAddr{kPageA + 4};
@@ -926,7 +983,7 @@ void test_tlb_and_decode_cache_deduplication() {
     constexpr simrv::xlen::Address kVaddr = 0x80001000;
     constexpr simrv::xlen::Address kPaddr1 = 0x10000000;
     constexpr simrv::xlen::Address kPaddr2 = 0x20000000;
-    const auto set = simrv::core::Tlb::calc_set(kVaddr);
+    const auto set = simrv::core::Tlb::calc_set(simrv::xlen::VirtAddr{kVaddr});
 
     // Initial insert into empty set -> uses way 0
     tlb.insert_data_r(simrv::xlen::VirtAddr{kVaddr}, simrv::xlen::PhysAddr{kPaddr1}, 0,
@@ -949,26 +1006,26 @@ void test_tlb_and_decode_cache_deduplication() {
     op1.cpc = simrv::xlen::VirtAddr{kVaddr};
     op1.op_id = simrv::isa::ADDI;
     op1.imm = 10;
-    decode_cache.insert(kVaddr, op1);
+    decode_cache.insert(simrv::xlen::VirtAddr{kVaddr}, op1);
 
-    auto* hit1 = decode_cache.lookup(kVaddr);
+    auto* hit1 = decode_cache.lookup(simrv::xlen::VirtAddr{kVaddr});
     expect(hit1 != nullptr && hit1->imm == 10, "decode cache lookup finds initial op");
 
     // Re-inserting the same PC updates the existing way without duplicating
     simrv::core::CachedOp op2 = op1;
     op2.imm = 20;
-    decode_cache.insert(kVaddr, op2);
+    decode_cache.insert(simrv::xlen::VirtAddr{kVaddr}, op2);
 
-    auto* hit2 = decode_cache.lookup(kVaddr);
+    auto* hit2 = decode_cache.lookup(simrv::xlen::VirtAddr{kVaddr});
     expect(hit2 != nullptr && hit2->imm == 20, "decode cache re-insert updates in place");
 }
 
 void test_runtime_ram_view() {
     std::array<simrv::xlen::Byte, 32> bytes{};
-    constexpr simrv::xlen::Address kUpperDramBase =
+    constexpr simrv::xlen::PhysAddr kUpperDramBase =
         simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
     const simrv::memory::RamView ram(bytes.data(), kUpperDramBase, bytes.size());
-    const simrv::xlen::Address address = kUpperDramBase + 8;
+    const simrv::xlen::PhysAddr address = kUpperDramBase + 8;
     simrv::memory::ram_write_fast(address, static_cast<simrv::xlen::Word>(0xA1B2C3D4U),
                                   static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw),
                                   ram);
@@ -980,18 +1037,20 @@ void test_runtime_ram_view() {
            "runtime RAM view uses the configured DRAM base as its offset");
     expect(!ram.contains(kUpperDramBase + bytes.size(), 1),
            "runtime RAM view rejects its end address");
-    expect(!ram.contains(kUpperDramBase - 1, 1),
+    expect(!ram.contains(simrv::xlen::PhysAddr{kUpperDramBase.raw() - 1}, 1),
            "runtime RAM view rejects addresses below its configured base");
 
     const simrv::memory::RamView extreme_view(bytes.data(), kUpperDramBase,
                                               std::numeric_limits<simrv::xlen::Address>::max());
-    expect(!extreme_view.contains(kUpperDramBase - 2, 1),
+    expect(!extreme_view.contains(simrv::xlen::PhysAddr{kUpperDramBase.raw() - 2}, 1),
            "runtime RAM view rejects below-base addresses despite unsigned wraparound");
-    expect(!ram.contains(std::numeric_limits<simrv::xlen::Address>::max(), 2),
-           "runtime RAM view rejects ranges that overflow the address width");
+    expect(
+        !ram.contains(simrv::xlen::PhysAddr{std::numeric_limits<simrv::xlen::Address>::max()}, 2),
+        "runtime RAM view rejects ranges that overflow the address width");
 
-    constexpr auto kLastPhysical = std::numeric_limits<simrv::xlen::Address>::max();
-    const simrv::memory::RamView wrapping_view(bytes.data(), kLastPhysical - 3, 8);
+    constexpr simrv::xlen::PhysAddr kLastPhysical{std::numeric_limits<simrv::xlen::Address>::max()};
+    const simrv::memory::RamView wrapping_view(bytes.data(),
+                                               simrv::xlen::PhysAddr{kLastPhysical.raw() - 3}, 8);
     expect(!wrapping_view.has_nonwrapping_range(),
            "a wrapping RAM mapping is not fast-path eligible");
     expect(wrapping_view.contains(kLastPhysical - 1, 2),
@@ -999,9 +1058,11 @@ void test_runtime_ram_view() {
     expect(!wrapping_view.contains(kLastPhysical, 2) &&
                wrapping_view.try_get_ptr(kLastPhysical, 2) == nullptr,
            "a RAM access cannot wrap beyond the physical address limit");
-    expect(!wrapping_view.contains(0, 1) && wrapping_view.try_get_ptr(0, 1) == nullptr,
+    expect(!wrapping_view.contains(simrv::xlen::PhysAddr{0}, 1) &&
+               wrapping_view.try_get_ptr(simrv::xlen::PhysAddr{0}, 1) == nullptr,
            "pointer lookup cannot wrap a below-base address into RAM");
-    expect(!simrv::memory::address_range_contains(kLastPhysical - 3, 8, kLastPhysical, 2),
+    expect(!simrv::memory::address_range_contains(simrv::xlen::PhysAddr{kLastPhysical.raw() - 3}, 8,
+                                                  kLastPhysical, 2),
            "physical range checks reject accesses that cross the address-space limit");
     expect(ram.has_nonwrapping_range(), "ordinary RAM mappings remain fast-path eligible");
 
@@ -1047,19 +1108,19 @@ void test_mmio_ranges() {
 
     simrv::memory::TlChannelA hole_request{};
     hole_request.opcode = simrv::memory::TlOpcodeA::Get;
-    hole_request.address = 0x4000;
+    hole_request.address = simrv::xlen::PhysAddr{0x4000};
     hole_request.size = 0;
     simrv::memory::TlChannelD hole_response{};
     expect(router.route_request(hole_request, hole_response) && !hole_response.denied,
            "outer node access warms the router shortcut");
-    hole_request.address = 0x4010;
+    hole_request.address = simrv::xlen::PhysAddr{0x4010};
     hole_response = {};
     expect(router.route_request(hole_request, hole_response) && !hole_response.denied &&
                hole_device.requests() == 1,
            "warmed router resolves a hole to the device that owns it");
     const auto outer_calls = node_with_hole.requests();
     const auto inner_calls = hole_device.requests();
-    hole_request.address = 0x400f;
+    hole_request.address = simrv::xlen::PhysAddr{0x400f};
     hole_request.size = 1;
     hole_response = {};
     expect(router.route_request(hole_request, hole_response) && hole_response.denied,
@@ -1079,7 +1140,7 @@ void test_mmio_ranges() {
     expect(router.is_range_mapped(simrv::xlen::PhysAddr{0x6100}, 4097),
            "an ambiguous sparse overlap beyond the scan limit is conservative");
     expect(router.register_device(&node_with_pin_hole), "a node with a one-byte hole registers");
-    hole_request.address = 0x5000;
+    hole_request.address = simrv::xlen::PhysAddr{0x5000};
     hole_request.size = 3;  // eight bytes; the first and last bytes are owned
     hole_response = {};
     expect(router.route_request(hole_request, hole_response) && hole_response.denied &&
@@ -1088,7 +1149,8 @@ void test_mmio_ranges() {
 
     simrv::memory::TlChannelA limit_request{};
     limit_request.opcode = simrv::memory::TlOpcodeA::Get;
-    limit_request.address = std::numeric_limits<simrv::xlen::Address>::max() - 7;
+    limit_request.address =
+        simrv::xlen::PhysAddr{std::numeric_limits<simrv::xlen::Address>::max() - 7};
     limit_request.size = 3;
     simrv::memory::TlChannelD limit_response{};
     expect(router.route_request(limit_request, limit_response) && limit_response.denied &&
@@ -1097,7 +1159,7 @@ void test_mmio_ranges() {
 
     simrv::memory::TlChannelA request{};
     request.opcode = simrv::memory::TlOpcodeA::Get;
-    request.address = 0x11FF;
+    request.address = simrv::xlen::PhysAddr{0x11FF};
     request.size = 1;  // two bytes, crossing the end of inner
     simrv::memory::TlChannelD response{};
     expect(router.route_request(request, response),
@@ -1105,7 +1167,7 @@ void test_mmio_ranges() {
     expect(response.denied, "straddling MMIO request returns a denied response");
     expect(inner.requests() == 0, "straddling request is not delivered to the device");
 
-    request.address = 0x1100;
+    request.address = simrv::xlen::PhysAddr{0x1100};
     request.size = 0;
     request.opcode = simrv::memory::TlOpcodeA::ArithmeticData;
     response = {};
@@ -1116,7 +1178,7 @@ void test_mmio_ranges() {
 
 void test_physical_range_validation() {
     using simrv::memory::address_range_contains;
-    constexpr simrv::xlen::Address kBase = 0x80000000;
+    constexpr simrv::xlen::PhysAddr kBase{0x80000000};
     constexpr simrv::xlen::Address kSize = 0x10000000;
     expect(address_range_contains(kBase, kSize, kBase, 8),
            "a complete access at the DRAM base is valid");
@@ -1125,7 +1187,7 @@ void test_physical_range_validation() {
     expect(!address_range_contains(kBase, kSize, kBase + kSize - 4, 8),
            "an access straddling the DRAM limit is rejected");
 #if SIMRV_XLEN == 64
-    expect(!address_range_contains(kBase, kSize, UINT64_C(0x180000000), 1),
+    expect(!address_range_contains(kBase, kSize, simrv::xlen::PhysAddr{UINT64_C(0x180000000)}, 1),
            "RV64 physical addresses do not alias DRAM through their low 32 bits");
 #endif
 }
@@ -1458,7 +1520,7 @@ void test_vector_mask_and_fault_only_first_memory() {
     };
 
     cpu.state().vl = 10;
-    regs.write(base_reg, ram.base());
+    regs.write(base_reg, ram.base().raw());
     ram.data()[0] = simrv::xlen::Byte{0xA5};
     ram.data()[1] = simrv::xlen::Byte{0x03};
     simrv::execute::ExecuteUnit::execute_vector(
@@ -1467,7 +1529,7 @@ void test_vector_mask_and_fault_only_first_memory() {
                regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x03,
            "vlm.v transfers ceil(vl/8) packed mask bytes");
 
-    regs.write(base_reg, ram.base() + 2);
+    regs.write(base_reg, (ram.base() + 2).raw());
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VSM_V, memory_ir(vd, base_reg));
     expect(ram.data()[2] == simrv::xlen::Byte{0xA5} && ram.data()[3] == simrv::xlen::Byte{0x03},
@@ -1482,7 +1544,7 @@ void test_vector_mask_and_fault_only_first_memory() {
             (std::to_underlying(rs1) << 15U) | (std::to_underlying(vector_reg) << 7U));
     };
     cpu.state().vl = 2;
-    regs.write(base_reg, ram.base() + 16);
+    regs.write(base_reg, (ram.base() + 16).raw());
     regs.write(stride_reg, 4);
     backing[16] = simrv::xlen::Byte{0x10};
     backing[17] = simrv::xlen::Byte{0x11};
@@ -1579,7 +1641,7 @@ void test_vector_mask_and_fault_only_first_memory() {
                regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[24] == 0xA7,
            "whole-register loads resume at the final EEW element without changing prestart bytes");
     cpu.state().vstart = 1;
-    regs.write(base_reg, ram.base());
+    regs.write(base_reg, ram.base().raw());
     regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 0xD5;
     regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] = 0xD6;
     ram.data()[2] = simrv::xlen::Byte{0x31};
@@ -1601,14 +1663,14 @@ void test_vector_mask_and_fault_only_first_memory() {
     cpu.state().vtype = static_cast<simrv::xlen::CsrValue>(1) << (cpu.state().regs.xlen - 1U);
     cpu.state().vl = 0;
     cpu.state().vstart = 0;
-    regs.write(base_reg, ram.base());
+    regs.write(base_reg, ram.base().raw());
     ram.data()[0] = simrv::xlen::Byte{0xC7};
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
     expect(!cpu.active_context().pending_exception.has_value() &&
                regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xC7,
            "whole-register loads work with vill set and vl zero");
-    regs.write(base_reg, ram.base() + 64);
+    regs.write(base_reg, (ram.base() + 64).raw());
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VS1R_V, memory_ir(vd, base_reg));
     expect(!cpu.active_context().pending_exception.has_value() &&
@@ -1628,7 +1690,7 @@ void test_vector_mask_and_fault_only_first_memory() {
     cpu.active_context().pending_exception.reset();
     cpu.state().vtype = 0;
 
-    const simrv::xlen::Address final_two_bytes = ram.base() + ram.size() - 2;
+    const simrv::xlen::Address final_two_bytes = (ram.base() + ram.size() - 2).raw();
     ram.data()[ram.size() - 2] = simrv::xlen::Byte{0x11};
     ram.data()[ram.size() - 1] = simrv::xlen::Byte{0x22};
     regs.write(base_reg, final_two_bytes);
@@ -1641,7 +1703,7 @@ void test_vector_mask_and_fault_only_first_memory() {
            "vle8ff.v suppresses a noninitial fault and trims vl to the loaded prefix");
 
     if constexpr (!simrv::xlen::kIsXLen64) {
-        const simrv::xlen::Address unmapped = ram.base() + ram.size();
+        const simrv::xlen::Address unmapped = (ram.base() + ram.size()).raw();
         regs.write(base_reg, unmapped);
         cpu.state().vtype = 3U << 3U;  // SEW=64
         cpu.state().vl = 1;
@@ -1671,7 +1733,7 @@ void test_compact_block_immediates() {
     auto& cpu = machine.hart(0);
     cpu.sync_decode_context();
     cpu.decode_cache.flush();
-    cpu.state().pc = 0x1000;
+    cpu.state().pc = simrv::xlen::VirtAddr{0x1000};
     cpu.state().regs.write(simrv::xlen::RegId::A0, 2);
     auto add = [&](simrv::xlen::Address pc, simrv::isa::OperationId id, int32_t imm) {
         simrv::pipeline::DecodedInstruction decoded{};
@@ -1698,15 +1760,15 @@ void test_compact_block_immediates() {
     cpu.run_fast_baremetal_batch(machine, simrv::xlen::kIsXLen64 ? 4 : 3, {});
     expect(cpu.state().regs.read(simrv::xlen::RegId::A0) == (simrv::xlen::kIsXLen64 ? 7 : 9),
            "compact blocks apply immediates for unified ALU operations");
-    cpu.state().pc = 0x1000;
+    cpu.state().pc = simrv::xlen::VirtAddr{0x1000};
     cpu.state().regs.write(simrv::xlen::RegId::A0, 2);
     const auto retired_before = cpu.e_icount;
     cpu.run_fast_baremetal_batch(machine, 1, {});
-    expect(cpu.e_icount == retired_before + 1 && cpu.state().pc == 0x1004 &&
+    expect(cpu.e_icount == retired_before + 1 && cpu.state().pc == simrv::xlen::VirtAddr{0x1004} &&
                cpu.state().regs.read(simrv::xlen::RegId::A0) == 5,
            "a cached block does not exceed the remaining instruction budget");
     if constexpr (simrv::xlen::kIsXLen64) {
-        cpu.state().pc = 0x1100;
+        cpu.state().pc = simrv::xlen::VirtAddr{0x1100};
         cpu.state().regs.write(simrv::xlen::RegId::A0, 0x7fffffff);
         cpu.state().regs.write(simrv::xlen::RegId::A1, 2);
         simrv::pipeline::DecodedInstruction decoded{};
@@ -1731,16 +1793,16 @@ void test_compact_block_immediates() {
 }
 
 void test_fast_block_successor_cache_collision() {
-    constexpr simrv::xlen::Register start = 0x1000;
-    constexpr simrv::xlen::Register target = 0x5004;
+    constexpr simrv::xlen::VirtAddr start{0x1000};
+    constexpr simrv::xlen::VirtAddr target{0x5004};
     static_assert(simrv::core::BlockCache::calc_set(start) ==
                   simrv::core::BlockCache::calc_set(target));
     simrv::core::Machine machine;
     auto& cpu = machine.hart(0);
     cpu.sync_decode_context();
     cpu.decode_cache.flush();
-    cpu.state().pc = start;
-    auto insert = [&](simrv::xlen::Register pc, simrv::isa::OperationId id, int32_t imm) {
+    cpu.state().pc = simrv::xlen::VirtAddr{start};
+    auto insert = [&](simrv::xlen::VirtAddr pc, simrv::isa::OperationId id, int32_t imm) {
         simrv::pipeline::DecodedInstruction decoded{};
         decoded.cpc = simrv::xlen::VirtAddr{pc};
         decoded.op_id = id;
@@ -1759,7 +1821,7 @@ void test_fast_block_successor_cache_collision() {
     insert(target, simrv::isa::JAL, 0);
     const auto before = cpu.e_icount;
     cpu.run_fast_baremetal_batch(machine, 2, {});
-    expect(cpu.e_icount == before + 2 && cpu.state().pc == target &&
+    expect(cpu.e_icount == before + 2 && cpu.state().pc == simrv::xlen::VirtAddr{target} &&
                cpu.state().regs.read(simrv::xlen::RegId::A0) == 1,
            "colliding successor preserves current block retirement and branch target");
 }
@@ -1778,7 +1840,7 @@ void test_fast_baremetal_misaligned_control_transfer() {
         }
         state.set_misa(state.misa & ~(simrv::xlen::CsrValue{1} << 2));
         state.mtvec = 0x2000;
-        state.pc = 0x1000;
+        state.pc = simrv::xlen::VirtAddr{0x1000};
         state.regs.write(simrv::xlen::RegId::A0, 0x1234);
         state.regs.write(simrv::xlen::RegId::A1, 0x1002);
         cpu.sync_decode_context();
@@ -1814,7 +1876,7 @@ void test_cached_store_legacy_tohost() {
     std::array<simrv::xlen::Byte, 8192> backing{};
     machine.set_ram_for_testing(backing.data(), backing.size());
     machine.memory().initialize_mmu();
-    machine.set_resolved_boot_state(0, simrv::xlen::Address{0x80001800});
+    machine.set_resolved_boot_state(simrv::xlen::VirtAddr{}, simrv::xlen::Address{0x80001800});
     auto& cpu = machine.hart(0);
     cpu.cpu_model_config.mmio_console_redirect = true;
     expect(!machine.execute_fast_batch_for_testing(0),
@@ -1843,7 +1905,7 @@ void test_cached_store_legacy_tohost() {
     std::array<simrv::xlen::Byte, 8192> translated_backing{};
     translated.set_ram_for_testing(translated_backing.data(), translated_backing.size());
     translated.memory().initialize_mmu();
-    translated.set_resolved_boot_state(0, simrv::xlen::Address{0x80001800});
+    translated.set_resolved_boot_state(simrv::xlen::VirtAddr{}, simrv::xlen::Address{0x80001800});
     auto& translated_cpu = translated.hart(0);
     translated_cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
     if constexpr (simrv::xlen::kIsXLen64) {
@@ -1854,9 +1916,10 @@ void test_cached_store_legacy_tohost() {
     constexpr simrv::xlen::Address virtual_address = 0x20000;
     constexpr simrv::xlen::Address vpn = virtual_address >> 12;
     translated_cpu.soft_tlb_write[simrv::core::CPU::soft_tlb_index(vpn)].set(
-        vpn, 0, simrv::xlen::PrivilegeLevel::Supervisor, translated_cpu.soft_tlb_epoch, 0x80001000,
-        translated_backing.data() + 4096, false);
-    simrv::memory::MemoryAccess::storeInt(translated.memory(), translated_cpu, virtual_address, 1,
+        vpn, 0, simrv::xlen::PrivilegeLevel::Supervisor, translated_cpu.soft_tlb_epoch,
+        simrv::xlen::PhysAddr{0x80001000}, translated_backing.data() + 4096, false);
+    simrv::memory::MemoryAccess::storeInt(translated.memory(), translated_cpu,
+                                          simrv::xlen::VirtAddr{virtual_address}, 1,
                                           simrv::isa::Funct3::Sw);
     expect(translated.tohost == 1 ||
                translated.stop_reason() == simrv::core::Machine::StopReason::TohostPass,
@@ -1885,7 +1948,7 @@ void test_vector_bulk_memory_operations() {
     cpu.state().vtype = 0;  // SEW=8, LMUL=1
     cpu.state().vl = 16;
     cpu.state().vstart = 0;
-    regs.write(base_reg, ram.base() + 0x100);
+    regs.write(base_reg, (ram.base() + 0x100).raw());
     for (uint32_t i = 0; i < 16; ++i) {
         ram.data()[0x100 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0xA0 + i)};
     }
@@ -1901,7 +1964,7 @@ void test_vector_bulk_memory_operations() {
     for (uint32_t i = 0; i < 16; ++i) {
         regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] = static_cast<uint8_t>(0x50 + i);
     }
-    regs.write(base_reg, ram.base() + 0x200);
+    regs.write(base_reg, (ram.base() + 0x200).raw());
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vd, base_reg));
     for (uint32_t i = 0; i < 16; ++i) {
@@ -1910,7 +1973,7 @@ void test_vector_bulk_memory_operations() {
     }
 
     // 2. Cross-page fallback test: buffer spanning 4096-byte boundary (e.g. 0xFF8..0x1008)
-    regs.write(base_reg, ram.base() + 0xFF8);
+    regs.write(base_reg, (ram.base() + 0xFF8).raw());
     for (uint32_t i = 0; i < 16; ++i) {
         ram.data()[0xFF8 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0x70 + i)};
     }
@@ -1923,7 +1986,7 @@ void test_vector_bulk_memory_operations() {
     }
 
     // Cross-page vse8 test: buffer spanning 4096-byte boundary
-    regs.write(base_reg, ram.base() + 0xFF8);
+    regs.write(base_reg, (ram.base() + 0xFF8).raw());
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vs, base_reg));
     for (uint32_t i = 0; i < 16; ++i) {
@@ -1932,7 +1995,7 @@ void test_vector_bulk_memory_operations() {
     }
 
     // 3. Whole-register load/store bulk test (including page-boundary crossing)
-    regs.write(base_reg, ram.base() + 0xFF0);
+    regs.write(base_reg, (ram.base() + 0xFF0).raw());
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
         ram.data()[0xFF0 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0x10 + (i & 0x7F))};
     }
@@ -1959,7 +2022,7 @@ void test_vector_bulk_memory_operations() {
     // 5. Strided fast-path memory operations (vlse8 / vsse8)
     constexpr auto stride_reg = static_cast<simrv::xlen::RegId>(11);
     regs.write(stride_reg, 2);  // Stride of 2 bytes
-    regs.write(base_reg, ram.base() + 0x300);
+    regs.write(base_reg, (ram.base() + 0x300).raw());
     for (uint32_t i = 0; i < 32; ++i) {
         ram.data()[0x300 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0xC0 + i)};
     }
@@ -1984,7 +2047,7 @@ void test_vector_bulk_memory_operations() {
     for (uint32_t i = 0; i < 8; ++i) {
         regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] = static_cast<uint8_t>(0x30 + i);
     }
-    regs.write(base_reg, ram.base() + 0x400);
+    regs.write(base_reg, (ram.base() + 0x400).raw());
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSSE8_V,
                                                 strided_ir(vd, base_reg, stride_reg));
@@ -1999,12 +2062,12 @@ void test_vector_bulk_memory_operations() {
         static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (regs.xlen == 64 ? 60U : 28U));
     (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 0);
     (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), type_header | (1U << 6U) | 3U);
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), ram.base() + 0x403);
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), (ram.base() + 0x403).raw());
     expect(!machine.execute_fast_batch_for_testing(0),
            "active architectural triggers disable fast instruction batching");
     cpu.pipeline_context.opcode = simrv::isa::Opcode::Load;
     cpu.pipeline_context.funct3 = simrv::isa::Funct3::Lbu;
-    cpu.pipeline_context.mem_addr = ram.base() + 0x403;
+    cpu.pipeline_context.mem_addr = simrv::xlen::VirtAddr{(ram.base() + 0x403).raw()};
     cpu.run_memory_stage_baremetal(machine);
     expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint,
            "bare-metal scalar memory stage observes load triggers");
@@ -2015,20 +2078,22 @@ void test_vector_bulk_memory_operations() {
     expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint,
            "bare-metal scalar memory stage observes store triggers");
     cpu.active_context().pending_exception.reset();
-    regs.write(base_reg, ram.base() + 0x400);
+    regs.write(base_reg, (ram.base() + 0x400).raw());
     cpu.state().vl = 8;
     cpu.state().vstart = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VLE8_V, memory_ir(vd, base_reg));
     expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint &&
-               cpu.active_context().pending_tval == ram.base() + 0x403 && cpu.state().vstart == 3,
+               cpu.active_context().pending_tval == (ram.base() + 0x403).raw() &&
+               cpu.state().vstart == 3,
            "bulk vector load falls back at the triggering element");
     cpu.active_context().pending_exception.reset();
     cpu.state().vstart = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vd, base_reg));
     expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint &&
-               cpu.active_context().pending_tval == ram.base() + 0x403 && cpu.state().vstart == 3,
+               cpu.active_context().pending_tval == (ram.base() + 0x403).raw() &&
+               cpu.state().vstart == 3,
            "bulk vector store falls back at the triggering element");
     cpu.active_context().pending_exception.reset();
     (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
@@ -2043,13 +2108,12 @@ void test_vector_bulk_memory_operations() {
     secondary->machine_ = &machine;
     machine.test_secondary_harts().push_back(std::move(secondary));
     auto& reservations = machine.memory().reservation_table();
-    reservations.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{ram.base() + 0x400});
+    reservations.set_reservation(simrv::xlen::HartId{1}, ram.base() + 0x400);
     cpu.state().vstart = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSSE8_V,
                                                 strided_ir(vd, base_reg, stride_reg));
-    expect(!reservations.check_reservation(simrv::xlen::HartId{1},
-                                           simrv::xlen::PhysAddr{ram.base() + 0x400}),
+    expect(!reservations.check_reservation(simrv::xlen::HartId{1}, ram.base() + 0x400),
            "strided vector store invalidates another hart's overlapping reservation");
 
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -2062,7 +2126,7 @@ void test_vector_bulk_memory_operations() {
                                                     strided_ir(vd, base_reg, stride_reg));
         expect(cpu.active_context().pending_exception == ExceptionCode::MisalignedLoad &&
                    cpu.state().vstart == 1 &&
-                   cpu.active_context().pending_tval == ram.base() + 0x409,
+                   cpu.active_context().pending_tval == (ram.base() + 0x409).raw(),
                "RV32 strided 64-bit load traps at the first misaligned element");
         cpu.active_context().pending_exception.reset();
         cpu.state().vstart = 0;
@@ -2071,7 +2135,7 @@ void test_vector_bulk_memory_operations() {
                                                     strided_ir(vd, base_reg, stride_reg));
         expect(cpu.active_context().pending_exception == ExceptionCode::MisalignedStore &&
                    cpu.state().vstart == 1 &&
-                   cpu.active_context().pending_tval == ram.base() + 0x409,
+                   cpu.active_context().pending_tval == (ram.base() + 0x409).raw(),
                "RV32 strided 64-bit store traps at the first misaligned element");
         cpu.active_context().pending_exception.reset();
         cpu.state().vtype = 0;
@@ -3477,7 +3541,7 @@ void test_named_isa_presets() {
 
 void test_sv32_page_walk() {
     std::array<simrv::xlen::Byte, 0x6000> ram{};
-    const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
+    const simrv::memory::RamView ram_view(ram.data(), simrv::xlen::PhysAddr{0}, ram.size());
     constexpr simrv::xlen::Address kRoot = 0x1000;
     constexpr simrv::xlen::Address kNext = 0x2000;
     constexpr simrv::xlen::Address kPhysical = 0x3000;
@@ -3488,24 +3552,24 @@ void test_sv32_page_walk() {
         kValid | std::to_underlying(simrv::PteFlag::R) | std::to_underlying(simrv::PteFlag::W) |
         std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
 
-    simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid,
+    simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{kRoot}, ((kNext >> 12U) << 10U) | kValid,
                                   static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw),
                                   ram_view);
-    simrv::memory::ram_write_fast(kNext + 4, ((kPhysical >> 12U) << 10U) | kLeafFlags,
-                                  static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw),
-                                  ram_view);
-    simrv::Mmu mmu(ram.data(), 0, ram.size());
-    const auto translated =
-        mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
+    simrv::memory::ram_write_fast(
+        simrv::xlen::PhysAddr{kNext + 4}, ((kPhysical >> 12U) << 10U) | kLeafFlags,
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw), ram_view);
+    simrv::Mmu mmu(ram.data(), simrv::xlen::PhysAddr{0}, ram.size());
+    const auto translated = mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read,
+                                          kPrivSupervisor, 0, kSatp, 32, false);
     expect(translated.has_value() && *translated == 0x3234,
            "Sv32 walks a two-level page table and preserves the page offset");
 
     constexpr simrv::xlen::Word kReservedNonLeaf = std::to_underlying(simrv::PteFlag::D);
-    simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid | kReservedNonLeaf,
-                                  static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw),
-                                  ram_view);
-    const auto malformed =
-        mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
+    simrv::memory::ram_write_fast(
+        simrv::xlen::PhysAddr{kRoot}, ((kNext >> 12U) << 10U) | kValid | kReservedNonLeaf,
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw), ram_view);
+    const auto malformed = mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read,
+                                         kPrivSupervisor, 0, kSatp, 32, false);
     expect(!malformed.has_value() &&
                malformed.error() == std::to_underlying(ExceptionCode::LoadPageFault),
            "Sv32 faults when a non-leaf PTE sets a reserved D bit");
@@ -3513,13 +3577,15 @@ void test_sv32_page_walk() {
     constexpr simrv::xlen::Word kOutsideRamSatp =
         (static_cast<simrv::xlen::Word>(1) << 31U) |
         (static_cast<simrv::xlen::Word>(ram.size()) >> 12U);
-    const auto load_access_fault = mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor,
-                                                 0, kOutsideRamSatp, 32, false);
+    const auto load_access_fault =
+        mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read, kPrivSupervisor, 0,
+                      kOutsideRamSatp, 32, false);
     expect(!load_access_fault.has_value() &&
                load_access_fault.error() == std::to_underlying(ExceptionCode::FaultLoad),
            "Sv32 reports a load access fault when the implicit root-PTE read is outside RAM");
-    const auto fetch_access_fault = mmu.translate(kVirtual, simrv::PteAccess::Code, kPrivSupervisor,
-                                                  0, kOutsideRamSatp, 32, false);
+    const auto fetch_access_fault =
+        mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Code, kPrivSupervisor, 0,
+                      kOutsideRamSatp, 32, false);
     expect(!fetch_access_fault.has_value() &&
                fetch_access_fault.error() == std::to_underlying(ExceptionCode::FaultFetch),
            "Sv32 reports an instruction access fault for a failed fetch page-table walk");
@@ -3528,7 +3594,7 @@ void test_sv32_page_walk() {
 void test_sv39_reserved_pte_bits() {
     if constexpr (simrv::xlen::kIsXLen64) {
         std::array<simrv::xlen::Byte, 0x7000> ram{};
-        const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
+        const simrv::memory::RamView ram_view(ram.data(), simrv::xlen::PhysAddr{0}, ram.size());
         constexpr simrv::xlen::Address kRoot = 0x1000;
         constexpr simrv::xlen::Address kLevel1 = 0x2000;
         constexpr simrv::xlen::Address kLevel0 = 0x3000;
@@ -3541,30 +3607,32 @@ void test_sv39_reserved_pte_bits() {
             kValid | std::to_underlying(simrv::PteFlag::R) | std::to_underlying(simrv::PteFlag::A);
         const auto write_pte = [ram_view](simrv::xlen::Address address, simrv::xlen::Word pte) {
             simrv::memory::ram_write_fast(
-                address, pte, static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sd),
-                ram_view);
+                simrv::xlen::PhysAddr{address}, pte,
+                static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sd), ram_view);
         };
 
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
         write_pte(kLevel1, ((kLevel0 >> 12U) << 10U) | kValid);
         write_pte(kLevel0 + 8, ((kPhysical >> 12U) << 10U) | kLeafFlags);
-        simrv::Mmu mmu(ram.data(), 0, ram.size());
+        simrv::Mmu mmu(ram.data(), simrv::xlen::PhysAddr{0}, ram.size());
         const auto translated =
-            mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
+            mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read, kPrivSupervisor,
+                          0, kSatp, 64, false);
         expect(translated.has_value() && *translated == 0x4234,
                "Sv39 walks three levels and preserves the page offset");
 
         write_pte(kLevel0 + 8, ((kPhysical >> 12U) << 10U) | kLeafFlags |
                                    static_cast<simrv::xlen::Word>(uint64_t{1} << 54U));
-        const auto reserved =
-            mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
+        const auto reserved = mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read,
+                                            kPrivSupervisor, 0, kSatp, 64, false);
         expect(!reserved.has_value() &&
                    reserved.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                "Sv39 faults on reserved PTE bits when Svnapot/Svpbmt are absent");
 
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid | (uint64_t{1} << 61U));
         const auto reserved_nonleaf_pbmt =
-            mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
+            mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read, kPrivSupervisor,
+                          0, kSatp, 64, false);
         expect(
             !reserved_nonleaf_pbmt.has_value() &&
                 reserved_nonleaf_pbmt.error() == std::to_underlying(ExceptionCode::LoadPageFault),
@@ -3573,7 +3641,8 @@ void test_sv39_reserved_pte_bits() {
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
         write_pte(kLevel0 + 8, ((kPhysical >> 12U) << 10U) | kLeafFlags | (uint64_t{1} << 61U));
         const auto noncacheable =
-            mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
+            mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read, kPrivSupervisor,
+                          0, kSatp, 64, false);
         expect(noncacheable.has_value() && *noncacheable == 0x4234 &&
                    simrv::PteView{.raw = noncacheable->pte}.pbmt() == simrv::PtePbmt::NonCacheable,
                "Svpbmt NC leaf translations retain the PBMT attribute");
@@ -3583,7 +3652,7 @@ void test_sv39_reserved_pte_bits() {
 void test_svnapot_64k_translation() {
     if constexpr (simrv::xlen::kIsXLen64) {
         std::array<simrv::xlen::Byte, 0x30000> ram{};
-        const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
+        const simrv::memory::RamView ram_view(ram.data(), simrv::xlen::PhysAddr{0}, ram.size());
         constexpr simrv::xlen::Address kRoot = 0x1000;
         constexpr simrv::xlen::Address kLevel1 = 0x2000;
         constexpr simrv::xlen::Address kLevel0 = 0x3000;
@@ -3595,8 +3664,8 @@ void test_svnapot_64k_translation() {
         constexpr simrv::xlen::Word kNapot = uint64_t{1} << 63U;
         const auto write_pte = [ram_view](simrv::xlen::Address address, simrv::xlen::Word pte) {
             simrv::memory::ram_write_fast(
-                address, pte, static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sd),
-                ram_view);
+                simrv::xlen::PhysAddr{address}, pte,
+                static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sd), ram_view);
         };
 
         const simrv::xlen::Word napot_leaf =
@@ -3621,12 +3690,13 @@ void test_svnapot_64k_translation() {
 
             const simrv::xlen::Word satp = static_cast<simrv::xlen::Word>(
                 (static_cast<uint64_t>(mode) << 60U) | (kRoot >> 12U));
-            simrv::Mmu mmu(ram.data(), 0, ram.size());
+            simrv::Mmu mmu(ram.data(), simrv::xlen::PhysAddr{0}, ram.size());
             for (simrv::xlen::Address page = 0; page < 16; ++page) {
                 const simrv::xlen::Address virtual_address = kVirtualBase + page * 0x1000U + 0xABC;
                 const simrv::xlen::Address expected = kPhysicalBase + page * 0x1000U + 0xABC;
-                const auto translated = mmu.translate(virtual_address, simrv::PteAccess::Read,
-                                                      kPrivSupervisor, 0, satp, 64, false);
+                const auto translated =
+                    mmu.translate(simrv::xlen::VirtAddr{virtual_address}, simrv::PteAccess::Read,
+                                  kPrivSupervisor, 0, satp, 64, false);
                 expect(translated.has_value() && *translated == expected,
                        "Svnapot translates each 4 KiB alias in Sv39/Sv48/Sv57");
             }
@@ -3634,15 +3704,17 @@ void test_svnapot_64k_translation() {
             if (mode == 8U) {
                 write_pte(first_leaf_address,
                           ((kPhysicalBase >> 12U | 0x4U) << 10U) | kValidReadAccessed | kNapot);
-                const auto bad_ppn = mmu.translate(kVirtualBase, simrv::PteAccess::Read,
-                                                   kPrivSupervisor, 0, satp, 64, false);
+                const auto bad_ppn =
+                    mmu.translate(simrv::xlen::VirtAddr{kVirtualBase}, simrv::PteAccess::Read,
+                                  kPrivSupervisor, 0, satp, 64, false);
                 expect(!bad_ppn.has_value() &&
                            bad_ppn.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                        "Svnapot faults on reserved PPN encodings");
 
                 write_pte(kLevel1, ((kPhysicalBase >> 12U) << 10U) | kValidReadAccessed | kNapot);
-                const auto bad_level = mmu.translate(kVirtualBase, simrv::PteAccess::Read,
-                                                     kPrivSupervisor, 0, satp, 64, false);
+                const auto bad_level =
+                    mmu.translate(simrv::xlen::VirtAddr{kVirtualBase}, simrv::PteAccess::Read,
+                                  kPrivSupervisor, 0, satp, 64, false);
                 expect(!bad_level.has_value() &&
                            bad_level.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                        "Svnapot faults when N is set on a superpage-level leaf");
@@ -3654,13 +3726,13 @@ void test_svnapot_64k_translation() {
 void test_atomic_alignment() {
     using simrv::isa::amo_address_aligned;
     using simrv::isa::amo_width_supported;
-    expect(amo_address_aligned(0x1004, simrv::isa::Funct3::Lw),
+    expect(amo_address_aligned(simrv::xlen::VirtAddr{0x1004}, simrv::isa::Funct3::Lw),
            "AMO.W accepts four-byte alignment");
-    expect(!amo_address_aligned(0x1002, simrv::isa::Funct3::Lw),
+    expect(!amo_address_aligned(simrv::xlen::VirtAddr{0x1002}, simrv::isa::Funct3::Lw),
            "AMO.W rejects a two-byte-aligned address");
-    expect(amo_address_aligned(0x1008, simrv::isa::Funct3::Ld),
+    expect(amo_address_aligned(simrv::xlen::VirtAddr{0x1008}, simrv::isa::Funct3::Ld),
            "AMO.D accepts eight-byte alignment");
-    expect(!amo_address_aligned(0x1004, simrv::isa::Funct3::Ld),
+    expect(!amo_address_aligned(simrv::xlen::VirtAddr{0x1004}, simrv::isa::Funct3::Ld),
            "AMO.D rejects four-byte alignment");
     expect(amo_width_supported(simrv::isa::Funct3::Lw),
            "AMO.W exists for both architectural XLENs");
@@ -4078,11 +4150,11 @@ void test_fast_baremetal_pending_interrupt_boundary() {
     auto& cpu = machine.primary_hart();
     cpu.reset();
 
-    constexpr simrv::xlen::Register pc = 0x1000;
-    constexpr simrv::xlen::Register handler = 0x2000;
+    constexpr simrv::xlen::VirtAddr pc{0x1000};
+    constexpr simrv::xlen::VirtAddr handler{0x2000};
     auto& state = cpu.state();
-    state.pc = pc;
-    state.mtvec = handler;
+    state.pc = simrv::xlen::VirtAddr{pc};
+    state.mtvec = handler.raw();
     state.mstatus |= simrv::core::MstatusBit::Mie;
     state.mie |= simrv::core::MipBit::Mtip;
     machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Timer,
@@ -4522,7 +4594,7 @@ void test_tilelink_c_coherence_semantics() {
     simrv::memory::TlChannelB probe_req{};
     probe_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
     probe_req.cap = simrv::memory::TlCap::ToN;
-    probe_req.address = test_addr;
+    probe_req.address = simrv::xlen::PhysAddr{test_addr};
 
     simrv::memory::TlChannelC probe_resp{};
     std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> dirty_buf{};
@@ -4539,7 +4611,7 @@ void test_tilelink_c_coherence_semantics() {
     simrv::memory::TlChannelB downgrade_req{};
     downgrade_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
     downgrade_req.cap = simrv::memory::TlCap::ToB;
-    downgrade_req.address = test_addr;
+    downgrade_req.address = simrv::xlen::PhysAddr{test_addr};
 
     simrv::memory::TlChannelC downgrade_resp{};
     std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> dirty_wb{};
@@ -4578,8 +4650,11 @@ void test_tilelink_c_protocol_checker() {
     using namespace simrv::memory;
     TileLinkProtocolChecker checker;
 
-    TlChannelA get{
-        .opcode = TlOpcodeA::Get, .size = 2, .source = 7, .address = 0x80000004, .mask = 0xf0};
+    TlChannelA get{.opcode = TlOpcodeA::Get,
+                   .size = 2,
+                   .source = 7,
+                   .address = simrv::xlen::PhysAddr{0x80000004},
+                   .mask = 0xf0};
     expect(checker.accept_a(get).has_value(), "checker accepts aligned masked Get");
     expect(!checker.accept_a(get).has_value(), "checker rejects live source reuse");
     TlChannelD get_response{
@@ -4596,7 +4671,7 @@ void test_tilelink_c_protocol_checker() {
                        .size = kTlBlockSize,
                        .source = 9,
                        .hart = 0,
-                       .address = 0x80000040};
+                       .address = simrv::xlen::PhysAddr{0x80000040}};
     expect(checker.accept_a(acquire).has_value(), "checker accepts one-block AcquireBlock");
     TlChannelD grant{.opcode = TlOpcodeD::GrantData,
                      .cap = TlCap::ToT,
@@ -4622,12 +4697,12 @@ void test_tilelink_c_protocol_checker() {
                           .cap = TlCap::ToN,
                           .size = kTlBlockSize,
                           .source = 10,
-                          .address = 0x80000040};
+                          .address = simrv::xlen::PhysAddr{0x80000040}};
     expect(checker.accept_b(probe_good).has_value(), "checker accepts aligned block ProbeBlock");
     expect(checker.outstanding_probes() == 1, "checker tracks outstanding probe");
 
     TlChannelB probe_bad_align = probe_good;
-    probe_bad_align.address = 0x80000043;
+    probe_bad_align.address = simrv::xlen::PhysAddr{0x80000043};
     expect(!checker.accept_b(probe_bad_align).has_value(),
            "checker rejects unaligned probe address");
 
@@ -4636,7 +4711,7 @@ void test_tilelink_c_protocol_checker() {
                          .report = TlReport::TtoN,
                          .size = kTlBlockSize,
                          .source = 10,
-                         .address = 0x80000040};
+                         .address = simrv::xlen::PhysAddr{0x80000040}};
     expect(checker.accept_c(probe_ack).has_value(), "checker accepts ProbeAckData");
     expect(checker.outstanding_probes() == 0, "ProbeAck clears outstanding probe");
 
@@ -4645,7 +4720,7 @@ void test_tilelink_c_protocol_checker() {
                            .report = TlReport::TtoN,
                            .size = kTlBlockSize,
                            .source = 12,
-                           .address = 0x80000080};
+                           .address = simrv::xlen::PhysAddr{0x80000080}};
     expect(checker.accept_c(release_req).has_value(), "checker accepts valid ReleaseData");
     expect(checker.outstanding_releases() == 1, "checker tracks outstanding release");
     TlChannelD rel_ack{.opcode = TlOpcodeD::ReleaseAck, .size = kTlBlockSize, .source = 12};
@@ -4730,7 +4805,8 @@ void test_strong_semantic_types() {
     expect(std::to_underlying(simrv::xlen::VecRegId::V5) == 5, "VecRegId underlying value");
 
     // MemoryGeometry with PhysAddr
-    simrv::core::MemoryGeometry geom{.dram_base = 0x80000000ULL, .dram_size = 0x10000000ULL};
+    simrv::core::MemoryGeometry geom{.dram_base = simrv::xlen::PhysAddr{0x80000000ULL},
+                                     .dram_size = 0x10000000ULL};
     expect(geom.contains(simrv::xlen::PhysAddr{0x80001000ULL}),
            "MemoryGeometry contains PhysAddr within DRAM");
     expect(!geom.contains(simrv::xlen::PhysAddr{0x10000000ULL}),
@@ -4788,14 +4864,14 @@ void test_cache_hierarchy_semantics() {
     expect(pf.prefetches_issued() == 0, "Initial prefetches issued count is 0");
 
     // Simulate sequential stride of 32 bytes (cache line size)
-    auto pred1 = pf.observe(0x80001000, 32);
+    auto pred1 = pf.observe(simrv::xlen::PhysAddr{0x80001000}, 32);
     expect(!pred1.has_value(), "First access establishes initial stream entry without prediction");
 
-    auto pred2 = pf.observe(0x80001020, 32);
+    auto pred2 = pf.observe(simrv::xlen::PhysAddr{0x80001020}, 32);
     expect(!pred2.has_value(), "Second access trains stride to +32 bytes");
 
-    auto pred3 = pf.observe(0x80001040, 32);
-    expect(pred3.has_value() && *pred3 == 0x80001060,
+    auto pred3 = pf.observe(simrv::xlen::PhysAddr{0x80001040}, 32);
+    expect(pred3.has_value() && *pred3 == simrv::xlen::PhysAddr{0x80001060},
            "Third access meets confidence threshold and predicts next line (0x80001060)");
     expect(pf.prefetches_issued() == 1, "Prefetch counter incremented on prediction");
 
@@ -4837,12 +4913,12 @@ void test_sdtrig_trigger_registers() {
            "tdata1 preserves mcontrol configuration");
     expect(cpu.state().has_active_triggers, "has_active_triggers flag set after enabling trigger");
 
-    const simrv::xlen::Address target_pc = 0x80001000;
-    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), target_pc);
+    const simrv::xlen::VirtAddr target_pc{0x80001000};
+    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), target_pc.raw());
     expect(res_tdata2.has_value(), "tdata2 write succeeded");
 
     auto tdata2_read = csr.read(csr_addr(simrv::core::Csr::Tdata2));
-    expect(tdata2_read.has_value() && *tdata2_read == target_pc, "tdata2 preserves match PC");
+    expect(tdata2_read.has_value() && *tdata2_read == target_pc.raw(), "tdata2 preserves match PC");
 
     // 3. Trigger matching check
     expect(cpu.check_triggers_pc(target_pc), "check_triggers_pc matches configured trigger PC");
@@ -4888,8 +4964,8 @@ void test_sdtrig_memory_watchpoints() {
     auto res_tdata1 = csr.write(csr_addr(simrv::core::Csr::Tdata1), store_cfg);
     expect(res_tdata1.has_value(), "tdata1 store watchpoint write succeeded");
 
-    const simrv::xlen::Address watch_addr = 0x80002000;
-    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), watch_addr);
+    const simrv::xlen::VirtAddr watch_addr{0x80002000};
+    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), watch_addr.raw());
     expect(res_tdata2.has_value(), "tdata2 watch address write succeeded");
     expect(cpu.state().has_active_triggers, "has_active_triggers is true for store watchpoint");
 
@@ -4905,8 +4981,8 @@ void test_sdtrig_memory_watchpoints() {
     (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 3);
     const simrv::xlen::CsrValue load_cfg = type_hdr | (1U << 6U) | (1U << 0U);  // m=1, load=1
     (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), load_cfg);
-    const simrv::xlen::Address load_addr = 0x80003000;
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), load_addr);
+    const simrv::xlen::VirtAddr load_addr{0x80003000};
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), load_addr.raw());
 
     expect(cpu.check_triggers_mem(load_addr, 4, false),
            "load watchpoint matches read access in M-mode");
@@ -4988,7 +5064,7 @@ void test_formalized_trap_semantics() {
         auto& state = cpu.state();
 
         state.mtvec = 0x80000000;
-        state.pc = 0x1000;
+        state.pc = simrv::xlen::VirtAddr{0x1000};
         state.priv = simrv::xlen::PrivilegeLevel::Machine;
         state.consecutive_traps = 0;
 
@@ -5032,7 +5108,7 @@ void test_formalized_trap_semantics() {
         loop_machine.memory().initialize_mmu();
         auto& loop_cpu = loop_machine.hart(simrv::xlen::HartId{0});
         loop_cpu.state().mtvec = 0x80000000;
-        loop_cpu.state().pc = 0x1000;
+        loop_cpu.state().pc = simrv::xlen::VirtAddr{0x1000};
         loop_cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
         loop_cpu.state().consecutive_traps = 0;
 
@@ -5054,7 +5130,7 @@ void test_formalized_trap_semantics() {
         zero_vec_machine.memory().initialize_mmu();
         auto& cpu_zero = zero_vec_machine.hart(simrv::xlen::HartId{0});
         cpu_zero.state().mtvec = 0;
-        cpu_zero.state().pc = 0x2000;
+        cpu_zero.state().pc = simrv::xlen::VirtAddr{0x2000};
         cpu_zero.state().priv = simrv::xlen::PrivilegeLevel::Machine;
 
         auto disp_zero = simrv::core::TrapController::dispatch_trap(cpu_zero, desc);
@@ -5092,7 +5168,7 @@ void test_breakpoint_hit_locations() {
            "register watchpoint hit retains its register domain and identifier");
     manager.clear_watchpoints();
     manager.add_reg_watchpoint(simrv::debug::RegType::PC, simrv::xlen::RegId::Zero, "pc");
-    after.pc = 0x3000;
+    after.pc = simrv::xlen::VirtAddr{0x3000};
     const auto pc_hit = manager.check_reg_changes(after, before);
     expect(pc_hit && std::holds_alternative<simrv::xlen::VirtAddr>(pc_hit->location) &&
                std::get<simrv::xlen::VirtAddr>(pc_hit->location) == 0x3000,

@@ -56,7 +56,7 @@ auto TileLinkProtocolChecker::accept_b(const TlChannelB& probe)
     if (probe.opcode != TlOpcodeB::ProbeBlock && probe.opcode != TlOpcodeB::ProbePerm) {
         return std::unexpected("B probe contains an illegal opcode");
     }
-    active_probes_.insert(probe.address.raw());
+    active_probes_.insert(probe.address);
     return {};
 }
 
@@ -76,7 +76,7 @@ auto TileLinkProtocolChecker::accept_c(const TlChannelC& response)
         }
     } else if (response.opcode == TlOpcodeC::ProbeAck ||
                response.opcode == TlOpcodeC::ProbeAckData) {
-        active_probes_.erase(response.address.raw());
+        active_probes_.erase(response.address);
     } else {
         return std::unexpected("C response contains an illegal opcode");
     }

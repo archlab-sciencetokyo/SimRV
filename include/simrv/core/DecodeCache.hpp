@@ -669,8 +669,8 @@ class DecodeCache {
         if (!dirty_) {
             return;
         }
-        const simrv::xlen::Address page_base = vpage.raw() & ~simrv::xlen::Address{0xFFF};
-        const auto vpn = page_base >> 12;
+        const simrv::xlen::VirtAddr page_base{vpage.raw() & ~simrv::xlen::Address{0xFFF}};
+        const auto vpn = page_base.raw() >> 12;
         if (simrv::compiler::likely(!may_contain_page(vpn))) {
             return;
         }
@@ -683,9 +683,9 @@ class DecodeCache {
             auto& set = sets_[(start_set + i) & kSetMask];
             if (set.ways[0].valid) {
                 const auto cpc0 = set.ways[0].cpc.raw();
-                if (((cpc0 & ~simrv::xlen::Address{0xFFF}) == page_base) ||
+                if (((cpc0 & ~simrv::xlen::Address{0xFFF}) == page_base.raw()) ||
                     (((cpc0 + set.ways[0].len() - 1) & ~simrv::xlen::Address{0xFFF}) ==
-                     page_base)) {
+                     page_base.raw())) {
                     set.ways[0].valid = 0;
                     set.ways[0].next_seq_idx = kInvalidSeqIndex;
                     set.ways[0].target_idx = kInvalidSeqIndex;
@@ -694,9 +694,9 @@ class DecodeCache {
             }
             if (set.ways[1].valid) {
                 const auto cpc1 = set.ways[1].cpc.raw();
-                if (((cpc1 & ~simrv::xlen::Address{0xFFF}) == page_base) ||
+                if (((cpc1 & ~simrv::xlen::Address{0xFFF}) == page_base.raw()) ||
                     (((cpc1 + set.ways[1].len() - 1) & ~simrv::xlen::Address{0xFFF}) ==
-                     page_base)) {
+                     page_base.raw())) {
                     set.ways[1].valid = 0;
                     set.ways[1].next_seq_idx = kInvalidSeqIndex;
                     set.ways[1].target_idx = kInvalidSeqIndex;
@@ -750,7 +750,7 @@ class DecodeCache {
         if (simrv::compiler::unlikely(pc == ~simrv::xlen::Register{0})) {
             return nullptr;
         }
-        const size_t set_idx = calc_set(pc);
+        const size_t set_idx = calc_set(address);
         auto& set = sets_[set_idx];
         const uint8_t ctx = active_ctx_;
         if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].ctx == ctx)) {
@@ -953,20 +953,19 @@ class DecodeCache {
         // Backward link: check if predecessor instructions at pc - 2 or pc - 4 can link to this
         // entry
         if (pc >= 2) {
-            if (auto* prev2 = lookup_aligned(pc - 2); prev2 != nullptr &&
-                                                      prev2->cpc == (pc - 2) &&
-                                                      prev2->valid && prev2->op_len == 2) {
+            if (auto* prev2 = lookup_aligned(pc - 2);
+                prev2 != nullptr && prev2->cpc == (pc - 2) && prev2->valid && prev2->op_len == 2) {
                 prev2->next_seq_idx = entry_idx;
             }
         }
         if (pc >= 4) {
-            if (auto* prev4 = lookup_aligned(pc - 4); prev4 != nullptr &&
-                                                      prev4->cpc == (pc - 4) &&
-                                                      prev4->valid && prev4->op_len == 4) {
+            if (auto* prev4 = lookup_aligned(pc - 4);
+                prev4 != nullptr && prev4->cpc == (pc - 4) && prev4->valid && prev4->op_len == 4) {
                 prev4->next_seq_idx = entry_idx;
             }
         }
     }
+
    private:
     constexpr void mark_page(simrv::xlen::Address vpn) noexcept {
         const size_t word_idx = static_cast<size_t>((vpn ^ (vpn >> 12)) & 63u);

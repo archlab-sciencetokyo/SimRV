@@ -838,7 +838,7 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
     if (option_id == "--pc") {
         auto value = parse_u32_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        options.start_pc = *value;
+        options.start_pc = simrv::xlen::VirtAddr{*value};
         return true;
     }
     if (option_id == "--timer") {
@@ -2190,7 +2190,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
         cfg.execution.start_pc = *cfg.soc.reset_pc;
     }
     if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
-        cfg.isa.isatest_tohost = *cfg.soc.tohost;
+        cfg.isa.isatest_tohost = cfg.soc.tohost->raw();
     }
     if (uefi_enabled) {
         cfg.soc.enable_pcie = true;

@@ -11,7 +11,7 @@
 #include <utility>
 
 #include "simrv/isa/InstructionFields.hpp"
-#include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::isa {
 
@@ -33,7 +33,7 @@ constexpr auto amo_width_supported(Funct3 funct3) -> bool {
 }
 
 /** Return whether an LR/SC/AMO effective address meets the A-extension alignment rule. */
-constexpr auto amo_address_aligned(simrv::xlen::Address address, Funct3 funct3) -> bool {
+constexpr auto amo_address_aligned(simrv::xlen::VirtAddr address, Funct3 funct3) -> bool {
     const unsigned bytes = amo_operand_bytes(funct3);
     return bytes != 0 && (address & static_cast<simrv::xlen::Address>(bytes - 1U)) == 0;
 }

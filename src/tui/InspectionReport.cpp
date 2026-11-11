@@ -61,7 +61,14 @@ auto quoted(std::string_view value) -> std::string { return '"' + json_escape(va
 
 template <typename Value>
 auto hex_value(Value value) -> std::string {
-    return std::format("0x{:0{}x}", static_cast<uint64_t>(value), simrv::xlen::kXLenHexDigits);
+    const uint64_t raw = [&] {
+        if constexpr (requires { value.raw(); }) {
+            return static_cast<uint64_t>(value.raw());
+        } else {
+            return static_cast<uint64_t>(value);
+        }
+    }();
+    return std::format("0x{:0{}x}", raw, simrv::xlen::kXLenHexDigits);
 }
 
 auto privilege_name(simrv::xlen::PrivilegeLevel privilege) -> std::string_view {

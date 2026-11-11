@@ -9,7 +9,6 @@
 #include <optional>
 
 #include "../InspectionTranslation.hpp"
-
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
@@ -29,7 +28,8 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     const unsigned int xlen = cpu.state().regs.xlen;
     const int word_size = static_cast<int>(xlen) / 8;
     const simrv::xlen::Register sp = cpu.state().regs.read(simrv::xlen::RegId::Sp);
-    const simrv::xlen::VirtAddr base_addr = is_mem_watch ? inspect_addr_ : simrv::xlen::VirtAddr{sp};
+    const simrv::xlen::VirtAddr base_addr =
+        is_mem_watch ? inspect_addr_ : simrv::xlen::VirtAddr{sp};
 
     // Check if the base address is valid and mapped in DRAM
     auto base_phys = translate_for_inspection(cpu, machine_, base_addr);
@@ -170,7 +170,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
             std::array<uint8_t, 8> bytes{};
             if (xlen == 64) {
                 uint64_t data = simrv::memory::ram_read_fast(
-                    paddr.raw(), static_cast<simrv::xlen::Instruction>(isa::Funct3::Sd),
+                    paddr, static_cast<simrv::xlen::Instruction>(isa::Funct3::Sd),
                     machine_.ram_view());
                 val_str = std::format("0x{:016x}", data);
                 raw_val = data;
@@ -181,7 +181,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
                 }
             } else {
                 uint32_t data = simrv::memory::ram_read_fast(
-                    paddr.raw(), static_cast<simrv::xlen::Instruction>(isa::Funct3::Sw),
+                    paddr, static_cast<simrv::xlen::Instruction>(isa::Funct3::Sw),
                     machine_.ram_view());
                 val_str = std::format("0x{:08x}", data);
                 raw_val = data;
@@ -252,8 +252,9 @@ auto InspectorPane::get_stack_addr_at_row(int logical_row) const
     -> std::optional<simrv::xlen::VirtAddr> {
     if (page_ != TuiRegPage::STACK) return std::nullopt;
     const auto& st = current_cpu().state();
-    const simrv::xlen::VirtAddr base = is_custom_memory_inspect()
-        ? inspect_addr_ : simrv::xlen::VirtAddr{st.regs.read(simrv::xlen::RegId::Sp)};
+    const simrv::xlen::VirtAddr base =
+        is_custom_memory_inspect() ? inspect_addr_
+                                   : simrv::xlen::VirtAddr{st.regs.read(simrv::xlen::RegId::Sp)};
     if (base == 0) return std::nullopt;
     const int word_size = static_cast<int>(st.regs.xlen) / 8;
     if (logical_row >= 1 && logical_row <= 13) {

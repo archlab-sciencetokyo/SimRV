@@ -72,7 +72,7 @@ struct RuntimeOptions {
     std::string checkpoint_dir;
     std::string inspection_output;
 
-    simrv::xlen::Address start_pc = simrv::boot::kStartPc;
+    simrv::xlen::VirtAddr start_pc{simrv::boot::kStartPc};
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();

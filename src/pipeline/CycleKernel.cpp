@@ -371,7 +371,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     case isa::Opcode::Load:
                     case isa::Opcode::Store:
                         ctx.tkn = false;
-                        ctx.mem_addr = ctx.rrs1 + ctx.imm;
+                        ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1 + ctx.imm};
                         executed_fast = true;
                         break;
                     case isa::Opcode::Branch:
@@ -428,9 +428,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                                               execute->prediction.false_control_alias)) {
                     const simrv::xlen::VirtAddr sequential =
                         execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4);
-                    const simrv::xlen::VirtAddr target =
-                        execute->context.tkn ? execute->context.jmp_pc
-                                             : simrv::xlen::VirtAddr{sequential};
+                    const simrv::xlen::VirtAddr target = execute->context.tkn
+                                                             ? execute->context.jmp_pc
+                                                             : simrv::xlen::VirtAddr{sequential};
 
                     const simrv::pipeline::BranchFeedback feedback{
                         .pc = execute->context.cpc,
@@ -666,7 +666,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             fetch->wb_val = 0;
             if (instruction_cache_timing.enabled()) {
                 const auto access =
-                    instruction_cache_timing.access(fetch->context.cpc.raw(), ca_state.icache_miss);
+                    instruction_cache_timing.access(fetch->context.cpc, ca_state.icache_miss);
                 const auto refill_wait = access.latency > 0 ? access.latency - 1 : 0;
                 if (!access.hit &&
                     cpu_model_config.instruction_front_cache.freeze_pipeline_on_refill) {

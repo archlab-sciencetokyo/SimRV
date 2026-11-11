@@ -78,6 +78,14 @@ clang-format --dry-run --Werror $(find include src tests -name "*.cpp" -o -name 
    - Avoid generic primitive types (`uint64_t`, `uint32_t`, `int`) when domain aliases exist:
      - `Word`, `Address`, `PhysAddr`, `VirtAddr`, `RegId`, `CsrValue`, `CsrNumber`, `TrapCause`.
    - Proactively declare strongly typed aliases for new architectural concepts.
+   - Keep virtual and physical addresses distinct at subsystem boundaries. Convert an external or
+     serialized integer with `VirtAddr{raw}` or `PhysAddr{raw}` only when its domain is known; check
+     guest-width limits before narrowing and use `.raw()` when crossing back to an architectural or
+     external interface. Address arithmetic stays in the address type, while ordinary sizes and
+     offsets remain scalar values. Physical SoC regions and DRAM, DMA, MMIO routing, PCIe BAR access,
+     data-cache tags, and MMIO trace records carry `PhysAddr`. Virtual PCs, symbol lookups, and the
+     instruction timing cache carry `VirtAddr`. The C plugin ABI remains scalar; convert only in its
+     C++ adapter and keep the explicit conversion next to that boundary.
 3. **Logging & Tracing Standards**:
    - Use `simrv::log::info`, `simrv::log::warn`, and `simrv::log::error` from `simrv/core/Logger.hpp` for console and TUI messages.
    - **Never** write raw `std::cout`, `std::cerr`, or `printf` calls inside core simulation logic.
@@ -153,3 +161,15 @@ ctest --test-dir build/rv32-release --output-on-failure -L gate
 # Release metadata and packaging conformance
 ctest --test-dir build/rv64-release --output-on-failure -L release
 ```
+
+## Building the documentation
+
+The site uses Zensical. Use Python 3.11 or newer and the checked-in dependency pins:
+
+```bash
+python3 -m venv .venv-docs
+.venv-docs/bin/python -m pip install --requirement .github/requirements-docs.txt
+.venv-docs/bin/zensical build --strict --config-file zensical.yml
+```
+
+The documentation workflow installs the same requirements for stable and development sites.

@@ -24,13 +24,11 @@ namespace simrv::device {
 
 class PcieRootComplex {
    public:
-    static constexpr simrv::xlen::Address kEcamBaseAddress =
-        static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_BASE);
+    static constexpr simrv::xlen::PhysAddr kEcamBaseAddress{SIMRV_PLATFORM_PCIE_ECAM_BASE};
     static constexpr simrv::xlen::Address kEcamSize =
         static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_SIZE);
 
-    static constexpr simrv::xlen::Address kMmioBaseAddress =
-        static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_BASE);
+    static constexpr simrv::xlen::PhysAddr kMmioBaseAddress{SIMRV_PLATFORM_PCIE_WINDOW_BASE};
     static constexpr simrv::xlen::Address kMmioSize =
         static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_SIZE);
 
@@ -54,8 +52,8 @@ class PcieRootComplex {
     [[nodiscard]] auto ecam_read(simrv::xlen::Address offset, PciAccessBytes size) -> PciConfigData;
     void ecam_write(simrv::xlen::Address offset, PciConfigData val, PciAccessBytes size);
 
-    [[nodiscard]] auto mmio_read(simrv::xlen::Address addr, PciAccessBytes size) -> PciMmioData;
-    void mmio_write(simrv::xlen::Address addr, PciMmioData val, PciAccessBytes size);
+    [[nodiscard]] auto mmio_read(simrv::xlen::PhysAddr addr, PciAccessBytes size) -> PciMmioData;
+    void mmio_write(simrv::xlen::PhysAddr addr, PciMmioData val, PciAccessBytes size);
 
     void assert_device_irq(PciBdf bdf);
     void assert_device_irq(PciBusNumber bus, PciDeviceNumber dev, PciFunctionNumber func) {
@@ -66,17 +64,17 @@ class PcieRootComplex {
         deassert_device_irq(PciBdf{.bus = bus, .dev = dev, .func = func});
     }
 
-    void send_msi(PciBdf bdf, simrv::xlen::Address addr, uint32_t message_data);
+    void send_msi(PciBdf bdf, simrv::xlen::PhysAddr addr, uint32_t message_data);
     void send_msi(PciBusNumber bus, PciDeviceNumber dev, PciFunctionNumber func,
-                  simrv::xlen::Address addr, uint32_t message_data) {
+                  simrv::xlen::PhysAddr addr, uint32_t message_data) {
         send_msi(PciBdf{.bus = bus, .dev = dev, .func = func}, addr, message_data);
     }
 
     void rebuild_bar_mappings();
 
     struct BarMapping {
-        simrv::xlen::Address base = 0;
-        simrv::xlen::Address end = 0;
+        simrv::xlen::PhysAddr base{};
+        simrv::xlen::PhysAddr end{};
         PciDevice* device = nullptr;
         PciBarIndex bar_idx = 0;
     };

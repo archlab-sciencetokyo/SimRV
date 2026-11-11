@@ -18,7 +18,7 @@ using isa::Funct3;
 
 auto PageTableWalker::pte_access_valid(simrv::xlen::PhysAddr address, unsigned size) const noexcept
     -> bool {
-    return ram_.contains(address.raw(), size);
+    return ram_.contains(address, size);
 }
 
 auto PageTableWalker::page_fault_for(PteAccess access) noexcept -> simrv::xlen::TrapCause {
@@ -447,14 +447,14 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
         const simrv::xlen::Word index_mask = (simrv::xlen::Word{1} << index_bits) - 1U;
         const simrv::xlen::Word index = (guest_address >> shift) & index_mask;
         const simrv::xlen::Word pte_address = table_address + index * sizeof(uint64_t);
-        if (!ram_.contains(pte_address, sizeof(uint64_t)) ||
+        if (!ram_.contains(simrv::xlen::PhysAddr{pte_address}, sizeof(uint64_t)) ||
             (arch_state != nullptr &&
              !core::pmp::check_access(*arch_state, simrv::xlen::PhysAddr{pte_address},
                                       sizeof(uint64_t), core::PmpAccessType::Read,
                                       simrv::xlen::PrivilegeLevel::Supervisor))) {
             return std::unexpected(access_fault_for(access));
         }
-        const auto* pte_ptr = ram_.unchecked_ptr(pte_address);
+        const auto* pte_ptr = ram_.unchecked_ptr(simrv::xlen::PhysAddr{pte_address});
         const auto pte = simrv::memory::host_read_fast(
             pte_ptr, static_cast<simrv::xlen::Instruction>(Funct3::Ld));
         const PteView view{.raw = pte};
@@ -525,7 +525,7 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                       state.status == PageWalkStatus::ReadPte ? Funct3::Lw : Funct3::Sw)
                 : static_cast<simrv::xlen::Instruction>(
                       state.status == PageWalkStatus::ReadPte ? Funct3::Ld : Funct3::Sd);
-        simrv::xlen::Byte* pte_ptr = ram_.unchecked_ptr(state.pte_address.raw());
+        simrv::xlen::Byte* pte_ptr = ram_.unchecked_ptr(state.pte_address);
         if (state.status == PageWalkStatus::ReadPte) {
             const simrv::xlen::Word pte = simrv::memory::host_read_fast(pte_ptr, operation);
             accept_pte(state, pte);

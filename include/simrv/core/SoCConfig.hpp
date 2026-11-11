@@ -18,6 +18,7 @@
 
 #include "simrv/core/InterruptTopology.hpp"
 #include "simrv/core/PlatformMap.h"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -102,14 +103,14 @@ enum class SoCDeviceKind : uint8_t {
 
 struct SoCDeviceRegion {
     std::string name;
-    simrv::xlen::Address base = 0;
+    simrv::xlen::PhysAddr base{};
     simrv::xlen::Address size = 0;
 };
 
 struct SoCDeviceConfig {
     SoCDeviceKind kind{};
     std::string name;
-    simrv::xlen::Address base = 0;
+    simrv::xlen::PhysAddr base{};
     simrv::xlen::Address size = 0x1000;
     uint32_t irq = 0;
     bool enabled = true;
@@ -125,7 +126,7 @@ struct SoCDeviceConfig {
 
     SoCDeviceConfig() = default;
     SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name,
-                    simrv::xlen::Address device_base, simrv::xlen::Address device_size = 0x1000,
+                    simrv::xlen::PhysAddr device_base, simrv::xlen::Address device_size = 0x1000,
                     uint32_t device_irq = 0, bool device_enabled = true,
                     std::vector<SoCDeviceRegion> device_regions = {},
                     std::string device_compatible = {}, uint32_t device_read_value = 0,
@@ -150,9 +151,9 @@ struct SoCDeviceConfig {
 };
 
 struct PcieHostConfig {
-    simrv::xlen::Address ecam_base = SIMRV_PLATFORM_PCIE_ECAM_BASE;
+    simrv::xlen::PhysAddr ecam_base{SIMRV_PLATFORM_PCIE_ECAM_BASE};
     simrv::xlen::Address ecam_size = SIMRV_PLATFORM_PCIE_ECAM_SIZE;
-    simrv::xlen::Address mmio_base = SIMRV_PLATFORM_PCIE_WINDOW_BASE;
+    simrv::xlen::PhysAddr mmio_base{SIMRV_PLATFORM_PCIE_WINDOW_BASE};
     simrv::xlen::Address mmio_size = SIMRV_PLATFORM_PCIE_WINDOW_SIZE;
     uint8_t first_bus = 0;
     uint8_t last_bus = 255;
@@ -247,7 +248,7 @@ struct SmpTopologyConfig {
 }
 
 [[nodiscard]] inline auto soc_pci_device_default(SoCDeviceKind kind, std::string name,
-                                                 simrv::xlen::Address base,
+                                                 simrv::xlen::PhysAddr base,
                                                  simrv::xlen::Address size, uint32_t mmio_irq,
                                                  uint8_t slot, uint32_t intx_source)
     -> SoCDeviceConfig {
@@ -260,92 +261,106 @@ struct SmpTopologyConfig {
 [[nodiscard]] inline auto soc_device_default(SoCDeviceKind kind) -> SoCDeviceConfig {
     switch (kind) {
         case SoCDeviceKind::Uart: {
-            SoCDeviceConfig device{kind, "uart0", SIMRV_PLATFORM_UART_BASE,
+            SoCDeviceConfig device{kind, "uart0", simrv::xlen::PhysAddr{SIMRV_PLATFORM_UART_BASE},
                                    SIMRV_PLATFORM_UART_SIZE, 3};
             device.clock_hz = SIMRV_PLATFORM_UART_CLOCK_HZ;
             return device;
         }
         case SoCDeviceKind::Rtc:
-            return {kind, "rtc0", 0x70000000, 0x1000, 11};
+            return {kind, "rtc0", simrv::xlen::PhysAddr{0x70000000}, 0x1000, 11};
         case SoCDeviceKind::Power:
-            return {kind, "power0", 0x00100000, 0x1000, 0};
+            return {kind, "power0", simrv::xlen::PhysAddr{0x00100000}, 0x1000, 0};
         case SoCDeviceKind::AclintMtimer:
-            return {kind, "timer0", 0x02000000, 0x00010000, 7};
+            return {kind, "timer0", simrv::xlen::PhysAddr{0x02000000}, 0x00010000, 7};
         case SoCDeviceKind::AclintMswi:
-            return {kind, "mswi0", 0x02010000, 0x00010000, 3};
+            return {kind, "mswi0", simrv::xlen::PhysAddr{0x02010000}, 0x00010000, 3};
         case SoCDeviceKind::Imsic:
             return {kind,
                     "imsic0",
-                    0x24000000,
+                    simrv::xlen::PhysAddr{0x24000000},
                     0x00010000,
                     0,
                     true,
-                    {{.name = "supervisor", .base = 0x28000000, .size = 0x00010000}}};
+                    {{.name = "supervisor",
+                      .base = simrv::xlen::PhysAddr{0x28000000},
+                      .size = 0x00010000}}};
         case SoCDeviceKind::Aplic:
             return {kind,
                     "aplic0",
-                    0x0c000000,
+                    simrv::xlen::PhysAddr{0x0c000000},
                     0x00004000,
                     0,
                     true,
-                    {{.name = "supervisor", .base = 0x0d000000, .size = 0x00004000}}};
+                    {{.name = "supervisor",
+                      .base = simrv::xlen::PhysAddr{0x0d000000},
+                      .size = 0x00004000}}};
         case SoCDeviceKind::Plic:
-            return {kind, "plic0", 0x50000000, 0x4000000, 0};
+            return {kind, "plic0", simrv::xlen::PhysAddr{0x50000000}, 0x4000000, 0};
         case SoCDeviceKind::Clint:
-            return {kind, "clint0", 0x60000000, 0xc0000, 0};
+            return {kind, "clint0", simrv::xlen::PhysAddr{0x60000000}, 0xc0000, 0};
         case SoCDeviceKind::VirtioMmioBlock:
-            return soc_pci_device_default(kind, "disk0", SIMRV_PLATFORM_VIRTIO_BLOCK_BASE,
+            return soc_pci_device_default(kind, "disk0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_BLOCK_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 2, 1, 17);
         case SoCDeviceKind::VirtioMmioConsole:
-            return soc_pci_device_default(kind, "console0", SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE,
+            return soc_pci_device_default(kind, "console0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 1, 2, 18);
         case SoCDeviceKind::VirtioMmioRng:
-            return soc_pci_device_default(kind, "rng0", SIMRV_PLATFORM_VIRTIO_RNG_BASE,
+            return soc_pci_device_default(kind, "rng0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_RNG_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 4, 3, 19);
         case SoCDeviceKind::VirtioMmioGpu:
-            return soc_pci_device_default(kind, "gpu0", SIMRV_PLATFORM_VIRTIO_GPU_BASE,
+            return soc_pci_device_default(kind, "gpu0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_GPU_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 5, 4, 20);
         case SoCDeviceKind::VirtioMmioInput:
-            return soc_pci_device_default(kind, "input0", SIMRV_PLATFORM_VIRTIO_INPUT_BASE,
+            return soc_pci_device_default(kind, "input0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_INPUT_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 6, 5, 21);
         case SoCDeviceKind::VirtioMmioSound:
-            return soc_pci_device_default(kind, "sound0", SIMRV_PLATFORM_VIRTIO_SOUND_BASE,
+            return soc_pci_device_default(kind, "sound0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_SOUND_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 7, 6, 22);
         case SoCDeviceKind::VirtioMmioNet:
-            return soc_pci_device_default(kind, "net0", SIMRV_PLATFORM_VIRTIO_NET_BASE,
+            return soc_pci_device_default(kind, "net0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_NET_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 8, 7, 23);
         case SoCDeviceKind::VirtioMmioFs:
-            return soc_pci_device_default(kind, "fs0", SIMRV_PLATFORM_VIRTIO_FS_BASE,
+            return soc_pci_device_default(kind, "fs0",
+                                          simrv::xlen::PhysAddr{SIMRV_PLATFORM_VIRTIO_FS_BASE},
                                           SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 9, 8, 24);
         case SoCDeviceKind::DmaController:
-            return {kind, "dma0", SIMRV_PLATFORM_DMA_BASE, SIMRV_PLATFORM_DMA_SIZE,
-                    SIMRV_PLATFORM_DMA_IRQ};
+            return {kind, "dma0", simrv::xlen::PhysAddr{SIMRV_PLATFORM_DMA_BASE},
+                    SIMRV_PLATFORM_DMA_SIZE, SIMRV_PLATFORM_DMA_IRQ};
         case SoCDeviceKind::ResetControl:
-            return {kind, "reset", 0x10000100, 4, 0};
+            return {kind, "reset", simrv::xlen::PhysAddr{0x10000100}, 4, 0};
         case SoCDeviceKind::RingBufferEthernet:
             return {kind,
                     "ethernet",
-                    0x14000000,
+                    simrv::xlen::PhysAddr{0x14000000},
                     0x4000,
                     2,
                     true,
-                    {{.name = "rxbuf", .base = 0x18000000, .size = 0x4000},
-                     {.name = "txbuf", .base = 0x1c000000, .size = 0x2000}},
+                    {{.name = "rxbuf", .base = simrv::xlen::PhysAddr{0x18000000}, .size = 0x4000},
+                     {.name = "txbuf", .base = simrv::xlen::PhysAddr{0x1c000000}, .size = 0x2000}},
                     {},
                     0,
                     {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}};
         case SoCDeviceKind::DummyMmio:
-            return {kind, "dummy", 0, 4, 0, true, {}, "simrv,dummy-mmio", 0};
+            return {kind, "dummy", simrv::xlen::PhysAddr{}, 4, 0, true, {}, "simrv,dummy-mmio", 0};
         case SoCDeviceKind::CustomMmio:
-            return {kind, "custom", 0, 0x1000, 0, true, {}, {}, 0};
+            return {kind, "custom", simrv::xlen::PhysAddr{}, 0x1000, 0, true, {}, {}, 0};
         case SoCDeviceKind::PFlash:
             return {kind,
                     "pflash0",
-                    0x20000000,
+                    simrv::xlen::PhysAddr{0x20000000},
                     0x02000000,
                     0,
                     true,
-                    {{.name = "pflash1", .base = 0x22000000, .size = 0x02000000}},
+                    {{.name = "pflash1",
+                      .base = simrv::xlen::PhysAddr{0x22000000},
+                      .size = 0x02000000}},
                     "cfi-flash",
                     0};
     }
@@ -360,10 +375,10 @@ struct SoCConfig {
     bool enable_mmio = false;
     bool disable_unlisted_devices = false;
     PcieHostConfig pcie{};
-    std::optional<simrv::xlen::Address> dram_base;
+    std::optional<simrv::xlen::PhysAddr> dram_base;
     std::optional<simrv::xlen::Address> dram_size;
-    std::optional<simrv::xlen::Address> reset_pc;
-    std::optional<simrv::xlen::Address> tohost;
+    std::optional<simrv::xlen::VirtAddr> reset_pc;
+    std::optional<simrv::xlen::PhysAddr> tohost;
     SmpTopologyConfig smp{};
     std::vector<SoCDeviceConfig> devices;
     std::vector<std::string> plugins{};
@@ -434,15 +449,16 @@ struct SoCConfig {
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (auto smp_result = smp.validate(); !smp_result) return smp_result;
         struct Region {
-            simrv::xlen::Address base;
+            simrv::xlen::PhysAddr base;
             simrv::xlen::Address size;
             std::string_view name;
         };
         std::vector<Region> regions;
         if (enable_pcie) {
             constexpr simrv::xlen::Address kEcamBusBytes = 1U << 20U;
-            const auto range_valid = [](simrv::xlen::Address base, simrv::xlen::Address size) {
-                return base != 0 && size != 0 && base <= ~simrv::xlen::Address{0} - size;
+            const auto range_valid = [](simrv::xlen::PhysAddr base, simrv::xlen::Address size) {
+                return base.raw() != 0 && size != 0 &&
+                       base.raw() <= ~simrv::xlen::Address{0} - size;
             };
             if (!range_valid(pcie.ecam_base, pcie.ecam_size) ||
                 !range_valid(pcie.mmio_base, pcie.mmio_size)) {
@@ -471,7 +487,7 @@ struct SoCConfig {
                 return std::unexpected("Enabled SoC devices must have unique, non-empty names");
             }
             names.push_back(device.name);
-            if (device.size == 0 || device.base > ~simrv::xlen::Address{0} - device.size) {
+            if (device.size == 0 || device.base.raw() > ~simrv::xlen::Address{0} - device.size) {
                 return std::unexpected("SoC device has an invalid address range at index " +
                                        std::to_string(i));
             }
@@ -517,7 +533,7 @@ struct SoCConfig {
                                        std::to_string(kPlicSourceCount));
             }
             for (const auto& extra : device.regions) {
-                if (extra.size == 0 || extra.base > ~simrv::xlen::Address{0} - extra.size) {
+                if (extra.size == 0 || extra.base.raw() > ~simrv::xlen::Address{0} - extra.size) {
                     return std::unexpected("SoC device has an invalid auxiliary region: '" +
                                            extra.name + "'");
                 }
@@ -566,7 +582,7 @@ struct SoCConfig {
             }
         }
         if (dram_base.has_value() && dram_size.has_value()) {
-            if (*dram_size == 0 || *dram_base > ~simrv::xlen::Address{0} - *dram_size) {
+            if (*dram_size == 0 || dram_base->raw() > ~simrv::xlen::Address{0} - *dram_size) {
                 return std::unexpected("SoC memory configuration has an invalid DRAM range");
             }
             regions.push_back({.base = *dram_base, .size = *dram_size, .name = "dram"});

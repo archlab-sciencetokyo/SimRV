@@ -1111,11 +1111,19 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         } else if (section == Section::Pcie) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
                 if (key == "ecam_base")
-                    config.pcie.ecam_base = *parsed;
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max())
+                        return false;
+                    else
+                        config.pcie.ecam_base =
+                            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
                 else if (key == "ecam_size")
                     config.pcie.ecam_size = *parsed;
                 else if (key == "mmio_base")
-                    config.pcie.mmio_base = *parsed;
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max())
+                        return false;
+                    else
+                        config.pcie.mmio_base =
+                            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
                 else if (key == "mmio_size")
                     config.pcie.mmio_size = *parsed;
                 else if (key == "first_bus" || key == "last_bus") {
@@ -1126,9 +1134,11 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             }
         } else if (section == Section::Memory) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "dram_base" || key == "base")
-                    config.dram_base = *parsed;
-                else if (key == "dram_size" || key == "size")
+                if (key == "dram_base" || key == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.dram_base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "dram_size" || key == "size")
                     config.dram_size = *parsed;
             } else if (key == "bram_prewarm") {
                 if (const auto parsed = detail::parse_bool(value)) {
@@ -1137,10 +1147,15 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             }
         } else if (section == Section::Boot) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "reset_pc" || key == "start_pc")
-                    config.reset_pc = *parsed;
-                else if (key == "tohost")
-                    config.tohost = *parsed;
+                if (key == "reset_pc" || key == "start_pc") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.reset_pc =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "tohost") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.tohost =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                }
             }
         } else if (section == Section::Device && device != nullptr) {
             if (key.starts_with("region.")) {
@@ -1156,16 +1171,23 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     device->regions,
                     [region_name](const auto& item) { return item.name == region_name; });
                 if (region == device->regions.end()) {
-                    device->regions.push_back(
-                        {.name = std::string(region_name), .base = 0, .size = 0});
+                    device->regions.push_back({.name = std::string(region_name),
+                                               .base = simrv::xlen::PhysAddr{},
+                                               .size = 0});
                     region = std::prev(device->regions.end());
                 }
-                if (field == "base") region->base = *parsed;
+                if (field == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    region->base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                }
                 if (field == "size") region->size = *parsed;
             } else if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "base")
-                    device->base = *parsed;
-                else if (key == "size")
+                if (key == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    device->base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "size")
                     device->size = *parsed;
                 else if (key == "irq" && *parsed <= std::numeric_limits<uint32_t>::max())
                     device->irq = static_cast<uint32_t>(*parsed);

@@ -17,9 +17,11 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <source_location>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "TestHelper.hpp"
@@ -32,6 +34,8 @@
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
+#include "simrv/device/ResetControlMmio.hpp"
+#include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
@@ -80,6 +84,22 @@ static_assert(!DmaReadable<simrv::xlen::VirtAddr>);
 static_assert(!DmaReadable<simrv::xlen::Address>);
 
 template <typename Address>
+concept PciPhysicalAddress = requires(
+    simrv::device::PcieRootComplex& root, simrv::device::PciDevice& device, Address address,
+    simrv::device::PciBarIndex& bar, simrv::device::PciBarOffset& offset) {
+    root.mmio_read(address, simrv::device::PciAccessBytes{4});
+    root.mmio_write(address, simrv::device::PciMmioData{0}, simrv::device::PciAccessBytes{4});
+    device.contains_mmio(address, bar, offset);
+    { device.bar_base(bar) } -> std::same_as<simrv::xlen::PhysAddr>;
+};
+
+static_assert(PciPhysicalAddress<simrv::xlen::PhysAddr>);
+static_assert(!PciPhysicalAddress<simrv::xlen::VirtAddr>);
+static_assert(!PciPhysicalAddress<simrv::xlen::Address>);
+static_assert(std::same_as<decltype(std::declval<const simrv::device::PciDevice&>().msi_address()),
+                           simrv::xlen::PhysAddr>);
+
+template <typename Address>
 concept CoherenceAddress = requires(simrv::memory::CoherenceHub& hub, Address address) {
     hub.get_directory_state(address);
     hub.invalidate_line_external(address);
@@ -89,6 +109,60 @@ concept CoherenceAddress = requires(simrv::memory::CoherenceHub& hub, Address ad
 static_assert(CoherenceAddress<simrv::xlen::PhysAddr>);
 static_assert(!CoherenceAddress<simrv::xlen::VirtAddr>);
 static_assert(!CoherenceAddress<simrv::xlen::Address>);
+
+static_assert(std::same_as<decltype(simrv::core::SoCDeviceConfig{}.base), simrv::xlen::PhysAddr>);
+static_assert(std::same_as<decltype(simrv::core::SoCDeviceRegion{}.base), simrv::xlen::PhysAddr>);
+static_assert(
+    std::same_as<decltype(simrv::core::PcieHostConfig{}.ecam_base), simrv::xlen::PhysAddr>);
+static_assert(
+    std::same_as<decltype(simrv::core::PcieHostConfig{}.mmio_base), simrv::xlen::PhysAddr>);
+static_assert(std::same_as<decltype(simrv::core::SoCConfig{}.dram_base),
+                           std::optional<simrv::xlen::PhysAddr>>);
+static_assert(std::same_as<decltype(simrv::core::SoCConfig{}.reset_pc),
+                           std::optional<simrv::xlen::VirtAddr>>);
+static_assert(std::same_as<decltype(simrv::core::FramebufferConfig{}.base), simrv::xlen::PhysAddr>);
+static_assert(
+    std::same_as<decltype(simrv::core::SoCConfig{}.tohost), std::optional<simrv::xlen::PhysAddr>>);
+static_assert(!std::is_assignable_v<simrv::xlen::PhysAddr&, simrv::xlen::Address>);
+static_assert(!std::is_assignable_v<simrv::xlen::PhysAddr&, simrv::xlen::VirtAddr>);
+static_assert(
+    std::is_constructible_v<simrv::device::Uart, simrv::core::Machine&, simrv::xlen::PhysAddr>);
+static_assert(
+    !std::is_constructible_v<simrv::device::Uart, simrv::core::Machine&, simrv::xlen::VirtAddr>);
+static_assert(std::is_constructible_v<simrv::device::DmaController, simrv::core::Machine*,
+                                      simrv::xlen::PhysAddr>);
+static_assert(!std::is_constructible_v<simrv::device::DmaController, simrv::core::Machine*,
+                                       simrv::xlen::VirtAddr>);
+static_assert(std::is_constructible_v<simrv::device::VirtioMmioBlock, simrv::xlen::PhysAddr,
+                                      uint32_t, simrv::core::Machine*>);
+static_assert(!std::is_constructible_v<simrv::device::VirtioMmioBlock, simrv::xlen::VirtAddr,
+                                       uint32_t, simrv::core::Machine*>);
+static_assert(std::is_constructible_v<simrv::device::Imsic, simrv::core::Machine*,
+                                      simrv::device::Imsic::Privilege, simrv::xlen::PhysAddr,
+                                      simrv::xlen::Address>);
+static_assert(!std::is_constructible_v<simrv::device::Imsic, simrv::core::Machine*,
+                                       simrv::device::Imsic::Privilege, simrv::xlen::VirtAddr,
+                                       simrv::xlen::Address>);
+static_assert(std::is_constructible_v<simrv::device::PFlash, simrv::core::Machine&,
+                                      simrv::xlen::PhysAddr, simrv::xlen::Address>);
+static_assert(!std::is_constructible_v<simrv::device::PFlash, simrv::core::Machine&,
+                                       simrv::xlen::VirtAddr, simrv::xlen::Address>);
+static_assert(std::is_constructible_v<simrv::device::ResetControlMmio, simrv::core::Machine&,
+                                      simrv::xlen::PhysAddr>);
+static_assert(!std::is_constructible_v<simrv::device::ResetControlMmio, simrv::core::Machine&,
+                                       simrv::xlen::VirtAddr>);
+static_assert(std::is_constructible_v<simrv::device::AclintMtimer, simrv::core::Machine*,
+                                      simrv::xlen::PhysAddr, simrv::xlen::Address>);
+static_assert(!std::is_constructible_v<simrv::device::AclintMtimer, simrv::core::Machine*,
+                                       simrv::xlen::VirtAddr, simrv::xlen::Address>);
+static_assert(std::is_constructible_v<simrv::Rtc, simrv::core::Machine&, simrv::xlen::PhysAddr,
+                                      simrv::xlen::Address>);
+static_assert(!std::is_constructible_v<simrv::Rtc, simrv::core::Machine&, simrv::xlen::VirtAddr,
+                                       simrv::xlen::Address>);
+static_assert(std::same_as<decltype(simrv::device::PcieRootComplex::kEcamBaseAddress),
+                           const simrv::xlen::PhysAddr>);
+static_assert(std::same_as<decltype(simrv::device::PcieRootComplex::kMmioBaseAddress),
+                           const simrv::xlen::PhysAddr>);
 
 class DummyDevice : public simrv::memory::MmioDevice {
    public:
@@ -237,13 +311,13 @@ void test_mmio_device_and_dma() {
 
     // VirtIO descriptor addresses are 64-bit even in a native RV32 build.
     // Reject an unrepresentable address instead of aliasing its low bits into RAM.
-    simrv::device::VirtioMmioRng mmio_rng(0x10003000, 4, &machine);
+    simrv::device::VirtioMmioRng mmio_rng(simrv::xlen::PhysAddr{0x10003000}, 4, &machine);
     simrv::device::PcieRootComplex root(&machine);
     auto pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
     check(root.attach_device(0, 3, 0, pci_rng));
     auto& mmio_transport = static_cast<simrv::device::virtio::IVirtioTransport&>(mmio_rng);
     auto& pci_transport = static_cast<simrv::device::virtio::IVirtioTransport&>(*pci_rng);
-    const uint64_t low = static_cast<uint64_t>(simrv::memory::kDramBaseAddress) + 0x100;
+    const uint64_t low = static_cast<uint64_t>(simrv::memory::kDramBaseAddress.raw()) + 0x100;
     const uint64_t high = low | (uint64_t{1} << 32);
     std::byte value{0x5a};
     std::byte result{};
@@ -262,7 +336,7 @@ void test_mmio_device_and_dma() {
     // A high driver-ring address must reach the transport without truncation.
     const uint16_t avail_idx = 1;
     std::memcpy(ram.data() + 0x202, &avail_idx, sizeof(avail_idx));
-    const auto base = static_cast<uint32_t>(simrv::memory::kDramBaseAddress);
+    const auto base = static_cast<uint32_t>(simrv::memory::kDramBaseAddress.raw());
     mmio_rng.write32(0x38, 8);
     mmio_rng.write32(0x80, base + 0x100);
     mmio_rng.write32(0x90, base + 0x200);
@@ -325,7 +399,7 @@ void test_mmio_device_and_dma() {
     timing.setup_latency = 10;
     timing.bandwidth_bytes_per_cycle = 4;
     machine.dma_engine().set_config(timing);
-    simrv::device::VirtioMmioBlock mmio_block(0x10001000, 2, &machine);
+    simrv::device::VirtioMmioBlock mmio_block(simrv::xlen::PhysAddr{0x10001000}, 2, &machine);
     auto pci_block = std::make_shared<simrv::device::VirtioPciBlock>();
     check(root.attach_device(0, 4, 0, pci_block));
     const auto configure_mmio = [&] {
@@ -363,7 +437,7 @@ void test_mmio_device_and_dma() {
     check(ram[0x602] == std::byte{1} && ram[0x702] == std::byte{1});
     check(mmio_block.isr_status() != 0 && pci_block->isr_status() != 0);
 
-    simrv::device::VirtioMmioNet mmio_net(0x10007000, 8, &machine);
+    simrv::device::VirtioMmioNet mmio_net(simrv::xlen::PhysAddr{0x10007000}, 8, &machine);
     auto pci_net = std::make_shared<simrv::device::VirtioPciNet>();
     check(root.attach_device(0, 5, 0, pci_net));
     const auto configure_mmio_net = [&] {
@@ -521,8 +595,8 @@ void test_dma_controller() {
     check(resp.data == 512);
 
     // 3. Fast mode transfer and interrupt assertion
-    const simrv::xlen::Address src_addr = simrv::memory::kDramBaseAddress + 0x1000;
-    const simrv::xlen::Address dst_addr = simrv::memory::kDramBaseAddress + 0x2000;
+    const simrv::xlen::Address src_addr = (simrv::memory::kDramBaseAddress + 0x1000).raw();
+    const simrv::xlen::Address dst_addr = (simrv::memory::kDramBaseAddress + 0x2000).raw();
     const uint32_t transfer_size = 128;
 
     for (uint32_t i = 0; i < transfer_size; ++i) {
@@ -571,8 +645,8 @@ void test_dma_controller() {
     };
     machine.dma_engine().set_config(ca_cfg);
 
-    const simrv::xlen::Address ca_src_addr = simrv::memory::kDramBaseAddress + 0x3000;
-    const simrv::xlen::Address ca_dst_addr = simrv::memory::kDramBaseAddress + 0x4000;
+    const simrv::xlen::Address ca_src_addr = (simrv::memory::kDramBaseAddress + 0x3000).raw();
+    const simrv::xlen::Address ca_dst_addr = (simrv::memory::kDramBaseAddress + 0x4000).raw();
     const uint32_t ca_size = 64;  // 10 setup + 16 transfer = 26 cycles
 
     for (uint32_t i = 0; i < ca_size; ++i) {
@@ -644,7 +718,8 @@ void test_tui_uart_input_irq_publication() {
 
     simrv::memory::TlChannelA enable_rx_irq{};
     enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
-    enable_rx_irq.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm;
+    enable_rx_irq.address =
+        simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm};
     enable_rx_irq.size = 0;
     enable_rx_irq.data = 1;
     simrv::memory::TlChannelD response{};
@@ -661,10 +736,12 @@ void test_tui_uart_input_irq_publication() {
     overrun_machine.cpu.reset();
     simrv::device::Uart overrun_uart(overrun_machine);
     auto request = enable_rx_irq;
-    request.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIirFcr;
+    request.address =
+        simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIirFcr};
     request.data = 1;
     check(overrun_uart.handle_request(request, response));
-    request.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm;
+    request.address =
+        simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm};
     request.data = 4;
     check(overrun_uart.handle_request(request, response));
     for (int i = 0; i < 16; ++i) overrun_uart.push_rx_byte(static_cast<uint8_t>(i));
@@ -688,7 +765,8 @@ void test_ia_tui_uart_input_waits_for_frame() {
 
     simrv::memory::TlChannelA enable_rx_irq{};
     enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
-    enable_rx_irq.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm;
+    enable_rx_irq.address =
+        simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm};
     enable_rx_irq.size = 0;
     enable_rx_irq.data = 1;
     simrv::memory::TlChannelD response{};
@@ -719,7 +797,7 @@ void test_uart_frame_timing_fifo_and_overrun() {
     const auto write = [&](simrv::xlen::Address reg, simrv::xlen::Word value) {
         simrv::memory::TlChannelA request{};
         request.opcode = simrv::memory::TlOpcodeA::PutFullData;
-        request.address = simrv::mmio::kUartBaseAddress + reg;
+        request.address = simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + reg};
         request.size = 0;
         request.data = value;
         simrv::memory::TlChannelD response{};
@@ -728,7 +806,7 @@ void test_uart_frame_timing_fifo_and_overrun() {
     const auto read = [&](simrv::xlen::Address reg) {
         simrv::memory::TlChannelA request{};
         request.opcode = simrv::memory::TlOpcodeA::Get;
-        request.address = simrv::mmio::kUartBaseAddress + reg;
+        request.address = simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + reg};
         request.size = 0;
         simrv::memory::TlChannelD response{};
         check(uart.handle_request(request, response));
@@ -770,7 +848,7 @@ void test_uart_frame_timing_fifo_and_overrun() {
     // In a word-spaced 16550, offset 8 is the FIFO-control / interrupt-ID register.
     simrv::device::Uart shifted_uart(machine);
     simrv::memory::TlChannelA shifted_request{};
-    shifted_request.address = simrv::mmio::kUartBaseAddress + 8;
+    shifted_request.address = simrv::xlen::PhysAddr{simrv::mmio::kUartBaseAddress + 8};
     shifted_request.size = 2;
     shifted_request.opcode = simrv::memory::TlOpcodeA::PutFullData;
     shifted_request.data = 1;
@@ -832,7 +910,7 @@ void test_timed_interconnect_ordering() {
     simrv::memory::TlChannelA first{};
     first.opcode = simrv::memory::TlOpcodeA::Get;
     first.source = 2;
-    first.address = simrv::memory::kDramBaseAddress;
+    first.address = simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress};
     simrv::memory::TlChannelA second = first;
     second.source = 1;
     second.address += 8;
@@ -883,7 +961,7 @@ void test_timed_interconnect_cancellation() {
     simrv::memory::TlChannelA request{};
     request.opcode = simrv::memory::TlOpcodeA::Get;
     request.source = 7;
-    request.address = simrv::memory::kDramBaseAddress;
+    request.address = simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress};
 
     check(bus.send_request(request));
     check(bus.pending_requests() == 1);
@@ -918,7 +996,7 @@ void test_timed_page_walk_transitions() {
     machine.memory().initialize_mmu();
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
 
-    constexpr simrv::xlen::Address physical = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address physical = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Address root = physical + 0x1000;
     const simrv::xlen::Word root_ppn = root >> 12;
     if constexpr (simrv::xlen::kIsXLen64) {
@@ -938,17 +1016,17 @@ void test_timed_page_walk_transitions() {
     std::memcpy(ram.data() + (pte_address - physical), &pte, sizeof(pte));
 
     auto& walk = machine.cpu.ca_state.instruction_walk;
-    auto result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
-                                                      kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                      simrv::memory::TlPort::Instruction, walk);
+    auto result = machine.cpu.translate_stage_address(
+        machine, simrv::xlen::VirtAddr{physical}, simrv::PteAccess::Code, kPrivSupervisor,
+        simrv::xlen::kXLenBits, simrv::memory::TlPort::Instruction, walk);
     check(!result.has_value());
     check(machine.memory().system_bus().pending_requests() == 1);
 
     machine.memory().system_bus().advance_cycle();
     machine.cpu.ca_state.waiting_for_interconnect = false;
-    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
-                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                 simrv::memory::TlPort::Instruction, walk);
+    result = machine.cpu.translate_stage_address(
+        machine, simrv::xlen::VirtAddr{physical}, simrv::PteAccess::Code, kPrivSupervisor,
+        simrv::xlen::kXLenBits, simrv::memory::TlPort::Instruction, walk);
     check(result.has_value() && !result->has_value() &&
           result->error() == static_cast<simrv::xlen::TrapCause>(ExceptionCode::FetchPageFault));
     check(machine.memory().system_bus().pending_requests() == 0);
@@ -959,22 +1037,22 @@ void test_timed_page_walk_transitions() {
     // A different, unmapped top-level entry faults after exactly one physical read.
     constexpr simrv::xlen::Address unmapped =
         physical + (simrv::xlen::Address{1} << (12 + top_level * top_vpn_bits));
-    result = machine.cpu.translate_stage_address(machine, unmapped, simrv::PteAccess::Code,
-                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                 simrv::memory::TlPort::Instruction, walk);
+    result = machine.cpu.translate_stage_address(
+        machine, simrv::xlen::VirtAddr{unmapped}, simrv::PteAccess::Code, kPrivSupervisor,
+        simrv::xlen::kXLenBits, simrv::memory::TlPort::Instruction, walk);
     check(!result.has_value());
     machine.memory().system_bus().advance_cycle();
     machine.cpu.ca_state.waiting_for_interconnect = false;
-    result = machine.cpu.translate_stage_address(machine, unmapped, simrv::PteAccess::Code,
-                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                 simrv::memory::TlPort::Instruction, walk);
+    result = machine.cpu.translate_stage_address(
+        machine, simrv::xlen::VirtAddr{unmapped}, simrv::PteAccess::Code, kPrivSupervisor,
+        simrv::xlen::kXLenBits, simrv::memory::TlPort::Instruction, walk);
     check(result.has_value() && !result->has_value());
     check(result->error() == static_cast<simrv::xlen::TrapCause>(ExceptionCode::FetchPageFault));
 
     // A squashed fetch removes both the transaction and resumable architectural state.
-    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
-                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                 simrv::memory::TlPort::Instruction, walk);
+    result = machine.cpu.translate_stage_address(
+        machine, simrv::xlen::VirtAddr{physical}, simrv::PteAccess::Code, kPrivSupervisor,
+        simrv::xlen::kXLenBits, simrv::memory::TlPort::Instruction, walk);
     check(!result.has_value());
     machine.memory().system_bus().cancel_source(walk.source);
     walk.reset();
@@ -987,7 +1065,7 @@ void test_timed_page_walk_transitions() {
     accessed.opcode = simrv::memory::TlOpcodeA::LogicalData;
     accessed.size = sizeof(simrv::xlen::Word) == 8 ? 3 : 2;
     accessed.source = 6;
-    accessed.address = pte_address;
+    accessed.address = simrv::xlen::PhysAddr{pte_address};
     accessed.data = std::to_underlying(simrv::PteFlag::A);
     auto dirty = accessed;
     dirty.source = 7;
@@ -1016,7 +1094,7 @@ void test_cycle_kernel_golden_translated_fetch() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address root = pc + 0x1000;
         constexpr simrv::xlen::Instruction instruction = 0x02a00093;  // addi x1, x0, 42
         std::memcpy(ram.data(), &instruction, sizeof(instruction));
@@ -1040,7 +1118,7 @@ void test_cycle_kernel_golden_translated_fetch() {
                                       simrv::PteFlag::X | simrv::PteFlag::A;
         std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
         machine.cpu.state().priv = kPrivSupervisor;
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount == 0 && cycles < 32) {
@@ -1073,7 +1151,7 @@ void test_cycle_kernel_golden_translated_load() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address data_address = pc + 0x100;
         constexpr simrv::xlen::Address root = pc + 0x1000;
         constexpr std::array<simrv::xlen::Instruction, 4> program = {
@@ -1110,7 +1188,7 @@ void test_cycle_kernel_golden_translated_load() {
                                       simrv::PteFlag::D;
         std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
         machine.cpu.state().priv = kPrivSupervisor;
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
         machine.cpu.tlb.insert_inst_r(simrv::xlen::VirtAddr{pc}, simrv::xlen::PhysAddr{pc}, 0,
                                       kPrivSupervisor);
 
@@ -1153,7 +1231,7 @@ void test_timed_smp_coherence_ordering() {
     machine.secondary_harts_.push_back(std::move(secondary));
     machine.memory().initialize_mmu();
 
-    const simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x100;
+    const simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x100).raw();
     ram[0x100] = simrv::xlen::Byte{0x5a};
     auto& bus = machine.memory().system_bus();
 
@@ -1162,7 +1240,7 @@ void test_timed_smp_coherence_ordering() {
     owner.grow = simrv::memory::TlGrow::NtoT;
     owner.source = 9;  // Deliberately unrelated to hart identity.
     owner.hart = 0;
-    owner.address = line;
+    owner.address = simrv::xlen::PhysAddr{line};
     owner.size = simrv::memory::kTlBlockSize;
     check(bus.send_request(owner));
 
@@ -1209,8 +1287,9 @@ void test_memory_access_fails_closed_when_request_is_rejected() {
     machine.cpu.machine_ = &machine;
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
 
-    constexpr simrv::xlen::Address address = simrv::memory::kDramBaseAddress + 0x180;
-    constexpr simrv::xlen::Address blocker_address = simrv::memory::kDramBaseAddress + 0x200;
+    constexpr simrv::xlen::Address address = (simrv::memory::kDramBaseAddress + 0x180).raw();
+    constexpr simrv::xlen::Address blocker_address =
+        (simrv::memory::kDramBaseAddress + 0x200).raw();
     ram[0x180] = simrv::xlen::Byte{0x78};
     ram[0x181] = simrv::xlen::Byte{0x56};
     ram[0x182] = simrv::xlen::Byte{0x34};
@@ -1224,7 +1303,7 @@ void test_memory_access_fails_closed_when_request_is_rejected() {
     blocker.size = 2;
     blocker.hart = hart.hart_id();
     blocker.source = source;
-    blocker.address = blocker_address;
+    blocker.address = simrv::xlen::PhysAddr{blocker_address};
 
     check(bus.send_request(blocker));
     hart.ca_state.waiting_for_interconnect = false;
@@ -1326,7 +1405,7 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     machine.cpu.machine_ = &machine;
     machine.memory().initialize_mmu();
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x180;
+    constexpr simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x180).raw();
     constexpr uint32_t original = 0x11223344;
     constexpr uint32_t updated = 0xa5b6c7d8;
     std::memcpy(ram.data() + 0x180, &original, sizeof(original));
@@ -1337,7 +1416,7 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     acquire.grow = simrv::memory::TlGrow::NtoT;
     acquire.source = 1;
     acquire.hart = 0;
-    acquire.address = line;
+    acquire.address = simrv::xlen::PhysAddr{line};
     acquire.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD response{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
@@ -1373,7 +1452,7 @@ void test_release_data_writes_back_without_directory_entry() {
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.cpu.machine_ = &machine;
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x240;
+    constexpr simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x240).raw();
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> released{};
     for (size_t i = 0; i < released.size(); ++i)
         released[i] = static_cast<simrv::xlen::Byte>((i * 13u + 7u) & 0xffu);
@@ -1385,7 +1464,7 @@ void test_release_data_writes_back_without_directory_entry() {
     release.size = simrv::memory::kTlBlockSize;
     release.source = simrv::memory::make_tl_source(0, simrv::memory::TlPort::Data);
     release.hart = 0;
-    release.address = line;
+    release.address = simrv::xlen::PhysAddr{line};
 
     simrv::memory::TlChannelD response{};
     auto& bus = machine.memory().system_bus();
@@ -1411,7 +1490,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     machine.cpu.machine_ = &machine;
     machine.memory().initialize_mmu();
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x280;
+    constexpr simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x280).raw();
     constexpr uint32_t value = 0x76543210;
     auto& bus = machine.memory().system_bus();
     simrv::memory::TlChannelA acquire{};
@@ -1419,7 +1498,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     acquire.grow = simrv::memory::TlGrow::NtoT;
     acquire.source = 3;
     acquire.hart = 0;
-    acquire.address = line;
+    acquire.address = simrv::xlen::PhysAddr{line};
     acquire.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD response{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
@@ -1479,7 +1558,7 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
     machine.memory().initialize_mmu();
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
 
-    constexpr simrv::xlen::Address first_line = simrv::memory::kDramBaseAddress + 0x300;
+    constexpr simrv::xlen::Address first_line = (simrv::memory::kDramBaseAddress + 0x300).raw();
     auto& bus = machine.memory().system_bus();
     for (unsigned index = 0; index < 3; ++index) {
         simrv::memory::TlChannelA acquire{};
@@ -1487,7 +1566,8 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
         acquire.grow = simrv::memory::TlGrow::NtoB;
         acquire.source = static_cast<simrv::memory::TlSourceId>(4 + index * 2);
         acquire.hart = 0;
-        acquire.address = first_line + index * simrv::memory::CoherenceHub::kLineBytes;
+        acquire.address =
+            simrv::xlen::PhysAddr{first_line + index * simrv::memory::CoherenceHub::kLineBytes};
         acquire.size = simrv::memory::kTlBlockSize;
         simrv::memory::TlChannelD response{};
         std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
@@ -1557,7 +1637,7 @@ void test_profiled_shared_cache_clusters() {
     check(hart0_l2->capacity_bytes() == 32 * 1024 && hart0_l2->associativity() == 4);
     check(!hub.shared_l3_enabled());
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x280;
+    constexpr simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x280).raw();
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> source{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> result{};
     source[0] = simrv::xlen::Byte{0x5a};
@@ -1589,14 +1669,14 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
     machine.secondary_harts_.push_back(std::move(third));
     machine.memory().initialize_mmu();
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x400;
+    constexpr simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x400).raw();
     auto& bus = machine.memory().system_bus();
     simrv::memory::TlChannelA request{};
     request.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
     request.grow = simrv::memory::TlGrow::NtoB;
     request.source = 20;
     request.hart = 0;
-    request.address = line;
+    request.address = simrv::xlen::PhysAddr{line};
     request.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD response{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
@@ -1650,7 +1730,7 @@ void test_dma_write_invalidates_reservations_in_all_modes() {
         machine.set_ram_for_testing(ram.data(), ram.size());
         machine.runtime_profile.engine = engine;
         auto& reservations = machine.memory().reservation_table();
-        constexpr simrv::xlen::Address base = simrv::memory::kDramBaseAddress + 0x100;
+        constexpr simrv::xlen::Address base = (simrv::memory::kDramBaseAddress + 0x100).raw();
         reservations.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8});
         reservations.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{base + 24});
         const std::array<simrv::xlen::Byte, 16> data{};
@@ -1683,7 +1763,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     machine.secondary_harts_.push_back(std::move(secondary));
     machine.memory().initialize_mmu();
 
-    const simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x200;
+    const simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x200).raw();
     const uint32_t original_val = 0xdeadbeef;
     std::memcpy(ram.data() + 0x200, &original_val, sizeof(original_val));
     auto& bus = machine.memory().system_bus();
@@ -1694,7 +1774,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     acq0.grow = simrv::memory::TlGrow::NtoB;
     acq0.source = 10;
     acq0.hart = 0;
-    acq0.address = line;
+    acq0.address = simrv::xlen::PhysAddr{line};
     acq0.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD resp0{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data0{};
@@ -1725,7 +1805,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     upg.grow = simrv::memory::TlGrow::BtoT;
     upg.source = 12;
     upg.hart = 0;
-    upg.address = line;
+    upg.address = simrv::xlen::PhysAddr{line};
     upg.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD upg_resp{};
     check(bus.acquire_perm(upg, upg_resp));
@@ -1765,7 +1845,7 @@ void test_tilelink_c_prefetch_intent() {
     machine.cpu.machine_ = &machine;
     machine.memory().initialize_mmu();
 
-    const simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x300;
+    const simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x300).raw();
     const uint32_t val = 0x87654321;
     std::memcpy(ram.data() + 0x300, &val, sizeof(val));
     auto& bus = machine.memory().system_bus();
@@ -1775,7 +1855,7 @@ void test_tilelink_c_prefetch_intent() {
     intent.intent = simrv::memory::TlIntent::PrefetchRead;
     intent.source = 20;
     intent.hart = 0;
-    intent.address = line;
+    intent.address = simrv::xlen::PhysAddr{line};
     intent.size = simrv::memory::kTlBlockSize;
 
     check(bus.send_request(intent));
@@ -1817,14 +1897,14 @@ void test_global_cycle_smp_pipeline_ordering() {
         secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
         machine.secondary_harts_.push_back(std::move(secondary));
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 2> program = {
             0x00100093,  // addi x1, x0, 1
             0x0000006f,  // jal x0, 0
         };
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.hart(0).state().pc = pc;
-        machine.hart(1).state().pc = pc;
+        machine.hart(0).state().pc = simrv::xlen::VirtAddr{pc};
+        machine.hart(1).state().pc = simrv::xlen::VirtAddr{pc};
         const auto initial_mcycle0 = machine.hart(0).clint_mmio.mcycle;
         const auto initial_mcycle1 = machine.hart(1).clint_mmio.mcycle;
 
@@ -1876,7 +1956,7 @@ void test_global_cycle_smp_amo_retry() {
     secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
     machine.test_secondary_harts().push_back(std::move(secondary));
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr std::array<simrv::xlen::Instruction, 5> program = {
         0x00150093,  // addi x1, a0, 1 (unique value per hart)
         0x00000117,  // auipc x2, 0
@@ -1888,7 +1968,7 @@ void test_global_cycle_smp_amo_retry() {
     const uint32_t initial = 0;
     std::memcpy(ram.data() + 0x100, &initial, sizeof(initial));
     for (size_t hart = 0; hart < 2; ++hart) {
-        machine.hart(hart).state().pc = pc;
+        machine.hart(hart).state().pc = simrv::xlen::VirtAddr{pc};
         machine.hart(hart).state().regs.write(simrv::xlen::RegId::A0, hart);
     }
 
@@ -1920,14 +2000,14 @@ void test_multithreaded_parallel_matches_global_cycle() {
         secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
         machine.test_secondary_harts().push_back(std::move(secondary));
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 2> program = {
             0x00108093,  // addi x1, x1, 1
             0x0000006f,  // jal x0, 0
         };
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.hart(0).state().pc = pc;
-        machine.hart(1).state().pc = pc;
+        machine.hart(0).state().pc = simrv::xlen::VirtAddr{pc};
+        machine.hart(1).state().pc = simrv::xlen::VirtAddr{pc};
         if (mode == simrv::core::SmpMode::MultiThreaded) {
             machine.start_runner_for_testing();
         }
@@ -1938,11 +2018,11 @@ void test_multithreaded_parallel_matches_global_cycle() {
             machine.stop_runner_for_testing();
         }
         return std::array<std::array<uint64_t, 5>, 2>{
-            std::array<uint64_t, 5>{machine.hart(0).state().pc,
+            std::array<uint64_t, 5>{machine.hart(0).state().pc.raw(),
                                     machine.hart(0).state().regs.read(simrv::xlen::RegId::Ra),
                                     machine.hart(0).e_icount, machine.hart(0).clint_mmio.mcycle,
                                     machine.memory().system_bus().cycle()},
-            std::array<uint64_t, 5>{machine.hart(1).state().pc,
+            std::array<uint64_t, 5>{machine.hart(1).state().pc.raw(),
                                     machine.hart(1).state().regs.read(simrv::xlen::RegId::Ra),
                                     machine.hart(1).e_icount, machine.hart(1).clint_mmio.mcycle,
                                     machine.memory().system_bus().cycle()},
@@ -1976,11 +2056,11 @@ void test_global_cycle_timer_phase_ordering() {
     secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
     machine.secondary_harts_.push_back(std::move(secondary));
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Instruction loop = 0x0000006f;  // jal x0, 0
     std::memcpy(ram.data(), &loop, sizeof(loop));
-    machine.hart(0).state().pc = pc;
-    machine.hart(1).state().pc = pc;
+    machine.hart(0).state().pc = simrv::xlen::VirtAddr{pc};
+    machine.hart(1).state().pc = simrv::xlen::VirtAddr{pc};
     machine.cpu.clint_mmio.mtime = 4;
     machine.cpu.clint_mmio.rtc_divider = simrv::core::timing::kCyclesPerTimebaseTick - 1;
     machine.cpu.clint_mmio.mtimecmp = 5;
@@ -2021,7 +2101,8 @@ void test_ca_quantum_smp_batching() {
     constexpr simrv::xlen::Instruction loop = 0x0000006f;  // jal x0, 0
     std::memcpy(ram.data(), &loop, sizeof(loop));
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
-        machine.hart(hart).state().pc = simrv::memory::kDramBaseAddress;
+        machine.hart(hart).state().pc =
+            simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     }
     const auto initial_hart0_cycles = machine.hart(0).clint_mmio.mcycle;
     const auto initial_hart1_cycles = machine.hart(1).clint_mmio.mcycle;
@@ -2064,7 +2145,7 @@ void test_ca_quantum_single_hart_batching() {
 
     constexpr simrv::xlen::Instruction loop = 0x0000006f;  // jal x0, 0
     std::memcpy(ram.data(), &loop, sizeof(loop));
-    machine.cpu.state().pc = simrv::memory::kDramBaseAddress;
+    machine.cpu.state().pc = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
 
     const auto initial_cycles = machine.cpu.clint_mmio.mcycle;
     machine.execute_cycle_for_testing();
@@ -2104,7 +2185,8 @@ void test_ca_mt_smp_pause_and_snapshots() {
     constexpr simrv::xlen::Instruction loop = 0x0000006f;  // jal x0, 0
     std::memcpy(ram.data(), &loop, sizeof(loop));
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
-        machine.hart(hart).state().pc = simrv::memory::kDramBaseAddress;
+        machine.hart(hart).state().pc =
+            simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     }
 
     machine.resume();
@@ -2217,7 +2299,7 @@ void test_cycle_kernel_golden_forwarding() {
         machine.cpu.pipeline_sim.config.pipeline_type = type;
         machine.cpu.pipeline_sim.config.enable_forwarding = true;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 4> program = {
             0x00100093,  // addi x1, x0, 1
             0x00108133,  // add  x2, x1, x1
@@ -2229,7 +2311,7 @@ void test_cycle_kernel_golden_forwarding() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 3 && cycles < 32) {
@@ -2276,7 +2358,8 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
     constexpr simrv::xlen::Instruction loop = 0x0000006f;  // jal x0, 0
     std::memcpy(ram.data(), &loop, sizeof(loop));
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
-        machine.hart(hart).state().pc = simrv::memory::kDramBaseAddress;
+        machine.hart(hart).state().pc =
+            simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     }
 
     machine.start_runner_for_testing();
@@ -2337,7 +2420,7 @@ void test_cycle_kernel_golden_load_use() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address data_address = pc + 0x100;
         constexpr std::array<simrv::xlen::Instruction, 5> program = {
             0x00000097,  // auipc x1, 0
@@ -2358,7 +2441,7 @@ void test_cycle_kernel_golden_load_use() {
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
         machine.cpu.dcache.insert(simrv::xlen::PhysAddr{data_address}, data_line.data(),
                                   simrv::memory::MesiState::Shared);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 4 && cycles < 32) {
@@ -2413,7 +2496,7 @@ void test_cycle_kernel_golden_fp_dependencies() {
         machine.cpu.pipeline_sim.config.pipeline_type = type;
         machine.cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address data_address = pc + 0x100;
         constexpr simrv::xlen::RegId fa0 = static_cast<simrv::xlen::RegId>(10);
         constexpr simrv::xlen::RegId fa1 = static_cast<simrv::xlen::RegId>(11);
@@ -2445,7 +2528,7 @@ void test_cycle_kernel_golden_fp_dependencies() {
         std::memcpy(ram.data() + 0x100, &lhs_bits, sizeof(lhs_bits));
         std::memcpy(ram.data() + 0x104, &rhs_bits, sizeof(rhs_bits));
         machine.cpu.state().regs.write(simrv::xlen::RegId::A0, data_address);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t guard = 0;
         while (machine.cpu.e_icount < 10 && guard++ < 256) {
@@ -2507,7 +2590,7 @@ void test_cycle_kernel_golden_data_refill() {
         machine.cpu.pipeline_sim.config.pipeline_type = type;
         machine.memory().initialize_mmu();
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 4> program = {
             0x00000097,  // auipc x1, 0
             0x10008093,  // addi  x1, x1, 256
@@ -2521,7 +2604,7 @@ void test_cycle_kernel_golden_data_refill() {
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, instruction_line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 3 && cycles < 32) {
@@ -2564,7 +2647,7 @@ void test_cycle_kernel_golden_fence_serialization() {
         machine.cpu.pipeline_sim.config.pipeline_type = type;
         machine.cpu.pipeline_sim.config.fence_flush_penalty = 2;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 4> program = {
             0x00100093,  // addi x1, x0, 1
             0x0ff0000f,  // fence iorw, iorw
@@ -2576,7 +2659,7 @@ void test_cycle_kernel_golden_fence_serialization() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 3 && cycles < 32) {
@@ -2608,7 +2691,7 @@ void test_cycle_kernel_golden_amo_writeback() {
         machine.cpu.pipeline_sim.config.pipeline_type = type;
         machine.cpu.pipeline_sim.config.enable_forwarding = true;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         const std::array<simrv::xlen::Instruction, 7> program = {
             0x00000093U | (operand << 20),  // addi x1, x0, operand
             0x00000117,                     // auipc x2, 0
@@ -2620,7 +2703,7 @@ void test_cycle_kernel_golden_amo_writeback() {
         };
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::memcpy(ram.data() + 0x100, &initial_value, sizeof(initial_value));
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t guard = 0;
         while (machine.cpu.e_icount < 6 && guard++ < 160) {
@@ -2685,7 +2768,7 @@ void test_cycle_kernel_golden_multicycle_execute() {
         machine.cpu.pipeline_sim.config.pipeline_type = type;
         machine.cpu.pipeline_sim.config.mul_latency = 3;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 4> program = {
             0x00600093,  // addi x1, x0, 6
             0x00700113,  // addi x2, x0, 7
@@ -2697,7 +2780,7 @@ void test_cycle_kernel_golden_multicycle_execute() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 3 && cycles < 32) {
@@ -2730,7 +2813,7 @@ void test_cycle_kernel_golden_branch_recovery() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 6> program = {
             0x00100093,  // addi x1, x0, 1
             0x00008463,  // beq  x1, x0, +8 (not taken)
@@ -2744,7 +2827,7 @@ void test_cycle_kernel_golden_branch_recovery() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 4 && cycles < 64) {
@@ -2776,13 +2859,13 @@ void test_cycle_kernel_golden_instruction_refill() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 2> program = {
             0x02a00093,  // addi x1, x0, 42
             0x0000006f,  // jal  x0, 0
         };
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 1 && cycles < 64) {
@@ -2822,7 +2905,7 @@ void test_cycle_kernel_golden_precise_trap() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address handler = pc + 16;
         constexpr std::array<simrv::xlen::Instruction, 6> program = {
             0xffffffff,  // illegal instruction
@@ -2837,7 +2920,7 @@ void test_cycle_kernel_golden_precise_trap() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
         machine.cpu.state().mtvec = handler;
 
         uint32_t cycles = 0;
@@ -2873,7 +2956,7 @@ void test_cycle_kernel_golden_interrupt_boundary() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address handler = pc + 16;
         constexpr std::array<simrv::xlen::Instruction, 6> program = {
             0x00100093,  // addi x1, x0, 1 (retires before interrupt)
@@ -2888,7 +2971,7 @@ void test_cycle_kernel_golden_interrupt_boundary() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
         machine.cpu.state().mtvec = handler;
         machine.cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
         machine.cpu.state().mie |= simrv::core::MipBit::Mtip;
@@ -2941,7 +3024,7 @@ void test_cycle_policy_architectural_equivalence() {
         machine.cpu.pipeline_sim.config.record_snapshots =
             engine == simrv::core::ExecutionEngine::CycleObservable;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address data_address = pc + 0x100;
         constexpr std::array<simrv::xlen::Instruction, 7> program = {
             0x02a00093,  // addi  x1, x0, 42
@@ -2957,7 +3040,7 @@ void test_cycle_policy_architectural_equivalence() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, instruction_line.data(),
                                   simrv::memory::MesiState::Exclusive);
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t guard = 0;
         while (machine.cpu.e_icount < 5 && guard++ < 64) {
@@ -3037,7 +3120,7 @@ void test_dynamic_mode_switching_cache_behavior() {
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
     machine.cpu.pipeline_sim.config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Address data_address = pc + 0x100;
     constexpr std::array<simrv::xlen::Instruction, 7> program = {
         0x02a00093,  // addi  x1, x0, 42
@@ -3052,7 +3135,7 @@ void test_dynamic_mode_switching_cache_behavior() {
     machine.record_loaded_segment(simrv::xlen::PhysAddr{pc}, sizeof(program), true);
     machine.record_loaded_segment(simrv::xlen::PhysAddr{data_address},
                                   simrv::memory::CoherenceHub::kLineBytes, false);
-    machine.cpu.state().pc = pc;
+    machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
     // Step 2 instructions in fast functional mode
     machine.cpu.run_cycle(machine);
@@ -3123,7 +3206,7 @@ void test_instruction_policy_architectural_equivalence() {
         machine.memory().initialize_mmu();
         machine.runtime_profile.engine = engine;
 
-        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
         constexpr std::array<simrv::xlen::Instruction, 6> program = {
             0x02a00093,  // addi  x1, x0, 42
             0x00000117,  // auipc x2, 0
@@ -3133,7 +3216,7 @@ void test_instruction_policy_architectural_equivalence() {
             0x0000006f,  // jal   x0, 0
         };
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.state().pc = pc;
+        machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t guard = 0;
         while (machine.cpu.e_icount < 8 && guard++ < 16) {
@@ -3144,7 +3227,7 @@ void test_instruction_policy_architectural_equivalence() {
         return Result{.x1 = machine.cpu.state().regs.read(simrv::xlen::RegId::Ra),
                       .x2 = machine.cpu.state().regs.read(simrv::xlen::RegId::Sp),
                       .x3 = machine.cpu.state().regs.read(simrv::xlen::RegId::Gp),
-                      .pc = machine.cpu.state().pc,
+                      .pc = machine.cpu.state().pc.raw(),
                       .memory_value = memory_value,
                       .retired = machine.cpu.e_icount,
                       .cycles = machine.cpu.clint_mmio.mcycle};
@@ -3299,21 +3382,21 @@ void test_pcie_and_virtio_pci() {
     assert(rc.get_device(0, 8, 0) == nullptr);
 
     // MMIO read/write routed to BAR 0
-    rc.mmio_write(0x40001000 + 0x00, 1, 4);
-    assert(rc.mmio_read(0x40001000 + 0x04, 4) ==
+    rc.mmio_write(simrv::xlen::PhysAddr{0x40001000 + 0x00}, 1, 4);
+    assert(rc.mmio_read(simrv::xlen::PhysAddr{0x40001000 + 0x04}, 4) ==
            simrv::device::virtio::kVirtioFVersion1FeatureWord);
 
     // Virtqueue 64-bit address writes via split 32-bit MMIO
-    rc.mmio_write(0x40001000 + 0x16, 0, 2);
-    rc.mmio_write(0x40001000 + 0x20, 0x80001234U, 4);
-    rc.mmio_write(0x40001000 + 0x24, 0x00000001U, 4);
+    rc.mmio_write(simrv::xlen::PhysAddr{0x40001000 + 0x16}, 0, 2);
+    rc.mmio_write(simrv::xlen::PhysAddr{0x40001000 + 0x20}, 0x80001234U, 4);
+    rc.mmio_write(simrv::xlen::PhysAddr{0x40001000 + 0x24}, 0x00000001U, 4);
     assert(blk->get_queue_state(0)->desc_addr == 0x180001234ULL);
 
 #if SIMRV_XLEN == 64
     // 64-bit MMIO access
-    rc.mmio_write(0x40001000 + 0x20, 0x180005678ULL, 8);
+    rc.mmio_write(simrv::xlen::PhysAddr{0x40001000 + 0x20}, 0x180005678ULL, 8);
     assert(blk->get_queue_state(0)->desc_addr == 0x180005678ULL);
-    assert(rc.mmio_read(0x40001000 + 0x20, 8) == 0x180005678ULL);
+    assert(rc.mmio_read(simrv::xlen::PhysAddr{0x40001000 + 0x20}, 8) == 0x180005678ULL);
 #endif
 
     // Test INTx assertion and deassertion on reading ISR offset 0x200
@@ -3322,17 +3405,19 @@ void test_pcie_and_virtio_pci() {
     assert(((plic.plic_pending[0] >> 17) & 1) == 0);
     blk->trigger_irq();
     assert(((plic.plic_pending[0] >> 17) & 1) == 1);
-    const auto isr_status = rc.mmio_read(0x40001000 + 0x200, 4);
+    const auto isr_status = rc.mmio_read(simrv::xlen::PhysAddr{0x40001000 + 0x200}, 4);
     (void)isr_status;
     assert(((plic.plic_pending[0] >> 17) & 1) == 0);
 
     // Test MSI capability configuration and MSI interrupt delivery to IMSIC
     assert(!blk->is_msi_enabled());
     assert(rc.ecam_read(0x8000 + 0x84, 1) == 0x05);  // MSI Cap ID
-    rc.ecam_write(0x8000 + 0x84 + 0x04, static_cast<uint32_t>(simrv::mmio::kImsicSBaseAddress), 4);
+    rc.ecam_write(0x8000 + 0x84 + 0x04,
+                  static_cast<uint32_t>(simrv::mmio::kImsicSBaseAddress.raw()), 4);
     rc.ecam_write(
         0x8000 + 0x84 + 0x08,
-        static_cast<uint32_t>(static_cast<uint64_t>(simrv::mmio::kImsicSBaseAddress) >> 32), 4);
+        static_cast<uint32_t>(static_cast<uint64_t>(simrv::mmio::kImsicSBaseAddress.raw()) >> 32),
+        4);
     rc.ecam_write(0x8000 + 0x84 + 0x0C, 9, 2);        // Message data: vector 9
     rc.ecam_write(0x8000 + 0x84 + 0x02, 0x0081U, 2);  // Enable MSI + 64-bit capable
     assert(blk->is_msi_enabled());
@@ -3454,7 +3539,7 @@ void test_pcie_and_virtio_pci() {
     // Assign address: 0x40020000
     rc.ecam_write(0x40000 + 0x10, 0x40020000U, 4);
     rc.ecam_write(0x40000 + 0x14, 0x00000000U, 4);
-    assert(rc.mmio_read(0x40020000, 4) == 0xCAFEBABE);
+    assert(rc.mmio_read(simrv::xlen::PhysAddr{0x40020000}, 4) == 0xCAFEBABE);
 
     std::cout << "[PASS] test_pcie_and_virtio_pci\n";
 }
@@ -3520,11 +3605,11 @@ void test_virtio_mmio_v2() {
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
 
-    simrv::device::VirtioMmioBlock blk(0x10001000, 2, &machine);
-    simrv::device::VirtioMmioConsole con(0x10002000, 1, &machine);
-    simrv::device::VirtioMmioRng rng(0x10003000, 4, &machine);
-    simrv::device::VirtioMmioNet net(0x10007000, 8, &machine);
-    simrv::device::VirtioMmioGpu gpu(0x10008000, 10, &machine);
+    simrv::device::VirtioMmioBlock blk(simrv::xlen::PhysAddr{0x10001000}, 2, &machine);
+    simrv::device::VirtioMmioConsole con(simrv::xlen::PhysAddr{0x10002000}, 1, &machine);
+    simrv::device::VirtioMmioRng rng(simrv::xlen::PhysAddr{0x10003000}, 4, &machine);
+    simrv::device::VirtioMmioNet net(simrv::xlen::PhysAddr{0x10007000}, 8, &machine);
+    simrv::device::VirtioMmioGpu gpu(simrv::xlen::PhysAddr{0x10008000}, 10, &machine);
 
     // Test Magic (0x74726976) and Version 2
     assert(blk.read32(0x00) == 0x74726976);
@@ -3609,7 +3694,7 @@ void test_virtio_mmio_v2() {
     ::close(disk_fd);
     check_block(blk.load_disk(disk_path), "attach MMIO block test image");
 
-    const simrv::xlen::Address ram_base = machine.memory_geometry().dram_base;
+    const simrv::xlen::Address ram_base = machine.memory_geometry().dram_base.raw();
     const auto guest_pointer = [&](simrv::xlen::Address address) {
         return ram.data() + static_cast<size_t>(address - ram_base);
     };
@@ -3779,8 +3864,8 @@ void test_ia_multihart_lr_sc_coherence() {
     secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
     machine.secondary_harts_.push_back(std::move(secondary));
 
-    constexpr simrv::xlen::Address target_addr = simrv::memory::kDramBaseAddress + 0x200;
-    constexpr simrv::xlen::Address physical_page = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address target_addr = (simrv::memory::kDramBaseAddress + 0x200).raw();
+    constexpr simrv::xlen::Address physical_page = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Address lr_alias = 0x400200;
     constexpr simrv::xlen::Address store_alias = 0x500200;
     constexpr uint32_t initial_val = 42;
@@ -3793,7 +3878,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
-    h0.pipeline_context.mem_addr = target_addr;
+    h0.pipeline_context.mem_addr = simrv::xlen::VirtAddr{target_addr};
     h0.pipeline_context.rrs1 = target_addr;
     h0.run_memory_stage(machine);
     check(h0.pipeline_context.mem_paddr.raw() == target_addr);
@@ -3804,7 +3889,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
-    h0.pipeline_context.mem_addr = target_addr;
+    h0.pipeline_context.mem_addr = simrv::xlen::VirtAddr{target_addr};
     h0.pipeline_context.rrs1 = target_addr;
     h0.pipeline_context.rrs2 = 43;
     h0.run_memory_stage(machine);
@@ -3820,11 +3905,12 @@ void test_ia_multihart_lr_sc_coherence() {
         hart_ref.state().satp = satp;
         const simrv::xlen::Address vpn = vaddr >> 12;
         const auto tlb_index = simrv::core::CPU::soft_tlb_index(vpn);
-        simrv::xlen::Byte* host_page = machine.ram_view().unchecked_ptr(physical_page);
+        simrv::xlen::Byte* host_page =
+            machine.ram_view().unchecked_ptr(simrv::xlen::PhysAddr{physical_page});
         hart_ref.soft_tlb_read[tlb_index].set(vpn, 0, kPrivSupervisor, hart_ref.soft_tlb_epoch,
-                                              physical_page, host_page);
+                                              simrv::xlen::PhysAddr{physical_page}, host_page);
         hart_ref.soft_tlb_write[tlb_index].set(vpn, 0, kPrivSupervisor, hart_ref.soft_tlb_epoch,
-                                               physical_page, host_page);
+                                               simrv::xlen::PhysAddr{physical_page}, host_page);
         hart_ref.tlb.insert_data_r(simrv::xlen::VirtAddr{vaddr},
                                    simrv::xlen::PhysAddr{physical_page}, 0, kPrivSupervisor);
         hart_ref.tlb.insert_data_w(simrv::xlen::VirtAddr{vaddr},
@@ -3838,7 +3924,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
-    h0.pipeline_context.mem_addr = lr_alias;
+    h0.pipeline_context.mem_addr = simrv::xlen::VirtAddr{lr_alias};
     h0.pipeline_context.rrs1 = lr_alias;
     h0.pipeline_context.rd = simrv::xlen::RegId::A1;
     h0.run_memory_stage(machine);
@@ -3853,7 +3939,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h1.pipeline_context = {};
     h1.pipeline_context.opcode = simrv::isa::Opcode::Store;
     h1.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
-    h1.pipeline_context.mem_addr = store_alias;
+    h1.pipeline_context.mem_addr = simrv::xlen::VirtAddr{store_alias};
     h1.pipeline_context.rrs1 = store_alias;
     h1.pipeline_context.rrs2 = 99;
     h1.run_memory_stage(machine);
@@ -3867,7 +3953,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
-    h0.pipeline_context.mem_addr = lr_alias;
+    h0.pipeline_context.mem_addr = simrv::xlen::VirtAddr{lr_alias};
     h0.pipeline_context.rrs1 = lr_alias;
     h0.pipeline_context.rrs2 = 100;
     h0.pipeline_context.rd = simrv::xlen::RegId::A2;
@@ -3884,14 +3970,14 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
-    h0.pipeline_context.mem_addr = lr_alias;
+    h0.pipeline_context.mem_addr = simrv::xlen::VirtAddr{lr_alias};
     h0.pipeline_context.rrs1 = lr_alias;
     h0.run_memory_stage(machine);
     h0.pipeline_context = {};
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
-    h0.pipeline_context.mem_addr = store_alias;
+    h0.pipeline_context.mem_addr = simrv::xlen::VirtAddr{store_alias};
     h0.pipeline_context.rrs1 = store_alias;
     h0.pipeline_context.rrs2 = 101;
     h0.run_memory_stage(machine);
@@ -3926,7 +4012,7 @@ void test_ia_multithreaded_smp_execution() {
     }
 
     // Binary: each hart runs 500 atomic increments to 0x80000200
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr std::array<simrv::xlen::Instruction, 10> program = {
         0x1f400093,  // addi x1, x0, 500
         0x00100213,  // addi x4, x0, 1
@@ -3942,7 +4028,7 @@ void test_ia_multithreaded_smp_execution() {
     std::memcpy(ram.data(), program.data(), sizeof(program));
 
     for (size_t i = 0; i < kNumHarts; ++i) {
-        machine.hart(i).state().pc = pc;
+        machine.hart(i).state().pc = simrv::xlen::VirtAddr{pc};
     }
 
     // Start background SMP threads
@@ -4004,7 +4090,7 @@ void test_quantum_smp_baremetal_execution() {
     }
 
     // Binary: each hart runs 250 atomic increments to 0x80000200
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr std::array<simrv::xlen::Instruction, 10> program = {
         0x0fa00093,  // addi x1, x0, 250
         0x00100213,  // addi x4, x0, 1
@@ -4020,7 +4106,7 @@ void test_quantum_smp_baremetal_execution() {
     std::memcpy(ram.data(), program.data(), sizeof(program));
 
     for (size_t i = 0; i < kNumHarts; ++i) {
-        machine.hart(i).state().pc = pc;
+        machine.hart(i).state().pc = simrv::xlen::VirtAddr{pc};
     }
 
     // Run execution turns using OsRunner quantum batching
@@ -4070,11 +4156,11 @@ void test_smp_instruction_limit_is_machine_wide() {
     secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
     machine.secondary_harts_.push_back(std::move(secondary));
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Instruction loop = 0x0000006f;  // jal x0, 0
     std::memcpy(ram.data(), &loop, sizeof(loop));
-    machine.hart(0).state().pc = pc;
-    machine.hart(1).state().pc = pc;
+    machine.hart(0).state().pc = simrv::xlen::VirtAddr{pc};
+    machine.hart(1).state().pc = simrv::xlen::VirtAddr{pc};
 
     machine.execute_cycle_for_testing();
     machine.finalize_for_testing();
@@ -4099,7 +4185,7 @@ void test_load_after_amo_readonly_page() {
     machine.memory().initialize_mmu();
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Address ro_page = pc + 0x2000;
     constexpr simrv::xlen::Address root = pc + 0x1000;
 
@@ -4122,7 +4208,7 @@ void test_load_after_amo_readonly_page() {
     std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
 
     machine.cpu.state().priv = kPrivSupervisor;
-    machine.cpu.state().pc = pc;
+    machine.cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
     // Simulate an earlier AMO instruction leaving Opcode::Amo in pipeline_context
     machine.cpu.pipeline_context.opcode = simrv::isa::Opcode::Amo;
@@ -4157,7 +4243,7 @@ void test_virtio_sound_negotiation_and_playback() {
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.memory().initialize_mmu();
 
-    simrv::device::VirtioMmioSound sound(0x10006000, 6, &machine);
+    simrv::device::VirtioMmioSound sound(simrv::xlen::PhysAddr{0x10006000}, 6, &machine);
 
     // 1. MMIO Discovery
     check(sound.read32(0x00) == 0x74726976);                          // "virt" magic
@@ -4570,7 +4656,8 @@ void test_pflash_cfi_query() {
 
     constexpr uint32_t kSize = 32 * 1024 * 1024;
     constexpr uint32_t kSectorSize = 64 * 1024;
-    simrv::device::PFlash pflash(machine, 0x20000000, kSize, kSectorSize, false, "pflash0");
+    simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x20000000}, kSize, kSectorSize,
+                                 false, "pflash0");
 
     check(pflash.read8(0x0) == 0xFF);
     pflash.write8(0x0, 0x98);  // Enter CFI query mode
@@ -4596,7 +4683,8 @@ void test_pflash_read_status_and_id() {
     cfg.execution.appmode = true;
     simrv::core::Machine machine{cfg};
 
-    simrv::device::PFlash pflash(machine, 0x20000000, 1024 * 1024, 64 * 1024, false, "pflash0");
+    simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x20000000}, 1024 * 1024, 64 * 1024,
+                                 false, "pflash0");
     pflash.write8(0x0, 0x70);
     check(pflash.read8(0x0) == 0x80);
 
@@ -4614,7 +4702,8 @@ void test_pflash_program_and_erase() {
 
     constexpr uint32_t kSize = 128 * 1024;
     constexpr uint32_t kSectorSize = 64 * 1024;
-    simrv::device::PFlash pflash(machine, 0x20000000, kSize, kSectorSize, false, "pflash0");
+    simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x20000000}, kSize, kSectorSize,
+                                 false, "pflash0");
 
     pflash.write8(0x100, 0x40);
     pflash.write8(0x100, 0xA5);
@@ -4638,7 +4727,8 @@ void test_pflash_persistence() {
     const auto test_file = temp_dir.path() / "pflash_test.bin";
 
     {
-        simrv::device::PFlash pflash(machine, 0x22000000, 64 * 1024, 64 * 1024, false, "pflash1");
+        simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x22000000}, 64 * 1024,
+                                     64 * 1024, false, "pflash1");
         pflash.set_backing_file(test_file);
 
         pflash.write8(0x10, 0x40);

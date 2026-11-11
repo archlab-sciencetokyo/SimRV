@@ -458,14 +458,14 @@ auto vlmul_name(Vlmul lmul) -> std::string {
     }
 }
 
-auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned active_xlen,
+auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned active_xlen,
                             const simrv::core::ArchState* st, const simrv::core::CPU* cpu,
                             const simrv::core::Machine* machine) -> InstructionExplanation {
     using namespace simrv::pipeline::operation;
     InstructionExplanation expl{};
     expl.pc = pc;
     if (machine != nullptr) {
-        expl.symbol = machine->symbol_table().lookup(simrv::xlen::VirtAddr{pc});
+        expl.symbol = machine->symbol_table().lookup(pc);
     }
     expl.raw_bits = raw_inst;
     expl.is_compressed = (raw_inst & 0x3U) != 0x3U;
@@ -573,7 +573,8 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                                      simrv::isa::is_hypervisor_memory_op(expl.op_id) ||
                                      simrv::isa::is_cmo_op(expl.op_id);
         mem.offset = zero_offset_mem ? 0 : expl.imm;
-        mem.effective_vaddr = simrv::xlen::VirtAddr{mem.base_address + static_cast<simrv::xlen::Address>(mem.offset)};
+        mem.effective_vaddr =
+            simrv::xlen::VirtAddr{mem.base_address + static_cast<simrv::xlen::Address>(mem.offset)};
         if (active_xlen == 32) {
             mem.effective_vaddr &= 0xFFFFFFFFULL;
         }
@@ -592,12 +593,12 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         if (mem.effective_paddr.has_value()) {
             const auto pmp_access =
                 is_write ? simrv::core::PmpAccessType::Write : simrv::core::PmpAccessType::Read;
-            mem.pmp_permitted = simrv::core::pmp::check_access(
-                *st, *mem.effective_paddr, mem.access_bytes, pmp_access);
+            mem.pmp_permitted = simrv::core::pmp::check_access(*st, *mem.effective_paddr,
+                                                               mem.access_bytes, pmp_access);
             if (mem.pmp_permitted && machine != nullptr && mem.access_bytes <= 8U &&
-                machine->ram_view().contains(mem.effective_paddr->raw(), mem.access_bytes)) {
+                machine->ram_view().contains(*mem.effective_paddr, mem.access_bytes)) {
                 uint64_t raw_mem = 0;
-                std::memcpy(&raw_mem, machine->ram_view().unchecked_ptr(mem.effective_paddr->raw()),
+                std::memcpy(&raw_mem, machine->ram_view().unchecked_ptr(*mem.effective_paddr),
                             mem.access_bytes);
                 mem.memory_preview_value = raw_mem;
             }
@@ -618,12 +619,14 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
             ctrl.condition_met = true;
             ctrl.condition_relation = "unconditional indirect jump";
         } else if (expl.op_id == JAL) {
-            ctrl.target_pc = simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
+            ctrl.target_pc =
+                simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "unconditional relative jump";
         } else if (is_branch(expl.op_id)) {
-            ctrl.target_pc = simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
+            ctrl.target_pc =
+                simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
             ctrl.is_conditional = true;
             ctrl.condition_met = simrv::execute::ExecuteUnitInt::branchTaken(
                 expl.rs1.raw_value, expl.rs2.raw_value, expl.funct3, active_xlen);
@@ -767,7 +770,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     } else if (expl.op_id == EBREAK) {
         expl.predicted_effect.predicted_trap =
             simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::Breakpoint);
-        expl.predicted_effect.predicted_tval = pc;
+        expl.predicted_effect.predicted_tval = pc.raw();
     } else if (expl.csr.has_value() &&
                (expl.csr->access_exception.has_value() || !expl.csr->privilege_permitted ||
                 !expl.csr->write_permitted)) {
@@ -805,9 +808,9 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                 static_cast<simrv::xlen::Register>(expl.imm);
         } else if (expl.op_id == AUIPC) {
             expl.predicted_effect.predicted_reg_value =
-                pc + static_cast<simrv::xlen::Register>(expl.imm);
+                pc.raw() + static_cast<simrv::xlen::Register>(expl.imm);
         } else if (expl.op_id == JAL || expl.op_id == JALR) {
-            expl.predicted_effect.predicted_reg_value = pc + step_bytes;
+            expl.predicted_effect.predicted_reg_value = pc.raw() + step_bytes;
         } else if (expl.csr.has_value() && expl.csr->current_value.has_value()) {
             expl.predicted_effect.predicted_reg_value = *expl.csr->current_value;
         } else if (is_pure_int_alu(expl.op_id)) {
@@ -880,13 +883,13 @@ auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::VirtAddr pc, un
 
 auto explain_static(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned xlen)
     -> InstructionExplanation {
-    return build_explanation_impl(raw_inst, pc.raw(), xlen, nullptr, nullptr, nullptr);
+    return build_explanation_impl(raw_inst, pc, xlen, nullptr, nullptr, nullptr);
 }
 
 auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::VirtAddr pc,
                       uint32_t raw_inst, const simrv::core::CPU* cpu,
                       const simrv::core::Machine* machine) -> InstructionExplanation {
-    return build_explanation_impl(raw_inst, pc.raw(), state.current_xlen(), &state, cpu, machine);
+    return build_explanation_impl(raw_inst, pc, state.current_xlen(), &state, cpu, machine);
 }
 
 auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
@@ -911,11 +914,11 @@ auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
                                             simrv::core::PmpAccessType::Execute)) {
             return std::nullopt;
         }
-        if (!machine.ram_view().contains(paddr->raw(), sizeof(uint16_t))) {
+        if (!machine.ram_view().contains(*paddr, sizeof(uint16_t))) {
             return std::nullopt;
         }
         uint16_t value = 0;
-        std::memcpy(&value, machine.ram_view().unchecked_ptr(paddr->raw()), sizeof(value));
+        std::memcpy(&value, machine.ram_view().unchecked_ptr(*paddr), sizeof(value));
         return value;
     };
 

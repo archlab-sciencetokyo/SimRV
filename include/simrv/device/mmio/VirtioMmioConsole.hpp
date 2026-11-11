@@ -15,7 +15,7 @@ namespace simrv::device {
  */
 class VirtioMmioConsole : public VirtioMmioDevice {
    public:
-    VirtioMmioConsole(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioConsole(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine);
 
     void send_input(uint8_t ch);
     [[nodiscard]] auto has_input() const -> bool { return backend_.has_rx(); }

@@ -34,17 +34,15 @@ class Plic : public memory::TileLinkNode {
 
     void set_sink(core::IInterruptController* sink) noexcept { sink_ = sink; }
 
-    static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kPlicBaseAddress;
+    static constexpr simrv::xlen::PhysAddr kBaseAddress = simrv::mmio::kPlicBaseAddress;
     static constexpr simrv::xlen::Address kSize = simrv::mmio::kPlicSize;
     static constexpr uint32_t kNumSources = core::kPlicSourceCount;
     static constexpr size_t kMaxPlicContexts = core::topology::kMaxPlicContexts;
 
     [[nodiscard]] auto name() const -> const char* final { return "plic"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr final {
-        return simrv::xlen::PhysAddr{base_address_};
-    }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr final { return base_address_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address final { return size_; }
-    void configure_address_map(simrv::xlen::Address base, simrv::xlen::Address size) noexcept {
+    void configure_address_map(simrv::xlen::PhysAddr base, simrv::xlen::Address size) noexcept {
         base_address_ = base;
         size_ = size;
     }
@@ -53,12 +51,11 @@ class Plic : public memory::TileLinkNode {
 
     using TileLinkNode::contains;
     [[nodiscard]] auto contains(simrv::xlen::PhysAddr address) const -> bool override {
-        const auto addr = address.raw();
-        return addr >= base_address_ && addr - base_address_ < size_;
+        return address >= base_address_ && address.raw() - base_address_.raw() < size_;
     }
 
-    [[nodiscard]] auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
-        return addr - base_address_;
+    [[nodiscard]] auto offset(simrv::xlen::PhysAddr addr) const -> simrv::xlen::Address {
+        return addr.raw() - base_address_.raw();
     }
 
     auto mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word;
@@ -88,7 +85,7 @@ class Plic : public memory::TileLinkNode {
    private:
     core::IInterruptController* sink_{nullptr};
     core::CPU* cpu_{nullptr};
-    simrv::xlen::Address base_address_ = kBaseAddress;
+    simrv::xlen::PhysAddr base_address_ = kBaseAddress;
     simrv::xlen::Address size_ = kSize;
     [[nodiscard]] auto get_context_for_offset(simrv::xlen::Address offset) const
         -> std::optional<simrv::xlen::PlicContextId>;

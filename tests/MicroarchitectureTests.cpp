@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -57,10 +58,22 @@ using simrv::pipeline::CpuModelPreset;
 using simrv::pipeline::PipelineType;
 
 namespace {
+template <typename Address>
+concept InstructionTimingAddress =
+    requires(simrv::cache::TimingCache& cache, simrv::cache::TimingCacheHierarchy& hierarchy,
+             Address address) {
+        cache.access(address);
+        hierarchy.access(address, true);
+    };
+
+static_assert(InstructionTimingAddress<simrv::xlen::VirtAddr>);
+static_assert(!InstructionTimingAddress<simrv::xlen::PhysAddr>);
+static_assert(!InstructionTimingAddress<simrv::xlen::Address>);
+
 class TestCustomMmio final : public simrv::memory::MmioDevice {
    public:
     explicit TestCustomMmio(const simrv::core::SoCDeviceConfig& config)
-        : name_(config.name), base_(config.base), size_(config.size) {}
+        : name_(config.name), base_(config.base.raw()), size_(config.size) {}
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
     [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
         return simrv::xlen::PhysAddr{base_};
@@ -78,11 +91,11 @@ class TestCustomMmio final : public simrv::memory::MmioDevice {
 void test_timing_front_cache() {
     simrv::cache::TimingCache cache;
     cache.configure(1024, 1, 16);
-    TEST_CHECK(!cache.access(0x80000000).hit);
-    TEST_CHECK(cache.access(0x80000004).hit);
-    TEST_CHECK(!cache.access(0x80000010).hit);
+    TEST_CHECK(!cache.access(simrv::xlen::VirtAddr{0x80000000}).hit);
+    TEST_CHECK(cache.access(simrv::xlen::VirtAddr{0x80000004}).hit);
+    TEST_CHECK(!cache.access(simrv::xlen::VirtAddr{0x80000010}).hit);
     cache.flush();
-    TEST_CHECK(!cache.access(0x80000004).hit);
+    TEST_CHECK(!cache.access(simrv::xlen::VirtAddr{0x80000004}).hit);
 
     const std::array levels{
         simrv::cache::TimingLevelConfig{1024, 1, 16, 1, 27},
@@ -91,10 +104,10 @@ void test_timing_front_cache() {
     simrv::cache::TimingCacheHierarchy hierarchy;
     const std::array<uint32_t, 2> startup_refills{1, 41};
     hierarchy.configure(levels, 1, startup_refills);
-    TEST_CHECK(hierarchy.access(0x80000000, true).latency == 1);
-    TEST_CHECK(hierarchy.access(0x80000004, false).hit_level == 0);
-    TEST_CHECK(hierarchy.access(0x80000020, true).latency == 41);
-    TEST_CHECK(hierarchy.access(0x80000030, false).hit_level == 1);
+    TEST_CHECK(hierarchy.access(simrv::xlen::VirtAddr{0x80000000}, true).latency == 1);
+    TEST_CHECK(hierarchy.access(simrv::xlen::VirtAddr{0x80000004}, false).hit_level == 0);
+    TEST_CHECK(hierarchy.access(simrv::xlen::VirtAddr{0x80000020}, true).latency == 41);
+    TEST_CHECK(hierarchy.access(simrv::xlen::VirtAddr{0x80000030}, false).hit_level == 1);
 }
 
 void test_rvcomp_profile_validation() {
@@ -306,7 +319,7 @@ void test_soc_manifest_export() {
     custom_soc.disable_unlisted_devices = true;
     custom_soc.devices = {{simrv::core::SoCDeviceKind::CustomMmio,
                            "custom-timer",
-                           0x20003000,
+                           simrv::xlen::PhysAddr{0x20003000},
                            0x1000,
                            0,
                            true,
@@ -363,12 +376,13 @@ void test_rvcomp_reset_and_ethernet_extensions() {
     simrv::core::Machine machine(simrv::core::MachineConfig{
         .soc = simrv::core::SoCConfig::rvcomp(),
     });
-    simrv::device::ResetControlMmio reset(machine, 0x10000100);
+    simrv::device::ResetControlMmio reset(machine, simrv::xlen::PhysAddr{0x10000100});
     reset.write32(0, 0xdeadbeef);
     TEST_CHECK(machine.reboot_requested);
 
     simrv::device::RingBufferEthernetMmio ethernet(
-        machine, "ethernet", 0x14000000, 0x4000, 2, 0x18000000, 0x4000, 0x1c000000, 0x2000,
+        machine, "ethernet", simrv::xlen::PhysAddr{0x14000000}, 0x4000, 2,
+        simrv::xlen::PhysAddr{0x18000000}, 0x4000, simrv::xlen::PhysAddr{0x1c000000}, 0x2000,
         {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, simrv::device::virtio::NetBackend::Mode::User);
     auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
     auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
@@ -385,7 +399,8 @@ void test_rvcomp_reset_and_ethernet_extensions() {
 }
 
 void test_dummy_mmio_behavior() {
-    simrv::device::DummyMmio device("watchdog", 0x30000000, 0x1000, 0x12345678);
+    simrv::device::DummyMmio device("watchdog", simrv::xlen::PhysAddr{0x30000000}, 0x1000,
+                                    0x12345678);
     TEST_CHECK(std::string_view(device.name()) == "watchdog");
     TEST_CHECK(device.base_address() == 0x30000000 && device.size() == 0x1000);
     TEST_CHECK(device.read32(0) == 0x12345678);
@@ -453,7 +468,7 @@ void test_rvcomp_uart_plugin() {
     capture->output.clear();
     std::memcpy(machine.ram_data(), guest.data(), sizeof(guest));
     auto& cpu = machine.primary_hart();
-    cpu.state().pc = simrv::memory::kDramBaseAddress;
+    cpu.state().pc = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     for (int i = 0; i < 1000; ++i) cpu.run_cycle(machine);
     TEST_CHECK(capture->output.empty());
     uart->push_rx_byte('Q');
@@ -490,7 +505,7 @@ void test_rvcomp_mmc_plugin_and_device() {
     full_cfg.kind = simrv::core::SoCDeviceKind::CustomMmio;
     full_cfg.name = "rvcomp-mmc";
     full_cfg.compatible = "isct,rvcomp-mmc";
-    full_cfg.base = 0xa0000000;
+    full_cfg.base = simrv::xlen::PhysAddr{0xa0000000};
     full_cfg.size = 0x2000;
     full_cfg.enabled = true;
 

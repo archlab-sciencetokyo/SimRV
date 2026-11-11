@@ -12,7 +12,7 @@
 
 namespace simrv::device {
 
-DmaController::DmaController(core::Machine* machine, simrv::xlen::Address base_address,
+DmaController::DmaController(core::Machine* machine, simrv::xlen::PhysAddr base_address,
                              simrv::xlen::Address size, uint32_t irq_num)
     : memory::MmioDevice(machine), base_address_(base_address), size_(size), irq_num_(irq_num) {}
 

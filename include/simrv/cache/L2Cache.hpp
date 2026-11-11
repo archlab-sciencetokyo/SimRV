@@ -19,8 +19,8 @@ class L2Cache : public BaseCache<1024, 64, 8> {
 
     [[nodiscard]] auto read_line(simrv::xlen::PhysAddr line_base,
                                  std::array<simrv::xlen::Byte, kLineBytes>& out_data) -> bool {
-        const uint32_t set_idx = get_set_index(line_base.raw());
-        const auto tag = get_tag(line_base.raw());
+        const uint32_t set_idx = get_set_index(line_base);
+        const auto tag = get_tag(line_base);
         last_accessed_set_ = set_idx;
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);

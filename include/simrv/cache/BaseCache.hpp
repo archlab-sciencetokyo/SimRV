@@ -23,6 +23,7 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/memory/Bus.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
@@ -114,7 +115,7 @@ class BaseCache {
 
     void insert(simrv::xlen::PhysAddr address, const simrv::xlen::Byte* line_data,
                 simrv::memory::MesiState init_state = simrv::memory::MesiState::Exclusive) {
-        const auto base_addr = address.raw();
+        const auto base_addr = address;
         ++access_tick_;
         const uint32_t set_idx = get_set_index(base_addr);
         const auto tag = get_tag(base_addr);
@@ -153,7 +154,7 @@ class BaseCache {
             last_eviction_ =
                 EvictedLine{.address = victim->tag, .state = victim->state, .data = victim->data};
         } else {
-            last_evicted_tag_ = ~simrv::xlen::Address{0};
+            last_evicted_tag_ = simrv::xlen::PhysAddr{~simrv::xlen::Address{0}};
         }
         last_replaced_set_ = set_idx;
         last_replaced_way_ = victim_way;
@@ -173,8 +174,8 @@ class BaseCache {
         std::ranges::fill(lines_, CacheLine{});
         last_replaced_set_ = 0xFFFFFFFF;
         last_replaced_way_ = 0xFFFFFFFF;
-        last_evicted_tag_ = ~simrv::xlen::Address{0};
-        last_inserted_tag_ = ~simrv::xlen::Address{0};
+        last_evicted_tag_ = simrv::xlen::PhysAddr{~simrv::xlen::Address{0}};
+        last_inserted_tag_ = simrv::xlen::PhysAddr{~simrv::xlen::Address{0}};
         last_eviction_.reset();
         last_accessed_set_ = 0xFFFFFFFF;
         last_access_was_hit_ = false;
@@ -309,7 +310,7 @@ class BaseCache {
     }
 
     [[nodiscard]] auto line_state(simrv::xlen::PhysAddr address) const -> simrv::memory::MesiState {
-        const auto base_addr = address.raw();
+        const auto base_addr = address;
         const uint32_t set_idx = get_set_index(base_addr);
         const auto tag = get_tag(base_addr);
         const auto [w, line_ptr] = find_matching_line(set_idx, tag);
@@ -321,7 +322,7 @@ class BaseCache {
 
     auto upgrade_line_state(simrv::xlen::PhysAddr address, simrv::memory::MesiState new_state)
         -> bool {
-        const auto base_addr = address.raw();
+        const auto base_addr = address;
         const uint32_t set_idx = get_set_index(base_addr);
         const auto tag = get_tag(base_addr);
         const auto [w, line_ptr] = find_matching_line(set_idx, tag);
@@ -335,7 +336,7 @@ class BaseCache {
 
     auto probe_line(simrv::xlen::PhysAddr address, simrv::memory::MesiState target_state,
                     std::array<simrv::xlen::Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
-        const auto base_addr = address.raw();
+        const auto base_addr = address;
         const uint32_t set_idx = get_set_index(base_addr);
         const auto tag = get_tag(base_addr);
         auto* line_ptr = &lines_[set_idx * active_ways_];
@@ -386,15 +387,15 @@ class BaseCache {
     uint32_t active_ways_ = kWays;
     uint32_t active_sets_ = kNumSets;
 
-    [[nodiscard]] auto get_set_index(simrv::xlen::Address addr) const
+    [[nodiscard]] auto get_set_index(simrv::xlen::PhysAddr addr) const
         -> simrv::memory::CacheSetIndex {
-        return static_cast<simrv::memory::CacheSetIndex>((addr >> kLineShift) &
+        return static_cast<simrv::memory::CacheSetIndex>((addr.raw() >> kLineShift) &
                                                          (active_sets_ - 1u));
     }
 
-    [[nodiscard]] constexpr auto get_tag(simrv::xlen::Address addr) const
+    [[nodiscard]] constexpr auto get_tag(simrv::xlen::PhysAddr addr) const
         -> simrv::memory::CacheTag {
-        return simrv::xlen::PhysAddr{addr &
+        return simrv::xlen::PhysAddr{addr.raw() &
                                      ~static_cast<simrv::xlen::Address>((1u << kLineShift) - 1u)};
     }
 };

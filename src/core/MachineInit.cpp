@@ -258,7 +258,7 @@ auto validate_elf_isa(const std::string& path, uint64_t selected_misa)
 void apply_cpu_model_dram_defaults(MachineConfig& config,
                                    const simrv::pipeline::CpuModelConfig& model) {
     if (model.mmio_console_redirect) {
-        config.memory.dram_base = 0;
+        config.memory.dram_base = simrv::xlen::PhysAddr{0};
     }
 }
 
@@ -277,15 +277,13 @@ void apply_cpu_model_runtime_config(Machine& machine, MachineConfig& config,
 
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                     const simrv::debug::SymbolTable& symbols) {
-    simrv::xlen::Address start_pc = machine.execution_config().start_pc;
+    simrv::xlen::VirtAddr start_pc = machine.execution_config().start_pc;
     if (start_pc == simrv::boot::kStartPc || start_pc == 0) {
-        simrv::xlen::Address entry = symbols.entry_point()
-                                         .value_or(symbols.lookup_name("_start").value_or(
-                                             simrv::xlen::VirtAddr{simrv::boot::kStartPc}))
-                                         .raw();
-        const simrv::xlen::Address dram_base = machine.ram_view().base();
+        simrv::xlen::VirtAddr entry = symbols.entry_point().value_or(
+            symbols.lookup_name("_start").value_or(simrv::xlen::VirtAddr{simrv::boot::kStartPc}));
+        const simrv::xlen::Address dram_base = machine.ram_view().base().raw();
         if (dram_base != 0 && entry < dram_base) {
-            entry += dram_base;
+            entry = simrv::xlen::VirtAddr{entry.raw() + dram_base};
         }
         start_pc = entry;
     }
@@ -346,7 +344,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
         auto load_segment = [&](const auto& phdr) {
             if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0) return;
             const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-            const simrv::xlen::Address dram_base = ram_view.base();
+            const simrv::xlen::Address dram_base = ram_view.base().raw();
             simrv::xlen::Address dest_offset = 0;
             if (paddr >= dram_base && (paddr - dram_base) < capacity) {
                 dest_offset = paddr - dram_base;
@@ -1017,22 +1015,24 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
             std::vector<simrv::util::FdtCustomDevice> fdt_devices;
             auto patched = simrv::util::patch_fdt(
-                input_blob, config.memory.dram_base, effective_dram_size,
+                input_blob, config.memory.dram_base.raw(), effective_dram_size,
                 config.execution.num_harts, &fb_info, config.execution.timebase_hz,
                 config.execution.cpu_clock_hz, &fdt_devices, config.files.bootargs);
             if (!patched) return std::unexpected(patched.error());
             final_blob = std::move(*patched);
             for (const auto& dev : fdt_devices) {
-                if (memory().system_bus().router().is_range_mapped(
-                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(dev.base)},
-                        dev.size)) {
+                if (dev.base > std::numeric_limits<simrv::xlen::Address>::max()) {
+                    return std::unexpected("device-tree MMIO base exceeds the guest address width");
+                }
+                const simrv::xlen::PhysAddr base{static_cast<simrv::xlen::Address>(dev.base)};
+                if (memory().system_bus().router().is_range_mapped(base, dev.size)) {
                     continue;
                 }
                 SoCDeviceConfig custom_cfg{};
                 custom_cfg.kind = SoCDeviceKind::CustomMmio;
                 custom_cfg.name = dev.name;
                 custom_cfg.compatible = dev.compatible;
-                custom_cfg.base = dev.base;
+                custom_cfg.base = base;
                 custom_cfg.size = dev.size;
                 custom_cfg.enabled = true;
                 auto extension = device_registry().create_mmio(*this, custom_cfg);
@@ -1064,7 +1064,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                     }
                 } else {
                     auto dummy =
-                        std::make_unique<simrv::device::DummyMmio>(dev.name, dev.base, dev.size, 0);
+                        std::make_unique<simrv::device::DummyMmio>(dev.name, base, dev.size, 0);
                     if (memory().system_bus().add_node(dummy.get())) {
                         runtime_->dummy_mmios.push_back(std::move(dummy));
                     }
@@ -1085,18 +1085,23 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                     ? FramebufferFormat::R5G6B5
                     : FramebufferFormat::A8R8G8B8;
             if (fb_info.base != 0) {
-                framebuffer_geometry_.base = fb_info.base;
+                if (!std::in_range<simrv::xlen::Address>(fb_info.base)) {
+                    return std::unexpected(
+                        "device-tree framebuffer base exceeds the guest address width");
+                }
+                framebuffer_geometry_.base =
+                    simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(fb_info.base)};
             }
         }
         const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
         if (final_blob.size() > dt_cap)
             return std::unexpected("device tree does not fit in guest DRAM");
         const auto initialized_ram = ram_view();
-        const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
-        if (!initialized_ram.contains(dtb_address, final_blob.size()))
+        const simrv::xlen::Address dtb_address = (initialized_ram.base() + dtb_offset).raw();
+        if (!initialized_ram.contains(simrv::xlen::PhysAddr{dtb_address}, final_blob.size()))
             return std::unexpected("device-tree region is outside DRAM");
-        std::memcpy(initialized_ram.unchecked_ptr(dtb_address), final_blob.data(),
-                    final_blob.size());
+        std::memcpy(initialized_ram.unchecked_ptr(simrv::xlen::PhysAddr{dtb_address}),
+                    final_blob.data(), final_blob.size());
 
         if (config.files.uefi_enabled) {
             // OpenSBI FW_DYNAMIC reads this six-word structure from a2, then enters the S-mode
@@ -1105,18 +1110,20 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             constexpr uint64_t kFwDynamicVersion = 2;
             constexpr uint64_t kFwDynamicModeSupervisor = 1;
             constexpr uint64_t kNoPreferredHart = UINT64_MAX;
-            const simrv::xlen::Address fw_info_address = initialized_ram.base() + dtb_offset - 4096;
+            const simrv::xlen::Address fw_info_address =
+                (initialized_ram.base() + dtb_offset - 4096).raw();
             constexpr std::array<uint64_t, 6> fw_info = {kFwDynamicMagic,
                                                          kFwDynamicVersion,
                                                          SIMRV_PLATFORM_PFLASH0_BASE,
                                                          kFwDynamicModeSupervisor,
                                                          0,
                                                          kNoPreferredHart};
-            if (!initialized_ram.contains(fw_info_address, sizeof(fw_info))) {
+            if (!initialized_ram.contains(simrv::xlen::PhysAddr{fw_info_address},
+                                          sizeof(fw_info))) {
                 return std::unexpected("OpenSBI FW_DYNAMIC info does not fit in guest DRAM");
             }
-            std::memcpy(initialized_ram.unchecked_ptr(fw_info_address), fw_info.data(),
-                        sizeof(fw_info));
+            std::memcpy(initialized_ram.unchecked_ptr(simrv::xlen::PhysAddr{fw_info_address}),
+                        fw_info.data(), sizeof(fw_info));
             primary_hart().state().regs.write(simrv::xlen::RegId::A2,
                                               static_cast<simrv::xlen::Register>(fw_info_address));
             primary_hart().use_opensbi = true;

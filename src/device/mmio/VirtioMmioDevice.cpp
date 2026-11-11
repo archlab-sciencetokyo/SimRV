@@ -14,7 +14,7 @@
 
 namespace simrv::device {
 
-VirtioMmioDevice::VirtioMmioDevice(const char* name, simrv::xlen::Address base_address,
+VirtioMmioDevice::VirtioMmioDevice(const char* name, simrv::xlen::PhysAddr base_address,
                                    simrv::xlen::Address size, uint32_t device_id, uint32_t irq_num,
                                    core::Machine* machine)
     : memory::MmioDevice(machine),

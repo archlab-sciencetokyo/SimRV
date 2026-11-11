@@ -11,7 +11,6 @@
 #include <format>
 
 #include "../InspectionTranslation.hpp"
-
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
@@ -111,7 +110,7 @@ void MemoryModal::open(simrv::xlen::VirtAddr initial_addr, simrv::core::Machine&
         if (inspector_pane && inspector_pane->get_inspect_addr() != 0) {
             initial_addr = inspector_pane->get_inspect_addr();
         } else if (machine.memory_geometry().dram_size > 0) {
-            initial_addr = simrv::xlen::VirtAddr{machine.memory_geometry().dram_base};
+            initial_addr = simrv::xlen::VirtAddr{machine.memory_geometry().dram_base.raw()};
         } else {
             initial_addr = simrv::xlen::VirtAddr{0x80000000ULL};
         }
@@ -275,7 +274,8 @@ auto MemoryModal::submit_input(
         if (physical_mode_) {
             paddr_opt = simrv::xlen::PhysAddr{target_addr};
         } else {
-            paddr_opt = translate_for_inspection(machine.primary_hart(), machine, simrv::xlen::VirtAddr{target_addr});
+            paddr_opt = translate_for_inspection(machine.primary_hart(), machine,
+                                                 simrv::xlen::VirtAddr{target_addr});
         }
 
         if (!paddr_opt || !machine.memory_geometry().contains(*paddr_opt)) {
@@ -285,7 +285,7 @@ auto MemoryModal::submit_input(
             return false;
         }
 
-        auto* ptr = machine.ram_view().try_get_ptr(paddr_opt->raw(), 1);
+        auto* ptr = machine.ram_view().try_get_ptr(*paddr_opt, 1);
         if (ptr != nullptr) {
             *ptr = static_cast<std::byte>(byte_val);
             set_status_override_cb(
@@ -344,7 +344,7 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
         std::string ascii_part;
 
         if (paddr_opt.has_value() && machine.memory_geometry().contains(*paddr_opt)) {
-            auto* dram_ptr = machine.ram_view().try_get_ptr(paddr_opt->raw(), 16);
+            auto* dram_ptr = machine.ram_view().try_get_ptr(*paddr_opt, 16);
             std::array<uint8_t, 16> row_bytes{};
             if (dram_ptr != nullptr) {
                 std::memcpy(row_bytes.data(), dram_ptr, 16);
@@ -389,7 +389,7 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
 
     uint64_t val64 = 0;
     if (cur_paddr && machine.memory_geometry().contains(*cur_paddr)) {
-        auto* ptr = machine.ram_view().try_get_ptr(cur_paddr->raw(), 8);
+        auto* ptr = machine.ram_view().try_get_ptr(*cur_paddr, 8);
         if (ptr != nullptr) {
             std::memcpy(&val64, ptr, 8);
         }

@@ -146,20 +146,23 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     out << "  \"device_policy\": "
         << quoted(config.disable_unlisted_devices ? "explicit" : "implicit") << ",\n";
     out << "  \"pcie\": {\n";
-    out << "    \"ecam_base\": " << config.pcie.ecam_base << ",\n";
+    out << "    \"ecam_base\": " << config.pcie.ecam_base.raw() << ",\n";
     out << "    \"ecam_size\": " << config.pcie.ecam_size << ",\n";
-    out << "    \"mmio_base\": " << config.pcie.mmio_base << ",\n";
+    out << "    \"mmio_base\": " << config.pcie.mmio_base.raw() << ",\n";
     out << "    \"mmio_size\": " << config.pcie.mmio_size << ",\n";
     out << "    \"first_bus\": " << static_cast<unsigned>(config.pcie.first_bus) << ",\n";
     out << "    \"last_bus\": " << static_cast<unsigned>(config.pcie.last_bus) << "\n";
     out << "  },\n";
     out << "  \"memory\": {\n";
-    out << "    \"dram_base\": " << (config.dram_base.value_or(0)) << ",\n";
+    out << "    \"dram_base\": "
+        << (config.dram_base ? config.dram_base->raw() : simrv::xlen::Address{0}) << ",\n";
     out << "    \"dram_size\": " << (config.dram_size.value_or(0)) << "\n";
     out << "  },\n";
     out << "  \"boot\": {\n";
-    out << "    \"reset_pc\": " << (config.reset_pc.value_or(0)) << ",\n";
-    out << "    \"tohost\": " << (config.tohost.value_or(0)) << "\n";
+    out << "    \"reset_pc\": "
+        << (config.reset_pc ? config.reset_pc->raw() : simrv::xlen::Address{0}) << ",\n";
+    out << "    \"tohost\": " << (config.tohost ? config.tohost->raw() : simrv::xlen::Address{0})
+        << "\n";
     out << "  },\n";
     out << "  \"devices\": [\n";
     for (size_t i = 0; i < devices.size(); ++i) {
@@ -171,7 +174,7 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
         write_quoted(out, device.name);
         out << ",\n";
         out << "      \"transport\": " << quoted(transport_name(config, device.kind)) << ",\n";
-        out << "      \"base\": " << device.base << ",\n";
+        out << "      \"base\": " << device.base.raw() << ",\n";
         out << "      \"size\": " << device.size << ",\n";
         out << "      \"irq\": " << device.irq << ",\n";
         if (device.kind == simrv::core::SoCDeviceKind::Uart) {
@@ -201,7 +204,7 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
             for (size_t region_index = 0; region_index < device.regions.size(); ++region_index) {
                 const auto& region = device.regions[region_index];
                 if (region_index != 0) out << ", ";
-                out << "{\"name\": " << quoted(region.name) << ", \"base\": " << region.base
+                out << "{\"name\": " << quoted(region.name) << ", \"base\": " << region.base.raw()
                     << ", \"size\": " << region.size << "}";
             }
             out << "],\n";

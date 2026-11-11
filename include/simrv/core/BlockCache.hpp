@@ -40,23 +40,23 @@ static_assert(sizeof(CompactOp) == 16);
  */
 struct alignas(64) BasicBlock {
     simrv::xlen::VirtAddr pc{~simrv::xlen::Register{0}};  ///< Tag: start virtual PC of block
-    BasicBlock* target_bb = nullptr;               ///< Direct pointer to taken branch target block
-    BasicBlock* fallthrough_bb = nullptr;          ///< Direct pointer to fallthrough block
-    BasicBlock* cached_jalr_bb = nullptr;          ///< 1-entry cached JALR return/jump block
-    simrv::xlen::Register target_pc = 0;           ///< Precomputed taken target PC
-    simrv::xlen::Register fallthrough_pc = 0;      ///< Precomputed fallthrough PC
-    simrv::xlen::Register cached_jalr_target = 0;  ///< Last target PC for JALR terminal
-    uint16_t num_guest_ops = 0;                    ///< Architectural guest instruction count
-    uint16_t num_ops = 0;                          ///< Number of instructions (1..16)
-    uint16_t non_branch_ops = 0;                   ///< Precomputed number of non-branch ops
-    uint16_t num_compressed = 0;                   ///< Number of 16-bit compressed instructions
-    uint16_t total_bytes = 0;                   ///< Total guest instruction bytes spanned by block
-    FastOp term_op = FastOp::Other;             ///< FastOp tag of the terminal instruction
-    BranchKind branch_kind = BranchKind::None;  ///< Branch kind for FastOp::Branch
-    bool ends_with_branch = false;              ///< True if block ends with a branch or jump
-    bool has_mem_op = false;                    ///< True if block contains any load or store
-    bool is_self_loop = false;                  ///< True if block branches directly to itself
-    uint8_t generation = 0;                     ///< Generation counter for fast invalidation
+    BasicBlock* target_bb = nullptr;             ///< Direct pointer to taken branch target block
+    BasicBlock* fallthrough_bb = nullptr;        ///< Direct pointer to fallthrough block
+    BasicBlock* cached_jalr_bb = nullptr;        ///< 1-entry cached JALR return/jump block
+    simrv::xlen::VirtAddr target_pc{};           ///< Precomputed taken target PC
+    simrv::xlen::VirtAddr fallthrough_pc{};      ///< Precomputed fallthrough PC
+    simrv::xlen::VirtAddr cached_jalr_target{};  ///< Last target PC for JALR terminal
+    uint16_t num_guest_ops = 0;                  ///< Architectural guest instruction count
+    uint16_t num_ops = 0;                        ///< Number of instructions (1..16)
+    uint16_t non_branch_ops = 0;                 ///< Precomputed number of non-branch ops
+    uint16_t num_compressed = 0;                 ///< Number of 16-bit compressed instructions
+    uint16_t total_bytes = 0;                    ///< Total guest instruction bytes spanned by block
+    FastOp term_op = FastOp::Other;              ///< FastOp tag of the terminal instruction
+    BranchKind branch_kind = BranchKind::None;   ///< Branch kind for FastOp::Branch
+    bool ends_with_branch = false;               ///< True if block ends with a branch or jump
+    bool has_mem_op = false;                     ///< True if block contains any load or store
+    bool is_self_loop = false;                   ///< True if block branches directly to itself
+    uint8_t generation = 0;                      ///< Generation counter for fast invalidation
     uint8_t pad = 0;
 
     std::array<CompactOp, kMaxBlockOps> ops{};  ///< Contiguous compact micro-ops
@@ -70,9 +70,9 @@ struct alignas(64) BasicBlock {
         target_bb = nullptr;
         fallthrough_bb = nullptr;
         cached_jalr_bb = nullptr;
-        target_pc = 0;
-        fallthrough_pc = 0;
-        cached_jalr_target = 0;
+        target_pc = simrv::xlen::VirtAddr{};
+        fallthrough_pc = simrv::xlen::VirtAddr{};
+        cached_jalr_target = simrv::xlen::VirtAddr{};
         num_guest_ops = 0;
         num_ops = 0;
         non_branch_ops = 0;

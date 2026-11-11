@@ -117,7 +117,7 @@ void test_serial_plugin_device_ticks_in_fast_baremetal() {
     }
     simrv::core::MachineConfig cfg{};
     cfg.memory.dram_size = 0x100000;
-    cfg.execution.start_pc = simrv::memory::kDramBaseAddress;
+    cfg.execution.start_pc = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     cfg.execution.fincnt = 128;
     cfg.files.binary_path = path.string();
     auto uart = simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Uart);
@@ -173,7 +173,7 @@ void test_framebuffer_uses_mmio_device_context() {
     cfg.tui.enabled = true;
     config.kind = simrv::core::SoCDeviceKind::CustomMmio;
     config.name = "test-framebuffer";
-    config.base = 0x10010000;
+    config.base = simrv::xlen::PhysAddr{0x10010000};
     config.size = 0x100;
     config.enabled = true;
     cfg.soc.devices.push_back(config);
@@ -321,7 +321,8 @@ void test_v2_cycle_ticking() {
     soc_dev.kind = simrv::core::SoCDeviceKind::CustomMmio;
     soc_dev.name = "ticked-device";
     soc_dev.compatible = "test,ticked";
-    soc_dev.base = descriptor.default_base;
+    soc_dev.base =
+        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(descriptor.default_base)};
     soc_dev.size = descriptor.default_size;
     soc_dev.enabled = true;
     cfg.soc.devices.push_back(soc_dev);
@@ -384,7 +385,7 @@ void test_example_timer_plugin_integration() {
     dev.kind = simrv::core::SoCDeviceKind::CustomMmio;
     dev.name = "demo-timer";
     dev.compatible = "simrv,demo-timer";
-    dev.base = 0x10030000;
+    dev.base = simrv::xlen::PhysAddr{0x10030000};
     dev.size = 0x1000;
     dev.enabled = true;
     cfg.soc.devices.push_back(dev);
@@ -432,14 +433,14 @@ void test_timer_plugin_advances_in_fast_baremetal() {
     }
     simrv::core::MachineConfig cfg{};
     cfg.memory.dram_size = 0x100000;
-    cfg.execution.start_pc = simrv::memory::kDramBaseAddress;
+    cfg.execution.start_pc = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     cfg.execution.fincnt = 128;
     cfg.files.binary_path = path.string();
     simrv::core::SoCDeviceConfig dev{};
     dev.kind = simrv::core::SoCDeviceKind::CustomMmio;
     dev.name = "demo-timer";
     dev.compatible = "simrv,demo-timer";
-    dev.base = 0x10030000;
+    dev.base = simrv::xlen::PhysAddr{0x10030000};
     dev.size = 0x1000;
     dev.enabled = true;
     cfg.soc.devices.push_back(dev);
@@ -469,7 +470,7 @@ void test_example_dma_accel_plugin_integration() {
     dev.kind = simrv::core::SoCDeviceKind::CustomMmio;
     dev.name = "demo-dma-accel";
     dev.compatible = "simrv,demo-dma-accel";
-    dev.base = 0x10040000;
+    dev.base = simrv::xlen::PhysAddr{0x10040000};
     dev.size = 0x1000;
     dev.enabled = true;
     cfg.soc.devices.push_back(dev);

@@ -525,7 +525,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         else
             net_str = "\033[90m[Disabled]\033[0m";
 
-        constexpr simrv::xlen::Address dram_base = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address dram_base = simrv::memory::kDramBaseAddress.raw();
         std::string ram_str =
             std::format("\033[1;36m[{} MB (0x{:08x}–0x{:08x})]\033[0m", draft.dram_size_mb,
                         dram_base, dram_base + (draft.dram_size_mb * 1024ULL * 1024ULL) - 1);

@@ -98,9 +98,9 @@ void Plic::reset() {
 
 auto Plic::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     if (req.opcode == memory::TlOpcodeA::Get) {
-        resp.data = mmio_read(offset(req.address.raw()));
+        resp.data = mmio_read(offset(req.address));
     } else {
-        mmio_write(offset(req.address.raw()), req.data);
+        mmio_write(offset(req.address), req.data);
     }
     return true;
 }

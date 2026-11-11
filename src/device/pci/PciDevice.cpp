@@ -32,7 +32,7 @@ void PciDevice::reset() {
         config_space_[0x11 + i * 4] = 0;
         config_space_[0x12 + i * 4] = 0;
         config_space_[0x13 + i * 4] = 0;
-        bar_bases_[i] = 0;
+        bar_bases_[i] = simrv::xlen::PhysAddr{};
     }
     config_space_[0x04] = 0;
     config_space_[0x05] = 0;
@@ -101,8 +101,8 @@ auto PciDevice::is_msi_enabled() const noexcept -> bool {
     return (ctrl & 0x0001U) != 0;
 }
 
-auto PciDevice::msi_address() const noexcept -> simrv::xlen::Address {
-    if (msi_cap_offset_ == 0) return 0;
+auto PciDevice::msi_address() const noexcept -> simrv::xlen::PhysAddr {
+    if (msi_cap_offset_ == 0) return {};
     uint16_t ctrl = 0;
     std::memcpy(&ctrl, &config_space_[msi_cap_offset_ + 2], 2);
     uint32_t lo = 0;
@@ -110,9 +110,10 @@ auto PciDevice::msi_address() const noexcept -> simrv::xlen::Address {
     if ((ctrl & 0x0080U) != 0) {
         uint32_t hi = 0;
         std::memcpy(&hi, &config_space_[msi_cap_offset_ + 8], 4);
-        return static_cast<simrv::xlen::Address>((static_cast<uint64_t>(hi) << 32) | lo);
+        return simrv::xlen::PhysAddr{
+            static_cast<simrv::xlen::Address>((static_cast<uint64_t>(hi) << 32) | lo)};
     }
-    return lo;
+    return simrv::xlen::PhysAddr{lo};
 }
 
 auto PciDevice::msi_data() const noexcept -> uint16_t {
@@ -170,7 +171,7 @@ void PciDevice::init_bar(PciBarIndex bar_idx, PciBarSize size, bool is_64bit,
     bar_sizes_[bar_idx] = size;
     bar_masks_[bar_idx] = ~(size - 1);
     bar_is_64bit_[bar_idx] = is_64bit;
-    bar_bases_[bar_idx] = 0;
+    bar_bases_[bar_idx] = simrv::xlen::PhysAddr{};
 
     uint32_t val = 0;
     if (is_64bit) val |= 0x04;
@@ -246,17 +247,18 @@ void PciDevice::bar_write(PciBarIndex bar_idx, PciBarOffset offset, PciMmioData 
     (void)size;
 }
 
-auto PciDevice::bar_base(PciBarIndex bar_idx) const -> simrv::xlen::Address {
-    if (bar_idx >= 6) return 0;
+auto PciDevice::bar_base(PciBarIndex bar_idx) const -> simrv::xlen::PhysAddr {
+    if (bar_idx >= 6) return {};
     uint32_t lo = 0;
     std::memcpy(&lo, &config_space_[0x10 + bar_idx * 4], 4);
     lo &= 0xFFFFFFF0U;
     if (bar_is_64bit_[bar_idx] && bar_idx < 5) {
         uint32_t hi = 0;
         std::memcpy(&hi, &config_space_[0x14 + bar_idx * 4], 4);
-        return static_cast<simrv::xlen::Address>((static_cast<uint64_t>(hi) << 32) | lo);
+        return simrv::xlen::PhysAddr{
+            static_cast<simrv::xlen::Address>((static_cast<uint64_t>(hi) << 32) | lo)};
     }
-    return lo;
+    return simrv::xlen::PhysAddr{lo};
 }
 
 auto PciDevice::bar_size(PciBarIndex bar_idx) const -> PciBarSize {
@@ -264,14 +266,14 @@ auto PciDevice::bar_size(PciBarIndex bar_idx) const -> PciBarSize {
     return bar_sizes_[bar_idx];
 }
 
-auto PciDevice::contains_mmio(simrv::xlen::Address addr, PciBarIndex& out_bar,
+auto PciDevice::contains_mmio(simrv::xlen::PhysAddr paddr, PciBarIndex& out_bar,
                               PciBarOffset& out_offset) const -> bool {
     for (uint8_t i = 0; i < 6; ++i) {
         if (bar_sizes_[i] == 0) continue;
-        simrv::xlen::Address base = bar_bases_[i] != 0 ? bar_bases_[i] : bar_base(i);
-        if (base != 0 && addr >= base && addr < base + bar_sizes_[i]) {
+        const simrv::xlen::PhysAddr base = bar_bases_[i] != 0 ? bar_bases_[i] : bar_base(i);
+        if (base != 0 && paddr >= base && paddr < base + bar_sizes_[i]) {
             out_bar = i;
-            out_offset = addr - base;
+            out_offset = static_cast<PciBarOffset>(paddr - base);
             return true;
         }
         if (bar_is_64bit_[i]) ++i;

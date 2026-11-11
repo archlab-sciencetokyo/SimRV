@@ -11,7 +11,7 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
     enum class Kind : uint8_t { Csr, Rx, Tx };
 
     Window(RingBufferEthernetMmio& owner, core::Machine& machine, Kind kind,
-           simrv::xlen::Address base, simrv::xlen::Address size, std::string label)
+           simrv::xlen::PhysAddr base, simrv::xlen::Address size, std::string label)
         : memory::MmioDevice(&machine),
           owner_(owner),
           kind_(kind),
@@ -20,9 +20,7 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
           label_(std::move(label)) {}
 
     [[nodiscard]] auto name() const -> const char* override { return label_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
-        return simrv::xlen::PhysAddr{base_};
-    }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override {
         if (kind_ == Kind::Csr) return owner_.read_csr(offset);
@@ -39,15 +37,15 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
    private:
     RingBufferEthernetMmio& owner_;
     Kind kind_;
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
     std::string label_;
 };
 
 RingBufferEthernetMmio::RingBufferEthernetMmio(
-    core::Machine& machine, std::string name, simrv::xlen::Address csr_base,
-    simrv::xlen::Address csr_size, uint32_t irq, simrv::xlen::Address rx_base,
-    simrv::xlen::Address rx_size, simrv::xlen::Address tx_base, simrv::xlen::Address tx_size,
+    core::Machine& machine, std::string name, simrv::xlen::PhysAddr csr_base,
+    simrv::xlen::Address csr_size, uint32_t irq, simrv::xlen::PhysAddr rx_base,
+    simrv::xlen::Address rx_size, simrv::xlen::PhysAddr tx_base, simrv::xlen::Address tx_size,
     std::array<uint8_t, 6> mac_address, virtio::NetBackend::Mode mode)
     : machine_(machine),
       name_(std::move(name)),

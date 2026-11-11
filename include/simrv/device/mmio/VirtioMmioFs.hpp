@@ -10,7 +10,7 @@ namespace simrv::device {
 
 class VirtioMmioFs final : public VirtioMmioDevice {
    public:
-    VirtioMmioFs(simrv::xlen::Address base, uint32_t irq, core::Machine* machine,
+    VirtioMmioFs(simrv::xlen::PhysAddr base, uint32_t irq, core::Machine* machine,
                  const std::string& shared_directory, std::string tag = "simrv");
     [[nodiscard]] auto is_ready() const noexcept -> bool { return backend_.is_ready(); }
 

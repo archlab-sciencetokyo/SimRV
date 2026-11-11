@@ -80,7 +80,7 @@ struct BranchPrediction {
     bool false_control_alias = false;
 
     constexpr void reset() noexcept {
-        predicted_target = 0;
+        predicted_target = simrv::xlen::VirtAddr{};
         bht_index = 0;
         ghr_snapshot = 0;
         is_control = false;
@@ -284,7 +284,8 @@ class BranchPredictor {
         if (is_jal) {
             pred.predicted_target = pc + static_cast<simrv::xlen::Address>(inst.imm);
             if (config_.untagged_btb) {
-                const uint32_t btb_idx = static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
+                const uint32_t btb_idx =
+                    static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
                 const auto& entry = config_.registered_btb_read && !config_.jump_uses_current_btb
                                         ? registered_btb_entry_
                                         : btb_[btb_idx];
@@ -323,7 +324,8 @@ class BranchPredictor {
             }
             // Check BTB for JALR target
             if (config_.enable_btb && !btb_.empty()) {
-                const uint32_t btb_idx = static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
+                const uint32_t btb_idx =
+                    static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
                 const auto& entry = btb_[btb_idx];
                 if (entry.valid && (config_.untagged_btb || entry.tag == pc)) {
                     pred.predicted_target = entry.target;
@@ -331,7 +333,7 @@ class BranchPredictor {
                     return;
                 }
             }
-            pred.predicted_target = 0;  // Unknown target until execute/decode
+            pred.predicted_target = simrv::xlen::VirtAddr{};  // Unknown target until execute/decode
             pred.btb_hit = false;
             return;
         }
@@ -393,7 +395,8 @@ class BranchPredictor {
     SIMRV_ALWAYS_INLINE void update_btb(simrv::xlen::VirtAddr pc,
                                         simrv::xlen::VirtAddr target) noexcept {
         if (config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx = static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
+            const uint32_t btb_idx =
+                static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
             btb_[btb_idx] = BtbEntry{.tag = pc, .target = target, .valid = true};
         }
     }
@@ -419,7 +422,8 @@ class BranchPredictor {
 
         if (simrv::compiler::unlikely(config_.type == BranchPredictorType::Tournament)) {
             const uint32_t gshare_idx =
-                (static_cast<uint32_t>(pc.raw() >> 1) ^ feedback.prediction.ghr_snapshot) & bht_mask_;
+                (static_cast<uint32_t>(pc.raw() >> 1) ^ feedback.prediction.ghr_snapshot) &
+                bht_mask_;
             const uint32_t bimodal_idx = static_cast<uint32_t>(pc.raw() >> 1) & bht_mask_;
 
             const bool gshare_pred = is_taken_prediction(bht_[gshare_idx]);

@@ -181,7 +181,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
 
     const bool is_pcie = (config.platform_profile == core::PlatformProfile::Pcie);
     const uint32_t num_harts = std::max(1U, static_cast<uint32_t>(config.execution.num_harts));
-    const simrv::xlen::Address dram_base = config.memory.dram_base;
+    const simrv::xlen::Address dram_base = config.memory.dram_base.raw();
     const simrv::xlen::Address dram_size = config.memory.dram_size;
     const auto timebase =
         static_cast<uint32_t>(config.execution.timebase_hz != 0 ? config.execution.timebase_hz
@@ -206,25 +206,26 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         return found == devices.end() ? nullptr : &*found;
     };
     const auto* uart = find_device(core::SoCDeviceKind::Uart);
-    const bool standard_uart = uart != nullptr &&
-        (uart->compatible.empty() || uart->compatible == "ns16550a" ||
-         uart->compatible == "ns16550");
+    const bool standard_uart =
+        uart != nullptr && (uart->compatible.empty() || uart->compatible == "ns16550a" ||
+                            uart->compatible == "ns16550");
     std::string bootargs = config.files.bootargs;
     if (bootargs.empty()) {
         bootargs = !standard_uart
                        ? "root=/dev/vda rw"
                        : std::format("console=ttyS0 earlycon=uart8250,mmio,{:#x} root=/dev/vda rw",
-                                     static_cast<uint64_t>(uart->base));
+                                     static_cast<uint64_t>(uart->base.raw()));
     }
     fdt.property_string("bootargs", bootargs);
     if (standard_uart) {
         const uint32_t baud = simrv::device::uart_baud_rate(
             uart->clock_hz, simrv::device::uart_reset_divisor(uart->clock_hz));
-        fdt.property_string("stdout-path", std::format("/soc/uart@{:x}:{}",
-                                                       static_cast<uint64_t>(uart->base), baud));
+        fdt.property_string(
+            "stdout-path",
+            std::format("/soc/uart@{:x}:{}", static_cast<uint64_t>(uart->base.raw()), baud));
     } else if (uart != nullptr) {
-        fdt.property_string("stdout-path", std::format("/soc/uart@{:x}",
-                                                       static_cast<uint64_t>(uart->base)));
+        fdt.property_string("stdout-path",
+                            std::format("/soc/uart@{:x}", static_cast<uint64_t>(uart->base.raw())));
     }
     fdt.end_node();
 
@@ -409,10 +410,9 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         }
     };
     if (uart != nullptr) {
-        fdt.begin_node(std::format("uart@{:x}", static_cast<uint64_t>(uart->base)));
-        fdt.property_string("compatible", uart->compatible.empty() ? "ns16550a"
-                                                                     : uart->compatible);
-        fdt.property_reg("reg", uart->base, uart->size);
+        fdt.begin_node(std::format("uart@{:x}", static_cast<uint64_t>(uart->base.raw())));
+        fdt.property_string("compatible", uart->compatible.empty() ? "ns16550a" : uart->compatible);
+        fdt.property_reg("reg", uart->base.raw(), uart->size);
         const uint32_t uart_clock = static_cast<uint32_t>(uart->clock_hz);
         fdt.property_u32("clock-frequency", uart_clock);
         if (standard_uart) {
@@ -425,38 +425,38 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     }
 
     if (const auto* rtc = find_device(core::SoCDeviceKind::Rtc); rtc != nullptr) {
-        fdt.begin_node(std::format("rtc@{:x}", static_cast<uint64_t>(rtc->base)));
-        fdt.property_string("compatible", rtc->compatible.empty() ? "google,goldfish-rtc"
-                                                                    : rtc->compatible);
-        fdt.property_reg("reg", rtc->base, rtc->size);
+        fdt.begin_node(std::format("rtc@{:x}", static_cast<uint64_t>(rtc->base.raw())));
+        fdt.property_string("compatible",
+                            rtc->compatible.empty() ? "google,goldfish-rtc" : rtc->compatible);
+        fdt.property_reg("reg", rtc->base.raw(), rtc->size);
         add_irq(*rtc);
         fdt.end_node();
     }
 
     const auto* power = find_device(core::SoCDeviceKind::Power);
-    const bool standard_power = power != nullptr &&
-        (power->compatible.empty() || power->compatible == "sifive,test1" ||
-         power->compatible == "sifive,test0");
+    const bool standard_power =
+        power != nullptr && (power->compatible.empty() || power->compatible == "sifive,test1" ||
+                             power->compatible == "sifive,test0");
     if (power != nullptr) {
         // SiFive test finisher, exposed as a syscon for Linux poweroff/reboot.
-        fdt.begin_node(std::format("test@{:x}", static_cast<uint64_t>(power->base)));
+        fdt.begin_node(std::format("test@{:x}", static_cast<uint64_t>(power->base.raw())));
         static constexpr std::string_view kTestCompat[] = {"sifive,test1", "sifive,test0",
                                                            "syscon"};
         if (standard_power)
             fdt.property_stringlist("compatible", kTestCompat);
         else
             fdt.property_string("compatible", power->compatible);
-        fdt.property_reg("reg", power->base, power->size);
+        fdt.property_reg("reg", power->base.raw(), power->size);
         fdt.property_phandle("phandle", 2U);
         fdt.end_node();
     }
 
     // The legacy CLINT node is represented only when that device is in the SoC model.
     if (const auto* clint = find_device(core::SoCDeviceKind::Clint); clint != nullptr) {
-        fdt.begin_node(std::format("clint@{:x}", static_cast<uint64_t>(clint->base)));
+        fdt.begin_node(std::format("clint@{:x}", static_cast<uint64_t>(clint->base.raw())));
         static constexpr std::string_view kClintCompat[] = {"riscv,clint0", "sifive,clint0"};
         fdt.property_stringlist("compatible", kClintCompat);
-        fdt.property_reg("reg", clint->base, clint->size);
+        fdt.property_reg("reg", clint->base.raw(), clint->size);
         std::vector<FdtCell> clint_irqs;
         for (uint32_t hart = 0; hart < num_harts; ++hart) {
             clint_irqs.push_back(100U + hart);  // cpu phandle
@@ -470,10 +470,10 @@ auto generate_platform_fdt(const core::MachineConfig& config,
 
     // PLIC
     if (plic != nullptr) {
-        fdt.begin_node(std::format("plic@{:x}", static_cast<uint64_t>(plic->base)));
+        fdt.begin_node(std::format("plic@{:x}", static_cast<uint64_t>(plic->base.raw())));
         static constexpr std::string_view kPlicCompat[] = {"sifive,plic-1.0.0", "riscv,plic0"};
         fdt.property_stringlist("compatible", kPlicCompat);
-        fdt.property_reg("reg", plic->base, plic->size);
+        fdt.property_reg("reg", plic->base.raw(), plic->size);
         fdt.property_u32("#address-cells", 0);
         fdt.property_u32("riscv,ndev", core::kPlicSourceCount);
         fdt.property_empty("interrupt-controller");
@@ -496,13 +496,13 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         // Parallel NOR Flash (PFlash)
         const auto flash0 =
             pflash == nullptr ? core::soc_device_default(core::SoCDeviceKind::PFlash) : *pflash;
-        fdt.begin_node(std::format("flash@{:x}", static_cast<uint64_t>(flash0.base)));
+        fdt.begin_node(std::format("flash@{:x}", static_cast<uint64_t>(flash0.base.raw())));
         fdt.property_string("compatible",
                             flash0.compatible.empty() ? "cfi-flash" : flash0.compatible);
-        std::vector<uint64_t> flash_regs{static_cast<uint64_t>(flash0.base),
+        std::vector<uint64_t> flash_regs{static_cast<uint64_t>(flash0.base.raw()),
                                          static_cast<uint64_t>(flash0.size)};
         for (const auto& region : flash0.regions) {
-            flash_regs.push_back(static_cast<uint64_t>(region.base));
+            flash_regs.push_back(static_cast<uint64_t>(region.base.raw()));
             flash_regs.push_back(static_cast<uint64_t>(region.size));
         }
         fdt.property_array_u64("reg", flash_regs);
@@ -513,22 +513,22 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     if (is_pcie) {
         const auto& pcie = config.soc.pcie;
         // PCIe ECAM Controller
-        fdt.begin_node(std::format("pci@{:x}", static_cast<uint64_t>(pcie.ecam_base)));
+        fdt.begin_node(std::format("pci@{:x}", static_cast<uint64_t>(pcie.ecam_base.raw())));
         fdt.property_string("compatible", "pci-host-ecam-generic");
         fdt.property_string("device_type", "pci");
-        fdt.property_reg("reg", pcie.ecam_base, pcie.ecam_size);
+        fdt.property_reg("reg", pcie.ecam_base.raw(), pcie.ecam_size);
         fdt.property_u32("#address-cells", 3);
         fdt.property_u32("#size-cells", 2);
         fdt.property_u32("#interrupt-cells", 1);
         fdt.property_array_u32("bus-range", {pcie.first_bus, pcie.last_bus});
-        const auto mmio_end = static_cast<uint64_t>(pcie.mmio_base) + pcie.mmio_size;
+        const auto mmio_end = static_cast<uint64_t>(pcie.mmio_base.raw()) + pcie.mmio_size;
         const FdtCell pci_memory_type = mmio_end > (uint64_t{1} << 32U) ? 0x03000000U : 0x02000000U;
         const FdtCell pci_ranges[] = {
             pci_memory_type,
-            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_base) >> 32U),
-            static_cast<FdtCell>(pcie.mmio_base),
-            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_base) >> 32U),
-            static_cast<FdtCell>(pcie.mmio_base),
+            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_base.raw()) >> 32U),
+            static_cast<FdtCell>(pcie.mmio_base.raw()),
+            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_base.raw()) >> 32U),
+            static_cast<FdtCell>(pcie.mmio_base.raw()),
             static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_size) >> 32U),
             static_cast<FdtCell>(pcie.mmio_size),
         };
@@ -569,9 +569,9 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         for (const auto kind : kVirtioKinds) {
             const auto* slot = find_device(kind);
             if (slot == nullptr) continue;
-            fdt.begin_node(std::format("virtio@{:x}", static_cast<uint64_t>(slot->base)));
+            fdt.begin_node(std::format("virtio@{:x}", static_cast<uint64_t>(slot->base.raw())));
             fdt.property_string("compatible", "virtio,mmio");
-            fdt.property_reg("reg", slot->base, slot->size);
+            fdt.property_reg("reg", slot->base.raw(), slot->size);
             add_irq(*slot);
             fdt.end_node();
         }
@@ -584,9 +584,10 @@ auto generate_platform_fdt(const core::MachineConfig& config,
             custom.kind != core::SoCDeviceKind::DummyMmio)
             continue;
         if (custom.compatible.empty()) continue;
-        fdt.begin_node(std::format("{}@{:x}", custom.name, static_cast<uint64_t>(custom.base)));
+        fdt.begin_node(
+            std::format("{}@{:x}", custom.name, static_cast<uint64_t>(custom.base.raw())));
         fdt.property_string("compatible", custom.compatible);
-        fdt.property_reg("reg", custom.base, custom.size);
+        fdt.property_reg("reg", custom.base.raw(), custom.size);
         add_irq(custom);
         fdt.end_node();
     }

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "simrv/memory/TileLinkNode.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -31,24 +32,21 @@ enum class PowerCommand : simrv::xlen::Word {
 class PowerMmio : public memory::TileLinkNode {
    public:
     /// Construct a Power MMIO device instance.
-    explicit PowerMmio(simrv::core::Machine& machine, simrv::xlen::Address base = kBaseAddress,
+    explicit PowerMmio(simrv::core::Machine& machine, simrv::xlen::PhysAddr base = kBaseAddress,
                        simrv::xlen::Address size = kSize);
 
-    static constexpr simrv::xlen::Address kBaseAddress =
-        static_cast<simrv::xlen::Address>(0x00100000u);
+    static constexpr simrv::xlen::PhysAddr kBaseAddress{0x00100000u};
     static constexpr simrv::xlen::Address kSize = static_cast<simrv::xlen::Address>(0x00001000u);
 
     [[nodiscard]] auto name() const -> const char* override { return "power"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
-        return simrv::xlen::PhysAddr{base_};
-    }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
    private:
     simrv::core::Machine& machine_;
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
 };
 

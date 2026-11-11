@@ -59,7 +59,7 @@ void Clint::reset() {
 }
 
 auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const simrv::xlen::Address off = offset(req.address.raw());
+    const simrv::xlen::Address off = offset(req.address);
     const int req_bytes = 1 << (req.size & 3);
 
     if (req.opcode == memory::TlOpcodeA::Get) {

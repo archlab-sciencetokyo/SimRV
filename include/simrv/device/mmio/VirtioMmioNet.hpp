@@ -15,7 +15,7 @@ namespace simrv::device {
  */
 class VirtioMmioNet : public VirtioMmioDevice {
    public:
-    VirtioMmioNet(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine,
+    VirtioMmioNet(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine,
                   virtio::NetBackend::Mode mode = virtio::NetBackend::Mode::User);
 
     auto backend() -> virtio::NetBackend& { return backend_; }

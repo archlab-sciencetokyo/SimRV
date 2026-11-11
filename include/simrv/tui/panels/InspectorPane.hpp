@@ -109,7 +109,7 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto get_log_scroll_offset() const -> int;
     void set_inspect_addr(simrv::xlen::VirtAddr addr) { inspect_addr_ = addr; }
     [[nodiscard]] auto get_inspect_addr() const -> simrv::xlen::VirtAddr { return inspect_addr_; }
-    void reset_inspect_addr() noexcept { inspect_addr_ = 0; }
+    void reset_inspect_addr() noexcept { inspect_addr_ = simrv::xlen::VirtAddr{}; }
     [[nodiscard]] auto is_custom_memory_inspect() const noexcept -> bool {
         return inspect_addr_ != 0;
     }

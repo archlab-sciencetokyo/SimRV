@@ -10,7 +10,7 @@
 
 namespace simrv::device {
 
-VirtioMmioGpu::VirtioMmioGpu(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioGpu::VirtioMmioGpu(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                              core::Machine* machine)
     : VirtioMmioDevice("virtio-gpu-mmio", base_address, 0x1000, virtio::kDevIdGpu, irq_num,
                        machine) {

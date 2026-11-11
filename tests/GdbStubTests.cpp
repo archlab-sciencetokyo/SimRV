@@ -534,13 +534,13 @@ static void test_memory_read() {
     negotiate_no_ack(client);
 
     // Read 4 bytes from base of DRAM
-    const simrv::xlen::Address base = h.machine.memory_geometry().dram_base;
-    const auto resp = client.transact(std::format("m{:x},4", base));
+    const auto base = h.machine.memory_geometry().dram_base;
+    const auto resp = client.transact(std::format("m{:x},4", base.raw()));
     // Should be 8 hex chars for 4 bytes
     EXPECT_EQ(resp.size(), 8u);
 
-    EXPECT_EQ(client.transact(std::format("M{:x},4:78563412", base)), std::string("OK"));
-    EXPECT_EQ(client.transact(std::format("m{:x},4", base)), std::string("78563412"));
+    EXPECT_EQ(client.transact(std::format("M{:x},4:78563412", base.raw())), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("m{:x},4", base.raw())), std::string("78563412"));
 }
 
 static void test_logical_breakpoints_and_watchpoints() {
@@ -551,18 +551,20 @@ static void test_logical_breakpoints_and_watchpoints() {
     RspClient client(h.port());
     client.send_raw("+");
     negotiate_no_ack(client);
-    const simrv::xlen::Address base = h.machine.memory_geometry().dram_base;
+    const auto base = h.machine.memory_geometry().dram_base;
     auto ram = h.machine.ram_view();
     *ram.unchecked_ptr(base) = static_cast<simrv::xlen::Byte>(0x13);
 
-    EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base)), std::string("OK"));
-    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base}));
+    EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base.raw())), std::string("OK"));
+    EXPECT_TRUE(
+        h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base.raw()}));
     EXPECT_EQ(static_cast<uint8_t>(*ram.unchecked_ptr(base)), uint8_t{0x13});
-    EXPECT_EQ(client.transact(std::format("Z1,{:x},4", base + 4)), std::string("OK"));
-    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base + 4}));
-    EXPECT_EQ(client.transact(std::format("Z2,{:x},4", base + 8)), std::string("OK"));
-    EXPECT_EQ(client.transact(std::format("Z3,{:x},4", base + 16)), std::string("OK"));
-    EXPECT_EQ(client.transact(std::format("Z4,{:x},4", base + 24)), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("Z1,{:x},4", (base + 4).raw())), std::string("OK"));
+    EXPECT_TRUE(
+        h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{(base + 4).raw()}));
+    EXPECT_EQ(client.transact(std::format("Z2,{:x},4", (base + 8).raw())), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("Z3,{:x},4", (base + 16).raw())), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("Z4,{:x},4", (base + 24).raw())), std::string("OK"));
     EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 3U);
 
     const auto monitor = [&](std::string_view command) {
@@ -574,11 +576,13 @@ static void test_logical_breakpoints_and_watchpoints() {
     EXPECT_TRUE(monitor("info pipeline").find("cycle-accurate mode is disabled") !=
                 std::string::npos);
 
-    EXPECT_EQ(client.transact(std::format("z0,{:x},4", base)), std::string("OK"));
-    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base}));
-    EXPECT_EQ(client.transact(std::format("z1,{:x},4", base + 4)), std::string("OK"));
-    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base + 4}));
-    EXPECT_EQ(client.transact(std::format("z2,{:x},4", base + 8)), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("z0,{:x},4", base.raw())), std::string("OK"));
+    EXPECT_TRUE(
+        !h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base.raw()}));
+    EXPECT_EQ(client.transact(std::format("z1,{:x},4", (base + 4).raw())), std::string("OK"));
+    EXPECT_TRUE(
+        !h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{(base + 4).raw()}));
+    EXPECT_EQ(client.transact(std::format("z2,{:x},4", (base + 8).raw())), std::string("OK"));
     EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 2U);
 }
 
@@ -640,16 +644,16 @@ static void test_modeled_step_and_watchpoint() {
         auto& cpu = machine.primary_hart();
         cpu.reset();
         const auto base = machine.memory_geometry().dram_base;
-        cpu.state().pc = base;
+        cpu.state().pc = simrv::xlen::VirtAddr{base.raw()};
         cpu.hart_status.store(simrv::core::HartStatus::Started);
         // addi x1,x0,7; sw x1,0(x2); jal x0,0
         const simrv::xlen::Instruction program[]{0x00700093, 0x00112023, 0x0000006f};
         std::memcpy(machine.ram_view().unchecked_ptr(base), program, sizeof(program));
-        cpu.state().regs.write(static_cast<simrv::xlen::RegId>(2), base + 128);
+        cpu.state().regs.write(simrv::xlen::RegId::Sp, simrv::xlen::Register{(base + 128).raw()});
         auto secondary = std::make_unique<simrv::core::CPU>();
         secondary->reset();
         secondary->state().mhartid = 1;
-        secondary->state().pc = base + 8;
+        secondary->state().pc = simrv::xlen::VirtAddr{(base + 8).raw()};
         secondary->hart_status.store(simrv::core::HartStatus::Started);
         machine.add_hart_for_testing(std::move(secondary));
         machine.install_debugger_for_testing(std::make_unique<simrv::debug::GdbStub>(0));
@@ -664,7 +668,8 @@ static void test_modeled_step_and_watchpoint() {
             EXPECT_EQ(cpu.e_icount, 1U);
             EXPECT_EQ(cpu.state().regs.read(static_cast<simrv::xlen::RegId>(1)),
                       simrv::xlen::Register{7});
-            EXPECT_EQ(client.transact(std::format("Z2,{:x},4", base + 128)), std::string("OK"));
+            EXPECT_EQ(client.transact(std::format("Z2,{:x},4", (base + 128).raw())),
+                      std::string("OK"));
             client.send_packet("c");
             client.send_raw("+");
             EXPECT_TRUE(client.recv_response(2000).find("watch:") != std::string::npos);

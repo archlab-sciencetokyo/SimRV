@@ -220,7 +220,7 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     }
 }
 
-void Machine::set_resolved_boot_state(simrv::xlen::Address start_pc,
+void Machine::set_resolved_boot_state(simrv::xlen::VirtAddr start_pc,
                                       std::optional<simrv::xlen::Address> tohost_address) noexcept {
     resolved_start_pc_ = start_pc;
     if (tohost_address.has_value()) resolved_isatest_tohost_ = *tohost_address;
@@ -293,7 +293,8 @@ auto Machine::ram_data() noexcept -> simrv::xlen::Byte* { return runtime_->ram.d
 auto Machine::ram_data() const noexcept -> const simrv::xlen::Byte* { return runtime_->ram.data(); }
 
 auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
-    return {runtime_->ram.data(), config.memory.dram_base, config.memory.dram_size};
+    return {runtime_->ram.data(), simrv::xlen::PhysAddr{config.memory.dram_base},
+            config.memory.dram_size};
 }
 
 auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
@@ -312,13 +313,14 @@ auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
             return {};
         return {
             const_cast<simrv::xlen::Byte*>(reinterpret_cast<const simrv::xlen::Byte*>(data.data())),
-            geom.base, static_cast<simrv::xlen::Address>(data.size())};
+            simrv::xlen::PhysAddr{geom.base}, static_cast<simrv::xlen::Address>(data.size())};
     }
     const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
     const auto base = framebuffer_geometry_.base;
     const auto ram = ram_view();
-    if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
-    return {ram.unchecked_ptr(base), base, size};
+    const simrv::xlen::PhysAddr physical_base{base};
+    if (!ram.contains(physical_base, static_cast<std::size_t>(size))) return {};
+    return {ram.unchecked_ptr(physical_base), physical_base, size};
 }
 
 auto Machine::framebuffer_geometry() const noexcept -> FramebufferConfig {
@@ -401,7 +403,7 @@ auto Machine::save_checkpoint(const std::string& filepath) const
                                   .xlen = simrv::xlen::kXLenBits,
                                   .vlen = config.isa.vlen,
                                   .harts = static_cast<uint32_t>(num_harts()),
-                                  .ram_base = config.memory.dram_base,
+                                  .ram_base = config.memory.dram_base.raw(),
                                   .ram_size = config.memory.dram_size};
     out.write(reinterpret_cast<const char*>(&header), sizeof(header));
     for (size_t i = 0; i < num_harts(); ++i) {
@@ -1329,9 +1331,8 @@ void OsRunner::finalize(Machine& machine) {
         if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
         if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
             machine.trace().emit_branch_prediction_trace(
-                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc.raw(),
-                cpu.pipeline_context.jmp_pc.raw(), cpu.pipeline_context.opcode,
-                cpu.pipeline_context.tkn);
+                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
+                cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
     if (simrv::compiler::unlikely(
@@ -2102,13 +2103,19 @@ void Machine::finalize_cycle_tohost() {
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
             const auto ram = ram_view();
-            if (ram.contains(payload, 4 * sizeof(uint64_t))) {
+            if (payload > std::numeric_limits<simrv::xlen::Address>::max()) {
+                simrv::log::warn("HTIF syscall block address exceeds the guest address width");
+                tohost = 0;
+                return;
+            }
+            const simrv::xlen::PhysAddr syscall_address{static_cast<simrv::xlen::Address>(payload)};
+            if (ram.contains(syscall_address, 4 * sizeof(uint64_t))) {
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;
                 uint64_t arg1 = 0;
                 uint64_t arg2 = 0;
 
-                const auto* syscall_block = ram.unchecked_ptr(payload);
+                const auto* syscall_block = ram.unchecked_ptr(syscall_address);
                 std::memcpy(&syscall_num, syscall_block + 0, sizeof(syscall_num));
                 std::memcpy(&arg0, syscall_block + 8, sizeof(arg0));
                 std::memcpy(&arg1, syscall_block + 16, sizeof(arg1));
@@ -2117,9 +2124,16 @@ void Machine::finalize_cycle_tohost() {
                 if (syscall_num == 64) {  // SYS_write
                     const simrv::xlen::Address fromhost_addr =
                         (isa_test_tohost() != 0 ? isa_test_tohost() : 0x80001000) + 8;
-                    const auto buf_addr = is_guest_xlen32 ? (arg1 & 0xFFFFFFFFULL) : arg1;
+                    const uint64_t raw_buf_addr = is_guest_xlen32 ? (arg1 & 0xFFFFFFFFULL) : arg1;
+                    if (raw_buf_addr > std::numeric_limits<simrv::xlen::Address>::max()) {
+                        simrv::log::warn("HTIF SYS_write buffer address exceeds the guest width");
+                        tohost = 0;
+                        return;
+                    }
+                    const simrv::xlen::PhysAddr buf_addr{
+                        static_cast<simrv::xlen::Address>(raw_buf_addr)};
                     if (!ram.contains(buf_addr, static_cast<size_t>(arg2)) ||
-                        !ram.contains(fromhost_addr, sizeof(uint64_t))) {
+                        !ram.contains(simrv::xlen::PhysAddr{fromhost_addr}, sizeof(uint64_t))) {
                         simrv::log::warn(
                             "HTIF SYS_write references RAM outside the configured DRAM");
                         tohost = 0;
@@ -2133,7 +2147,8 @@ void Machine::finalize_cycle_tohost() {
 
                     // Write success response (bytes written) to fromhost
                     uint64_t resp = arg2;
-                    std::memcpy(ram.unchecked_ptr(fromhost_addr), &resp, sizeof(resp));
+                    std::memcpy(ram.unchecked_ptr(simrv::xlen::PhysAddr{fromhost_addr}), &resp,
+                                sizeof(resp));
                     for (size_t i = 0; i < num_harts(); ++i) {
                         hart(i).dcache.probe_line(simrv::xlen::PhysAddr{fromhost_addr},
                                                   simrv::memory::MesiState::Invalid);

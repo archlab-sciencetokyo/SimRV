@@ -15,7 +15,7 @@ namespace simrv::device {
  */
 class VirtioMmioSound : public VirtioMmioDevice {
    public:
-    VirtioMmioSound(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioSound(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine);
 
     [[nodiscard]] auto backend() noexcept -> virtio::VirtioSoundBackend& { return backend_; }
     [[nodiscard]] auto backend() const noexcept -> const virtio::VirtioSoundBackend& {

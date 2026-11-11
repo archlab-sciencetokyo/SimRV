@@ -25,13 +25,14 @@ namespace simrv::device {
  */
 class VirtioMmioDevice : public memory::MmioDevice, public virtio::IVirtioTransport {
    public:
-    VirtioMmioDevice(const char* name, simrv::xlen::Address base_address, simrv::xlen::Address size,
-                     uint32_t device_id, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioDevice(const char* name, simrv::xlen::PhysAddr base_address,
+                     simrv::xlen::Address size, uint32_t device_id, uint32_t irq_num,
+                     core::Machine* machine);
     ~VirtioMmioDevice() override = default;
 
     [[nodiscard]] auto name() const -> const char* override { return name_; }
     [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
-        return simrv::xlen::PhysAddr{base_address_};
+        return base_address_;
     }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
@@ -82,7 +83,7 @@ class VirtioMmioDevice : public memory::MmioDevice, public virtio::IVirtioTransp
     void add_queue(uint16_t max_size);
 
     const char* name_;
-    simrv::xlen::Address base_address_;
+    simrv::xlen::PhysAddr base_address_;
     simrv::xlen::Address size_;
     uint32_t device_id_;
     uint32_t irq_num_;

@@ -32,6 +32,7 @@
 #include "simrv/tui/InspectionReport.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiBackend.hpp"
 #include "simrv/tui/TuiDrawer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
@@ -59,6 +60,9 @@
 #include "simrv/util/CliParser.hpp"
 
 namespace simrv::tui {
+static_assert(std::same_as<decltype(BackendRequest::address),
+                           std::variant<simrv::xlen::PhysAddr, simrv::xlen::VirtAddr>>);
+
 struct TuiTestAccess {
     static auto arrow(Tui& tui, std::string_view sequence) -> bool {
         tui.esc_buf_ = sequence;
@@ -1481,8 +1485,8 @@ void test_control_flow_calls_mission() {
                !layout_tui.mission_progress().checkpoint_reached(),
            "n advances to the next mission step");
 
-    layout_machine.set_resolved_boot_state(0x80000000, std::nullopt);
-    layout_machine.primary_hart().state().pc = 0x80000004;
+    layout_machine.set_resolved_boot_state(simrv::xlen::VirtAddr{0x80000000}, std::nullopt);
+    layout_machine.primary_hart().state().pc = simrv::xlen::VirtAddr{0x80000004};
     layout_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 99);
     simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, 0, simrv::tui::TuiKey::F5);
     expect(layout_tui.get_active_modal() == simrv::tui::ModalType::None && !layout_tui.is_paused(),
@@ -1510,7 +1514,8 @@ void test_control_flow_calls_mission() {
            "restarting a mission also resets guest architectural state to the entry point");
 
     simrv::core::Machine completion_machine;
-    completion_machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+    completion_machine.primary_hart().state().pc =
+        simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     simrv::tui::Tui completion_tui(completion_machine);
     simrv::tui::TuiTestAccess::configure_mission(completion_tui, lesson,
                                                  "/tmp/control-flow-calls.elf");
@@ -1628,12 +1633,14 @@ void test_register_change_highlight() {
            "register change highlight clears after a fresh baseline snapshot");
 
     simrv::core::Machine running_machine;
-    running_machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+    running_machine.primary_hart().state().pc =
+        simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     running_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 7);
     simrv::tui::Tui tui(running_machine);
     simrv::tui::TuiTestAccess::init_panes(tui, running_machine);
     if (tui.is_modal_active()) tui.close_modal();
-    running_machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+    running_machine.primary_hart().state().pc =
+        simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
     running_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 7);
     simrv::tui::TuiTestAccess::set_execution_paused(tui, false);
     simrv::tui::TuiTestAccess::update_cache(tui);
@@ -1806,7 +1813,7 @@ void test_inspection_report() {
     config.tui.inspection_output = "/tmp/simrv-inspection-report-test.json";
     simrv::core::Machine machine(config);
     machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    machine.hart(1).state().pc = 0x80000100;
+    machine.hart(1).state().pc = simrv::xlen::VirtAddr{0x80000100};
     machine.hart(1).state().regs.write(simrv::xlen::RegId::A0, 42);
     machine.hart(1).pipeline_context.op_id = simrv::isa::OperationId::ADDI;
     machine.hart(1).pipeline_context.ir_org = 0x02A00513;
@@ -2368,10 +2375,10 @@ void test_instruction_explainer_is_side_effect_free() {
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
     cpu.reset();
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
     constexpr simrv::xlen::Instruction addi = 0x00100093U;
     std::memcpy(ram.data(), &addi, sizeof(addi));
-    cpu.state().pc = pc;
+    cpu.state().pc = simrv::xlen::VirtAddr{pc};
     cpu.pipeline_context.ir = 0xDEADBEEFU;
     cpu.pipeline_context.cpc = simrv::xlen::VirtAddr{pc + 0x40};
 
@@ -2385,7 +2392,9 @@ void test_instruction_explainer_is_side_effect_free() {
     simrv::tui::InspectorPane pane(machine);
     cpu.pipeline_sim.config.record_snapshots = true;
     cpu.pipeline_sim.advance_cycle({
-        .fetch = {.instruction = {.pc = pc, .op_id = simrv::isa::OperationId::ADDI}, .valid = true},
+        .fetch = {.instruction = {.pc = simrv::xlen::VirtAddr{pc},
+                                  .op_id = simrv::isa::OperationId::ADDI},
+                  .valid = true},
     });
     expect(pane.get_pipeline_pc_at_row(2) == simrv::xlen::VirtAddr{pc},
            "timeline selection returns the displayed instruction's PC");
@@ -2393,7 +2402,8 @@ void test_instruction_explainer_is_side_effect_free() {
     expect(pane.get_pipeline_pc_at_row(-1) == simrv::xlen::VirtAddr{},
            "non-pipeline row has no selectable virtual PC");
     pane.set_explain_pc(simrv::xlen::VirtAddr{pc});
-    expect(pane.get_explain_pc() == simrv::xlen::VirtAddr{pc}, "explainer retains selected virtual PC");
+    expect(pane.get_explain_pc() == simrv::xlen::VirtAddr{pc},
+           "explainer retains selected virtual PC");
     pane.set_visible_rows(30);
     const auto rendered = pane.render_row(2, 80);
 
@@ -2918,11 +2928,12 @@ void test_bus_inspector_and_tilelink_channels() {
     simrv::core::Machine machine;
 
     auto& bus = machine.memory().system_bus();
-    bus.record_transaction(TileLinkChannel::A, "AcquireBlock", 1, 0, 0x80001000, "NtoT");
-    bus.record_transaction(TileLinkChannel::B, "ProbeBlock", 1, 0, 0x80001000, "Hart 1 ToN");
-    bus.record_transaction(TileLinkChannel::C, "ProbeAckData", 1, 0, 0x80001000, "TtoN");
-    bus.record_transaction(TileLinkChannel::D, "GrantData", 1, 5, 0x80001000, "ToT");
-    bus.record_transaction(TileLinkChannel::E, "GrantAck", 0, 5, 0, "");
+    constexpr simrv::xlen::PhysAddr address{0x80001000};
+    bus.record_transaction(TileLinkChannel::A, "AcquireBlock", 1, 0, address, "NtoT");
+    bus.record_transaction(TileLinkChannel::B, "ProbeBlock", 1, 0, address, "Hart 1 ToN");
+    bus.record_transaction(TileLinkChannel::C, "ProbeAckData", 1, 0, address, "TtoN");
+    bus.record_transaction(TileLinkChannel::D, "GrantData", 1, 5, address, "ToT");
+    bus.record_transaction(TileLinkChannel::E, "GrantAck", 0, 5, simrv::xlen::PhysAddr{}, "");
 
     expect(bus.transaction_history().size() == 5, "bus recorded 5 transactions");
 
@@ -3119,12 +3130,12 @@ void test_responsive_labels_and_header() {
     if constexpr (sizeof(simrv::xlen::Register) > 4) {
         ctx.rrs1 = 0xffffffffd60ef000ULL;
         ctx.rrs2 = 0xffffffd60ff00000ULL;
-        ctx.mem_addr = 0xffffffffd60ef000ULL;
+        ctx.mem_addr = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(0xffffffffd60ef000ULL)};
         ctx.mem_wdata = 0xffffffd60ff00000ULL;
     } else {
         ctx.rrs1 = 0xd60ef000U;
         ctx.rrs2 = 0x0ff00000U;
-        ctx.mem_addr = 0xd60ef000U;
+        ctx.mem_addr = simrv::xlen::VirtAddr{0xd60ef000U};
         ctx.mem_wdata = 0x0ff00000U;
     }
     ctx.imm = 0;
@@ -3160,7 +3171,8 @@ void test_tui_differential_rendering_and_throttling() {
 
     constexpr simrv::xlen::Instruction addi_inst = 0x00100093;  // addi x1, x0, 1
     std::memcpy(ram.data(), &addi_inst, sizeof(addi_inst));
-    machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+    machine.primary_hart().state().pc =
+        simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw()};
 
     Tui tui(machine);
     TuiTestAccess::init_panes(tui, machine);
@@ -4375,7 +4387,7 @@ void test_memory_modal_and_hart_modal() {
     ram[0x1003] = simrv::xlen::Byte{0x12};
 
     // 1. Test MemoryModal navigation and inspection
-    const simrv::xlen::Address start_addr = simrv::memory::kDramBaseAddress + 0x1000;
+    const simrv::xlen::Address start_addr = (simrv::memory::kDramBaseAddress + 0x1000).raw();
     MemoryModal::open(simrv::xlen::VirtAddr{start_addr}, machine, nullptr);
     expect(MemoryModal::current_address() == start_addr, "MemoryModal opens at target address");
     expect(MemoryModal::input_mode() == MemoryModal::InputMode::Normal,

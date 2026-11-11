@@ -190,7 +190,7 @@ struct MicroarchProfile {
  * @brief Formalized semantic breakdown of an instruction evaluated against architectural state.
  */
 struct InstructionExplanation {
-    simrv::xlen::Address pc{0};
+    simrv::xlen::VirtAddr pc{};
     std::string symbol;
     uint32_t raw_bits = 0;
     bool is_compressed = false;

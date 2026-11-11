@@ -15,7 +15,7 @@ namespace simrv::device {
  */
 class VirtioMmioRng : public VirtioMmioDevice {
    public:
-    VirtioMmioRng(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioRng(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine);
 
    protected:
     void on_queue_notify(uint32_t q_idx) override;

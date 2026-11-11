@@ -8,7 +8,7 @@
 
 namespace simrv::device {
 
-VirtioMmioInput::VirtioMmioInput(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioInput::VirtioMmioInput(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                  core::Machine* machine)
     : VirtioMmioDevice("virtio-input-mmio", base_address, 0x1000, virtio::kDevIdInput, irq_num,
                        machine) {

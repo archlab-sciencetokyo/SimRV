@@ -260,7 +260,7 @@ void test_cfu_pipeline_hazard_timing() {
     // Back-to-back dependency causes a 1-cycle Decode hazard stall.
     if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
-        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
         std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
 
@@ -275,7 +275,7 @@ void test_cfu_pipeline_hazard_timing() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program_dependent.data(), sizeof(program_dependent));
         std::memcpy(ram.data(), program_dependent.data(), sizeof(program_dependent));
-        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
                           simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
@@ -313,7 +313,7 @@ void test_cfu_pipeline_hazard_timing() {
 
     if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
-        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
         std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
 
@@ -328,7 +328,7 @@ void test_cfu_pipeline_hazard_timing() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program_independent.data(), sizeof(program_independent));
         std::memcpy(ram.data(), program_independent.data(), sizeof(program_independent));
-        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
                           simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
@@ -416,30 +416,29 @@ void test_bram_prewarm_and_cli() {
             0x01400113,  // addi x2, x0, 20
             0x002081b3,  // add x3, x1, x2
         };
-        const simrv::xlen::Address code_addr = machine.memory_geometry().dram_base;
+        const simrv::xlen::PhysAddr code_addr = machine.memory_geometry().dram_base;
         std::memcpy(ram.data(), test_prog.data(), sizeof(test_prog));
 
         constexpr uint32_t data_val = 0x12345678;
-        const simrv::xlen::Address data_addr = machine.memory_geometry().dram_base + 0x1000;
-        std::memcpy(ram.data() + (data_addr - machine.memory_geometry().dram_base), &data_val,
-                    sizeof(data_val));
+        const simrv::xlen::PhysAddr data_addr = machine.memory_geometry().dram_base + 0x1000;
+        std::memcpy(ram.data() + (data_addr.raw() - machine.memory_geometry().dram_base.raw()),
+                    &data_val, sizeof(data_val));
 
         machine.clear_loaded_segments();
-        machine.record_loaded_segment(simrv::xlen::PhysAddr{code_addr}, sizeof(test_prog), true);
-        machine.record_loaded_segment(simrv::xlen::PhysAddr{data_addr}, sizeof(data_val), false);
+        machine.record_loaded_segment(code_addr, sizeof(test_prog), true);
+        machine.record_loaded_segment(data_addr, sizeof(data_val), false);
 
         machine.prewarm_bram_caches();
 
         // Verify ICache hit on the prewarmed code line
         uint32_t fetched_inst = 0;
-        TEST_CHECK(cpu.icache.read(simrv::xlen::PhysAddr{code_addr}, fetched_inst));
+        TEST_CHECK(cpu.icache.read(code_addr, fetched_inst));
         TEST_CHECK(fetched_inst == test_prog[0]);
         TEST_CHECK(cpu.icache.miss_count() == 0);
 
         // Verify DCache hit on the prewarmed data line
         simrv::xlen::Word read_data = 0;
-        TEST_CHECK(
-            cpu.dcache.read(simrv::xlen::PhysAddr{data_addr}, read_data, simrv::isa::Funct3::Lw));
+        TEST_CHECK(cpu.dcache.read(data_addr, read_data, simrv::isa::Funct3::Lw));
         TEST_CHECK(static_cast<uint32_t>(read_data) == data_val);
         TEST_CHECK(cpu.dcache.miss_count() == 0);
     }
@@ -461,7 +460,8 @@ void test_bram_prewarm_and_cli() {
     // Rounding a segment's end must not wrap and skip valid high-address lines.
     {
         simrv::core::MachineConfig config{};
-        config.memory.dram_base = std::numeric_limits<simrv::xlen::Address>::max() - 0xfff;
+        config.memory.dram_base =
+            simrv::xlen::PhysAddr{std::numeric_limits<simrv::xlen::Address>::max() - 0xfff};
         simrv::core::Machine machine(config);
         std::vector<simrv::xlen::Byte> ram(0xfff, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());

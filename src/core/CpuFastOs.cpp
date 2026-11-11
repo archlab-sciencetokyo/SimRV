@@ -80,7 +80,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         machine.num_harts() > 1;
                     auto* chained = cached;
                     CachedOp* fallback_op = nullptr;
-                    simrv::xlen::Register next_pc = state_.pc.raw();
+                    simrv::xlen::VirtAddr next_pc = state_.pc;
                     uint32_t chain_size = 0;
                     uint32_t compressed_count = 0;
 
@@ -147,7 +147,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             return false;
                         }
                         auto* next_op = decode_cache.op_by_index(chained->next_seq_idx);
-                        if (simrv::compiler::likely(next_op->cpc.raw() == next_pc &&
+                        if (simrv::compiler::likely(next_op->cpc == next_pc &&
                                                     next_op->ctx == active_ctx)) {
                             chained = next_op;
                             return true;
@@ -203,7 +203,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                             entry.matches_fast(vpn, asid_priv_tag, priv_tag,
                                                                soft_tlb_epoch) &&
                                             entry.has_host_ptr())) {
-                                        host_ptr = entry.host_ptr(lookup_addr);
+                                        host_ptr =
+                                            entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr});
                                     } else if (TLBEntry* tlb_e = tlb.lookup_data_r(
                                                    simrv::xlen::VirtAddr{lookup_addr}, current_asid,
                                                    eff_priv);
@@ -212,14 +213,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                    tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
                                         const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
                                         if (simrv::compiler::likely(
-                                                ram.contains(ppage, 4096) &&
+                                                ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
                                                 (state_.num_active_pmp == 0 ||
                                                  core::pmp::check_access(
                                                      state_, simrv::xlen::PhysAddr{ppage}, 4096,
                                                      core::PmpAccessType::Read, eff_priv)))) {
-                                            auto* const host_base = ram.unchecked_ptr(ppage);
+                                            auto* const host_base =
+                                                ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage});
                                             entry.set(vpn, current_asid, eff_priv, soft_tlb_epoch,
-                                                      ppage, host_base, tlb_e->global);
+                                                      simrv::xlen::PhysAddr{ppage}, host_base,
+                                                      tlb_e->global);
                                             host_ptr = host_base + page_offset;
                                         }
                                     }
@@ -242,7 +245,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                         break;
                                     }
                                 } else if (fast_m_ram) {
-                                    auto* host_ptr = ram.try_get_ptr_fast(lookup_addr, size_bytes);
+                                    auto* host_ptr = ram.try_get_ptr_fast(
+                                        simrv::xlen::PhysAddr{lookup_addr}, size_bytes);
                                     if (host_ptr != nullptr) {
                                         const simrv::xlen::Register mem_rdata =
                                             simrv::memory::host_read_fast_aligned(host_ptr,
@@ -288,12 +292,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                 } else {
                                     state_.regs.write_xlen32(chained->rd, link_pc);
                                 }
-                                next_pc = target_pc;
+                                next_pc = simrv::xlen::VirtAddr{target_pc};
                                 record_hpm_instruction_classes<kHpmClassMode>(
                                     chained->op_id, chained->opcode(), chained->cinsn != 0);
                                 if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                    next_pc = static_cast<simrv::xlen::Register>(
-                                        static_cast<int64_t>(static_cast<int32_t>(next_pc)));
+                                    next_pc = simrv::xlen::VirtAddr{
+                                        static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+                                            static_cast<int32_t>(next_pc.raw())))};
                                 }
                                 ++chain_size;
                                 compressed_count += (chained->op_len == 2);
@@ -302,7 +307,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     break;
                                 }
                                 auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                                if (simrv::compiler::likely(next_op->cpc.raw() == next_pc &&
+                                if (simrv::compiler::likely(next_op->cpc == next_pc &&
                                                             next_op->ctx == active_ctx)) {
                                     chained = next_op;
                                     continue;
@@ -340,7 +345,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                 } else {
                                     state_.regs.write_xlen32(chained->rd, link_pc);
                                 }
-                                next_pc = target_pc;
+                                next_pc = simrv::xlen::VirtAddr{target_pc};
                                 record_hpm_instruction_classes<kHpmClassMode>(
                                     chained->op_id, chained->opcode(), chained->cinsn != 0);
                                 ++chain_size;
@@ -350,7 +355,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     break;
                                 }
                                 auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                                if (simrv::compiler::likely(next_op->cpc.raw() == next_pc &&
+                                if (simrv::compiler::likely(next_op->cpc == next_pc &&
                                                             next_op->ctx == active_ctx)) {
                                     chained = next_op;
                                     continue;
@@ -418,7 +423,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                 target_pc = static_cast<simrv::xlen::Register>(
                                     static_cast<int64_t>(static_cast<int32_t>(target_pc)));
                             }
-                            next_pc = target_pc;
+                            next_pc = simrv::xlen::VirtAddr{target_pc};
                             record_hpm_instruction_classes<kHpmClassMode>(
                                 chained->op_id, chained->opcode(), chained->cinsn != 0);
                             ++chain_size;
@@ -428,7 +433,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                 break;
                             }
                             auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                            if (simrv::compiler::likely(next_op->cpc.raw() == next_pc &&
+                            if (simrv::compiler::likely(next_op->cpc == next_pc &&
                                                         next_op->ctx == active_ctx)) {
                                 chained = next_op;
                                 continue;
@@ -465,7 +470,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                                soft_tlb_epoch) &&
                                             entry.has_host_ptr())) {
                                         paddr = (entry.paddr_base + page_offset).raw();
-                                        host_ptr = entry.host_ptr(lookup_addr);
+                                        host_ptr =
+                                            entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr});
                                     } else if (TLBEntry* tlb_e = tlb.lookup_data_w(
                                                    simrv::xlen::VirtAddr{lookup_addr}, current_asid,
                                                    eff_priv);
@@ -474,14 +480,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                    tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
                                         const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
                                         if (simrv::compiler::likely(
-                                                ram.contains(ppage, 4096) &&
+                                                ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
                                                 (state_.num_active_pmp == 0 ||
                                                  core::pmp::check_access(
                                                      state_, simrv::xlen::PhysAddr{ppage}, 4096,
                                                      core::PmpAccessType::Write, eff_priv)))) {
-                                            auto* const host_base = ram.unchecked_ptr(ppage);
+                                            auto* const host_base =
+                                                ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage});
                                             entry.set(vpn, current_asid, eff_priv, soft_tlb_epoch,
-                                                      ppage, host_base, tlb_e->global);
+                                                      simrv::xlen::PhysAddr{ppage}, host_base,
+                                                      tlb_e->global);
                                             paddr = ppage + page_offset;
                                             host_ptr = host_base + page_offset;
                                         }
@@ -505,7 +513,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     }
                                 } else if (fast_m_ram &&
                                            !is_tohost_addr_fast(tohost_addr, lookup_addr)) {
-                                    auto* host_ptr = ram.try_get_ptr_fast(lookup_addr, size_bytes);
+                                    auto* host_ptr = ram.try_get_ptr_fast(
+                                        simrv::xlen::PhysAddr{lookup_addr}, size_bytes);
                                     if (host_ptr != nullptr) {
                                         simrv::memory::host_write_fast_aligned(
                                             host_ptr, state_.regs.read(chained->rs2),
@@ -555,7 +564,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                     entry.has_host_ptr())) {
                                                 const simrv::xlen::Word mem_rdata =
                                                     simrv::memory::host_read_fast(
-                                                        entry.host_ptr(lookup_addr),
+                                                        entry.host_ptr(
+                                                            simrv::xlen::VirtAddr{lookup_addr}),
                                                         static_cast<simrv::xlen::Instruction>(
                                                             chained->funct3));
                                                 state_.regs.write_fp(
@@ -578,8 +588,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                 break;
                                             }
                                         } else if (fast_m_ram) {
-                                            auto* host_ptr =
-                                                ram.try_get_ptr_fast(lookup_addr, size_bytes);
+                                            auto* host_ptr = ram.try_get_ptr_fast(
+                                                simrv::xlen::PhysAddr{lookup_addr}, size_bytes);
                                             if (host_ptr != nullptr) {
                                                 const simrv::xlen::Word mem_rdata =
                                                     simrv::memory::host_read_fast(
@@ -641,7 +651,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                             simrv::xlen::to_fp_reg_id(
                                                                 chained->rs2));
                                                     simrv::memory::host_write_fast(
-                                                        entry.host_ptr(lookup_addr),
+                                                        entry.host_ptr(
+                                                            simrv::xlen::VirtAddr{lookup_addr}),
                                                         static_cast<simrv::xlen::Word>(fp_data),
                                                         static_cast<simrv::xlen::Instruction>(
                                                             chained->funct3));
@@ -661,8 +672,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                             }
                                         } else if (fast_m_ram &&
                                                    !is_tohost_addr_fast(tohost_addr, lookup_addr)) {
-                                            auto* host_ptr =
-                                                ram.try_get_ptr_fast(lookup_addr, size_bytes);
+                                            auto* host_ptr = ram.try_get_ptr_fast(
+                                                simrv::xlen::PhysAddr{lookup_addr}, size_bytes);
                                             if (host_ptr != nullptr) {
                                                 const simrv::xlen::FloatingRegister fp_data =
                                                     state_.regs.read_fp(

@@ -32,15 +32,13 @@ namespace simrv::device {
 class Uart : public SerialDevice {
    public:
     explicit Uart(simrv::core::Machine& machine,
-                  simrv::xlen::Address base = simrv::mmio::kUartBaseAddress,
+                  simrv::xlen::PhysAddr base = simrv::mmio::kUartBaseAddress,
                   simrv::xlen::Address size = simrv::mmio::kUartSize, uint32_t irq = 3,
                   uint64_t clock_hz = SIMRV_PLATFORM_UART_CLOCK_HZ,
                   uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz);
     ~Uart() override;
     [[nodiscard]] auto name() const -> const char* override { return "uart"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
-        return simrv::xlen::PhysAddr{base_};
-    }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
@@ -78,7 +76,7 @@ class Uart : public SerialDevice {
     void update_active_transfer() noexcept;
 
     simrv::core::Machine& machine_;
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
     uint32_t irq_;
     uint64_t clock_hz_;

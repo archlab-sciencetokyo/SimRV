@@ -186,9 +186,10 @@ auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machi
     out << "{\"schema_version\":2,\"event\":\"" << lifecycle_event_name(kind)
         << "\",\"timestamp\":\"" << lifecycle_timestamp()
         << "\",\"cycle\":" << hart.clint_mmio.mcycle << ",\"hart\":0,\"pc\":\"0x" << std::hex
-        << hart.state().pc.raw() << std::dec << "\",\"mode\":\"" << privilege_mode(hart.state().priv)
-        << "\",\"payload\":{\"status\":\"" << (status == 0 ? "ok" : "failed")
-        << "\",\"stop_reason\":\"" << simrv::core::Machine::stop_reason_name(machine.stop_reason())
+        << hart.state().pc.raw() << std::dec << "\",\"mode\":\""
+        << privilege_mode(hart.state().priv) << "\",\"payload\":{\"status\":\""
+        << (status == 0 ? "ok" : "failed") << "\",\"stop_reason\":\""
+        << simrv::core::Machine::stop_reason_name(machine.stop_reason())
         << "\",\"retired_instructions\":" << hart.e_icount
         << ",\"cycles\":" << hart.clint_mmio.mcycle;
     if (status != 0) out << ",\"exit_status\":" << status;
@@ -707,8 +708,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     std::println("  Device Policy   : {}",
                                  soc.disable_unlisted_devices ? "explicit" : "implicit defaults");
                     if (soc.dram_base.has_value() && soc.dram_size.has_value()) {
-                        std::println("  SoC DRAM Base   : {:#x} (size: {:#x})", *soc.dram_base,
-                                     *soc.dram_size);
+                        std::println("  SoC DRAM Base   : {:#x} (size: {:#x})",
+                                     soc.dram_base->raw(), *soc.dram_size);
                     }
                     std::println("  SoC Devices     : {} configured", soc.devices.size());
 

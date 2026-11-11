@@ -139,7 +139,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     }
 
     if (ctx.pending_exception.has_value()) {
-        state_.pc = ctx.cpc.raw();
+        state_.pc = ctx.cpc;
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {

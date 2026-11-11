@@ -38,7 +38,7 @@ struct PipelineContext : public DecodedInstruction {
     // EX1 stage results and controls
     bool tkn = false;
     simrv::xlen::VirtAddr jmp_pc{0};
-    simrv::xlen::Address mem_addr = 0;
+    simrv::xlen::VirtAddr mem_addr{};
     simrv::xlen::PhysAddr mem_paddr{0};
     simrv::xlen::Register wb_data = 0;
     simrv::xlen::CsrValue wb_data_csr = 0;

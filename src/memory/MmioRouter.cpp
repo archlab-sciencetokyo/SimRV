@@ -233,7 +233,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
             const auto width = static_cast<uint32_t>(1u << (req.size & 0x3u));
             const simrv::xlen::Word data =
                 is_write ? static_cast<simrv::xlen::Word>(req.data) : simrv::xlen::Word{0};
-            tracer_->log_mmio(req.hart, "unmapped", req.address.raw(), width, data, is_write, true,
+            tracer_->log_mmio(req.hart, "unmapped", req.address, width, data, is_write, true,
                               false);
         }
         return false;
@@ -251,7 +251,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
             return;
         const simrv::xlen::Word data = is_write ? static_cast<simrv::xlen::Word>(req.data)
                                                 : static_cast<simrv::xlen::Word>(resp.data);
-        tracer_->log_mmio(req.hart, device->name(), req.address.raw(),
+        tracer_->log_mmio(req.hart, device->name(), req.address,
                           static_cast<uint32_t>(request_bytes), data, is_write, faulted);
     };
 

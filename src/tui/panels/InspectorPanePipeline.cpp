@@ -403,7 +403,7 @@ auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen
     if (decode.valid && (decode.is_branch || decode.is_jump)) {
         return simrv::xlen::VirtAddr{decode.pc};
     }
-    return 0;
+    return {};
 }
 
 auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
@@ -735,7 +735,7 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
                                              : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 
             std::string asm_str = simrv::explain::format_instruction_assembly(
-                ctx.ir_org, ctx.cpc.raw(), cpu.state().current_xlen());
+                ctx.ir_org, ctx.cpc, cpu.state().current_xlen());
 
             return render_pair("PC", pc_str, kThemeMint, "Asm", asm_str, kThemePeach, col_width,
                                right_width, 10);
@@ -1100,7 +1100,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
     // Execution Timeline instruction rows (logical rows 2..6)
     if (logical_row >= 2 && logical_row <= 6) {
         auto const history = ps.cycle_history();
-        if (history.empty()) return 0;
+        if (history.empty()) return {};
         const auto active_insts = timeline_instructions(history);
 
         int const inst_row = logical_row - 2;
@@ -1113,7 +1113,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
     if (machine_.runtime_profile.is_cycle_mode()) {
         const auto stage_pc = [&ps](PipelineStage stage) {
             const auto& reg = ps.stage_reg(stage);
-            return simrv::xlen::VirtAddr{reg.valid ? reg.pc : simrv::xlen::Register{0}};
+            return reg.valid ? reg.pc : simrv::xlen::VirtAddr{};
         };
         switch (logical_row) {
             case 11:
@@ -1130,7 +1130,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
                 break;
         }
     }
-    return 0;
+    return {};
 }
 
 auto InspectorPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,

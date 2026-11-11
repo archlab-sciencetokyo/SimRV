@@ -131,10 +131,11 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
     commit_cached_branch_target(op, target_pc);
 }
 
-auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address mem_addr,
+auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::VirtAddr vaddr,
                         isa::Funct3 funct3, simrv::xlen::Register& out_val,
                         const simrv::memory::RamView& ram) -> bool {
-    if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
+    simrv::xlen::Address mem_addr = vaddr.raw();
+    if (simrv::compiler::unlikely(!is_aligned_for_funct3(vaddr, funct3))) {
         return false;
     }
 
@@ -145,9 +146,10 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) mem_addr &= 0xFFFFFFFFULL;
         }
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes))) {
-            out_val = simrv::memory::ram_read_fast(
-                mem_addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
+        if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{mem_addr}, size_bytes))) {
+            out_val =
+                simrv::memory::ram_read_fast(simrv::xlen::PhysAddr{mem_addr},
+                                             static_cast<simrv::xlen::Instruction>(funct3), ram);
             return true;
         }
         return false;
@@ -166,8 +168,9 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
         const auto& entry = soft_tlb_read[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             if (simrv::compiler::likely(entry.has_host_ptr())) {
-                out_val = simrv::memory::host_read_fast(
-                    entry.host_ptr(mem_addr), static_cast<simrv::xlen::Instruction>(funct3));
+                out_val =
+                    simrv::memory::host_read_fast(entry.host_ptr(simrv::xlen::VirtAddr{mem_addr}),
+                                                  static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
             const simrv::xlen::Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
@@ -177,9 +180,10 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
                                              core::PmpAccessType::Read, eff_priv))) {
                 return false;
             }
-            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
+            if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{paddr}, size_bytes))) {
                 out_val = simrv::memory::ram_read_fast(
-                    paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
+                    simrv::xlen::PhysAddr{paddr}, static_cast<simrv::xlen::Instruction>(funct3),
+                    ram);
                 return true;
             }
             return false;
@@ -196,41 +200,44 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             }
             simrv::xlen::Address const ppage = tlb_e->p_addr.raw();
             simrv::xlen::Byte* host_base =
-                (ram.contains(ppage, 4096) &&
+                (ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
                  (state_.num_active_pmp == 0 ||
                   core::pmp::check_access(state_, simrv::xlen::PhysAddr{ppage}, 4096,
                                           core::PmpAccessType::Read, eff_priv)))
-                    ? ram.unchecked_ptr(ppage)
+                    ? ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage})
                     : nullptr;
-            soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
-                                       host_base, tlb_e->global);
+            soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch,
+                                       simrv::xlen::PhysAddr{ppage}, host_base, tlb_e->global);
             if (host_base != nullptr) {
                 out_val = simrv::memory::host_read_fast(
                     host_base + (mem_addr & 0xFFF), static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
-            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
+            if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{paddr}, size_bytes))) {
                 out_val = simrv::memory::ram_read_fast(
-                    paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
+                    simrv::xlen::PhysAddr{paddr}, static_cast<simrv::xlen::Instruction>(funct3),
+                    ram);
                 return true;
             }
         }
     } else {
-        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes) &&
+        if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{mem_addr}, size_bytes) &&
                                     core::pmp::check_access(state_, simrv::xlen::PhysAddr{mem_addr},
                                                             size_bytes, core::PmpAccessType::Read,
                                                             eff_priv))) {
-            out_val = simrv::memory::ram_read_fast(
-                mem_addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
+            out_val =
+                simrv::memory::ram_read_fast(simrv::xlen::PhysAddr{mem_addr},
+                                             static_cast<simrv::xlen::Instruction>(funct3), ram);
             return true;
         }
     }
     return false;
 }
 
-auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::Funct3 funct3,
+auto CPU::try_fast_store(Machine& machine, simrv::xlen::VirtAddr vaddr, isa::Funct3 funct3,
                          simrv::xlen::Register rrs2, const simrv::memory::RamView& ram) -> bool {
-    if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
+    simrv::xlen::Address mem_addr = vaddr.raw();
+    if (simrv::compiler::unlikely(!is_aligned_for_funct3(vaddr, funct3))) {
         return false;
     }
 
@@ -241,11 +248,11 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) mem_addr &= 0xFFFFFFFFULL;
         }
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes) &&
+        if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{mem_addr}, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2,
+            simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{mem_addr}, rrs2,
                                           static_cast<simrv::xlen::Instruction>(funct3), ram);
-            pipeline_context.mem_paddr = mem_addr;
+            pipeline_context.mem_paddr = simrv::xlen::PhysAddr{mem_addr};
             return true;
         }
         return false;
@@ -268,9 +275,9 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                 return false;
             }
             if (simrv::compiler::likely(entry.has_host_ptr())) {
-                simrv::memory::host_write_fast(entry.host_ptr(mem_addr), rrs2,
-                                               static_cast<simrv::xlen::Instruction>(funct3));
-                pipeline_context.mem_paddr = paddr;
+                simrv::memory::host_write_fast(entry.host_ptr(simrv::xlen::VirtAddr{mem_addr}),
+                                               rrs2, static_cast<simrv::xlen::Instruction>(funct3));
+                pipeline_context.mem_paddr = simrv::xlen::PhysAddr{paddr};
                 return true;
             }
             if (simrv::compiler::unlikely(
@@ -280,9 +287,9 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                 return false;
             }
             if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
-                simrv::memory::ram_write_fast(paddr, rrs2,
+                simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{paddr}, rrs2,
                                               static_cast<simrv::xlen::Instruction>(funct3), ram);
-                pipeline_context.mem_paddr = paddr;
+                pipeline_context.mem_paddr = simrv::xlen::PhysAddr{paddr};
                 return true;
             }
             return false;
@@ -302,35 +309,36 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             }
             simrv::xlen::Address const ppage = tlb_e->p_addr.raw();
             simrv::xlen::Byte* host_base =
-                (ram.contains(ppage, 4096) &&
+                (ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
                  (state_.num_active_pmp == 0 ||
                   core::pmp::check_access(state_, simrv::xlen::PhysAddr{ppage}, 4096,
                                           core::PmpAccessType::Write, eff_priv)))
-                    ? ram.unchecked_ptr(ppage)
+                    ? ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage})
                     : nullptr;
-            soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
-                                        host_base, tlb_e->global);
+            soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch,
+                                        simrv::xlen::PhysAddr{ppage}, host_base, tlb_e->global);
             if (host_base != nullptr) {
                 simrv::memory::host_write_fast(host_base + (mem_addr & 0xFFF), rrs2,
                                                static_cast<simrv::xlen::Instruction>(funct3));
-                pipeline_context.mem_paddr = paddr;
+                pipeline_context.mem_paddr = simrv::xlen::PhysAddr{paddr};
                 return true;
             }
-            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
-                simrv::memory::ram_write_fast(paddr, rrs2,
+            if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{paddr}, size_bytes))) {
+                simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{paddr}, rrs2,
                                               static_cast<simrv::xlen::Instruction>(funct3), ram);
-                pipeline_context.mem_paddr = paddr;
+                pipeline_context.mem_paddr = simrv::xlen::PhysAddr{paddr};
                 return true;
             }
         }
     } else {
-        if (simrv::compiler::likely(
-                ram.contains(mem_addr, size_bytes) && !is_tohost_addr(machine, mem_addr) &&
-                core::pmp::check_access(state_, simrv::xlen::PhysAddr{mem_addr}, size_bytes,
-                                        core::PmpAccessType::Write, eff_priv))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2,
+        if (simrv::compiler::likely(ram.contains(simrv::xlen::PhysAddr{mem_addr}, size_bytes) &&
+                                    !is_tohost_addr(machine, mem_addr) &&
+                                    core::pmp::check_access(state_, simrv::xlen::PhysAddr{mem_addr},
+                                                            size_bytes, core::PmpAccessType::Write,
+                                                            eff_priv))) {
+            simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{mem_addr}, rrs2,
                                           static_cast<simrv::xlen::Instruction>(funct3), ram);
-            pipeline_context.mem_paddr = mem_addr;
+            pipeline_context.mem_paddr = simrv::xlen::PhysAddr{mem_addr};
             return true;
         }
     }
@@ -366,7 +374,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
             .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
-        pipeline_context.mem_addr = mem_addr;
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
     }
     simrv::xlen::Register mem_rdata = 0;
     constexpr unsigned size_bytes = kSizeBytes;
@@ -380,8 +388,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) phys_addr &= 0xFFFFFFFFULL;
         }
         if (simrv::compiler::likely((phys_addr & align_mask) == 0 &&
-                                    ram.contains(phys_addr, size_bytes))) {
-            mem_rdata = simrv::memory::ram_read_fast(phys_addr, kFunct3, ram);
+                                    ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes))) {
+            mem_rdata =
+                simrv::memory::ram_read_fast(simrv::xlen::PhysAddr{phys_addr}, kFunct3, ram);
             state_.regs.write(op.rd, mem_rdata);
             advance_cached_pc(op);
             return true;
@@ -404,7 +413,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
                 if (simrv::compiler::likely(entry.has_host_ptr())) {
-                    mem_rdata = simrv::memory::host_read_fast(entry.host_ptr(lookup_addr), kFunct3);
+                    mem_rdata = simrv::memory::host_read_fast(
+                        entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}), kFunct3);
                     state_.regs.write(op.rd, mem_rdata);
                     advance_cached_pc(op);
                     return true;
@@ -421,14 +431,15 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                                                     eff_priv))) {
                         const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
                         simrv::xlen::Byte* const host_base =
-                            (ram.contains(ppage, 4096) &&
+                            (ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
                              (state_.num_active_pmp == 0 ||
                               core::pmp::check_access(state_, simrv::xlen::PhysAddr{ppage}, 4096,
                                                       core::PmpAccessType::Read, eff_priv)))
-                                ? ram.unchecked_ptr(ppage)
+                                ? ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage})
                                 : nullptr;
                         soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch,
-                                                   ppage, host_base, tlb_e->global);
+                                                   simrv::xlen::PhysAddr{ppage}, host_base,
+                                                   tlb_e->global);
                         if (simrv::compiler::likely(host_base != nullptr)) {
                             mem_rdata =
                                 simrv::memory::host_read_fast(host_base + page_offset, kFunct3);
@@ -446,10 +457,12 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         }
     }
 
-    if (skip_fast_load || !try_fast_load(machine, mem_addr, kFunct3, mem_rdata, ram)) {
+    if (skip_fast_load ||
+        !try_fast_load(machine, simrv::xlen::VirtAddr{mem_addr}, kFunct3, mem_rdata, ram)) {
         op.copy_to(pipeline_context);
-        pipeline_context.mem_addr = mem_addr;
-        mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, kFunct3);
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+        mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                         simrv::xlen::VirtAddr{mem_addr}, kFunct3);
         if (pipeline_context.pending_exception.has_value()) {
             raise_exception(
                 static_cast<simrv::xlen::TrapCause>(*pipeline_context.pending_exception),
@@ -487,7 +500,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
             .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
-        pipeline_context.mem_addr = mem_addr;
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
     }
     constexpr unsigned size_bytes = kSizeBytes;
     bool skip_fast_store = false;
@@ -499,9 +512,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) phys_addr &= 0xFFFFFFFFULL;
         }
         if (simrv::compiler::likely((phys_addr & kAlignMask) == 0 &&
-                                    ram.contains(phys_addr, size_bytes) &&
+                                    ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes) &&
                                     !is_tohost_addr(machine, phys_addr))) {
-            simrv::memory::ram_write_fast(phys_addr, rrs2, kFunct3, ram);
+            simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{phys_addr}, rrs2, kFunct3, ram);
             state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
                     machine.memory_.reservation_table().may_have_reservations() &&
@@ -532,8 +545,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                 const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
                 if (simrv::compiler::likely(entry.has_host_ptr() &&
                                             !is_tohost_addr(machine, paddr))) {
-                    simrv::memory::host_write_fast(entry.host_ptr(lookup_addr), rrs2,
-                                                   static_cast<simrv::xlen::Instruction>(kFunct3));
+                    simrv::memory::host_write_fast(
+                        entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}), rrs2,
+                        static_cast<simrv::xlen::Instruction>(kFunct3));
                     state_.lr_reservation_active = false;
                     if (simrv::compiler::unlikely(
                             machine.memory_.reservation_table().may_have_reservations() &&
@@ -557,14 +571,15 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                             !is_tohost_addr(machine, paddr))) {
                         const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
                         simrv::xlen::Byte* const host_base =
-                            (ram.contains(ppage, 4096) &&
+                            (ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
                              (state_.num_active_pmp == 0 ||
                               core::pmp::check_access(state_, simrv::xlen::PhysAddr{ppage}, 4096,
                                                       core::PmpAccessType::Write, eff_priv)))
-                                ? ram.unchecked_ptr(ppage)
+                                ? ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage})
                                 : nullptr;
                         soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch,
-                                                    ppage, host_base, tlb_e->global);
+                                                    simrv::xlen::PhysAddr{ppage}, host_base,
+                                                    tlb_e->global);
                         if (simrv::compiler::likely(host_base != nullptr)) {
                             simrv::memory::host_write_fast(
                                 host_base + page_offset, rrs2,
@@ -589,10 +604,12 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         }
     }
 
-    if (skip_fast_store || !try_fast_store(machine, mem_addr, kFunct3, rrs2, ram)) {
+    if (skip_fast_store ||
+        !try_fast_store(machine, simrv::xlen::VirtAddr{mem_addr}, kFunct3, rrs2, ram)) {
         op.copy_to(pipeline_context);
-        pipeline_context.mem_addr = mem_addr;
-        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, kFunct3);
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this,
+                                              simrv::xlen::VirtAddr{mem_addr}, rrs2, kFunct3);
         if (pipeline_context.pending_exception.has_value()) {
             raise_exception(
                 static_cast<simrv::xlen::TrapCause>(*pipeline_context.pending_exception),
@@ -863,10 +880,12 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     if (simrv::compiler::unlikely(state_.regs.xlen == 32))
                         phys_addr &= 0xFFFFFFFFULL;
                 }
-                if (simrv::compiler::likely((phys_addr & align_mask) == 0 &&
-                                            ram.contains(phys_addr, size_bytes))) {
+                if (simrv::compiler::likely(
+                        (phys_addr & align_mask) == 0 &&
+                        ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes))) {
                     mem_rdata = simrv::memory::ram_read_fast(
-                        phys_addr, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
+                        simrv::xlen::PhysAddr{phys_addr},
+                        static_cast<simrv::xlen::Instruction>(op.funct3), ram);
                     loaded = true;
                 }
             } else if (fast_width_supported) {
@@ -888,7 +907,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                             entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch) &&
                             entry.has_host_ptr())) {
                         mem_rdata = simrv::memory::host_read_fast(
-                            entry.host_ptr(lookup_addr),
+                            entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}),
                             static_cast<simrv::xlen::Instruction>(op.funct3));
                         loaded = true;
                     }
@@ -896,14 +915,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             if (!loaded) {
                 simrv::xlen::Word raw_val = 0;
-                if (fast_width_supported &&
-                    try_fast_load(machine, mem_addr, op.funct3, raw_val, ram)) {
+                if (fast_width_supported && try_fast_load(machine, simrv::xlen::VirtAddr{mem_addr},
+                                                          op.funct3, raw_val, ram)) {
                     mem_rdata = raw_val;
                 } else {
                     op.copy_to(pipeline_context);
-                    pipeline_context.mem_addr = mem_addr;
-                    mem_rdata = simrv::memory::MemoryAccess::loadFp(machine.memory_, *this,
-                                                                    mem_addr, op.funct3);
+                    pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+                    mem_rdata = simrv::memory::MemoryAccess::loadFp(
+                        machine.memory_, *this, simrv::xlen::VirtAddr{mem_addr}, op.funct3);
                     if (pipeline_context.pending_exception.has_value()) {
                         raise_exception(static_cast<simrv::xlen::TrapCause>(
                                             *pipeline_context.pending_exception),
@@ -945,12 +964,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     if (simrv::compiler::unlikely(state_.regs.xlen == 32))
                         phys_addr &= 0xFFFFFFFFULL;
                 }
-                if (simrv::compiler::likely((phys_addr & align_mask) == 0 &&
-                                            ram.contains(phys_addr, size_bytes) &&
-                                            !is_tohost_addr(machine, phys_addr))) {
-                    simrv::memory::ram_write_fast(
-                        phys_addr, fp_data, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
-                    pipeline_context.mem_paddr = phys_addr;
+                if (simrv::compiler::likely(
+                        (phys_addr & align_mask) == 0 &&
+                        ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes) &&
+                        !is_tohost_addr(machine, phys_addr))) {
+                    simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{phys_addr}, fp_data,
+                                                  static_cast<simrv::xlen::Instruction>(op.funct3),
+                                                  ram);
+                    pipeline_context.mem_paddr = simrv::xlen::PhysAddr{phys_addr};
                     stored = true;
                 }
             } else if (fast_width_supported) {
@@ -974,9 +995,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                         const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
                         if (simrv::compiler::likely(!is_tohost_addr(machine, paddr))) {
                             simrv::memory::host_write_fast(
-                                entry.host_ptr(lookup_addr), fp_data,
+                                entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}), fp_data,
                                 static_cast<simrv::xlen::Instruction>(op.funct3));
-                            pipeline_context.mem_paddr = paddr;
+                            pipeline_context.mem_paddr = simrv::xlen::PhysAddr{paddr};
                             stored = true;
                         }
                     }
@@ -984,10 +1005,12 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             if (!stored) {
                 if (!fast_width_supported ||
-                    !try_fast_store(machine, mem_addr, op.funct3, fp_data, ram)) {
+                    !try_fast_store(machine, simrv::xlen::VirtAddr{mem_addr}, op.funct3, fp_data,
+                                    ram)) {
                     op.copy_to(pipeline_context);
-                    pipeline_context.mem_addr = mem_addr;
-                    simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
+                    pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+                    simrv::memory::MemoryAccess::storeFp(machine.memory_, *this,
+                                                         simrv::xlen::VirtAddr{mem_addr}, fp_data,
                                                          op.funct3);
                     if (pipeline_context.pending_exception.has_value()) {
                         raise_exception(static_cast<simrv::xlen::TrapCause>(

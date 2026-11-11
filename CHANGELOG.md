@@ -8,19 +8,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Improve bare-metal execution performance and throughput reporting.
 - Add host hardware cache topology discovery and adaptive simulation tuning diagnostics in `simrv doctor`.
 - Reduce ELF loading and initialization overhead.
-- Use explicit virtual-address types across C++ execution, tracing, debugging, and symbol APIs.
-- Distinguish virtual addresses from register locations in C++ breakpoint-hit results.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
 - Fix missing UART line interrupts when the receive FIFO overruns.
 
 ## [v3.0.0-rc.19] — 2026-11-09
 
-- Separate fast execution into dedicated baremetal and OS engines with unified direct dispatch.
-- Restore direct-chained basic block execution in the baremetal engine.
 - Modernize CLI execution summary with adaptive duration units, visual progress bars, peak/average MIPS tracking, and conditional RVC share display.
 - Flush UART buffers immediately in CLI mode so interactive guest prompts appear without latency.
 - Remove redundant termination logs prior to the execution summary box.
-- Retire legacy Python test and benchmark harnesses in favor of native C++ implementations (`simrv-benchmark`, `simrv-act`, `simrv-vector`, `simrv-parity`).
 - Fix RV32 guest compatibility on RV64 for selective TLB invalidation, SBI RFENCE, and SSTC `stimecmp` timer CSRs.
 - Filter 64-bit-only pointer-masking extensions in FDT generation for RV32 guests.
 - Fix MMIO routing for overlapping device windows with holes and reject accesses that cross device boundaries.
@@ -30,7 +25,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Reject invalid VirtIO queue sizes, overflowing ring ranges, and out-of-range descriptor indices.
 - Discard stale deferred VirtIO block and network completions after queue reset or reconfiguration.
 - Fix unsupported wide direct data-cache accesses in native RV32.
-- Strengthen C++ address interfaces for translation, caches, debugging, MMIO, and DMA. The C plugin ABI remains compatible.
 - Allow serial plugins to replace the configured UART and compatible MMIO plugins to replace standalone power and RTC devices. Plugin MMIO errors now reach the guest.
 - Allow custom MMIO plugins to provide a framebuffer for the TUI.
 - Fix missed TUI display updates for small framebuffers and rows with trailing bytes.
@@ -40,7 +34,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix cache prewarming for ELF segments loaded at RAM-relative addresses or near the physical address limit.
 - Fix spurious NUL characters in the RVComp UART by using its serial device plugin.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
-- Improve bare-metal fast-execution throughput.
 - Fix Linux packages so optional plugin libraries are installed with the tools package.
 
 ## [v3.0.0-rc.18] — 2026-11-04

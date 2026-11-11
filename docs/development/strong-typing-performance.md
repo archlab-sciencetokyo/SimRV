@@ -150,3 +150,55 @@ interleaved samples on x86 CPU 15. Median times were 0.162476 seconds (4.97% CV)
 0.157763 seconds (2.58% CV) after. The result shows no material regression on this workload;
 the variability and a concurrent CLI summary change prevent attributing the small difference to
 the guard. SHA-256 prefixes were `da35e96dcd80` and `802f2bb0b512`.
+
+For the typed TileLink/coherence addresses, resumable transfer address, and instruction explainer
+PC changes, an RV64 release executable comparison used the `compute.elf`, `branch.elf`, and
+`memory.elf` guests from `benchmark_logs/strong-typing-2026-11-05/`. Each run used
+`rv64gc_zicsr_zifencei_zicntr`, the fast bare-metal engine, and a 100 million instruction limit.
+Hyperfine ran five warmups and 30 measured samples pinned to x86 CPU 0. Medians in seconds and
+CVs were:
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Compute | 0.116711 (1.52%) | 0.118295 (2.36%) |
+| Branch | 0.352744 (17.55%) | 0.259118 (9.85%) |
+| Memory | 0.118551 (2.39%) | 0.117202 (2.16%) |
+
+The branch samples are too variable to support a performance conclusion. Compute and memory
+differences are below 5%. The compared binaries were 45,461,824 and 45,463,920 bytes, with SHA-256
+`c4432f39320abfc629783eba443d31883320a88c4d31e42cd369a34bbbc786be` and
+`c793440ae6aa77747d29b06d558850051845cff8cef6d084417f67ff9d18a377`. This is an intermediate
+working-tree comparison rather than the original migration baseline. The host was an Intel Core
+Ultra X7 358H running x86-64 WSL2 with GCC 16.2.1, `-O3 -DNDEBUG`, and `-march=x86-64-v3`. ARM
+hardware remains unavailable, so no ARM performance conclusion is made.
+
+## Seminar snapshot: SimRV versus Spike
+
+These measurements were collected on the same x86-64 WSL2 host (Intel Core Ultra X7 358H),
+using the RV64 release build, `rv64gc_zicsr_zifencei_zicntr`, two warmups and five measured runs.
+The synthetic guests used a fixed 100 million instruction stop. CoreMark ran to its own
+completion point and retired 1,682,374,656 instructions per run (about 1.68 billion, not an
+exact 2 billion). The native C++ benchmark runner compared SimRV and Spike with the same guest
+and stop policy.
+
+| Workload | Stop policy | SimRV median (CV) | Spike median (CV) | SimRV / Spike throughput |
+| --- | --- | ---: | ---: | ---: |
+| Compute | 100M instructions | 103.833 ms (1.55%) | 140.817 ms (8.16%) | 1.36x |
+| Branch | 100M instructions | 159.708 ms (1.79%) | 147.881 ms (1.23%) | 0.93x |
+| Memory | 100M instructions | 114.537 ms (2.46%) | 146.483 ms (2.75%) | 1.28x |
+| CoreMark | workload completion; 1.682B retired | 2869.873 ms (0.74%) | 2702.929 ms (0.77%) | 0.94x |
+
+Throughput ratios are derived from median elapsed time because instruction counts match within each
+pair. The compute Spike samples have 8.16% CV, so treat that ratio as noisy. These are workload
+results, not a claim of broad simulator superiority. The JSON records are
+`/tmp/{compute,branch,memory,coremark}-final-spike.json`; they are local temporary files and are
+not included in the repository.
+
+The available Linux image manifest identifies Linux 7.3, OpenSBI 1.9, and Buildroot 2026.08.1
+with an Alpine root filesystem and 512 MiB DRAM. A separate diskless boot workload was measured
+with a 25 million instruction cap: the prior intermediate binaries measured 0.733139 s before and
+0.718217 s after (1.67% and 1.66% CV). This is capped boot progress, not time to a completed OS
+boot, and no directly comparable Spike result is available. ARM hardware and hardware performance
+counters were unavailable; `perf` could not load its `libslang.so.2` dependency. Callgrind was
+available for instruction profiling, but the captured run lacked useful simulator symbols, so it
+does not identify an actionable hot function.

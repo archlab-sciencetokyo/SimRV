@@ -15,7 +15,7 @@ namespace simrv::device {
  */
 class VirtioMmioInput : public VirtioMmioDevice {
    public:
-    VirtioMmioInput(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioInput(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine);
 
     void push_event(uint16_t type, uint16_t code, uint32_t value);
     void push_key_event(uint16_t code, bool pressed);

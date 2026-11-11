@@ -12,7 +12,7 @@
 
 namespace simrv::device {
 
-VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                  core::Machine* machine, const std::string& disk_path)
     : VirtioMmioDevice("virtio-block-mmio", base_address, 0x1000, virtio::kDevIdBlock, irq_num,
                        machine),

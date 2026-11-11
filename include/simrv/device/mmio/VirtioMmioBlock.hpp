@@ -17,7 +17,7 @@ namespace simrv::device {
  */
 class VirtioMmioBlock : public VirtioMmioDevice {
    public:
-    VirtioMmioBlock(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine,
+    VirtioMmioBlock(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine,
                     const std::string& disk_path = "");
 
     auto load_disk(const std::string& path) -> bool { return backend_.load_disk(path); }

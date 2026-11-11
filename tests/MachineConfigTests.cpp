@@ -35,8 +35,7 @@
 
 namespace {
 
-static_assert(std::same_as<decltype(simrv::core::TuiExecutionSnapshot::pc),
-                           simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::core::TuiExecutionSnapshot::pc), simrv::xlen::VirtAddr>);
 
 static_assert(std::same_as<decltype(simrv::util::RuntimeOptions::trace_pc_start),
                            std::optional<simrv::xlen::VirtAddr>>);
@@ -260,9 +259,12 @@ auto main() -> int {
         fs::remove_all(output, ignored);
     }
 
-    const simrv::core::MemoryGeometry custom{.dram_base = 0x40000000, .dram_size = 0x1000};
-    expect(custom.contains(0x40000FFC, 4), "custom geometry contains final word");
-    expect(!custom.contains(0x40000FFC, 8), "custom geometry rejects overflow");
+    const simrv::core::MemoryGeometry custom{.dram_base = simrv::xlen::PhysAddr{0x40000000},
+                                             .dram_size = 0x1000};
+    expect(custom.contains(simrv::xlen::PhysAddr{0x40000FFC}, 4),
+           "custom geometry contains final word");
+    expect(!custom.contains(simrv::xlen::PhysAddr{0x40000FFC}, 8),
+           "custom geometry rejects overflow");
 
     auto invalid = defaults;
     invalid.execution.num_harts = 0;
@@ -438,7 +440,7 @@ auto main() -> int {
     // C++23 explicit object parameter (deducing this) builder chaining test
     auto fluent = simrv::core::MachineConfig{}
                       .with_harts(3)
-                      .with_dram_base(0x80000000)
+                      .with_dram_base(simrv::xlen::PhysAddr{0x80000000})
                       .with_dram_size(0x40000000)
                       .with_appmode(false)
                       .with_smp_quantum(42)
@@ -699,12 +701,12 @@ auto main() -> int {
     }
     {
         simrv::core::MachineConfig cfg{};
-        cfg.memory.dram_base = 0x10000000ULL;
+        cfg.memory.dram_base = simrv::xlen::PhysAddr{0x10000000ULL};
         cfg.memory.dram_size = 0x10000ULL;
         expect(!cfg.validate(), "MachineConfig rejects DRAM overlapping UART MMIO");
 
         cfg.memory.dram_base =
-            static_cast<simrv::xlen::Address>(~static_cast<simrv::xlen::Address>(0) - 0x1000ULL);
+            simrv::xlen::PhysAddr{~simrv::xlen::Address{0} - simrv::xlen::Address{0x1000}};
         cfg.memory.dram_size = 0x2000ULL;
         expect(!cfg.validate(), "MachineConfig rejects DRAM range overflow");
     }
@@ -732,9 +734,10 @@ auto main() -> int {
         const auto checkpoint_dir = std::filesystem::temp_directory_path() /
                                     ("simrv-periodic-checkpoint-" + std::to_string(suffix));
         simrv::core::MachineConfig periodic_config{};
-        periodic_config.memory.dram_base = 0x80000000;
+        periodic_config.memory.dram_base = simrv::xlen::PhysAddr{0x80000000};
         periodic_config.memory.dram_size = 16ULL * 1024 * 1024;
-        periodic_config.execution.start_pc = periodic_config.memory.dram_base;
+        periodic_config.execution.start_pc =
+            simrv::xlen::VirtAddr{periodic_config.memory.dram_base.raw()};
         periodic_config.execution.fincnt = 4;
         periodic_config.debug.checkpoint_every = 2;
         periodic_config.debug.checkpoint_dir = checkpoint_dir.string();
@@ -743,7 +746,8 @@ auto main() -> int {
         periodic_ram[0] = simrv::xlen::Byte{0x6f};  // jal x0, 0
         simrv::core::Machine periodic_machine(periodic_config);
         periodic_machine.set_ram_for_testing(periodic_ram.data(), periodic_ram.size());
-        periodic_machine.primary_hart().state().pc = periodic_config.memory.dram_base;
+        periodic_machine.primary_hart().state().pc =
+            simrv::xlen::VirtAddr{periodic_config.memory.dram_base.raw()};
         periodic_machine.run();
 
         size_t sidecars = 0;
@@ -774,7 +778,7 @@ auto main() -> int {
             std::filesystem::temp_directory_path() / "simrv-checkpoint-test.bin";
         const auto malformed = std::filesystem::temp_directory_path() / "simrv-checkpoint-bad.bin";
         simrv::core::MachineConfig checkpoint_config{};
-        checkpoint_config.memory.dram_base = 0x80000000;
+        checkpoint_config.memory.dram_base = simrv::xlen::PhysAddr{0x80000000};
         checkpoint_config.memory.dram_size = 4096;
         checkpoint_config.isa.vlen = 256;
         std::vector<simrv::xlen::Byte> source_ram(4096, simrv::xlen::Byte{0});
@@ -782,7 +786,7 @@ auto main() -> int {
         simrv::core::Machine source(checkpoint_config);
         source.set_ram_for_testing(source_ram.data(), source_ram.size());
         auto& source_state = source.primary_hart().state();
-        source_state.pc = 0x80000100;
+        source_state.pc = simrv::xlen::VirtAddr{0x80000100};
         source_state.regs.vlen = 256;
         source_state.regs.write(simrv::xlen::RegId::T2, 0x12345678);
         source_state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5)),
@@ -932,35 +936,35 @@ auto main() -> int {
         cfg.platform_profile = simrv::core::PlatformProfile::None;
         cfg.soc.disable_unlisted_devices = true;
         auto uart = simrv::core::soc_device_default(SoCDeviceKind::Uart);
-        uart.base = 0x10010000;
+        uart.base = simrv::xlen::PhysAddr{0x10010000};
         uart.irq = 5;
         auto rtc = simrv::core::soc_device_default(SoCDeviceKind::Rtc);
-        rtc.base = 0x10011000;
+        rtc.base = simrv::xlen::PhysAddr{0x10011000};
         auto power = simrv::core::soc_device_default(SoCDeviceKind::Power);
-        power.base = 0x10012000;
+        power.base = simrv::xlen::PhysAddr{0x10012000};
         auto dma = simrv::core::soc_device_default(SoCDeviceKind::DmaController);
-        dma.base = 0x10013000;
+        dma.base = simrv::xlen::PhysAddr{0x10013000};
         auto plic = simrv::core::soc_device_default(SoCDeviceKind::Plic);
-        plic.base = 0x50010000;
+        plic.base = simrv::xlen::PhysAddr{0x50010000};
         auto clint = simrv::core::soc_device_default(SoCDeviceKind::Clint);
-        clint.base = 0x60010000;
+        clint.base = simrv::xlen::PhysAddr{0x60010000};
         auto mtimer = simrv::core::soc_device_default(SoCDeviceKind::AclintMtimer);
-        mtimer.base = 0x02020000;
+        mtimer.base = simrv::xlen::PhysAddr{0x02020000};
         auto mswi = simrv::core::soc_device_default(SoCDeviceKind::AclintMswi);
-        mswi.base = 0x02030000;
+        mswi.base = simrv::xlen::PhysAddr{0x02030000};
         auto imsic = simrv::core::soc_device_default(SoCDeviceKind::Imsic);
-        imsic.base = 0x24010000;
-        imsic.regions.front().base = 0x28010000;
+        imsic.base = simrv::xlen::PhysAddr{0x24010000};
+        imsic.regions.front().base = simrv::xlen::PhysAddr{0x28010000};
         auto aplic = simrv::core::soc_device_default(SoCDeviceKind::Aplic);
-        aplic.base = 0x0c010000;
-        aplic.regions.front().base = 0x0d010000;
+        aplic.base = simrv::xlen::PhysAddr{0x0c010000};
+        aplic.regions.front().base = simrv::xlen::PhysAddr{0x0d010000};
         cfg.soc.devices = {uart, rtc, power, dma, plic, clint, mtimer, mswi, imsic, aplic};
 
         simrv::core::Machine machine(cfg);
         expect(machine.initialize().has_value(), "machine accepts relocated built-in devices");
         const auto& router = machine.memory().system_bus().router();
         for (const auto& device : cfg.soc.devices) {
-            auto* runtime_device = router.resolve_device(simrv::xlen::PhysAddr{device.base});
+            auto* runtime_device = router.resolve_device(device.base);
             expect(runtime_device != nullptr,
                    "relocated device is registered at its configured base");
             if (runtime_device != nullptr) {
@@ -969,16 +973,15 @@ auto main() -> int {
                        "runtime device range matches configured descriptor");
             }
         }
-        expect(
-            router.resolve_device(simrv::xlen::PhysAddr{imsic.regions.front().base}) != nullptr &&
-                router.resolve_device(simrv::xlen::PhysAddr{aplic.regions.front().base}) != nullptr,
-            "supervisor AIA windows follow their configured auxiliary regions");
+        expect(router.resolve_device(imsic.regions.front().base) != nullptr &&
+                   router.resolve_device(aplic.regions.front().base) != nullptr,
+               "supervisor AIA windows follow their configured auxiliary regions");
 
-        auto* runtime_uart = router.resolve_device(simrv::xlen::PhysAddr{uart.base});
+        auto* runtime_uart = router.resolve_device(uart.base);
         if (runtime_uart != nullptr) {
             simrv::memory::TlChannelA enable_rx_irq{};
             enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
-            enable_rx_irq.address = uart.base + simrv::mmio::kUartRegIerDlm;
+            enable_rx_irq.address = simrv::xlen::PhysAddr{uart.base + simrv::mmio::kUartRegIerDlm};
             enable_rx_irq.size = 0;
             enable_rx_irq.data = 1;
             simrv::memory::TlChannelD response{};
@@ -1080,6 +1083,9 @@ auto main() -> int {
             "pci_intx_source = 30\n"};
         expect(simrv::core::parse_soc_config_stream(input, soc),
                "PCIe host and endpoint topology parse from SoC configuration");
+        expect(soc.pcie.ecam_base == simrv::xlen::PhysAddr{0x34000000} &&
+                   soc.pcie.mmio_base == simrv::xlen::PhysAddr{0x44000000},
+               "SoC parser stores PCIe windows as physical addresses");
         const auto* endpoint = soc.find(SoCDeviceKind::VirtioMmioBlock);
         expect(endpoint != nullptr && endpoint->pci_slot == 9 && endpoint->pci_function == 2 &&
                    endpoint->pci_intx_source == 30,
@@ -1092,13 +1098,36 @@ auto main() -> int {
                    manifest.str().find("\"pci_intx_source\": 30") != std::string::npos,
                "SoC manifest records PCIe host and endpoint topology");
 
+        if constexpr (sizeof(simrv::xlen::Address) == sizeof(uint32_t)) {
+            auto invalid_width = simrv::core::SoCConfig::virt_pcie();
+            std::istringstream too_wide{"[pcie]\necam_base = 0x100000000\n"};
+            expect(!simrv::core::parse_soc_config_stream(too_wide, invalid_width),
+                   "RV32 SoC parser rejects a PCIe base outside the address width");
+        }
+
         auto invalid = simrv::core::SoCConfig::virt_pcie();
         invalid.pcie.ecam_size = 1U << 20U;
         expect(!invalid.validate(), "PCIe validation rejects insufficient ECAM capacity");
         invalid = simrv::core::SoCConfig::virt_pcie();
-        invalid.pcie.ecam_base = ~simrv::xlen::Address{0} - 0x100;
+        invalid.pcie.ecam_base = simrv::xlen::PhysAddr{~simrv::xlen::Address{0} - 0x100};
         invalid.pcie.ecam_size = 0x200;
         expect(!invalid.validate(), "PCIe validation rejects overflowing host ranges");
+
+        auto boot_config = simrv::core::SoCConfig::virt_pcie();
+        std::istringstream boot_addresses{
+            "[memory]\ndram_base = 0x80000000\ndram_size = 0x10000000\n"
+            "[boot]\nreset_pc = 0x80200000\ntohost = 0x80001000\n"};
+        expect(simrv::core::parse_soc_config_stream(boot_addresses, boot_config) &&
+                   boot_config.dram_base == simrv::xlen::PhysAddr{0x80000000} &&
+                   boot_config.reset_pc == simrv::xlen::VirtAddr{0x80200000} &&
+                   boot_config.tohost == simrv::xlen::PhysAddr{0x80001000},
+               "SoC parser preserves physical and virtual address domains for boot settings");
+        if constexpr (sizeof(simrv::xlen::Address) == sizeof(uint32_t)) {
+            auto invalid_width = simrv::core::SoCConfig::virt_pcie();
+            std::istringstream too_wide{"[boot]\nreset_pc = 0x100000000\n"};
+            expect(!simrv::core::parse_soc_config_stream(too_wide, invalid_width),
+                   "RV32 SoC parser rejects a reset PC outside the address width");
+        }
         invalid = simrv::core::SoCConfig::virt_pcie();
         invalid.disable_unlisted_devices = true;
         auto duplicate = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
@@ -1136,11 +1165,11 @@ auto main() -> int {
         simrv::core::MachineConfig cfg{};
         cfg.tui.enabled = true;
         cfg.soc.disable_unlisted_devices = true;
-        cfg.soc.pcie.ecam_base = 0x34000000;
+        cfg.soc.pcie.ecam_base = simrv::xlen::PhysAddr{0x34000000};
         cfg.soc.pcie.ecam_size = 1U << 20U;
         cfg.soc.pcie.first_bus = 4;
         cfg.soc.pcie.last_bus = 4;
-        cfg.soc.pcie.mmio_base = 0x44000000;
+        cfg.soc.pcie.mmio_base = simrv::xlen::PhysAddr{0x44000000};
         cfg.soc.pcie.mmio_size = 16U << 20U;
         auto block = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
         block.pci_bus = 4;
@@ -1168,17 +1197,17 @@ auto main() -> int {
             simrv::memory::TlChannelD response{};
             request.opcode = simrv::memory::TlOpcodeA::Get;
             request.size = 2;
-            request.address = cfg.soc.pcie.ecam_base + config_offset;
+            request.address = simrv::xlen::PhysAddr{cfg.soc.pcie.ecam_base + config_offset};
             expect(ecam_node->handle_request(request, response) &&
                        (response.data & 0xffffU) == 0x1af4U,
                    "system-bus ECAM node serves the configured endpoint BDF");
             request.opcode = simrv::memory::TlOpcodeA::PutFullData;
-            request.address = cfg.soc.pcie.mmio_base + 0x1000;
+            request.address = simrv::xlen::PhysAddr{cfg.soc.pcie.mmio_base + 0x1000};
             request.data = 1;
             expect(mmio_node->handle_request(request, response),
                    "system-bus PCIe MMIO node accepts a feature-selector write");
             request.opcode = simrv::memory::TlOpcodeA::Get;
-            request.address = cfg.soc.pcie.mmio_base + 0x1004;
+            request.address = simrv::xlen::PhysAddr{cfg.soc.pcie.mmio_base + 0x1004};
             const bool mmio_read_ok = mmio_node->handle_request(request, response);
             expect(
                 mmio_read_ok && response.data == simrv::device::virtio::kVirtioFVersion1FeatureWord,
@@ -1187,9 +1216,10 @@ auto main() -> int {
         if (machine.pcie_root() != nullptr) {
             const auto id = machine.pcie_root()->ecam_read(config_offset, 4);
             expect((id & 0xffffU) == 0x1af4U, "configured PCI endpoint is discoverable at its BDF");
-            machine.pcie_root()->mmio_write(0x44001000, 1, 4);
+            machine.pcie_root()->mmio_write(simrv::xlen::PhysAddr{0x44001000}, 1, 4);
             const auto bar_count = machine.pcie_root()->active_bar_count();
-            const auto feature_word = machine.pcie_root()->mmio_read(0x44001004, 4);
+            const auto feature_word =
+                machine.pcie_root()->mmio_read(simrv::xlen::PhysAddr{0x44001004}, 4);
             expect(bar_count == 1 &&
                        feature_word == simrv::device::virtio::kVirtioFVersion1FeatureWord,
                    "configured PCI BAR is routed through relocated MMIO aperture");
@@ -1604,7 +1634,7 @@ auto main() -> int {
         machine.release_ram_for_testing();
         expect(machine.ram_data() == nullptr, "ram_data is null after release");
 
-        machine.primary_hart().state().pc = 0x80001234;
+        machine.primary_hart().state().pc = simrv::xlen::VirtAddr{0x80001234};
         machine.primary_hart().e_icount = 42;
         machine.publish_tui_execution_snapshot_for_testing();
         const auto snapshot = machine.tui_execution_snapshot();

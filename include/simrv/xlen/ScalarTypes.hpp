@@ -29,9 +29,13 @@ using CompressedInstruction = uint16_t;
 using FloatingRegister = uint64_t;
 using Counter = uint64_t;
 
-// Forward declarations for strong semantic types
-struct VirtAddr;
-struct PhysAddr;
+// Forward declarations and aliases for strong address domains.
+struct VirtAddrTag;
+struct PhysAddrTag;
+template <typename Tag>
+struct BasicAddress;
+using VirtAddr = BasicAddress<VirtAddrTag>;
+using PhysAddr = BasicAddress<PhysAddrTag>;
 struct HartId;
 struct CsrNumber;
 

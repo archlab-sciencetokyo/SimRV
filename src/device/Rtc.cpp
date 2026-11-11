@@ -10,7 +10,7 @@
 
 namespace simrv {
 
-Rtc::Rtc(simrv::core::Machine& machine, simrv::xlen::Address base, simrv::xlen::Address size,
+Rtc::Rtc(simrv::core::Machine& machine, simrv::xlen::PhysAddr base, simrv::xlen::Address size,
          uint32_t irq)
     : machine_(machine), base_(base), size_(size), irq_(irq) {
     sync_with_system_time();
@@ -44,7 +44,7 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
-    const simrv::xlen::Address offset = (req.address - base_).raw();
+    const simrv::xlen::Address offset = req.address.raw() - base_.raw();
 
     if (!is_write) {
         switch (offset) {

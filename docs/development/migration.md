@@ -62,3 +62,29 @@ than translating removed fields at runtime.
 
 Combined CPU/SoC model files use `[soc]` and `[device.uart]`; the old `[platform]` and `[uart]`
 section spellings are rejected with migration guidance.
+
+## C++ address-domain API
+
+First-party C++ interfaces distinguish virtual PCs and effective addresses (`simrv::xlen::VirtAddr`)
+from guest physical addresses used by RAM, MMIO, DMA, SoC regions, and PCIe BARs
+(`simrv::xlen::PhysAddr`). Constructors are explicit; callers must name the domain when importing a
+scalar:
+
+```cpp
+const simrv::xlen::VirtAddr reset_pc{raw_elf_entry};
+const simrv::xlen::PhysAddr uart_base{platform_uart_base};
+```
+
+Use `.raw()` only when crossing an architectural, serialized, or C ABI boundary whose representation
+is scalar. Validate the external width before narrowing to the configured guest `Word`. Sizes,
+register offsets, and arithmetic displacements remain scalar values. `TLB::lookup` takes a virtual
+address and `TLB::insert` receives a virtual tag and physical result. Device constructors and
+`MmioDevice::base_address()` use `PhysAddr`; address-based TUI backend requests carry a virtual or
+physical alternative selected by their command. The C plugin structures and callbacks remain
+unchanged, with explicit conversions in the C++ adapter.
+
+Breakpoint and watchpoint APIs use virtual addresses. MMIO routing, DMA, cache tags, and reservation
+tracking use physical addresses. An address read from an ELF or device-tree file is not assigned a
+domain by its integer type: use the format's semantics, then construct the appropriate type at the
+parser boundary. A guest physical value wider than the simulator's configured XLEN must be rejected
+before constructing `PhysAddr`.

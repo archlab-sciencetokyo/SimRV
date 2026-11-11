@@ -144,7 +144,7 @@ void benchmark_branch_predictor(ankerl::nanobench::Bench& bench) {
 
     simrv::pipeline::DecodedInstruction beq_inst{};
     beq_inst.opcode = simrv::isa::Opcode::Branch;
-    beq_inst.cpc = 0x80000020U;
+    beq_inst.cpc = simrv::xlen::VirtAddr{0x80000020U};
     beq_inst.imm = 16;
 
     simrv::pipeline::BranchPrediction pred{};
@@ -152,11 +152,11 @@ void benchmark_branch_predictor(ankerl::nanobench::Bench& bench) {
     bench.title("Branch Predictor (GShare)")
         .unit("prediction")
         .run("BranchPredictor::predict_and_update", [&]() {
-            bpred.predict(beq_inst.cpc.raw(), beq_inst, pred);
+            bpred.predict(beq_inst.cpc, beq_inst, pred);
             const simrv::pipeline::BranchFeedback feedback{
-                .pc = beq_inst.cpc.raw(),
+                .pc = simrv::xlen::VirtAddr{beq_inst.cpc.raw()},
                 .actual_taken = true,
-                .actual_target = (beq_inst.cpc + beq_inst.imm).raw(),
+                .actual_target = beq_inst.cpc + beq_inst.imm,
                 .opcode = beq_inst.opcode,
                 .op_id = beq_inst.op_id,
                 .prediction = pred,

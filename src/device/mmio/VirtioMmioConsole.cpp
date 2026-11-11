@@ -10,7 +10,7 @@
 
 namespace simrv::device {
 
-VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                      core::Machine* machine)
     : VirtioMmioDevice("virtio-console-mmio", base_address, 0x1000, virtio::kDevIdConsole, irq_num,
                        machine) {

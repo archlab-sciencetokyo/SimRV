@@ -6,7 +6,7 @@
 
 namespace simrv::device {
 
-VirtioMmioSound::VirtioMmioSound(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioSound::VirtioMmioSound(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                  core::Machine* machine)
     : VirtioMmioDevice("virtio-sound-mmio", base_address, 0x1000, virtio::kDevIdSound, irq_num,
                        machine) {

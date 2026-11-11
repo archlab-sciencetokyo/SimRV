@@ -29,7 +29,7 @@ namespace simrv {
 class Mmu {
    public:
     explicit Mmu(memory::RamView ram = {}) noexcept : walker_(ram) {}
-    explicit Mmu(simrv::xlen::Byte* mmem, simrv::xlen::Address dram_base,
+    explicit Mmu(simrv::xlen::Byte* mmem, simrv::xlen::PhysAddr dram_base,
                  simrv::xlen::Address dram_size) noexcept
         : walker_(mmem, dram_base, dram_size) {}
 

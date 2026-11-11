@@ -24,7 +24,7 @@ auto MemorySubsystem::dma_read(simrv::xlen::PhysAddr physical_address, void* dst
         return false;
     }
     const auto geometry = memory_geometry();
-    if (!geometry.contains(paddr, len)) {
+    if (!geometry.contains(physical_address, len)) {
         return false;
     }
     if (!machine_.runtime_profile.is_instruction_mode()) {
@@ -37,7 +37,7 @@ auto MemorySubsystem::dma_read(simrv::xlen::PhysAddr physical_address, void* dst
             if (line == last_line) break;
         }
     }
-    std::memcpy(dst, machine_.ram_data() + (paddr - geometry.dram_base), len);
+    std::memcpy(dst, machine_.ram_data() + (paddr - geometry.dram_base.raw()), len);
     return true;
 }
 
@@ -48,7 +48,7 @@ auto MemorySubsystem::dma_write(simrv::xlen::PhysAddr physical_address, const vo
         return false;
     }
     const auto geometry = memory_geometry();
-    if (!geometry.contains(paddr, len)) {
+    if (!geometry.contains(physical_address, len)) {
         return false;
     }
     if (!machine_.runtime_profile.is_instruction_mode()) {
@@ -63,7 +63,7 @@ auto MemorySubsystem::dma_write(simrv::xlen::PhysAddr physical_address, const vo
     }
     // DMA is an external write in every execution mode, including instruction-fast.
     reservation_table_.invalidate_range(physical_address, len);
-    std::memcpy(machine_.ram_data() + (paddr - geometry.dram_base), src, len);
+    std::memcpy(machine_.ram_data() + (paddr - geometry.dram_base.raw()), src, len);
     return true;
 }
 

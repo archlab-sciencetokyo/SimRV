@@ -577,7 +577,9 @@ auto GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     const auto address = parse_hex(std::string_view(pkt).substr(1, comma - 1));
     const auto length = parse_hex(std::string_view(pkt).substr(comma + 1));
     if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
-        *length > 4096 || !machine.ram_view().contains(*address, *length)) {
+        *length > 4096 ||
+        !machine.ram_view().contains(
+            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*address)}, *length)) {
         return "E01";
     }
     const auto addr = static_cast<simrv::xlen::Address>(*address);
@@ -593,7 +595,8 @@ auto GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     const auto ram = machine.ram_view();
 
     for (size_t i = 0; i < safe_len; ++i) {
-        const auto phys = static_cast<uint64_t>(addr) + i;
+        const simrv::xlen::PhysAddr phys{
+            static_cast<simrv::xlen::Address>(static_cast<uint64_t>(addr) + i)};
         uint8_t byte_val = 0;
         if (ram.contains(phys)) {
             byte_val = static_cast<uint8_t>(*ram.unchecked_ptr(phys));
@@ -616,7 +619,8 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
         *length > 4096 || pkt.size() - colon - 1 != *length * 2 ||
         (*length != 0 && !valid_hex(std::string_view(pkt).substr(colon + 1))) ||
-        !machine.ram_view().contains(*address, *length)) {
+        !machine.ram_view().contains(
+            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*address)}, *length)) {
         return "E01";
     }
     const auto addr = static_cast<simrv::xlen::Address>(*address);

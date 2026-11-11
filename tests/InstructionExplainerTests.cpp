@@ -22,12 +22,20 @@
 
 namespace {
 
-static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::target_pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::fallthrough_pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::link_pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::explain::PredictedStateEffect::next_pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_vaddr), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_paddr), std::optional<simrv::xlen::PhysAddr>>);
+static_assert(
+    std::same_as<decltype(simrv::explain::ControlDataflow::target_pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::explain::ControlDataflow::fallthrough_pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::explain::ControlDataflow::link_pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::explain::PredictedStateEffect::next_pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::explain::MemoryDataflow::effective_vaddr), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_paddr),
+                           std::optional<simrv::xlen::PhysAddr>>);
+static_assert(
+    std::same_as<decltype(simrv::explain::InstructionExplanation::pc), simrv::xlen::VirtAddr>);
 static_assert(!std::is_invocable_v<decltype(&simrv::explain::explain_static), uint32_t,
                                    simrv::xlen::PhysAddr, unsigned>);
 
@@ -127,7 +135,7 @@ void test_static_and_compressed_explanation() {
     using namespace simrv::explain;
 
     // 1. Standard 32-bit ADDI x1, x2, 42 -> 0x02a10093
-    const auto addi_expl = explain_static(0x02A10093U, 0x80000000ULL);
+    const auto addi_expl = explain_static(0x02A10093U, simrv::xlen::VirtAddr{0x80000000});
     expect(!addi_expl.is_compressed, "32-bit ADDI is not compressed");
     expect(!addi_expl.state_grounded, "explain_static marks state_grounded=false");
     expect(addi_expl.op_id == simrv::isa::OperationId::ADDI, "Decoded OperationId is ADDI");
@@ -138,7 +146,7 @@ void test_static_and_compressed_explanation() {
     expect(addi_expl.predicted_effect.next_pc == 0x80000004ULL, "Static next_pc is PC + 4");
 
     // 2. Compressed C.ADDI x1, 5 -> 0x0095 (000 0 00001 00101 01)
-    const auto c_addi_expl = explain_static(0x0095U, 0x80000010ULL);
+    const auto c_addi_expl = explain_static(0x0095U, simrv::xlen::VirtAddr{0x80000010});
     expect(c_addi_expl.is_compressed, "C.ADDI is marked compressed");
     expect(c_addi_expl.op_id == simrv::isa::OperationId::ADDI, "C.ADDI decompresses to ADDI");
     expect(c_addi_expl.imm == 5, "C.ADDI immediate is 5");
@@ -158,7 +166,7 @@ void test_state_grounded_alu_and_branch() {
     cpu.reset();
     auto& st = cpu.state();
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::VirtAddr pc{simrv::memory::kDramBaseAddress.raw()};
     st.pc = pc;
     st.regs.write(static_cast<simrv::xlen::RegId>(1), 100);
     st.regs.write(static_cast<simrv::xlen::RegId>(2), 25);
@@ -203,13 +211,13 @@ void test_state_grounded_memory_and_csr() {
     cpu.reset();
     auto& st = cpu.state();
 
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::VirtAddr pc{simrv::memory::kDramBaseAddress.raw()};
     st.pc = pc;
 
     // Store a known 32-bit word at DRAM + 0x100
     constexpr uint32_t mem_word = 0xCAFEBABEU;
     std::memcpy(backing.data() + 0x100, &mem_word, sizeof(mem_word));
-    st.regs.write(static_cast<simrv::xlen::RegId>(1), pc + 0xF0);
+    st.regs.write(static_cast<simrv::xlen::RegId>(1), pc.raw() + 0xF0);
 
     // LW x4, 16(x1) -> imm=16 (0x010), rs1=1, funct3=2, rd=4, opcode=0x03 -> 0x0100a203
     constexpr uint32_t lw_inst = 0x0100A203U;
@@ -219,7 +227,7 @@ void test_state_grounded_memory_and_csr() {
     expect(lw_expl.has_value(), "explain_at_pc succeeds for mapped DRAM instruction");
     expect(lw_expl->memory.has_value(), "LW populates MemoryDataflow");
     expect(lw_expl->memory->effective_vaddr == pc + 0x100, "LW effective_vaddr is base + 16");
-    expect(lw_expl->memory->effective_paddr == simrv::xlen::PhysAddr{pc + 0x100},
+    expect(lw_expl->memory->effective_paddr == simrv::xlen::PhysAddr{pc.raw() + 0x100},
            "LW physical address uses the untranslated machine-mode address");
     expect(lw_expl->memory->is_aligned, "LW at +0x100 is 4-byte aligned");
     expect(lw_expl->memory->pmp_permitted, "LW is permitted by default PMP");
@@ -267,7 +275,7 @@ void test_virtualization_privilege_and_extension_gating() {
     cpu.machine_ = &machine;
     cpu.reset();
     auto& st = cpu.state();
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::VirtAddr pc{simrv::memory::kDramBaseAddress.raw()};
     st.pc = pc;
     st.set_misa(st.misa | (simrv::xlen::CsrValue{1} << 7U));  // Enable H extension
 
@@ -302,8 +310,8 @@ void test_virtualization_privilege_and_extension_gating() {
 
     // 3. VS-mode SRET targets vsepc and traps with VirtualInstruction when hstatus.VTSR=1
     constexpr uint32_t sret_inst = 0x10200073U;
-    st.sepc = pc + 0x200;
-    st.vsepc = pc + 0x400;
+    st.sepc = pc.raw() + 0x200;
+    st.vsepc = pc.raw() + 0x400;
     st.hstatus = 0;
     const auto vs_sret_ok = explain_in_state(st, pc, sret_inst, &cpu, &machine);
     expect(!vs_sret_ok.predicted_effect.predicted_trap.has_value(),
@@ -364,7 +372,7 @@ void test_sstc_and_stateen_csr_parity() {
     cpu.machine_ = &machine;
     cpu.reset();
     auto& st = cpu.state();
-    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::VirtAddr pc{simrv::memory::kDramBaseAddress.raw()};
     st.pc = pc;
     st.set_misa(st.misa | (simrv::xlen::CsrValue{1} << 7U));  // Enable H extension
 

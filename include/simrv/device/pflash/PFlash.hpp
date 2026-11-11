@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "simrv/memory/MmioDevice.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -41,14 +42,12 @@ enum class PFlashMode : uint8_t {
  */
 class PFlash final : public memory::MmioDevice {
    public:
-    PFlash(core::Machine& machine, simrv::xlen::Address base, simrv::xlen::Address size,
+    PFlash(core::Machine& machine, simrv::xlen::PhysAddr base, simrv::xlen::Address size,
            uint32_t sector_size = 128 * 1024, bool read_only = false, std::string name = "pflash");
     ~PFlash() override;
 
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
-        return simrv::xlen::PhysAddr{base_};
-    }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     [[nodiscard]] auto read8(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData8 override;
@@ -89,7 +88,7 @@ class PFlash final : public memory::MmioDevice {
     void handle_command(simrv::xlen::Address offset, uint32_t value);
 
     [[maybe_unused]] core::Machine& machine_;
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
     uint32_t sector_size_;
     bool read_only_;

@@ -4,7 +4,7 @@
 
 namespace simrv::device {
 
-VirtioMmioRng::VirtioMmioRng(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioRng::VirtioMmioRng(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                              core::Machine* machine)
     : VirtioMmioDevice("virtio-rng-mmio", base_address, 0x1000, virtio::kDevIdRng, irq_num,
                        machine) {

@@ -25,13 +25,13 @@ namespace {
 
 [[nodiscard]] constexpr auto calculate_trap_target(simrv::xlen::CsrValue tvec,
                                                    simrv::xlen::TrapCause cause) noexcept
-    -> simrv::xlen::Address {
+    -> simrv::xlen::VirtAddr {
     const simrv::xlen::Address tvec_base = tvec & ~simrv::xlen::Address{3};
     const simrv::xlen::Word tvec_mode = tvec & 3;
     if (tvec_mode == 1 && trap_is_interrupt(cause)) {
-        return tvec_base + 4 * trap_exception_code(cause);
+        return simrv::xlen::VirtAddr{tvec_base + 4 * trap_exception_code(cause)};
     }
-    return tvec_base;
+    return simrv::xlen::VirtAddr{tvec_base};
 }
 
 auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause cause) -> bool {
@@ -238,8 +238,8 @@ auto TrapController::predict_mret(const ArchState& state) noexcept -> TrapReturn
         mstatus &= ~MstatusBit::Mprv;
     }
 
-    ret.target_pc = simrv::xlen::VirtAddr{
-        sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa))};
+    ret.target_pc = sign_extend_return_pc(
+        state, simrv::xlen::VirtAddr{isa::epc_read_value(state.mepc, state.misa)});
     ret.target_priv = target_priv;
     ret.target_virtualization = return_to_guest;
     ret.next_mstatus = mstatus;
@@ -267,8 +267,8 @@ auto TrapController::predict_sret(const ArchState& state) noexcept -> TrapReturn
     ret.target_virtualization = state.virt || return_to_guest;
     ret.target_priv = target_priv;
     const auto return_pc = state.virt ? state.vsepc : state.sepc;
-    ret.target_pc = simrv::xlen::VirtAddr{
-        sign_extend_return_pc(state, isa::epc_read_value(return_pc, state.misa))};
+    ret.target_pc = sign_extend_return_pc(
+        state, simrv::xlen::VirtAddr{isa::epc_read_value(return_pc, state.misa)});
     return ret;
 }
 
@@ -278,7 +278,8 @@ void TrapController::mret(ArchState& state) {
     state.priv = ret.target_priv;
     state.virt = ret.target_virtualization;
     state.update_xlen();
-    state.pc = sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa));
+    state.pc = sign_extend_return_pc(
+        state, simrv::xlen::VirtAddr{isa::epc_read_value(state.mepc, state.misa)});
     state.lr_reservation_active = false;
 }
 

@@ -50,10 +50,10 @@ void PcieRootComplex::rebuild_bar_mappings() {
         if (!dev) continue;
         for (uint8_t i = 0; i < 6; ++i) {
             const simrv::xlen::Address size = dev->bar_size(i);
-            const simrv::xlen::Address base = dev->bar_base(i);
+            const simrv::xlen::PhysAddr base = dev->bar_base(i);
             if (size > 0 && base != 0 && base >= config_.mmio_base &&
-                base <= ~simrv::xlen::Address{0} - size &&
-                (base + size) <= (config_.mmio_base + config_.mmio_size)) {
+                base.raw() <= ~simrv::xlen::Address{0} - size &&
+                (base.raw() + size) <= (config_.mmio_base + config_.mmio_size)) {
                 active_bars_.push_back(BarMapping{
                     .base = base,
                     .end = base + size,
@@ -99,7 +99,7 @@ void PcieRootComplex::ecam_write(simrv::xlen::Address offset, PciConfigData val,
     }
 }
 
-auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, PciAccessBytes size) -> PciMmioData {
+auto PcieRootComplex::mmio_read(simrv::xlen::PhysAddr addr, PciAccessBytes size) -> PciMmioData {
     if (active_bars_.empty() || addr < config_.mmio_base ||
         addr >= config_.mmio_base + config_.mmio_size) {
         return 0;
@@ -117,7 +117,8 @@ auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, PciAccessBytes size) 
                 mru_bars_[0] = hit;
             }
             return mru_bars_[0].device->bar_read(
-                mru_bars_[0].bar_idx, static_cast<PciBarOffset>(addr - mru_bars_[0].base), size);
+                mru_bars_[0].bar_idx,
+                static_cast<PciBarOffset>(addr.raw() - mru_bars_[0].base.raw()), size);
         }
     }
 
@@ -134,14 +135,16 @@ auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, PciAccessBytes size) 
             if (mru_bar_count_ < kBarMruCapacity) {
                 ++mru_bar_count_;
             }
-            return it->device->bar_read(it->bar_idx, static_cast<PciBarOffset>(addr - it->base),
-                                        size);
+            return it->device->bar_read(
+                it->bar_idx, static_cast<PciBarOffset>(addr.raw() - it->base.raw()), size);
         }
     }
     return 0;
 }
 
-void PcieRootComplex::mmio_write(simrv::xlen::Address addr, PciMmioData val, PciAccessBytes size) {
+void PcieRootComplex::mmio_write(simrv::xlen::PhysAddr paddr, PciMmioData val,
+                                 PciAccessBytes size) {
+    const auto addr = paddr;
     if (active_bars_.empty() || addr < config_.mmio_base ||
         addr >= config_.mmio_base + config_.mmio_size) {
         return;
@@ -158,9 +161,9 @@ void PcieRootComplex::mmio_write(simrv::xlen::Address addr, PciMmioData val, Pci
                 }
                 mru_bars_[0] = hit;
             }
-            mru_bars_[0].device->bar_write(mru_bars_[0].bar_idx,
-                                           static_cast<PciBarOffset>(addr - mru_bars_[0].base), val,
-                                           size);
+            mru_bars_[0].device->bar_write(
+                mru_bars_[0].bar_idx,
+                static_cast<PciBarOffset>(addr.raw() - mru_bars_[0].base.raw()), val, size);
             return;
         }
     }
@@ -178,8 +181,8 @@ void PcieRootComplex::mmio_write(simrv::xlen::Address addr, PciMmioData val, Pci
             if (mru_bar_count_ < kBarMruCapacity) {
                 ++mru_bar_count_;
             }
-            it->device->bar_write(it->bar_idx, static_cast<PciBarOffset>(addr - it->base), val,
-                                  size);
+            it->device->bar_write(
+                it->bar_idx, static_cast<PciBarOffset>(addr.raw() - it->base.raw()), val, size);
             return;
         }
     }
@@ -213,8 +216,9 @@ void PcieRootComplex::deassert_device_irq(PciBdf bdf) {
     }
 }
 
-void PcieRootComplex::send_msi(PciBdf bdf, simrv::xlen::Address addr, uint32_t message_data) {
+void PcieRootComplex::send_msi(PciBdf bdf, simrv::xlen::PhysAddr paddr, uint32_t message_data) {
     (void)bdf;
+    const auto addr = paddr.raw();
     if (imsic_s_ != nullptr && addr >= imsic_s_->base_address().raw() &&
         addr < imsic_s_->base_address().raw() + imsic_s_->size()) {
         imsic_s_->write32(addr - imsic_s_->base_address().raw(), message_data);
@@ -226,14 +230,13 @@ void PcieRootComplex::send_msi(PciBdf bdf, simrv::xlen::Address addr, uint32_t m
         return;
     }
     if (machine_ != nullptr) {
-        machine_->memory().dma_write(simrv::xlen::PhysAddr{addr}, &message_data,
-                                     sizeof(message_data));
+        machine_->memory().dma_write(paddr, &message_data, sizeof(message_data));
     }
 }
 
 auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const simrv::xlen::Address offset = (req.address - rc_->config_.ecam_base).raw();
+    const simrv::xlen::Address offset = req.address.raw() - rc_->config_.ecam_base.raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
@@ -254,7 +257,6 @@ auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
 
 auto PcieRootComplex::MmioNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const simrv::xlen::Address addr = req.address.raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
@@ -266,9 +268,9 @@ auto PcieRootComplex::MmioNode::handle_request(const memory::TlChannelA& req,
 
     const auto size = static_cast<PciAccessBytes>(1u << (req.size & 0x3u));
     if (is_write) {
-        rc_->mmio_write(addr, static_cast<PciMmioData>(req.data), size);
+        rc_->mmio_write(req.address, static_cast<PciMmioData>(req.data), size);
     } else {
-        resp.data = rc_->mmio_read(addr, size);
+        resp.data = rc_->mmio_read(req.address, size);
     }
     return true;
 }

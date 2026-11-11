@@ -230,7 +230,7 @@ void test_pmp_mmu_page_walk() {
     std::array<simrv::xlen::Byte, 64 * 1024> memory{};
     const simrv::xlen::Address dram_base = 0x80000000;
     const simrv::xlen::Address dram_size = memory.size();
-    simrv::Mmu mmu(memory.data(), dram_base, dram_size);
+    simrv::Mmu mmu(memory.data(), simrv::xlen::PhysAddr{dram_base}, dram_size);
 
     simrv::core::ArchState state{};
     state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
@@ -254,9 +254,9 @@ void test_pmp_mmu_page_walk() {
 
     // Attempt page walk: Reading PTE at 0x80000000 should fail PMP check and return Access Fault
     // (FaultLoad)
-    auto result =
-        mmu.translate(0x10000, simrv::PteAccess::Read, simrv::xlen::PrivilegeLevel::Supervisor, 0,
-                      satp, simrv::xlen::kXLenBits, true, &state);
+    auto result = mmu.translate(simrv::xlen::VirtAddr{0x10000}, simrv::PteAccess::Read,
+                                simrv::xlen::PrivilegeLevel::Supervisor, 0, satp,
+                                simrv::xlen::kXLenBits, true, &state);
     expect(!result.has_value(), "Page walk across PMP-prohibited PTE fails");
     if (!result.has_value()) {
         expect(result.error() == ExceptionCode::FaultLoad,
@@ -385,7 +385,7 @@ void test_mmu_page_walk_uses_supervisor_pmp() {
     std::array<simrv::xlen::Byte, 64 * 1024> memory{};
     const simrv::xlen::Address dram_base = 0x80000000;
     const simrv::xlen::Address dram_size = memory.size();
-    simrv::Mmu mmu(memory.data(), dram_base, dram_size);
+    simrv::Mmu mmu(memory.data(), simrv::xlen::PhysAddr{dram_base}, dram_size);
 
     simrv::core::ArchState state{};
     state.priv = simrv::xlen::PrivilegeLevel::User;
@@ -453,14 +453,14 @@ void test_mmu_reserved_pte_rejection() {
 // 5. Bare-metal AMO natural alignment check
 void test_baremetal_amo_alignment() {
     using simrv::isa::Funct3;
-    expect(!simrv::isa::amo_address_aligned(0x80000001, Funct3::Lw),
+    expect(!simrv::isa::amo_address_aligned(simrv::xlen::VirtAddr{0x80000001}, Funct3::Lw),
            "Word AMO address 0x80000001 is misaligned");
-    expect(simrv::isa::amo_address_aligned(0x80000004, Funct3::Lw),
+    expect(simrv::isa::amo_address_aligned(simrv::xlen::VirtAddr{0x80000004}, Funct3::Lw),
            "Word AMO address 0x80000004 is naturally aligned");
     if constexpr (simrv::xlen::kIsXLen64) {
-        expect(!simrv::isa::amo_address_aligned(0x80000004, Funct3::Ld),
+        expect(!simrv::isa::amo_address_aligned(simrv::xlen::VirtAddr{0x80000004}, Funct3::Ld),
                "Doubleword AMO address 0x80000004 is misaligned for 8-byte access");
-        expect(simrv::isa::amo_address_aligned(0x80000008, Funct3::Ld),
+        expect(simrv::isa::amo_address_aligned(simrv::xlen::VirtAddr{0x80000008}, Funct3::Ld),
                "Doubleword AMO address 0x80000008 is naturally aligned");
     }
 }
@@ -540,7 +540,7 @@ void test_tlb_global_mappings() {
 void test_soft_tlb_global_mappings() {
     simrv::core::CPU cpu{};
     constexpr simrv::xlen::Address kVaddr = 0x20000;
-    constexpr simrv::xlen::Address kPaddr = 0x80020000;
+    constexpr simrv::xlen::PhysAddr kPaddr{0x80020000};
     constexpr simrv::xlen::Address kVpn = kVaddr >> 12;
     constexpr Asid kAsid1 = 1;
     constexpr Asid kAsid2 = 2;
@@ -924,7 +924,8 @@ void test_pdc_guest_stage_isolation() {
     using simrv::xlen::VirtAddr;
     PageTableWalker walker{};
     std::array<Byte, 4096> dummy_backing{};
-    walker.set_ram_view(RamView(dummy_backing.data(), 0x80000000ULL, 0x10000000ULL));
+    walker.set_ram_view(
+        RamView(dummy_backing.data(), simrv::xlen::PhysAddr{0x80000000ULL}, 0x10000000ULL));
 
     // First walk: guest_stage_enabled = true (VS-stage walk via arch_state.virt = true)
     ArchState guest_arch{};

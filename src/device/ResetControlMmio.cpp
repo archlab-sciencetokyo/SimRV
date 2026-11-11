@@ -4,7 +4,7 @@
 
 namespace simrv::device {
 
-ResetControlMmio::ResetControlMmio(core::Machine& machine, simrv::xlen::Address base,
+ResetControlMmio::ResetControlMmio(core::Machine& machine, simrv::xlen::PhysAddr base,
                                    simrv::xlen::Address size, std::string name)
     : memory::MmioDevice(&machine),
       machine_(machine),

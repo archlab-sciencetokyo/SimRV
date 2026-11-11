@@ -11,235 +11,133 @@
 
 namespace simrv::xlen {
 
-/**
- * @struct PhysAddr
- * @brief Strong zero-overhead semantic wrapper representing physical memory addresses.
- */
-struct PhysAddr {
+/** A zero-overhead address value whose tag identifies its semantic domain. */
+template <typename Tag>
+struct BasicAddress {
     Word val{0};
 
-    constexpr PhysAddr() noexcept = default;
-    constexpr PhysAddr(Word v) noexcept : val(v) {}
-    constexpr PhysAddr(const VirtAddr&) = delete;
-    auto operator=(const VirtAddr&) -> PhysAddr& = delete;
+    constexpr BasicAddress() noexcept = default;
+    constexpr explicit BasicAddress(Word value) noexcept : val(value) {}
 
     [[nodiscard]] constexpr auto value() const noexcept -> Word { return val; }
     [[nodiscard]] constexpr auto raw() const noexcept -> Word { return val; }
     [[nodiscard]] constexpr explicit operator Word() const noexcept { return val; }
 
-    constexpr auto operator=(Word v) noexcept -> PhysAddr& {
-        val = v;
-        return *this;
-    }
+    constexpr auto operator<=>(const BasicAddress&) const noexcept = default;
+    constexpr bool operator==(const BasicAddress&) const noexcept = default;
 
-    constexpr auto operator<=>(const PhysAddr&) const noexcept = default;
-    constexpr bool operator==(const PhysAddr&) const noexcept = default;
     template <std::integral I>
     constexpr bool operator==(I rhs) const noexcept {
         return val == static_cast<Word>(rhs);
     }
+
     template <std::integral I>
     constexpr auto operator<=>(I rhs) const noexcept {
         return val <=> static_cast<Word>(rhs);
     }
 
     template <std::integral I>
-    constexpr auto operator+(I offset) const noexcept -> PhysAddr {
-        return PhysAddr{val + static_cast<Word>(offset)};
+    constexpr auto operator+(I offset) const noexcept -> BasicAddress {
+        return BasicAddress{val + static_cast<Word>(offset)};
     }
+
     template <std::integral I>
-    friend constexpr auto operator+(I lhs, PhysAddr rhs) noexcept -> PhysAddr {
-        return PhysAddr{static_cast<Word>(lhs) + rhs.val};
+    friend constexpr auto operator+(I lhs, BasicAddress rhs) noexcept -> BasicAddress {
+        return BasicAddress{static_cast<Word>(lhs) + rhs.val};
     }
+
     template <std::integral I>
-    constexpr auto operator-(I offset) const noexcept -> PhysAddr {
-        return PhysAddr{val - static_cast<Word>(offset)};
+    constexpr auto operator-(I offset) const noexcept -> BasicAddress {
+        return BasicAddress{val - static_cast<Word>(offset)};
     }
+
     template <std::integral I>
-    friend constexpr auto operator-(I lhs, PhysAddr rhs) noexcept -> PhysAddr {
-        return PhysAddr{static_cast<Word>(lhs) - rhs.val};
+    friend constexpr auto operator-(I lhs, BasicAddress rhs) noexcept -> BasicAddress {
+        return BasicAddress{static_cast<Word>(lhs) - rhs.val};
     }
-    constexpr auto operator-(PhysAddr other) const noexcept -> SignedWord {
+
+    constexpr auto operator-(BasicAddress other) const noexcept -> SignedWord {
         return static_cast<SignedWord>(val - other.val);
     }
+
     template <std::integral I>
-    constexpr auto operator+=(I offset) noexcept -> PhysAddr& {
+    constexpr auto operator+=(I offset) noexcept -> BasicAddress& {
         val += static_cast<Word>(offset);
         return *this;
     }
+
     template <std::integral I>
-    constexpr auto operator-=(I offset) noexcept -> PhysAddr& {
+    constexpr auto operator-=(I offset) noexcept -> BasicAddress& {
         val -= static_cast<Word>(offset);
         return *this;
     }
 
     template <std::integral I>
-    constexpr auto operator&(I mask) const noexcept -> PhysAddr {
-        return PhysAddr{val & static_cast<Word>(mask)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator&(I lhs, PhysAddr rhs) noexcept -> PhysAddr {
-        return PhysAddr{static_cast<Word>(lhs) & rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator|(I mask) const noexcept -> PhysAddr {
-        return PhysAddr{val | static_cast<Word>(mask)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator|(I lhs, PhysAddr rhs) noexcept -> PhysAddr {
-        return PhysAddr{static_cast<Word>(lhs) | rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator^(I mask) const noexcept -> PhysAddr {
-        return PhysAddr{val ^ static_cast<Word>(mask)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator^(I lhs, PhysAddr rhs) noexcept -> PhysAddr {
-        return PhysAddr{static_cast<Word>(lhs) ^ rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator%(I mask) const noexcept -> PhysAddr {
-        return PhysAddr{val % static_cast<Word>(mask)};
-    }
-    constexpr auto operator~() const noexcept -> PhysAddr { return PhysAddr{~val}; }
-    constexpr auto operator>>(unsigned shift) const noexcept -> PhysAddr {
-        return PhysAddr{val >> shift};
-    }
-    constexpr auto operator<<(unsigned shift) const noexcept -> PhysAddr {
-        return PhysAddr{val << shift};
+    constexpr auto operator&(I mask) const noexcept -> BasicAddress {
+        return BasicAddress{val & static_cast<Word>(mask)};
     }
 
     template <std::integral I>
-    constexpr auto operator&=(I mask) noexcept -> PhysAddr& {
+    friend constexpr auto operator&(I lhs, BasicAddress rhs) noexcept -> BasicAddress {
+        return BasicAddress{static_cast<Word>(lhs) & rhs.val};
+    }
+
+    template <std::integral I>
+    constexpr auto operator|(I mask) const noexcept -> BasicAddress {
+        return BasicAddress{val | static_cast<Word>(mask)};
+    }
+
+    template <std::integral I>
+    friend constexpr auto operator|(I lhs, BasicAddress rhs) noexcept -> BasicAddress {
+        return BasicAddress{static_cast<Word>(lhs) | rhs.val};
+    }
+
+    template <std::integral I>
+    constexpr auto operator^(I mask) const noexcept -> BasicAddress {
+        return BasicAddress{val ^ static_cast<Word>(mask)};
+    }
+
+    template <std::integral I>
+    friend constexpr auto operator^(I lhs, BasicAddress rhs) noexcept -> BasicAddress {
+        return BasicAddress{static_cast<Word>(lhs) ^ rhs.val};
+    }
+
+    template <std::integral I>
+    constexpr auto operator%(I divisor) const noexcept -> BasicAddress {
+        return BasicAddress{val % static_cast<Word>(divisor)};
+    }
+
+    constexpr auto operator~() const noexcept -> BasicAddress { return BasicAddress{~val}; }
+
+    constexpr auto operator>>(unsigned shift) const noexcept -> BasicAddress {
+        return BasicAddress{val >> shift};
+    }
+
+    constexpr auto operator<<(unsigned shift) const noexcept -> BasicAddress {
+        return BasicAddress{val << shift};
+    }
+
+    template <std::integral I>
+    constexpr auto operator&=(I mask) noexcept -> BasicAddress& {
         val &= static_cast<Word>(mask);
         return *this;
     }
+
     template <std::integral I>
-    constexpr auto operator|=(I mask) noexcept -> PhysAddr& {
+    constexpr auto operator|=(I mask) noexcept -> BasicAddress& {
         val |= static_cast<Word>(mask);
         return *this;
     }
+
     template <std::integral I>
-    constexpr auto operator^=(I mask) noexcept -> PhysAddr& {
+    constexpr auto operator^=(I mask) noexcept -> BasicAddress& {
         val ^= static_cast<Word>(mask);
         return *this;
     }
 };
 
-/**
- * @struct VirtAddr
- * @brief Strong zero-overhead semantic wrapper representing virtual memory addresses.
- */
-struct VirtAddr {
-    Word val{0};
-
-    constexpr VirtAddr() noexcept = default;
-    constexpr VirtAddr(Word v) noexcept : val(v) {}
-    constexpr VirtAddr(const PhysAddr&) = delete;
-    auto operator=(const PhysAddr&) -> VirtAddr& = delete;
-
-    [[nodiscard]] constexpr auto value() const noexcept -> Word { return val; }
-    [[nodiscard]] constexpr auto raw() const noexcept -> Word { return val; }
-    [[nodiscard]] constexpr explicit operator Word() const noexcept { return val; }
-
-    constexpr auto operator=(Word v) noexcept -> VirtAddr& {
-        val = v;
-        return *this;
-    }
-
-    constexpr auto operator<=>(const VirtAddr&) const noexcept = default;
-    constexpr bool operator==(const VirtAddr&) const noexcept = default;
-    template <std::integral I>
-    constexpr bool operator==(I rhs) const noexcept {
-        return val == static_cast<Word>(rhs);
-    }
-    template <std::integral I>
-    constexpr auto operator<=>(I rhs) const noexcept {
-        return val <=> static_cast<Word>(rhs);
-    }
-
-    template <std::integral I>
-    constexpr auto operator+(I offset) const noexcept -> VirtAddr {
-        return VirtAddr{val + static_cast<Word>(offset)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator+(I lhs, VirtAddr rhs) noexcept -> VirtAddr {
-        return VirtAddr{static_cast<Word>(lhs) + rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator-(I offset) const noexcept -> VirtAddr {
-        return VirtAddr{val - static_cast<Word>(offset)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator-(I lhs, VirtAddr rhs) noexcept -> VirtAddr {
-        return VirtAddr{static_cast<Word>(lhs) - rhs.val};
-    }
-    constexpr auto operator-(VirtAddr other) const noexcept -> SignedWord {
-        return static_cast<SignedWord>(val - other.val);
-    }
-    template <std::integral I>
-    constexpr auto operator+=(I offset) noexcept -> VirtAddr& {
-        val += static_cast<Word>(offset);
-        return *this;
-    }
-    template <std::integral I>
-    constexpr auto operator-=(I offset) noexcept -> VirtAddr& {
-        val -= static_cast<Word>(offset);
-        return *this;
-    }
-
-    template <std::integral I>
-    constexpr auto operator&(I mask) const noexcept -> VirtAddr {
-        return VirtAddr{val & static_cast<Word>(mask)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator&(I lhs, VirtAddr rhs) noexcept -> VirtAddr {
-        return VirtAddr{static_cast<Word>(lhs) & rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator|(I mask) const noexcept -> VirtAddr {
-        return VirtAddr{val | static_cast<Word>(mask)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator|(I lhs, VirtAddr rhs) noexcept -> VirtAddr {
-        return VirtAddr{static_cast<Word>(lhs) | rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator^(I mask) const noexcept -> VirtAddr {
-        return VirtAddr{val ^ static_cast<Word>(mask)};
-    }
-    template <std::integral I>
-    friend constexpr auto operator^(I lhs, VirtAddr rhs) noexcept -> VirtAddr {
-        return VirtAddr{static_cast<Word>(lhs) ^ rhs.val};
-    }
-    template <std::integral I>
-    constexpr auto operator%(I mask) const noexcept -> VirtAddr {
-        return VirtAddr{val % static_cast<Word>(mask)};
-    }
-    constexpr auto operator~() const noexcept -> VirtAddr { return VirtAddr{~val}; }
-    constexpr auto operator>>(unsigned shift) const noexcept -> VirtAddr {
-        return VirtAddr{val >> shift};
-    }
-    constexpr auto operator<<(unsigned shift) const noexcept -> VirtAddr {
-        return VirtAddr{val << shift};
-    }
-
-    template <std::integral I>
-    constexpr auto operator&=(I mask) noexcept -> VirtAddr& {
-        val &= static_cast<Word>(mask);
-        return *this;
-    }
-    template <std::integral I>
-    constexpr auto operator|=(I mask) noexcept -> VirtAddr& {
-        val |= static_cast<Word>(mask);
-        return *this;
-    }
-    template <std::integral I>
-    constexpr auto operator^=(I mask) noexcept -> VirtAddr& {
-        val ^= static_cast<Word>(mask);
-        return *this;
-    }
-};
+struct VirtAddrTag {};
+struct PhysAddrTag {};
 
 template <typename T>
 concept StrongAddress = std::same_as<T, PhysAddr> || std::same_as<T, VirtAddr>;

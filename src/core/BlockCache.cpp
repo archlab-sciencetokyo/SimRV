@@ -26,7 +26,7 @@ auto BlockCache::build_block(simrv::xlen::VirtAddr pc, DecodeCache& decode_cache
     bb.generation = generation_;
 
     CachedOp* cur = head_op;
-    simrv::xlen::Register cur_pc = pc.raw();
+    simrv::xlen::VirtAddr cur_pc = pc;
     CachedOp* next_op = nullptr;
 
     while (bb.num_ops < kMaxBlockOps && cur != nullptr && cur->cpc == cur_pc) {
@@ -102,10 +102,10 @@ auto BlockCache::build_block(simrv::xlen::VirtAddr pc, DecodeCache& decode_cache
                         break;
                 }
             }
-            bb.fallthrough_pc = static_cast<simrv::xlen::Register>(cur->cpc.raw() + cur->op_len);
+            bb.fallthrough_pc = cur->cpc + cur->op_len;
             if (cur->fast_op != FastOp::Jalr && cur->branch_kind != BranchKind::Jalr) {
-                bb.target_pc = static_cast<simrv::xlen::Register>(cur->cpc.raw() + cur->imm);
-                if (bb.target_pc == bb.pc.raw()) {
+                bb.target_pc = cur->cpc + cur->imm;
+                if (bb.target_pc == bb.pc) {
                     bb.is_self_loop = true;
                     bb.target_bb = &bb;
                 } else {

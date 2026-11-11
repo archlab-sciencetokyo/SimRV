@@ -28,10 +28,10 @@
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
-static_assert(std::same_as<decltype(simrv::pipeline::PipelineInstruction::pc),
-                           simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::pipeline::PipelineReg::target_pc),
-                           simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::pipeline::PipelineInstruction::pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::pipeline::PipelineReg::target_pc), simrv::xlen::VirtAddr>);
 
 namespace section_0 {
 /**
@@ -532,7 +532,7 @@ void test_disabled_predictor() {
     DecodedInstruction branch{};
     branch.opcode = Opcode::Branch;
     branch.imm = -16;
-    const auto branch_prediction = bp.predict(0x100, branch);
+    const auto branch_prediction = bp.predict(simrv::xlen::VirtAddr{0x100}, branch);
     TEST_CHECK(branch_prediction.is_control);
     TEST_CHECK(!branch_prediction.predicted_taken);
     TEST_CHECK(branch_prediction.predicted_target == 0x104);
@@ -540,7 +540,7 @@ void test_disabled_predictor() {
     DecodedInstruction jump{};
     jump.opcode = Opcode::Jal;
     jump.imm = 64;
-    const auto jump_prediction = bp.predict(0x200, jump);
+    const auto jump_prediction = bp.predict(simrv::xlen::VirtAddr{0x200}, jump);
     TEST_CHECK(jump_prediction.is_control);
     TEST_CHECK(!jump_prediction.predicted_taken);
     TEST_CHECK(jump_prediction.predicted_target == 0x204);
@@ -561,12 +561,12 @@ void test_registered_btb_read_latency() {
     DecodedInstruction branch{};
     branch.opcode = Opcode::Branch;
     branch.imm = 12;
-    constexpr simrv::xlen::Address pc = 0x1000;
+    constexpr simrv::xlen::VirtAddr pc{0x1000};
 
     bp.latch_btb_read(pc);
     const auto initial = bp.predict(pc, branch);
     TEST_CHECK(!initial.predicted_taken);
-    bp.update({.pc = pc,
+    bp.update({.pc = simrv::xlen::VirtAddr{pc},
                .actual_taken = true,
                .actual_target = pc + 12,
                .opcode = Opcode::Branch,
@@ -597,11 +597,11 @@ void test_static_predictor() {
     bwd_branch.opcode = Opcode::Branch;
     bwd_branch.imm = -8;  // Backward jump (loop)
 
-    auto pred_fwd = bp.predict(0x1000, fwd_branch);
+    auto pred_fwd = bp.predict(simrv::xlen::VirtAddr{0x1000}, fwd_branch);
     TEST_CHECK(!pred_fwd.predicted_taken);
     TEST_CHECK(pred_fwd.predicted_target == 0x1004);
 
-    auto pred_bwd = bp.predict(0x1020, bwd_branch);
+    auto pred_bwd = bp.predict(simrv::xlen::VirtAddr{0x1020}, bwd_branch);
     TEST_CHECK(pred_bwd.predicted_taken);
     TEST_CHECK(pred_bwd.predicted_target == 0x1020 - 8);
 }
@@ -619,7 +619,7 @@ void test_bimodal_transitions() {
     branch.opcode = Opcode::Branch;
     branch.imm = 12;
 
-    const simrv::xlen::Address pc = 0x2000;
+    const simrv::xlen::VirtAddr pc{0x2000};
 
     // Initial state is Weakly Not-Taken (1) -> predicts not-taken
     auto pred1 = bp.predict(pc, branch);
@@ -627,7 +627,7 @@ void test_bimodal_transitions() {
 
     // Train Taken -> counter becomes Weakly Taken (2)
     BranchFeedback fb1{
-        .pc = pc,
+        .pc = simrv::xlen::VirtAddr{pc},
         .actual_taken = true,
         .actual_target = pc + 12,
         .opcode = Opcode::Branch,
@@ -641,7 +641,7 @@ void test_bimodal_transitions() {
 
     // Train Taken again -> counter becomes Strongly Taken (3)
     BranchFeedback fb2{
-        .pc = pc,
+        .pc = simrv::xlen::VirtAddr{pc},
         .actual_taken = true,
         .actual_target = pc + 12,
         .opcode = Opcode::Branch,
@@ -654,7 +654,7 @@ void test_bimodal_transitions() {
 
     // Train Not-Taken -> counter becomes Weakly Taken (2) -> still predicts taken
     BranchFeedback fb3{
-        .pc = pc,
+        .pc = simrv::xlen::VirtAddr{pc},
         .actual_taken = false,
         .actual_target = pc + 4,
         .opcode = Opcode::Branch,
@@ -667,7 +667,7 @@ void test_bimodal_transitions() {
 
     // Train Not-Taken -> counter becomes Weakly Not-Taken (1) -> predicts not-taken
     BranchFeedback fb4{
-        .pc = pc,
+        .pc = simrv::xlen::VirtAddr{pc},
         .actual_taken = false,
         .actual_target = pc + 4,
         .opcode = Opcode::Branch,
@@ -693,7 +693,7 @@ void test_gshare_and_history_restoration() {
     branch.opcode = Opcode::Branch;
     branch.imm = 8;
 
-    const simrv::xlen::Address pc = 0x3000;
+    const simrv::xlen::VirtAddr pc{0x3000};
 
     // First prediction with GHR=0
     auto pred1 = bp.predict(pc, branch);
@@ -703,7 +703,7 @@ void test_gshare_and_history_restoration() {
     // Speculative prediction with predicted taken
     // We train the entry at (pc ^ 0) to be strongly taken
     BranchFeedback fb1{
-        .pc = pc,
+        .pc = simrv::xlen::VirtAddr{pc},
         .actual_taken = true,
         .actual_target = pc + 8,
         .opcode = Opcode::Branch,
@@ -738,7 +738,7 @@ void test_ras_call_and_return() {
     call1.rd = simrv::xlen::RegId::Ra;
     call1.imm = 0x100;
 
-    auto pred_call1 = bp.predict(0x80000000, call1);
+    auto pred_call1 = bp.predict(simrv::xlen::VirtAddr{0x80000000}, call1);
     TEST_CHECK(pred_call1.is_call);
     TEST_CHECK(pred_call1.predicted_target == 0x80000100);
     TEST_CHECK(bp.ras_depth() == 1);
@@ -750,7 +750,7 @@ void test_ras_call_and_return() {
     call2.rd = simrv::xlen::RegId::Ra;
     call2.imm = 0x50;
 
-    auto pred_call2 = bp.predict(0x80000120, call2);
+    auto pred_call2 = bp.predict(simrv::xlen::VirtAddr{0x80000120}, call2);
     TEST_CHECK(pred_call2.is_call);
     TEST_CHECK(bp.ras_depth() == 2);
     TEST_CHECK(bp.ras_peek() == 0x80000124);
@@ -762,14 +762,14 @@ void test_ras_call_and_return() {
     ret1.rs1 = simrv::xlen::RegId::Ra;
     ret1.imm = 0;
 
-    auto pred_ret1 = bp.predict(0x80000170, ret1);
+    auto pred_ret1 = bp.predict(simrv::xlen::VirtAddr{0x80000170}, ret1);
     TEST_CHECK(pred_ret1.is_return);
     TEST_CHECK(pred_ret1.ras_hit);
     TEST_CHECK(pred_ret1.predicted_target == 0x80000124);
     TEST_CHECK(bp.ras_depth() == 1);
 
     // Return from top call: JALR x0, RA, 0
-    auto pred_ret2 = bp.predict(0x80000130, ret1);
+    auto pred_ret2 = bp.predict(simrv::xlen::VirtAddr{0x80000130}, ret1);
     TEST_CHECK(pred_ret2.is_return);
     TEST_CHECK(pred_ret2.ras_hit);
     TEST_CHECK(pred_ret2.predicted_target == 0x80000004);
@@ -794,7 +794,7 @@ void test_btb_indirect_jump_caching() {
     jalr.rs1 = simrv::xlen::RegId::A0;
     jalr.imm = 0;
 
-    const simrv::xlen::Address pc = 0x4000;
+    const simrv::xlen::VirtAddr pc{0x4000};
 
     // First lookup: BTB miss
     auto pred1 = bp.predict(pc, jalr);
@@ -802,9 +802,9 @@ void test_btb_indirect_jump_caching() {
 
     // Train BTB with target 0x80001000
     BranchFeedback fb1{
-        .pc = pc,
+        .pc = simrv::xlen::VirtAddr{pc},
         .actual_taken = true,
-        .actual_target = 0x80001000,
+        .actual_target = simrv::xlen::VirtAddr{0x80001000},
         .opcode = Opcode::Jalr,
         .prediction = pred1,
     };
@@ -829,11 +829,11 @@ void test_telemetry_stats() {
     branch.opcode = Opcode::Branch;
     branch.imm = 4;
 
-    auto pred = bp.predict(0x5000, branch);
+    auto pred = bp.predict(simrv::xlen::VirtAddr{0x5000}, branch);
     BranchFeedback fb{
-        .pc = 0x5000,
+        .pc = simrv::xlen::VirtAddr{0x5000},
         .actual_taken = false,
-        .actual_target = 0x5004,
+        .actual_target = simrv::xlen::VirtAddr{0x5004},
         .opcode = Opcode::Branch,
         .prediction = pred,
     };
@@ -865,9 +865,9 @@ void test_untagged_btb_false_control_alias() {
     DecodedInstruction branch{};
     branch.opcode = Opcode::Branch;
     branch.imm = 12;
-    constexpr simrv::xlen::Address branch_pc = 0x1000;
+    constexpr simrv::xlen::VirtAddr branch_pc{0x1000};
     auto cold = bp.predict(branch_pc, branch);
-    bp.update({.pc = branch_pc,
+    bp.update({.pc = simrv::xlen::VirtAddr{branch_pc},
                .actual_taken = true,
                .actual_target = branch_pc + 12,
                .opcode = Opcode::Branch,
@@ -875,14 +875,14 @@ void test_untagged_btb_false_control_alias() {
 
     DecodedInstruction add{};
     add.opcode = Opcode::Op;
-    constexpr simrv::xlen::Address alias_pc = branch_pc + (16 << 2);
+    constexpr simrv::xlen::VirtAddr alias_pc = branch_pc + (16 << 2);
     const auto alias = bp.predict(alias_pc, add);
     TEST_CHECK(alias.is_control);
     TEST_CHECK(alias.false_control_alias);
     TEST_CHECK(alias.predicted_taken);
     TEST_CHECK(alias.predicted_target == branch_pc + 12);
 
-    bp.update({.pc = alias_pc,
+    bp.update({.pc = simrv::xlen::VirtAddr{alias_pc},
                .actual_taken = false,
                .actual_target = alias_pc + 4,
                .opcode = Opcode::Op,
@@ -1042,11 +1042,13 @@ void test_pipeline_sim_hazard_events() {
 
     // Cycle 1: Dispatch with data hazard stall
     sim.advance_cycle({
-        .fetch = {.instruction = {.pc = 0x1008, .op_id = OperationId::ADD}, .valid = true},
-        .decode = {.instruction = {.pc = 0x1004, .op_id = OperationId::ADD},
+        .fetch = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1008}, .op_id = OperationId::ADD},
+                  .valid = true},
+        .decode = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1004}, .op_id = OperationId::ADD},
                    .valid = true,
                    .stalled = true},
-        .execute = {.instruction = {.pc = 0x1000, .op_id = OperationId::LW}, .valid = true},
+        .execute = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1000}, .op_id = OperationId::LW},
+                    .valid = true},
         .retired = false,
         .data_hazard_stall = true,
     });
@@ -1073,7 +1075,7 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
 
     const auto run_model = [&](simrv::pipeline::PipelineType type, bool forwarding) {
         simrv::core::Machine machine;
-        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
         std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
         auto& cpu = machine.primary_hart();
@@ -1086,9 +1088,9 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
                           simrv::memory::MesiState::Exclusive);
-        cpu.state().pc = pc;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (cpu.e_icount < 3 && cycles < 64) {
@@ -1193,14 +1195,14 @@ void test_zkt_fixed_instruction_latency() {
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         cpu.pipeline_sim.config.pipeline_type = type;
 
-        const auto pc = machine.memory_geometry().dram_base;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
         const std::array<simrv::xlen::Instruction, 2> program = {instruction, 0x0000006F};
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
-        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
                           simrv::memory::MesiState::Exclusive);
-        cpu.state().pc = pc;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
         cpu.state().regs.write(simrv::xlen::RegId::Ra, lhs);
         cpu.state().regs.write(simrv::xlen::RegId::Sp, rhs);
 
@@ -1270,14 +1272,14 @@ void test_zvkt_vector_latency() {
         vector.u8[0] = pattern;
         vector.u8[1] = static_cast<uint8_t>(~pattern);
 
-        const auto pc = machine.memory_geometry().dram_base;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
         const std::array<simrv::xlen::Instruction, 2> program = {instruction, 0x0000006F};
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
-        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
                           simrv::memory::MesiState::Exclusive);
-        cpu.state().pc = pc;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (cpu.e_icount < 1 && cycles < 64) {
@@ -1313,7 +1315,7 @@ void test_cycle_kernel_fp_hazard_stall_counters() {
 
     const auto run_model = [&](simrv::pipeline::PipelineType type, bool forwarding) {
         simrv::core::Machine machine;
-        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
         std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
         auto& cpu = machine.primary_hart();
@@ -1327,9 +1329,9 @@ void test_cycle_kernel_fp_hazard_stall_counters() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
                           simrv::memory::MesiState::Exclusive);
-        cpu.state().pc = pc;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
 
         uint32_t cycles = 0;
         while (cpu.e_icount < 4 && cycles < 64) {
@@ -1549,13 +1551,18 @@ void test_pipeline_sim_wrapper() {
     sim.config.record_snapshots = true;
     sim.reset();
     sim.advance_cycle({
-        .fetch = {.instruction = {.pc = 0x1010, .op_id = OperationId::SUB}, .valid = true},
-        .decode = {.instruction = {.pc = 0x100c, .op_id = OperationId::ADD}, .valid = true},
-        .execute = {.instruction = {.pc = 0x1008, .op_id = OperationId::MUL},
+        .fetch = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1010}, .op_id = OperationId::SUB},
+                  .valid = true},
+        .decode = {.instruction = {.pc = simrv::xlen::VirtAddr{0x100c}, .op_id = OperationId::ADD},
+                   .valid = true},
+        .execute = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1008}, .op_id = OperationId::MUL},
                     .valid = true,
                     .stalled = true},
-        .memory = {.instruction = {.pc = 0x1004, .op_id = OperationId::LW}, .valid = true},
-        .writeback = {.instruction = {.pc = 0x1000, .op_id = OperationId::ADDI}, .valid = true},
+        .memory = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1004}, .op_id = OperationId::LW},
+                   .valid = true},
+        .writeback = {.instruction = {.pc = simrv::xlen::VirtAddr{0x1000},
+                                      .op_id = OperationId::ADDI},
+                      .valid = true},
         .retired = true,
         .data_hazard_stall = true,
     });
@@ -1584,8 +1591,11 @@ void test_pipeline_sim_wrapper() {
     simrv::pipeline::PipelineSim observable;
     observable.config.record_snapshots = true;
     const simrv::pipeline::PipelineCycleEvent transition{
-        .fetch = {.instruction = {.pc = 0x2004, .op_id = OperationId::ADD}, .valid = true},
-        .writeback = {.instruction = {.pc = 0x2000, .op_id = OperationId::SUB}, .valid = true},
+        .fetch = {.instruction = {.pc = simrv::xlen::VirtAddr{0x2004}, .op_id = OperationId::ADD},
+                  .valid = true},
+        .writeback = {.instruction = {.pc = simrv::xlen::VirtAddr{0x2000},
+                                      .op_id = OperationId::SUB},
+                      .valid = true},
         .retired = true,
         .control_flush = true,
     };

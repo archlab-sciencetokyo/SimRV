@@ -77,7 +77,7 @@ void BranchPredictor::configure(const BranchPredictorConfig& config) {
     btb_.assign(btb_sz, BtbEntry{});
 
     const size_t ras_sz = std::max<size_t>(4, config_.ras_entries);
-    ras_.assign(ras_sz, 0);
+    ras_.assign(ras_sz, simrv::xlen::VirtAddr{});
     ras_head_ = 0;
     ras_count_ = 0;
 
@@ -91,7 +91,7 @@ void BranchPredictor::reset() {
     std::fill(btb_.begin(), btb_.end(), BtbEntry{});
     registered_btb_entry_ = {};
     registered_bht_counter_ = config_.bht_initial_state;
-    std::fill(ras_.begin(), ras_.end(), 0);
+    std::fill(ras_.begin(), ras_.end(), simrv::xlen::VirtAddr{});
     ghr_ = 0;
     ras_head_ = 0;
     ras_count_ = 0;

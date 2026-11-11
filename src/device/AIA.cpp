@@ -16,7 +16,7 @@ namespace simrv::device {
 // Imsic Implementation
 // =========================================================================
 
-Imsic::Imsic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
+Imsic::Imsic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::PhysAddr base_addr,
              simrv::xlen::Address size)
     : memory::MmioDevice(machine), priv_(priv), base_addr_(base_addr), size_(size) {
     reset();
@@ -168,7 +168,7 @@ void Imsic::update_hart(simrv::xlen::HartId hart_idx) {
 // Aplic Implementation
 // =========================================================================
 
-Aplic::Aplic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
+Aplic::Aplic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::PhysAddr base_addr,
              simrv::xlen::Address size, Imsic* imsic)
     : memory::MmioDevice(machine), priv_(priv), base_addr_(base_addr), size_(size), imsic_(imsic) {
     reset();

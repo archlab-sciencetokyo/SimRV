@@ -39,8 +39,8 @@ class ICache : public BaseCache<512, 64, 8> {
         requires(std::same_as<Value, uint16_t> || std::same_as<Value, uint32_t>)
     [[nodiscard]] auto read_value(simrv::xlen::PhysAddr paddr, Value& data) -> bool {
         const auto addr = paddr.raw();
-        const uint32_t set_idx = get_set_index(addr);
-        const auto tag = get_tag(addr);
+        const uint32_t set_idx = get_set_index(paddr);
+        const auto tag = get_tag(paddr);
         last_accessed_set_ = set_idx;
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);

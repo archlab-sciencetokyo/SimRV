@@ -66,7 +66,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
                                   static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_WINDOW_BASE));
         return format_to_width(
             std::format("  {}Space:\033[0m {}DRAM {:#010x}\033[0m │ {}\033[0m", kThemeText,
-                        kThemeMint, static_cast<uint64_t>(memory::kDramBaseAddress), topology),
+                        kThemeMint, static_cast<uint64_t>(memory::kDramBaseAddress.raw()),
+                        topology),
             width);
     }
     if (logical_row == 2) {
@@ -350,7 +351,7 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
             } else if (tx.channel == TileLinkChannel::E) {
                 src_sink = std::format("snk:{}", tx.sink);
             }
-            std::string addr_str = (tx.address != 0) ? std::format("@{:#x}", tx.address) : "";
+            std::string addr_str = (tx.address != 0) ? std::format("@{:#x}", tx.address.raw()) : "";
             std::string detail_str = tx.detail.empty() ? "" : std::format("({})", tx.detail);
 
             return format_to_width(

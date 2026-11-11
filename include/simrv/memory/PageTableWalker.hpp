@@ -208,9 +208,9 @@ class PageTableWalker {
    public:
     constexpr PageTableWalker() noexcept = default;
     explicit constexpr PageTableWalker(RamView ram) noexcept : ram_(ram) {}
-    explicit constexpr PageTableWalker(simrv::xlen::Byte* mmem, simrv::xlen::Address dram_base,
+    explicit constexpr PageTableWalker(simrv::xlen::Byte* mmem, simrv::xlen::PhysAddr dram_base,
                                        simrv::xlen::Address dram_size) noexcept
-        : ram_(mmem, dram_base, dram_size) {}
+        : ram_(mmem, simrv::xlen::PhysAddr{dram_base}, dram_size) {}
 
     [[nodiscard]] constexpr auto ram_view() const noexcept -> RamView { return ram_; }
     constexpr void set_ram_view(RamView ram) noexcept { ram_ = ram; }

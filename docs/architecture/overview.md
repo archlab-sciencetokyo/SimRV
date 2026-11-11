@@ -145,11 +145,16 @@ original starting tree remain incomplete; ARM hardware and usable host performan
 unavailable. See [strong typing and performance](../development/strong-typing-performance.md)
 for the measurements and their limitations.
 
-The strong-typing migration is also incomplete: some trace records and TUI address entry points
-still use scalar address types. The architectural PC, decode and block cache keys, pipeline stage
-records and fetch cursor, branch-trace API, and TUI execution snapshot use `VirtAddr`. Spike
-lockstep commit PCs, pipeline-stall trace PCs, trap and SBI trace PCs, TUI instruction telemetry
-PCs, and predicted instruction-explainer PCs also use `VirtAddr`.
+Address-domain types protect the architectural and platform interfaces where the distinction affects
+correctness. Architectural PCs, decode and block cache keys, pipeline stage records and fetch
+cursors, branch prediction, traces, symbols, breakpoints, and instruction-explainer PCs use
+`VirtAddr`. Physical SoC regions, device bases, PCIe windows and BARs, DRAM and `tohost`
+configuration, DMA, MMIO routing, cache tags, coherence, and reservation tracking use `PhysAddr`.
+The instruction timing cache keys virtual PCs rather than memory bus addresses. The TUI backend
+request carries an explicit virtual or physical address alternative for its command. C plugin ABI
+and serialized formats retain scalar representations, with explicit typed adapters at those
+boundaries. Scalar range arithmetic remains in widened RAM and PMP helpers, AXI message records,
+device register offsets, and parsers until they validate the input width and establish its domain.
 The explainer distinguishes effective virtual addresses from translated physical addresses; its
 register base and offsets remain scalar arithmetic values. Its public explanation and disassembly
 entry points accept virtual PCs. Branch prediction feedback, BTB targets, and return-address stack

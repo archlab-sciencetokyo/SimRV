@@ -255,10 +255,9 @@ auto Sbi::handle_hsm(simrv::xlen::Word func_id) -> bool {
                 sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::AlreadyStarted), 0);
                 return true;
             }
-            target_cpu.state().pc = start_addr;
+            target_cpu.state().pc = simrv::xlen::VirtAddr{start_addr};
             if (target_cpu.state().regs.xlen == 32) {
-                target_cpu.state().pc = static_cast<simrv::xlen::Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(start_addr)));
+                target_cpu.state().canonicalize_pc();
             }
             target_cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
             target_cpu.state().regs.write(simrv::xlen::RegId::A0, target_hart);
@@ -335,17 +334,22 @@ auto Sbi::handle_dbcn(simrv::xlen::Word func_id) -> bool {
                 static_cast<size_t>(cpu_.state().regs.read(simrv::xlen::RegId::A0));
             const auto base_addr_lo = cpu_.state().regs.read(simrv::xlen::RegId::A1);
             const auto base_addr_hi = cpu_.state().regs.read(simrv::xlen::RegId::A2);
-            const auto paddr = static_cast<simrv::xlen::Address>(
-                (static_cast<uint64_t>(base_addr_hi) << 32) | static_cast<uint64_t>(base_addr_lo));
+            const uint64_t raw_paddr =
+                (static_cast<uint64_t>(base_addr_hi) << 32) | static_cast<uint64_t>(base_addr_lo);
+            if (raw_paddr > std::numeric_limits<simrv::xlen::Address>::max()) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::InvalidParam), 0);
+                return true;
+            }
+            const simrv::xlen::PhysAddr paddr{static_cast<simrv::xlen::Address>(raw_paddr)};
 
             size_t written = 0;
             for (size_t i = 0; i < num_bytes; ++i) {
-                const simrv::xlen::Address byte_addr = paddr + i;
+                const simrv::xlen::PhysAddr byte_addr = paddr + i;
                 if (cpu_.machine_ != nullptr &&
                     cpu_.machine_->memory_geometry().contains(byte_addr)) {
                     const auto geometry = cpu_.machine_->memory_geometry();
                     const auto ch = static_cast<char>(
-                        cpu_.machine_->ram_data()[byte_addr - geometry.dram_base]);
+                        cpu_.machine_->ram_data()[byte_addr.raw() - geometry.dram_base.raw()]);
                     cpu_.machine_->console_write(ch);
                     written++;
                 }

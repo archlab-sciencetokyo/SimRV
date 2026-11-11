@@ -280,8 +280,8 @@ struct alignas(128) ArchState {
     SIMRV_ALWAYS_INLINE constexpr void canonicalize_pc() noexcept {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(regs.xlen == 32)) {
-                pc = static_cast<simrv::xlen::Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(pc.raw())));
+                pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(pc.raw())))};
             }
         }
     }
@@ -399,9 +399,10 @@ struct alignas(32) SoftTlbEntry {
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE bool has_host_ptr() const noexcept { return has_host; }
 
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr(simrv::xlen::Address vaddr) const noexcept
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr(simrv::xlen::VirtAddr vaddr) const noexcept
         -> simrv::xlen::Byte* {
-        return reinterpret_cast<simrv::xlen::Byte*>(host_offset + static_cast<uintptr_t>(vaddr));
+        return reinterpret_cast<simrv::xlen::Byte*>(host_offset +
+                                                    static_cast<uintptr_t>(vaddr.raw()));
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr_base() const noexcept -> simrv::xlen::Byte* {
@@ -424,7 +425,7 @@ struct alignas(32) SoftTlbEntry {
 
     void invalidate() noexcept {
         tag = kInvalidTag;
-        paddr_base = 0;
+        paddr_base = simrv::xlen::PhysAddr{};
         host_offset = 0;
         has_host = false;
         global = false;
@@ -545,8 +546,8 @@ class CPU {
     /**
      * @brief Checks if an instruction fetch PC matches any active Sdtrig execution trigger.
      */
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_pc(simrv::xlen::VirtAddr pc) const noexcept
-        -> bool {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_pc(
+        simrv::xlen::VirtAddr pc) const noexcept -> bool {
         if (!state_.has_active_triggers) return false;
         const unsigned xlen = state_.regs.xlen;
         for (size_t i = 0; i < ArchState::kNumTriggers; ++i) {
@@ -570,7 +571,7 @@ class CPU {
     /**
      * @brief Checks if a memory access range matches any active Sdtrig load/store trigger.
      */
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_mem(simrv::xlen::Address addr,
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_mem(simrv::xlen::VirtAddr addr,
                                                               uint32_t size,
                                                               bool is_write) const noexcept
         -> bool {
@@ -594,8 +595,8 @@ class CPU {
             if (state_.priv == simrv::xlen::PrivilegeLevel::Machine && !m) continue;
             if (state_.priv == simrv::xlen::PrivilegeLevel::Supervisor && !s) continue;
             if (state_.priv == simrv::xlen::PrivilegeLevel::User && !u) continue;
-            const simrv::xlen::Address t2 = state_.tdata2[i];
-            if (addr <= t2 && t2 < addr + span) return true;
+            const simrv::xlen::Address trigger_address = state_.tdata2[i];
+            if (addr <= trigger_address && trigger_address < addr + span) return true;
         }
         return false;
     }
@@ -853,10 +854,10 @@ class CPU {
     template <isa::OperationId kBranchOp, bool kCopyContext>
     SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, simrv::xlen::Register rrs1,
                                                    simrv::xlen::Register rrs2) -> void;
-    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, simrv::xlen::Address mem_addr,
+    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, simrv::xlen::VirtAddr mem_addr,
                                            isa::Funct3 funct3, simrv::xlen::Register& out_val,
                                            const simrv::memory::RamView& ram) -> bool;
-    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, simrv::xlen::Address mem_addr,
+    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, simrv::xlen::VirtAddr mem_addr,
                                             isa::Funct3 funct3, simrv::xlen::Register rrs2,
                                             const simrv::memory::RamView& ram) -> bool;
     template <isa::OperationId kLoadOp>
@@ -873,10 +874,10 @@ class CPU {
     template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
     SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op) -> bool;
     [[gnu::noinline]] auto advance_sequential_miss_baremetal(CachedOp* chained,
-                                                             simrv::xlen::Register next_pc) noexcept
+                                                             simrv::xlen::VirtAddr next_pc) noexcept
         -> CachedOp*;
     [[gnu::noinline]] auto resolve_branch_target_baremetal(CachedOp* chained,
-                                                           simrv::xlen::Register target_pc) noexcept
+                                                           simrv::xlen::VirtAddr target_pc) noexcept
         -> CachedOp*;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
@@ -918,7 +919,7 @@ class CPU {
     /// The enclosing fast-execution kernel processes interrupts once after the instruction.
     SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op,
                                                          simrv::xlen::VirtAddr target_pc) {
-        state_.pc = target_pc.raw();
+        state_.pc = target_pc;
         account_retirement();
         record_hpm_event(HpmEvent::Instructions);
         record_hpm_event(HpmEvent::Cycles);

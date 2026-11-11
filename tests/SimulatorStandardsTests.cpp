@@ -150,7 +150,7 @@ void test_hypervisor_sv39x4_guest_translation() {
     const auto leaf_address = kLeaf + leaf_index * 8U;
     store_pte(leaf_address, ((kPhysicalPage >> 12U) << 10U) | kValidReadWriteAccessedDirty);
 
-    simrv::memory::PageTableWalker walker(backing.data(), 0, backing.size());
+    simrv::memory::PageTableWalker walker(backing.data(), simrv::xlen::PhysAddr{0}, backing.size());
     const simrv::xlen::Word hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
     const auto translated = walker.walk_guest_physical(simrv::memory::GuestPhysAddr{kGuestAddress},
                                                        PteAccess::Read, hgatp, 64);
@@ -205,10 +205,10 @@ void test_sha_two_stage_translation_integration() {
     state.virt = true;
     state.hgatp = (uint64_t{8} << 60U) | (kHRoot >> 12U);
     constexpr simrv::xlen::Word kVsSatp = (uint64_t{8} << 60U) | (kGuestRoot >> 12U);
-    simrv::Mmu mmu(backing.data(), 0, backing.size());
+    simrv::Mmu mmu(backing.data(), simrv::xlen::PhysAddr{0}, backing.size());
     const auto translated =
-        mmu.translate(kGuestVa, simrv::PteAccess::Read, simrv::xlen::PrivilegeLevel::Supervisor, 0,
-                      kVsSatp, 64, false, &state);
+        mmu.translate(simrv::xlen::VirtAddr{kGuestVa}, simrv::PteAccess::Read,
+                      simrv::xlen::PrivilegeLevel::Supervisor, 0, kVsSatp, 64, false, &state);
     TEST_ASSERT(translated.has_value());
     TEST_ASSERT(translated->physical_address.raw() == kHostBase + kGuestPa + (kGuestVa & 0xFFFU));
     TEST_ASSERT(translated->pte == (((kGuestPa >> 12U) << 10U) | 0xCFU));

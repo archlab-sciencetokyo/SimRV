@@ -51,7 +51,7 @@ class TileLinkBus : public Bus {
         std::string_view opcode;
         TlSourceId source = 0;
         TlSinkId sink = 0;
-        simrv::xlen::Address address = 0;
+        simrv::xlen::PhysAddr address{};
         std::string_view detail;
     };
 
@@ -122,7 +122,7 @@ class TileLinkBus : public Bus {
     }
 
     void record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
-                            TlSinkId sink, simrv::xlen::Address address,
+                            TlSinkId sink, simrv::xlen::PhysAddr address,
                             std::string_view detail = {},
                             const simrv::core::BusTraceContext* trace_context = nullptr);
     [[nodiscard]] static constexpr auto ram_capabilities() -> TlManagerCapabilities {

@@ -272,9 +272,9 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto peak_mips() const noexcept -> double { return peak_mips_; }
     void sample_throughput() noexcept;
     /// Initialization-only derived boot state; image symbols never rewrite the input config.
-    void set_resolved_boot_state(simrv::xlen::Address start_pc,
+    void set_resolved_boot_state(simrv::xlen::VirtAddr start_pc,
                                  std::optional<simrv::xlen::Address> tohost_address) noexcept;
-    [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::Address {
+    [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::VirtAddr {
         return resolved_start_pc_;
     }
     [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
@@ -424,7 +424,7 @@ class Machine final : public core::IInterruptController {
     std::chrono::steady_clock::time_point last_sample_time_{};
     simrv::xlen::Counter last_sample_instructions_{0};
     double peak_mips_{0.0};
-    simrv::xlen::Address resolved_start_pc_ = 0;
+    simrv::xlen::VirtAddr resolved_start_pc_{};
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
     FramebufferConfig framebuffer_geometry_{};
     bool is_smp_enabled_ = false;

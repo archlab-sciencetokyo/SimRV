@@ -27,8 +27,8 @@ class ExternalSerialAdapter final : public Uart {
     ExternalSerialAdapter(simrv::core::Machine& machine, const simrv::core::SoCDeviceConfig& config,
                           const SimRvExternalDevice* dev, const SimRvExternalSerialDevice* serial,
                           void* ctx)
-        : Uart(machine, config.base, config.size, config.irq, config.clock_hz,
-               machine.execution_config().cpu_clock_hz),
+        : Uart(machine, simrv::xlen::PhysAddr{config.base.raw()}, config.size, config.irq,
+               config.clock_hz, machine.execution_config().cpu_clock_hz),
           serial_(serial),
           ctx_(ctx),
           services_{.host_ctx = this,
@@ -460,7 +460,7 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
                 return nullptr;
             }
         }
-        const auto base = config.base != 0 ? config.base : dev->default_base;
+        const auto base = config.base != 0 ? config.base.raw() : dev->default_base;
         const auto size = config.size != 0 ? config.size : dev->default_size;
         const auto dev_name = !config.name.empty() ? config.name : name;
         const auto physical_base = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(base)};

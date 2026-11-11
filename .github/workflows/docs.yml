@@ -6,12 +6,14 @@ on:
     paths:
       - 'docs/**'
       - 'zensical.yml'
+      - '.github/requirements-docs.txt'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main, dev]
     paths:
       - 'docs/**'
       - 'zensical.yml'
+      - '.github/requirements-docs.txt'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -36,7 +38,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install documentation dependencies
-        run: pip install --upgrade pip && pip install zensical pymdown-extensions
+        run: python -m pip install --requirement .github/requirements-docs.txt
 
       - name: Build documentation site with Zensical
         env:
@@ -79,7 +81,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install documentation dependencies
-        run: pip install --upgrade pip && pip install zensical pymdown-extensions
+        run: python -m pip install --requirement docs-dev/.github/requirements-docs.txt
 
       - name: Build stable and development sites with Zensical
         run: |

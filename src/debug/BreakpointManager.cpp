@@ -169,7 +169,7 @@ void BreakpointManager::add_reg_watchpoint(RegType reg_type, simrv::xlen::RegId 
     watchpoints_.push_back(Watchpoint{.id = next_watchpoint_id_++,
                                       .owner = BreakpointOwner::Tui,
                                       .target = WatchTarget::Register,
-                                      .addr = 0,
+                                      .addr = simrv::xlen::VirtAddr{},
                                       .reg_type = reg_type,
                                       .reg_index = reg_index,
                                       .reg_name = reg_name,

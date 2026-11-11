@@ -9,7 +9,7 @@
 #include <string>
 
 #include "simrv/device/pci/PciTypes.hpp"
-#include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::device {
 
@@ -36,12 +36,12 @@ class PciDevice {
     virtual void bar_write(PciBarIndex bar_idx, PciBarOffset offset, PciMmioData val,
                            PciAccessBytes size);
 
-    [[nodiscard]] auto bar_base(PciBarIndex bar_idx) const -> simrv::xlen::Address;
+    [[nodiscard]] auto bar_base(PciBarIndex bar_idx) const -> simrv::xlen::PhysAddr;
     [[nodiscard]] auto bar_size(PciBarIndex bar_idx) const -> PciBarSize;
     [[nodiscard]] auto bar_is_64bit(PciBarIndex bar_idx) const noexcept -> bool {
         return bar_idx < 6 && bar_is_64bit_[bar_idx];
     }
-    [[nodiscard]] auto contains_mmio(simrv::xlen::Address addr, PciBarIndex& out_bar,
+    [[nodiscard]] auto contains_mmio(simrv::xlen::PhysAddr addr, PciBarIndex& out_bar,
                                      PciBarOffset& out_offset) const -> bool;
 
     void set_root_complex(PcieRootComplex* rc, PciBdf bdf);
@@ -54,7 +54,7 @@ class PciDevice {
 
     void init_msi(uint8_t cap_offset = 0x48, bool is_64bit = true);
     [[nodiscard]] auto is_msi_enabled() const noexcept -> bool;
-    [[nodiscard]] auto msi_address() const noexcept -> simrv::xlen::Address;
+    [[nodiscard]] auto msi_address() const noexcept -> simrv::xlen::PhysAddr;
     [[nodiscard]] auto msi_data() const noexcept -> uint16_t;
 
     void init_msix(uint8_t cap_offset, PciBarIndex table_bar, uint32_t table_offset,
@@ -77,7 +77,7 @@ class PciDevice {
                   bool is_prefetchable = false);
 
     std::array<uint8_t, 256> config_space_{{0}};
-    std::array<simrv::xlen::Address, 6> bar_bases_{{0}};
+    std::array<simrv::xlen::PhysAddr, 6> bar_bases_{};
     std::array<PciBarSize, 6> bar_sizes_{{0}};
     std::array<PciBarMask, 6> bar_masks_{{0}};
     std::array<bool, 6> bar_is_64bit_{{false}};

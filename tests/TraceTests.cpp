@@ -72,6 +72,13 @@ concept TrapTracePc =
 static_assert(TrapTracePc<simrv::xlen::VirtAddr>);
 static_assert(!TrapTracePc<simrv::xlen::PhysAddr>);
 static_assert(!TrapTracePc<simrv::xlen::Address>);
+template <typename T>
+concept MmioTraceAddress = requires(simrv::core::Tracer& tracer, T address) {
+    tracer.log_mmio(simrv::xlen::HartId{0}, "device", address, 4, simrv::xlen::Word{0}, true);
+};
+static_assert(MmioTraceAddress<simrv::xlen::PhysAddr>);
+static_assert(!MmioTraceAddress<simrv::xlen::VirtAddr>);
+static_assert(!MmioTraceAddress<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
                                std::declval<const std::string&>())),
                            std::optional<simrv::xlen::VirtAddr>>);
@@ -82,7 +89,7 @@ static_assert(
 static_assert(
     std::same_as<decltype(simrv::debug::FunctionLookupResult::base_addr), simrv::xlen::VirtAddr>);
 
-constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress;
+constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress.raw();
 constexpr std::array<simrv::xlen::Instruction, 10> kProgram = {
     0x010000ef,  // jal  ra, 0x10 (direct call)
     0x0000006f,  // jal  x0, 0 (ordinary jump, not a call)
@@ -155,7 +162,7 @@ void test_retirement_context_and_call_trace() {
         machine.set_ram_for_testing(ram.data(), ram.size());
         machine.primary_hart().machine_ = &machine;
         machine.primary_hart().reset();
-        machine.primary_hart().state().pc = kPc;
+        machine.primary_hart().state().pc = simrv::xlen::VirtAddr{kPc};
         machine.runtime_profile.engine = engines[i];
         const auto path = trace_path(std::to_string(i));
         machine.trace().set_command_line(
@@ -248,12 +255,12 @@ void test_optional_fp_register_write_trace() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
     cpu.state().regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(1)),
                               0x40400000);
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext retiring{};
-    retiring.cpc = kPc;
+    retiring.cpc = simrv::xlen::VirtAddr{kPc};
     retiring.ir = 0x003100d3;
     retiring.rd = static_cast<simrv::xlen::RegId>(1);
     retiring.op_id = simrv::isa::FADD_S;
@@ -291,7 +298,7 @@ void test_retirement_index_offsets() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
 
     const auto path = trace_path("index");
     const auto index_path = g_retirement_indexes.back();
@@ -361,7 +368,7 @@ void test_gzip_retirement_preserves_schema_one_records() {
         auto& cpu = machine.primary_hart();
         cpu.machine_ = &machine;
         cpu.reset();
-        cpu.state().pc = kPc;
+        cpu.state().pc = simrv::xlen::VirtAddr{kPc};
         machine.trace().init_architecture_trace(path.string());
         if (!machine.trace().is_architecture_trace_enabled()) std::abort();
         while (cpu.e_icount < 1) cpu.run_cycle(machine);
@@ -407,7 +414,7 @@ void test_branches_are_not_calls() {
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
     machine.primary_hart().machine_ = &machine;
-    machine.primary_hart().state().pc = kPc;
+    machine.primary_hart().state().pc = simrv::xlen::VirtAddr{kPc};
     machine.primary_hart().state().regs.write(simrv::xlen::RegId::T1, kPc + 16);
     machine.primary_hart().state().regs.write(simrv::xlen::RegId::Ra, kPc + 24);
     const auto path = trace_path("branch");
@@ -437,7 +444,7 @@ void test_trace_level_filters_streams() {
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().machine_ = &machine;
     machine.primary_hart().reset();
-    machine.primary_hart().state().pc = kPc;
+    machine.primary_hart().state().pc = simrv::xlen::VirtAddr{kPc};
     const auto path = trace_path("level");
     machine.trace().init_architecture_trace(path.string());
     if (!machine.trace().needs_retiring_context()) std::abort();
@@ -514,7 +521,7 @@ void test_trace_hart_identity() {
         machine.hart(hart).machine_ = &machine;
         machine.hart(hart).reset();
         machine.hart(hart).state().mhartid = hart;
-        machine.hart(hart).state().pc = kPc;
+        machine.hart(hart).state().pc = simrv::xlen::VirtAddr{kPc};
     }
     const auto path = trace_path("smp");
     machine.trace().init_architecture_trace(path.string());
@@ -558,7 +565,7 @@ void test_arch_trace_event_hart_and_cycle_filters() {
         machine.hart(hart).machine_ = &machine;
         machine.hart(hart).reset();
         machine.hart(hart).state().mhartid = hart;
-        machine.hart(hart).state().pc = kPc;
+        machine.hart(hart).state().pc = simrv::xlen::VirtAddr{kPc};
     }
 
     const auto path = trace_path("event-filters");
@@ -620,8 +627,8 @@ void test_arch_trace_device_filter() {
     machine.primary_hart().reset();
     const auto path = trace_path("device-filter");
     machine.trace().init_architecture_trace(path.string());
-    machine.trace().log_mmio(0, "other-device", 0x1000, 4, 1, true);
-    machine.trace().log_mmio(0, "trace-test-device", 0x2000, 4, 2, true);
+    machine.trace().log_mmio(0, "other-device", simrv::xlen::PhysAddr{0x1000}, 4, 1, true);
+    machine.trace().log_mmio(0, "trace-test-device", simrv::xlen::PhysAddr{0x2000}, 4, 2, true);
     machine.trace().flush_all();
     const auto devices = read_trace(sibling_path(path, "devices.jsonl"));
     if (devices.size() != 2 ||
@@ -715,7 +722,7 @@ void test_retired_memory_events_and_address_classification() {
     load.opcode = simrv::isa::Opcode::Load;
     load.op_id = simrv::isa::LW;
     load.funct3 = simrv::isa::Funct3::Lw;
-    load.mem_addr = kPc + 0x100;
+    load.mem_addr = simrv::xlen::VirtAddr{kPc + 0x100};
     load.mem_rdata = 0x12345678;
     machine.primary_hart().clint_mmio.mcycle = 10;
     machine.trace().log_architecture_retirement(machine.primary_hart(), load);
@@ -725,7 +732,7 @@ void test_retired_memory_events_and_address_classification() {
     store.opcode = simrv::isa::Opcode::Store;
     store.op_id = simrv::isa::SW;
     store.funct3 = simrv::isa::Funct3::Sw;
-    store.mem_addr = device.base_address().raw();
+    store.mem_addr = simrv::xlen::VirtAddr{device.base_address().raw()};
     store.mem_wdata = 0x89abcdef;
     machine.primary_hart().clint_mmio.mcycle = 12;
     machine.trace().log_architecture_retirement(machine.primary_hart(), store);
@@ -758,14 +765,14 @@ void test_precise_memory_fault_event() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc + 0x80;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc + 0x80};
     cpu.state().mtvec = kPc + 0x200;
     auto& context = cpu.pipeline_context;
     context.cpc = simrv::xlen::VirtAddr{kPc + 0x80};
     context.opcode = simrv::isa::Opcode::Store;
     context.op_id = simrv::isa::SW;
     context.funct3 = simrv::isa::Funct3::Sw;
-    context.mem_addr = device.base_address().raw();
+    context.mem_addr = simrv::xlen::VirtAddr{device.base_address().raw()};
     context.mem_wdata = 0xfeedcafe;
     if (!machine.memory().system_bus().router().register_device(&device)) std::abort();
 
@@ -798,8 +805,8 @@ void test_bus_trace_level_four() {
     Machine machine(config);
     const auto path = trace_path("bus-events");
     machine.trace().init_architecture_trace(path.string());
-    machine.memory().system_bus().record_transaction(TileLinkChannel::A, "Get", 3, 0, 0x1000,
-                                                     "read");
+    machine.memory().system_bus().record_transaction(TileLinkChannel::A, "Get", 3, 0,
+                                                     simrv::xlen::PhysAddr{0x1000}, "read");
     machine.trace().flush_all();
 
     const auto lines = read_trace(sibling_path(path, "bus.jsonl"));
@@ -841,13 +848,13 @@ void test_mmio_arch_trace_uses_requesting_hart_without_dlog() {
     request.opcode = simrv::memory::TlOpcodeA::Get;
     request.size = 2;
     request.hart = simrv::xlen::HartId{1};
-    request.address = 0x50000000;
+    request.address = simrv::xlen::PhysAddr{0x50000000};
     simrv::memory::TlChannelD response{};
     if (!router.route_request(request, response) || response.failed()) std::abort();
     device.set_fail(true);
     response = {};
     if (!router.route_request(request, response) || !response.failed()) std::abort();
-    request.address = 0x60000000;
+    request.address = simrv::xlen::PhysAddr{0x60000000};
     response = {};
     if (router.route_request(request, response) || !response.failed()) std::abort();
     machine.trace().flush_all();
@@ -897,7 +904,7 @@ void test_interrupt_entry_and_return_events() {
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
     cpu.reset();
-    cpu.state().pc = kPc + 0x40;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc + 0x40};
     cpu.state().mtvec = kPc + 0x100;
 
     const auto path = trace_path("interrupt");
@@ -910,7 +917,7 @@ void test_interrupt_entry_and_return_events() {
     simrv::pipeline::PipelineContext return_context{};
     return_context.funct12 = 0x302;
     return_context.cpc = cpu.state().pc;
-    cpu.state().pc = cpu.state().mepc;
+    cpu.state().pc = simrv::xlen::VirtAddr{cpu.state().mepc};
     machine.trace().log_architecture_retirement(cpu, return_context);
     machine.trace().flush_all();
 
@@ -965,11 +972,11 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
     cpu.state().mtvec = kPc + 0x100;
     cpu.state().mie = std::to_underlying(simrv::core::MipBit::Msip);
     cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
-    cpu.state().regs.write(simrv::xlen::RegId::T0, simrv::mmio::kAclintMswiBaseAddress);
+    cpu.state().regs.write(simrv::xlen::RegId::T0, simrv::mmio::kAclintMswiBaseAddress.raw());
     cpu.state().regs.write(simrv::xlen::RegId::T1, 1);
     cpu.state().regs.write(simrv::xlen::RegId::T2, machine.isa_test_tohost());
     cpu.state().regs.write(simrv::xlen::RegId::S0, 1);

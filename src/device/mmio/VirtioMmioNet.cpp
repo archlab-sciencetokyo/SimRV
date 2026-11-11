@@ -13,7 +13,7 @@
 
 namespace simrv::device {
 
-VirtioMmioNet::VirtioMmioNet(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioNet::VirtioMmioNet(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                              core::Machine* machine, virtio::NetBackend::Mode mode)
     : VirtioMmioDevice("virtio-net-mmio", base_address, 0x1000, virtio::kDevIdNet, irq_num,
                        machine),

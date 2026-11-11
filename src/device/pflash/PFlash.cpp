@@ -13,7 +13,7 @@
 
 namespace simrv::device {
 
-PFlash::PFlash(core::Machine& machine, simrv::xlen::Address base, simrv::xlen::Address size,
+PFlash::PFlash(core::Machine& machine, simrv::xlen::PhysAddr base, simrv::xlen::Address size,
                uint32_t sector_size, bool read_only, std::string name)
     : memory::MmioDevice(&machine),
       machine_(machine),

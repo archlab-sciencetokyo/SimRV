@@ -4,9 +4,11 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::tui {
 enum class BackendCommand : uint32_t {
@@ -27,7 +29,7 @@ struct BackendRequest {
     BackendCommand command = BackendCommand::Status;
     uint64_t id = 0;
     uint64_t generation = 0;
-    uint64_t address = 0;
+    std::variant<simrv::xlen::PhysAddr, simrv::xlen::VirtAddr> address = simrv::xlen::PhysAddr{};
     uint32_t hart = 0;
     uint32_t count = 1;
 };

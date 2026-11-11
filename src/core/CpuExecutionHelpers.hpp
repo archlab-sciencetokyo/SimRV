@@ -15,11 +15,11 @@ using isa::Funct3;
 using isa::Funct5Amo;
 using isa::Opcode;
 
-[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto is_aligned_for_funct3(simrv::xlen::Address addr,
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto is_aligned_for_funct3(simrv::xlen::VirtAddr addr,
                                                                        isa::Funct3 funct3) noexcept
     -> bool {
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
-    return (addr & (size_bytes - 1u)) == 0;
+    return (addr.raw() & (size_bytes - 1u)) == 0;
 }
 
 [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto access_size_for_funct3(isa::Funct3 funct3) noexcept

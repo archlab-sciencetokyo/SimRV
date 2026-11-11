@@ -3,7 +3,7 @@
 
 namespace simrv::device {
 
-VirtioMmioFs::VirtioMmioFs(simrv::xlen::Address base, uint32_t irq, core::Machine* machine,
+VirtioMmioFs::VirtioMmioFs(simrv::xlen::PhysAddr base, uint32_t irq, core::Machine* machine,
                            const std::string& shared_directory, std::string tag)
     : VirtioMmioDevice("virtio-fs-mmio", base, 0x1000, virtio::kDevIdFs, irq, machine),
       backend_(std::move(tag)) {
