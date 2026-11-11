@@ -205,5 +205,27 @@ symbols. `CPU::run_fast_baremetal_batch` accounted for 85.1% of instrumented ins
 the annotated profile attributed 11.1% to the direct `FastOp::Add` case and 12.8% to the
 non-branch ALU loop. These are instrumentation counts, not timing shares. They identify the
 functional execution kernel as the place to investigate, but do not establish which source-level
-change would improve native throughput; no optimization was retained without a controlled timing
-comparison. The profile output is `/tmp/simrv-branch.callgrind` and is not part of the repository.
+change would improve native throughput. A focused dispatcher experiment is recorded below. The
+profile output is `/tmp/simrv-branch.callgrind` and is not part of the repository.
+
+## Fast-op dispatcher simplification
+
+Callgrind highlighted the bare-metal execution kernel, so I tested removing eight duplicated
+`FastOp` checks (`Add`, `Addi`, `Slli`, `Srli`, `Addiw`, `Addw`, `Andi`, and `Mulw`) and routing
+them through the existing operation `switch`. Both binaries used the same RV64 release settings,
+ISA, guests and 100-million-instruction stop. Hyperfine pinned runs to x86 CPU 0, used three
+warmups and interleaved 30 compute or 20 branch/memory samples. The host/compiler settings are the
+same Intel Core Ultra X7 358H, x86-64 WSL2 and GCC 16.2.1 settings listed above.
+
+| Workload | Before median (CV) | After median (CV) | Change |
+| --- | ---: | ---: | ---: |
+| Compute | 109.036 ms (2.08%) | 99.497 ms (1.58%) | 9.2% faster |
+| Branch | 165.613 ms (0.75%) | 164.495 ms (1.37%) | 0.7% faster |
+| Memory | 116.532 ms (2.01%) | 116.179 ms (1.98%) | 0.3% faster |
+
+All three comparisons retired the same 100 million guest instructions in each sample. The before
+and after RV64 executables were 45,564,848 and 45,557,624 bytes. Compute improved beyond the 5%
+threshold with low variability; branch and memory remained within that threshold. The result
+supports keeping the simpler dispatch on this x86 host. It is not an ARM measurement or a claim
+that the change helps every host. Raw hyperfine records are in `/tmp/fastop-paired-*.json` and are
+not checked in.

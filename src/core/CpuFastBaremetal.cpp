@@ -366,63 +366,6 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                             }
                         }
 
-                        if (cop.fast_op == FastOp::Add) {
-                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
-                                                 gpr[std::to_underlying(cop.rs2)]);
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Addi) {
-                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] + cop.imm);
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Slli) {
-                            constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
-                            write_rd(cop.rd,
-                                     gpr[std::to_underlying(cop.rs1)] << (cop.imm & shift_mask));
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Srli) {
-                            constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
-                            write_rd(cop.rd,
-                                     gpr[std::to_underlying(cop.rs1)] >> (cop.imm & shift_mask));
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Addiw) {
-#if SIMRV_XLEN == 64
-                            gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
-                                static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] + cop.imm));
-#else
-                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] + cop.imm);
-#endif
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Addw) {
-#if SIMRV_XLEN == 64
-                            gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
-                                static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] +
-                                                     gpr[std::to_underlying(cop.rs2)]));
-#else
-                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
-                                                 gpr[std::to_underlying(cop.rs2)]);
-#endif
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Andi) {
-                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] & cop.imm);
-                            return;
-                        }
-                        if (cop.fast_op == FastOp::Mulw) {
-#if SIMRV_XLEN == 64
-                            gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
-                                static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] *
-                                                     gpr[std::to_underlying(cop.rs2)]));
-#else
-                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] *
-                                                 gpr[std::to_underlying(cop.rs2)]);
-#endif
-                            return;
-                        }
-
                         switch (cop.fast_op) {
                             case FastOp::Add: {
                                 write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
