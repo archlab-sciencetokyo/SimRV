@@ -1188,19 +1188,19 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     }
 
     constexpr simrv::xlen::Address kLineSize = simrv::cache::DCache::kLineBytes;
-    const simrv::xlen::Address vaddr = addr.raw() & ~(kLineSize - 1u);
+    const simrv::xlen::VirtAddr vaddr = addr & ~(kLineSize - 1u);
     const simrv::xlen::Word active_satp = cpu.active_satp();
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
          simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
 
-    simrv::xlen::Address paddr = vaddr;
+    simrv::xlen::PhysAddr paddr{vaddr.raw()};
     if (translation_enabled) {
         if constexpr (simrv::xlen::kIsXLen64) {
-            if (!simrv::Mmu::is_canonical(simrv::xlen::VirtAddr{vaddr}, active_satp, active_xlen)) {
+            if (!simrv::Mmu::is_canonical(vaddr, active_satp, active_xlen)) {
                 cpu.active_context().pending_exception = ExceptionCode::StorePageFault;
-                cpu.active_context().pending_tval = vaddr;
+                cpu.active_context().pending_tval = vaddr.raw();
                 return;
             }
         }
@@ -1209,28 +1209,23 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         // accessible; failures are still reported as store exceptions below.
         const PteAccess access_type =
             op == isa::OperationId::CBO_ZERO ? PteAccess::Write : PteAccess::Read;
-        auto* entry =
-            (access_type == PteAccess::Write)
-                ? cpu.tlb.lookup_data_w(simrv::xlen::VirtAddr{vaddr}, current_asid, eff_priv)
-                : cpu.tlb.lookup_data_r(simrv::xlen::VirtAddr{vaddr}, current_asid, eff_priv);
+        auto* entry = (access_type == PteAccess::Write)
+                          ? cpu.tlb.lookup_data_w(vaddr, current_asid, eff_priv)
+                          : cpu.tlb.lookup_data_r(vaddr, current_asid, eff_priv);
         if (entry != nullptr) {
-            paddr = (entry->p_addr + (vaddr & simrv::memory::kPageMask)).raw();
+            paddr = entry->p_addr + (vaddr.raw() & simrv::memory::kPageMask);
         } else {
-            auto translate_res = cpu.translate_stage_address(
-                *cpu.machine_, simrv::xlen::VirtAddr{vaddr}, access_type, eff_priv, active_xlen,
-                TlPort::Data, cpu.ca_state.data_walk);
+            auto translate_res =
+                cpu.translate_stage_address(*cpu.machine_, vaddr, access_type, eff_priv,
+                                            active_xlen, TlPort::Data, cpu.ca_state.data_walk);
             if (!translate_res.has_value()) return;
             (void)(*translate_res)
                 .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
-                    paddr = res.physical_address.raw();
+                    paddr = res.physical_address;
                     if (access_type == PteAccess::Write) {
-                        cpu.tlb.insert_data_w(simrv::xlen::VirtAddr{vaddr},
-                                              simrv::xlen::PhysAddr{paddr}, current_asid, eff_priv,
-                                              res.global());
+                        cpu.tlb.insert_data_w(vaddr, paddr, current_asid, eff_priv, res.global());
                     } else {
-                        cpu.tlb.insert_data_r(simrv::xlen::VirtAddr{vaddr},
-                                              simrv::xlen::PhysAddr{paddr}, current_asid, eff_priv,
-                                              res.global());
+                        cpu.tlb.insert_data_r(vaddr, paddr, current_asid, eff_priv, res.global());
                     }
                     return {};
                 })
@@ -1246,7 +1241,7 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                             exception = ExceptionCode::FaultStore;
                     }
                     cpu.active_context().pending_exception = exception;
-                    cpu.active_context().pending_tval = vaddr;
+                    cpu.active_context().pending_tval = vaddr.raw();
                     return {};
                 });
             if (cpu.active_context().pending_exception.has_value()) return;
@@ -1256,53 +1251,46 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     // PMP verification
     const core::PmpAccessType pmp_access =
         op == isa::OperationId::CBO_ZERO ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-    if (!core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{paddr}, kLineSize, pmp_access,
-                                 eff_priv)) {
+    if (!core::pmp::check_access(cpu.state(), paddr, kLineSize, pmp_access, eff_priv)) {
         cpu.active_context().pending_exception = ExceptionCode::FaultStore;
-        cpu.active_context().pending_tval = vaddr;
+        cpu.active_context().pending_tval = vaddr.raw();
         return;
     }
 
     const auto& geometry = mem.memory_geometry();
-    if (!geometry.contains(simrv::xlen::PhysAddr{paddr}, kLineSize)) {
+    if (!geometry.contains(paddr, kLineSize)) {
         cpu.active_context().pending_exception = ExceptionCode::FaultStore;
-        cpu.active_context().pending_tval = vaddr;
+        cpu.active_context().pending_tval = vaddr.raw();
         return;
     }
 
     std::array<simrv::xlen::Byte, kLineSize> dirty_line{};
 
     if (op == isa::OperationId::CBO_ZERO) {
-        if (geometry.contains(simrv::xlen::PhysAddr{paddr}, kLineSize)) {
-            std::memset(cpu.machine_->ram_view().unchecked_ptr(simrv::xlen::PhysAddr{paddr}), 0,
-                        kLineSize);
+        if (geometry.contains(paddr, kLineSize)) {
+            std::memset(cpu.machine_->ram_view().unchecked_ptr(paddr), 0, kLineSize);
         }
         // The broadcast removes the directory entry. Drop our copy as well so it cannot
         // remain modified and untracked when another hart acquires the zeroed block.
-        (void)cpu.dcache.probe_line(simrv::xlen::PhysAddr{paddr},
-                                    simrv::memory::MesiState::Invalid);
+        (void)cpu.dcache.probe_line(paddr, simrv::memory::MesiState::Invalid);
         cpu.state().lr_reservation_active = false;
-        mem.system_bus().coherence_hub().invalidate_line_broadcast(simrv::xlen::PhysAddr{paddr},
-                                                                   cpu.hart_id());
+        mem.system_bus().coherence_hub().invalidate_line_broadcast(paddr, cpu.hart_id());
     } else if (op == isa::OperationId::CBO_CLEAN) {
-        if (cpu.dcache.probe_line(simrv::xlen::PhysAddr{paddr}, simrv::memory::MesiState::Exclusive,
-                                  &dirty_line)) {
-            if (geometry.contains(simrv::xlen::PhysAddr{paddr}, kLineSize)) {
-                std::memcpy(cpu.machine_->ram_view().unchecked_ptr(simrv::xlen::PhysAddr{paddr}),
-                            dirty_line.data(), kLineSize);
+        if (cpu.dcache.probe_line(paddr, simrv::memory::MesiState::Exclusive, &dirty_line)) {
+            if (geometry.contains(paddr, kLineSize)) {
+                std::memcpy(cpu.machine_->ram_view().unchecked_ptr(paddr), dirty_line.data(),
+                            kLineSize);
             }
         }
     } else if (op == isa::OperationId::CBO_FLUSH) {
-        if (cpu.dcache.probe_line(simrv::xlen::PhysAddr{paddr}, simrv::memory::MesiState::Invalid,
-                                  &dirty_line)) {
-            if (geometry.contains(simrv::xlen::PhysAddr{paddr}, kLineSize)) {
-                std::memcpy(cpu.machine_->ram_view().unchecked_ptr(simrv::xlen::PhysAddr{paddr}),
-                            dirty_line.data(), kLineSize);
+        if (cpu.dcache.probe_line(paddr, simrv::memory::MesiState::Invalid, &dirty_line)) {
+            if (geometry.contains(paddr, kLineSize)) {
+                std::memcpy(cpu.machine_->ram_view().unchecked_ptr(paddr), dirty_line.data(),
+                            kLineSize);
             }
         }
     } else if (op == isa::OperationId::CBO_INVAL) {
-        (void)cpu.dcache.probe_line(simrv::xlen::PhysAddr{paddr}, simrv::memory::MesiState::Invalid,
-                                    nullptr);
+        (void)cpu.dcache.probe_line(paddr, simrv::memory::MesiState::Invalid, nullptr);
     }
 }
 
