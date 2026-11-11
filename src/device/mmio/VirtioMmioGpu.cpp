@@ -31,10 +31,10 @@ void VirtioMmioGpu::on_queue_notify(uint32_t q_idx) {
     auto& q = queues_[q_idx];
 
     auto dma_read = [this](uint64_t addr, void* buf, size_t size) {
-        return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), size);
+        return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(buf), size);
     };
     auto dma_write = [this](uint64_t addr, const void* buf, size_t size) {
-        return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), size);
+        return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(buf), size);
     };
     auto notify_complete = [this]() { trigger_irq(); };
 

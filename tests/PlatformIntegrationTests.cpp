@@ -54,6 +54,7 @@
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/device/pflash/PFlash.hpp"
 #include "simrv/device/virtio/HostAudioSink.hpp"
+#include "simrv/device/virtio/IVirtioTransport.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
 #include "simrv/memory/Axi4.hpp"
@@ -67,6 +68,15 @@
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace {
+
+template <typename Address>
+concept VirtioTransportAcceptsDmaAddress =
+    requires(simrv::device::virtio::IVirtioTransport& t, Address address, std::byte* data) {
+        t.dma_read_bytes(address, data, 1);
+    };
+
+static_assert(VirtioTransportAcceptsDmaAddress<simrv::xlen::PhysAddr>);
+static_assert(!VirtioTransportAcceptsDmaAddress<uint64_t>);
 
 void check(bool condition, const char* message = "check assertion failed") {
     if (!condition) {
@@ -322,13 +332,13 @@ void test_mmio_device_and_dma() {
     std::byte value{0x5a};
     std::byte result{};
     for (auto* transport : {&mmio_transport, &pci_transport}) {
-        check(transport->dma_write_bytes(low, &value, 1));
-        check(transport->dma_read_bytes(low, &result, 1));
+        check(transport->dma_write_wire_address(low, &value, 1));
+        check(transport->dma_read_wire_address(low, &result, 1));
         check(result == value);
         value = std::byte{0xa5};
-        check(!transport->dma_write_bytes(high, &value, 1));
-        check(!transport->dma_read_bytes(high, &result, 1));
-        check(transport->dma_read_bytes(low, &result, 1));
+        check(!transport->dma_write_wire_address(high, &value, 1));
+        check(!transport->dma_read_wire_address(high, &result, 1));
+        check(transport->dma_read_wire_address(low, &result, 1));
         check(result == std::byte{0x5a});
         value = std::byte{0x5a};
     }

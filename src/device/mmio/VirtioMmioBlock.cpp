@@ -40,10 +40,10 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                                   machine_->dma_engine().is_enabled();
 
     auto dma_read = [this](uint64_t addr, void* buf, size_t size) {
-        return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), size);
+        return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(buf), size);
     };
     auto dma_write = [this](uint64_t addr, const void* buf, size_t size) {
-        return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), size);
+        return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(buf), size);
     };
     auto schedule_deferred = [this, q_idx](size_t transfer_bytes, uint16_t head_desc_idx,
                                            uint32_t total_written) {
@@ -55,13 +55,15 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                 auto& q = queues_[q_idx];
                 if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                if (!dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2))
+                if (!dma_read_wire_address(q.device_addr + 2,
+                                           reinterpret_cast<std::byte*>(&used_idx), 2))
                     return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
-                dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
-                                reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                dma_write_wire_address(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                       reinterpret_cast<std::byte*>(&elem), sizeof(elem));
                 used_idx++;
-                dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                dma_write_wire_address(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                       2);
                 trigger_irq();
             },
             "virtio-mmio-block");

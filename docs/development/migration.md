@@ -83,6 +83,12 @@ address and `TLB::insert` receives a virtual tag and physical result. Device con
 physical alternative selected by their command. The C plugin structures and callbacks remain
 unchanged, with explicit conversions in the C++ adapter.
 
+VirtIO descriptor fields and queue-address registers retain their specified 64-bit wire
+representation. `IVirtioTransport::dma_read_bytes` and `dma_write_bytes` take `PhysAddr`; transport
+code that consumes a wire address must use the named `dma_*_wire_address` adapters, which reject
+values the configured `Word` cannot represent before conversion. Do not change the packed descriptor
+layout to use an internal C++ address type.
+
 Breakpoint and watchpoint APIs use virtual addresses. MMIO routing, DMA, cache tags, and reservation
 tracking use physical addresses. An address read from an ELF or device-tree file is not assigned a
 domain by its integer type: use the format's semantics, then construct the appropriate type at the

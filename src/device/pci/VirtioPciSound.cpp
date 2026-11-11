@@ -19,10 +19,10 @@ void VirtioPciSound::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     auto& q = queues_[queue_index];
 
     auto dma_read_fn = [this](uint64_t addr, void* dst, std::size_t len) -> bool {
-        return dma_read(addr, dst, len);
+        return dma_read_wire_address(addr, dst, len);
     };
     auto dma_write_fn = [this](uint64_t addr, const void* src, std::size_t len) -> bool {
-        return dma_write(addr, src, len);
+        return dma_write_wire_address(addr, src, len);
     };
     auto trigger_irq_fn = [this]() { trigger_irq(); };
 

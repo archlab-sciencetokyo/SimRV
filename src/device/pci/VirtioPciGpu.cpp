@@ -23,10 +23,10 @@ void VirtioPciGpu::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     auto& q = queues_[queue_index];
 
     auto dma_read_cb = [this](uint64_t addr, void* buf, size_t size) {
-        return dma_read(addr, buf, size);
+        return dma_read_wire_address(addr, buf, size);
     };
     auto dma_write_cb = [this](uint64_t addr, const void* buf, size_t size) {
-        return dma_write(addr, buf, size);
+        return dma_write_wire_address(addr, buf, size);
     };
     auto notify_complete = [this]() {
         isr_status_ |= 0x1;

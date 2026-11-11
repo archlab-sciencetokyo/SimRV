@@ -29,10 +29,10 @@ void VirtioMmioFs::on_queue_notify(uint32_t queue_index) {
     backend_.process_queue(
         queues_[queue_index],
         [this](uint64_t address, void* data, size_t size) {
-            return dma_read_bytes(address, reinterpret_cast<std::byte*>(data), size);
+            return dma_read_wire_address(address, reinterpret_cast<std::byte*>(data), size);
         },
         [this](uint64_t address, const void* data, size_t size) {
-            return dma_write_bytes(address, reinterpret_cast<const std::byte*>(data), size);
+            return dma_write_wire_address(address, reinterpret_cast<const std::byte*>(data), size);
         },
         [this]() { trigger_irq(); });
 }

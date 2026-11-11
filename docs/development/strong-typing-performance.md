@@ -199,6 +199,11 @@ with an Alpine root filesystem and 512 MiB DRAM. A separate diskless boot worklo
 with a 25 million instruction cap: the prior intermediate binaries measured 0.733139 s before and
 0.718217 s after (1.67% and 1.66% CV). This is capped boot progress, not time to a completed OS
 boot, and no directly comparable Spike result is available. ARM hardware and hardware performance
-counters were unavailable; `perf` could not load its `libslang.so.2` dependency. Callgrind was
-available for instruction profiling, but the captured run lacked useful simulator symbols, so it
-does not identify an actionable hot function.
+counters were unavailable; `perf` could not load its `libslang.so.2` dependency. A Callgrind run of
+the branch guest capped at 1 million retired instructions (one run, no warmup) resolved simulator
+symbols. `CPU::run_fast_baremetal_batch` accounted for 85.1% of instrumented instruction events;
+the annotated profile attributed 11.1% to the direct `FastOp::Add` case and 12.8% to the
+non-branch ALU loop. These are instrumentation counts, not timing shares. They identify the
+functional execution kernel as the place to investigate, but do not establish which source-level
+change would improve native throughput; no optimization was retained without a controlled timing
+comparison. The profile output is `/tmp/simrv-branch.callgrind` and is not part of the repository.

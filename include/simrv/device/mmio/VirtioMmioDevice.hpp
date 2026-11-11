@@ -76,8 +76,9 @@ class VirtioMmioDevice : public memory::MmioDevice, public virtio::IVirtioTransp
         (void)size;
     }
 
-    auto dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool override;
-    auto dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
+    auto dma_read_bytes(simrv::xlen::PhysAddr phys_addr, std::byte* dst, std::size_t len)
+        -> bool override;
+    auto dma_write_bytes(simrv::xlen::PhysAddr phys_addr, const std::byte* src, std::size_t len)
         -> bool override;
 
     void add_queue(uint16_t max_size);

@@ -35,10 +35,10 @@ void VirtioMmioConsole::on_queue_notify(uint32_t q_idx) {
     virtio::process_console_queue(
         q_idx, queues_[q_idx], backend_,
         [this](uint64_t addr, void* buf, size_t len) {
-            return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), len);
+            return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(buf), len);
         },
         [this](uint64_t addr, const void* buf, size_t len) {
-            return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), len);
+            return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(buf), len);
         },
         [this]() { trigger_irq(); });
 }

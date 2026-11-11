@@ -26,9 +26,11 @@ void VirtioPciFs::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     backend_.process_queue(
         queues_[queue_index],
-        [this](uint64_t address, void* data, size_t size) { return dma_read(address, data, size); },
+        [this](uint64_t address, void* data, size_t size) {
+            return dma_read_wire_address(address, data, size);
+        },
         [this](uint64_t address, const void* data, size_t size) {
-            return dma_write(address, data, size);
+            return dma_write_wire_address(address, data, size);
         },
         [this]() {
             isr_status_ |= 1;

@@ -27,10 +27,10 @@ void VirtioMmioInput::process_eventq() {
     virtio::process_input_event_queue(
         queues_[0], backend_,
         [this](uint64_t address, void* data, std::size_t size) {
-            return dma_read_bytes(address, reinterpret_cast<std::byte*>(data), size);
+            return dma_read_wire_address(address, reinterpret_cast<std::byte*>(data), size);
         },
         [this](uint64_t address, const void* data, std::size_t size) {
-            return dma_write_bytes(address, reinterpret_cast<const std::byte*>(data), size);
+            return dma_write_wire_address(address, reinterpret_cast<const std::byte*>(data), size);
         },
         [this]() { trigger_irq(); });
 }

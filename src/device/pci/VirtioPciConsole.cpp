@@ -30,10 +30,10 @@ void VirtioPciConsole::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     virtio::process_console_queue(
         queue_index, queues_[queue_index], backend_,
         [this](uint64_t addr, void* buf, size_t len) {
-            return dma_read(addr, buf, len);
+            return dma_read_wire_address(addr, buf, len);
         },
         [this](uint64_t addr, const void* buf, size_t len) {
-            return dma_write(addr, buf, len);
+            return dma_write_wire_address(addr, buf, len);
         },
         [this]() {
             isr_status_ |= 0x1;

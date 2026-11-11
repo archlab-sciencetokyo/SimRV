@@ -84,18 +84,14 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffse
     next_cap_offset_ += cap_len;
 }
 
-auto VirtioPciDevice::dma_read(uint64_t paddr, void* dst, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine() || !std::in_range<simrv::xlen::Word>(paddr))
-        return false;
-    return root_complex_->machine()->memory().dma_read(
-        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(paddr)}, dst, len);
+auto VirtioPciDevice::dma_read(simrv::xlen::PhysAddr paddr, void* dst, size_t len) -> bool {
+    if (!root_complex_ || !root_complex_->machine()) return false;
+    return root_complex_->machine()->memory().dma_read(paddr, dst, len);
 }
 
-auto VirtioPciDevice::dma_write(uint64_t paddr, const void* src, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine() || !std::in_range<simrv::xlen::Word>(paddr))
-        return false;
-    return root_complex_->machine()->memory().dma_write(
-        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(paddr)}, src, len);
+auto VirtioPciDevice::dma_write(simrv::xlen::PhysAddr paddr, const void* src, size_t len) -> bool {
+    if (!root_complex_ || !root_complex_->machine()) return false;
+    return root_complex_->machine()->memory().dma_write(paddr, src, len);
 }
 
 void VirtioPciDevice::trigger_irq() {
@@ -103,12 +99,13 @@ void VirtioPciDevice::trigger_irq() {
     PciDevice::trigger_irq();
 }
 
-auto VirtioPciDevice::dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool {
+auto VirtioPciDevice::dma_read_bytes(simrv::xlen::PhysAddr phys_addr, std::byte* dst,
+                                     std::size_t len) -> bool {
     return dma_read(phys_addr, dst, len);
 }
 
-auto VirtioPciDevice::dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
-    -> bool {
+auto VirtioPciDevice::dma_write_bytes(simrv::xlen::PhysAddr phys_addr, const std::byte* src,
+                                      std::size_t len) -> bool {
     return dma_write(phys_addr, src, len);
 }
 

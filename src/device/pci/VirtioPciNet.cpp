@@ -116,10 +116,10 @@ void VirtioPciNet::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
                                   machine->dma_engine().is_enabled();
 
     auto dma_read_cb = [this](uint64_t addr, void* buf, size_t size) {
-        return dma_read(addr, buf, size);
+        return dma_read_wire_address(addr, buf, size);
     };
     auto dma_write_cb = [this](uint64_t addr, const void* buf, size_t size) {
-        return dma_write(addr, buf, size);
+        return dma_write_wire_address(addr, buf, size);
     };
     auto schedule_deferred = [this, machine, queue_index](size_t transfer_bytes,
                                                           uint16_t head_desc_idx, uint32_t len) {
@@ -131,12 +131,12 @@ void VirtioPciNet::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
                 auto& q = queues_[queue_index];
                 if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                if (!dma_read(q.device_addr + 2, &used_idx, 2)) return;
+                if (!dma_read_wire_address(q.device_addr + 2, &used_idx, 2)) return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = len};
-                dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
-                          sizeof(elem));
+                dma_write_wire_address(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                                       sizeof(elem));
                 used_idx++;
-                dma_write(q.device_addr + 2, &used_idx, 2);
+                dma_write_wire_address(q.device_addr + 2, &used_idx, 2);
                 isr_status_ |= 0x1;
                 trigger_irq();
             },
