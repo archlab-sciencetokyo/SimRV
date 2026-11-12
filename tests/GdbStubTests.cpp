@@ -554,22 +554,28 @@ static void test_logical_breakpoints_and_watchpoints() {
     const auto base = h.machine.memory_geometry().dram_base;
     auto ram = h.machine.ram_view();
     *ram.unchecked_ptr(base) = static_cast<simrv::xlen::Byte>(0x13);
-
-    EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base.raw())), std::string("OK"));
-    EXPECT_TRUE(
-        h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base.raw()}));
-    EXPECT_EQ(static_cast<uint8_t>(*ram.unchecked_ptr(base)), uint8_t{0x13});
-    EXPECT_EQ(client.transact(std::format("Z1,{:x},4", (base + 4).raw())), std::string("OK"));
-    EXPECT_TRUE(
-        h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{(base + 4).raw()}));
-    EXPECT_EQ(client.transact(std::format("Z2,{:x},4", (base + 8).raw())), std::string("OK"));
-    EXPECT_EQ(client.transact(std::format("Z3,{:x},4", (base + 16).raw())), std::string("OK"));
-    EXPECT_EQ(client.transact(std::format("Z4,{:x},4", (base + 24).raw())), std::string("OK"));
-    EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 3U);
-
     const auto monitor = [&](std::string_view command) {
         return decode_monitor_response(client.transact(monitor_packet(command)));
     };
+
+    EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base.raw())), std::string("OK"));
+    EXPECT_TRUE(monitor("info breakpoints").find(std::format("0x{:x}", base.raw())) !=
+                std::string::npos);
+    EXPECT_EQ(static_cast<uint8_t>(*ram.unchecked_ptr(base)), uint8_t{0x13});
+    EXPECT_EQ(client.transact(std::format("Z1,{:x},4", (base + 4).raw())), std::string("OK"));
+    EXPECT_TRUE(monitor("info breakpoints").find(std::format("0x{:x}", (base + 4).raw())) !=
+                std::string::npos);
+    EXPECT_EQ(client.transact(std::format("Z2,{:x},4", (base + 8).raw())), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("Z3,{:x},4", (base + 16).raw())), std::string("OK"));
+    EXPECT_EQ(client.transact(std::format("Z4,{:x},4", (base + 24).raw())), std::string("OK"));
+    const auto watchpoints = monitor("info watchpoints");
+    EXPECT_TRUE(watchpoints.find(std::format("0x{:x}", (base + 8).raw())) !=
+                std::string::npos);
+    EXPECT_TRUE(watchpoints.find(std::format("0x{:x}", (base + 16).raw())) !=
+                std::string::npos);
+    EXPECT_TRUE(watchpoints.find(std::format("0x{:x}", (base + 24).raw())) !=
+                std::string::npos);
+
     EXPECT_TRUE(monitor("help").find("info watchpoints") != std::string::npos);
     EXPECT_TRUE(monitor("info breakpoints").find("0x80000000") != std::string::npos);
     EXPECT_TRUE(monitor("info watchpoints").find("watchpoint") != std::string::npos);
@@ -577,13 +583,19 @@ static void test_logical_breakpoints_and_watchpoints() {
                 std::string::npos);
 
     EXPECT_EQ(client.transact(std::format("z0,{:x},4", base.raw())), std::string("OK"));
-    EXPECT_TRUE(
-        !h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base.raw()}));
+    EXPECT_TRUE(monitor("info breakpoints").find(std::format("0x{:x}", base.raw())) ==
+                std::string::npos);
     EXPECT_EQ(client.transact(std::format("z1,{:x},4", (base + 4).raw())), std::string("OK"));
-    EXPECT_TRUE(
-        !h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{(base + 4).raw()}));
+    EXPECT_TRUE(monitor("info breakpoints").find(std::format("0x{:x}", (base + 4).raw())) ==
+                std::string::npos);
     EXPECT_EQ(client.transact(std::format("z2,{:x},4", (base + 8).raw())), std::string("OK"));
-    EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 2U);
+    const auto remaining_watchpoints = monitor("info watchpoints");
+    EXPECT_TRUE(remaining_watchpoints.find(std::format("0x{:x}", (base + 8).raw())) ==
+                std::string::npos);
+    EXPECT_TRUE(remaining_watchpoints.find(std::format("0x{:x}", (base + 16).raw())) !=
+                std::string::npos);
+    EXPECT_TRUE(remaining_watchpoints.find(std::format("0x{:x}", (base + 24).raw())) !=
+                std::string::npos);
 }
 
 static void test_detach_and_reconnect_cleanup() {
