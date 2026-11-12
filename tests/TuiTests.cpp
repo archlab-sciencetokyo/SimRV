@@ -3958,6 +3958,8 @@ void test_sixel_fluid_framebuffer_updates() {
     const auto small_sig = TuiTestAccess::sixel_framebuffer_signature(tui);
     std::string before_pixel;
     TuiTestAccess::render_draw_sixel(tui, 2, 40, 20, before_pixel);
+    expect(before_pixel.find("\033P0;1q") != std::string::npos,
+           "multicolor Sixel planes use transparent zero bits");
     fb_bytes[2] = simrv::xlen::Byte{0xff};
     tui.render(true);
     expect(TuiTestAccess::sixel_framebuffer_signature(tui) != small_sig,

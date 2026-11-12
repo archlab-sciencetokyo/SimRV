@@ -1103,8 +1103,10 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     // glyphs seven times taller than their native framebuffer shape.
     // Use cursor-positioned sixel so the graphic can live in its assigned panel.
     // The dimensions above ensure it fits before the footer, avoiding scroll.
-    update_cmds += std::format("\033[5;{}r\033[?80l\033[{};{}H\033Pq\"1;1;{};{}", 4 + display_rows,
-                               5 + y_offset, display_x, width, height);
+    // Each palette color is emitted as a separate Sixel plane. Transparent zero
+    // bits prevent later planes from clearing pixels painted by earlier colors.
+    update_cmds += std::format("\033[5;{}r\033[?80l\033[{};{}H\033P0;1q\"1;1;{};{}",
+                               4 + display_rows, 5 + y_offset, display_x, width, height);
     update_cmds += kSixelPaletteHeader;
 
     const auto* fb_bytes = reinterpret_cast<const uint8_t*>(fb.data());
@@ -3932,7 +3934,8 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
                 machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
-                                   std::format("Removed PC breakpoint at 0x{:08x}", pc.raw()), false);
+                                   std::format("Removed PC breakpoint at 0x{:08x}", pc.raw()),
+                                   false);
             } else {
                 machine_.breakpoint_manager().add_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT CREATED",
