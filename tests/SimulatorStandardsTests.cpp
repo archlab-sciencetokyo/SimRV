@@ -15,6 +15,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/SbiTypes.hpp"
 #include "simrv/core/SimulationStats.hpp"
 #include "simrv/debug/SymbolTable.hpp"
@@ -365,9 +366,13 @@ void test_host_cache_topology() {
     TEST_ASSERT(topo.line_bytes >= 32);
     TEST_ASSERT(topo.l1d_bytes >= 16 * 1024);
     TEST_ASSERT(topo.l2_bytes >= 256 * 1024);
-    TEST_ASSERT(topo.optimal_fast_batch_quantum(true) == 2048);
-    TEST_ASSERT(topo.optimal_fast_batch_quantum(false) >= 65536);
-    TEST_ASSERT(topo.optimal_block_cache_sets() >= 1024);
+
+    const simrv::core::RuntimeProfile cli{};
+    const simrv::core::RuntimeProfile tui{
+        .interaction = simrv::core::InteractionMode::Tui,
+    };
+    TEST_ASSERT(cli.fast_batch_quantum() == 65536);
+    TEST_ASSERT(tui.fast_batch_quantum() == 2048);
 }
 
 }  // namespace

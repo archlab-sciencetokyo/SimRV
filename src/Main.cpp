@@ -365,9 +365,6 @@ auto print_doctor() -> int {
             "  host cache       : L1d {} KiB (line {} B), L1i {} KiB, L2 {} MiB, L3 {} MiB",
             cache_info.l1d_bytes / 1024, cache_info.line_bytes, cache_info.l1i_bytes / 1024,
             cache_info.l2_bytes / (1024 * 1024), cache_info.l3_bytes / (1024 * 1024));
-        std::println("  adaptive tuning  : fast quantum {} insns, block cache {} sets",
-                     cache_info.optimal_fast_batch_quantum(false),
-                     cache_info.optimal_block_cache_sets());
     }
     std::println("  interactive TTY  : {}",
                  tty ? "yes (stdin & stdout connected to a terminal)"

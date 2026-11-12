@@ -5,15 +5,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- Improve bare-metal execution performance and throughput reporting.
-- Add host hardware cache topology discovery and adaptive simulation tuning diagnostics in `simrv doctor`.
+## [v3.0.0-rc.19] — 2026-11-12
+
+- Modernize CLI execution summary with adaptive duration units, visual progress bars, peak/average MIPS tracking, and conditional RVC share display.
+- Improve bare-metal fast-path throughput.
+- Report host cache topology in `simrv doctor`.
 - Reduce ELF loading and initialization overhead.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
 - Fix missing UART line interrupts when the receive FIFO overruns.
-
-## [v3.0.0-rc.19] — 2026-11-09
-
-- Modernize CLI execution summary with adaptive duration units, visual progress bars, peak/average MIPS tracking, and conditional RVC share display.
 - Flush UART buffers immediately in CLI mode so interactive guest prompts appear without latency.
 - Remove redundant termination logs prior to the execution summary box.
 - Fix RV32 guest compatibility on RV64 for selective TLB invalidation, SBI RFENCE, and SSTC `stimecmp` timer CSRs.
