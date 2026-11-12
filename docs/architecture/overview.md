@@ -125,6 +125,18 @@ Checked RAM lookups reject addresses below the mapping and accesses that wrap th
 space. The unchecked fast lookup is used only with non-null, nonwrapping RAM and an access size no
 larger than the mapping; other configurations take the checked fallback.
 
+#### Fast-path contract inventory
+
+| Shortcut | Eligibility and required state | Observable contract and fallback |
+| --- | --- | --- |
+| Instruction batches | `Machine::fast_batch_policy()` requires a single hart and disables batching for stepping, lockstep, branch tracing, breakpoints/watchpoints, active triggers, redirecting consoles, and extension devices that need instruction ticks. | Retire and account at batch boundaries; poll controls there. Ineligible runs use the ordinary runner. Cached execution exits on control, trap, and observation boundaries. |
+| Bare-metal block chains | The direct chain requires machine-mode flat, valid nonwrapping RAM without locked PMP, active reservations, or SMP; only supported compact operations are admitted. | It preserves guest-width register/PC behavior and checks taken-target alignment. Unsupported operations, misses, and misaligned taken branches return to the precise cached/scalar path. |
+| OS cached memory | A host pointer requires a matching soft-TLB context/epoch and page range, with PMP checked for the full access; direct physical RAM also requires a valid RAM range. | Translation, privilege, faults, `tohost`, triggers, and reservation behavior are retained. TLB misses and accesses needing per-element checks use `MemoryAccess`; address-space changes invalidate the TLB. |
+| Instruction fetch | The bare-metal physical-RAM shortcut is enabled only before the MMU has ever been used. | Execute PMP checks run before decode; translated, page-walk, and bus fetch remain the fallback. Fetch faults report the guest PC. |
+| Vector bulk copies | Direct copies require machine effective privilege, canonical pointers, a valid page-bounded range, suitable PMP permissions, no breakpoints/triggers, and no store-side reservation checks. | Stores retain `tohost` and reservation effects. Unit-stride/whole-register operations split at page boundaries; chunks that fail eligibility, masked/strided accesses needing individual checks, and fault-only-first loads use element-wise memory operations and preserve `vstart`/fault ordering. |
+| Cache lookup | The MRU hint is only a candidate way; the line is rechecked for tag, validity, and non-invalid coherence state. | A failed hint scans the set, preserving normal replacement and coherence handling. |
+| MMIO, DMA, and device polling | MMIO MRU hits recheck ownership and every addressed byte; DMA validates the physical range and wire-width conversion. Network polling retains libslirp callbacks for the stack lifetime and supplies no-op poll-registration hooks because SimRV polls synchronously. | Invalid or ambiguous mappings are rejected through normal routing. Device and bus side effects remain in their ordinary handlers; network frames are delivered through the backend queue. |
+
 #### Audit evidence and remaining coverage
 
 The following findings describe guest correctness, rather than security severity:
@@ -138,12 +150,14 @@ The following findings describe guest correctness, rather than security severity
 | The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `MicroarchitectureTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
 | A compact block could bypass misaligned taken-branch exceptions when compressed instructions were disabled. | High | Bare-metal fast execution falls back to scalar execution for IALIGN=32; `CoreSemanticsTests` checks jumps and branches on RV64, hosted RV32, and native RV32. |
 | A UART receive overrun in a later device tick could leave the line interrupt unpublished. | Medium | Overrun transitions now schedule an interrupt update; `PlatformIntegrationTests` exercises an overrun after a full FIFO was established in an earlier tick. |
+| DHCP could advertise a working-looking DNS proxy while guest DNS requests timed out. | Medium | The libslirp callback table must outlive its stack, and its poll-registration callbacks must be present even when SimRV polls synchronously. `PlatformIntegrationTests::test_user_network_external_dns` verifies an upstream response when explicitly enabled. |
 
-These checks document reviewed paths, not a proof that every first-party shortcut has been
-inventoried. In particular, full architecture-suite and performance comparisons against the
-original starting tree remain incomplete; ARM hardware and usable host performance counters were
-unavailable. See [strong typing and performance](../development/strong-typing-performance.md)
-for the measurements and their limitations.
+This inventory records the major first-party execution, memory, cache, and device shortcuts; it is
+not a machine-checked proof or an exhaustive review of every optimization. Full architecture-suite
+and performance comparisons against the original starting tree remain incomplete. ARM hardware and
+usable host performance counters were unavailable. See
+[strong typing and performance](../development/strong-typing-performance.md) for measurements and
+their limitations.
 
 Address-domain types protect the architectural and platform interfaces where the distinction affects
 correctness. Architectural PCs, decode and block cache keys, pipeline stage records and fetch
