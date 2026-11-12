@@ -346,7 +346,10 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::fast_forward_wfi(Machine& machine) {
-    if (!machine.appmode_enabled() || (state_.mip & state_.mie) != 0) {
+    // mtime is shared by all harts. Advancing it from one hart's WFI is only sound
+    // when no other hart can independently advance or observe the virtual deadline.
+    if (!machine.appmode_enabled() || machine.num_harts() != 1 ||
+        (state_.mip & state_.mie) != 0) {
         return;
     }
     auto& primary_clint = machine.primary_hart().clint_mmio;
@@ -369,9 +372,13 @@ void CPU::fast_forward_wfi(Machine& machine) {
     }
     const bool vstce = (state_.henvcfg & (uint64_t{1} << 63U)) != 0;
     if (stce && vstce && state_.vstimecmp != std::numeric_limits<simrv::xlen::Counter>::max()) {
-        const auto virtual_deadline = static_cast<uint64_t>(state_.vstimecmp - state_.htimedelta);
-        if (virtual_deadline > cur_mtime && virtual_deadline < next_deadline) {
-            next_deadline = virtual_deadline;
+        // vstimecmp is expressed in guest virtual time. If the offset already
+        // puts it at or behind mtime, it is due now; subtraction would wrap.
+        if (state_.vstimecmp > state_.htimedelta) {
+            const auto virtual_deadline = state_.vstimecmp - state_.htimedelta;
+            if (virtual_deadline > cur_mtime && virtual_deadline < next_deadline) {
+                next_deadline = virtual_deadline;
+            }
         }
     }
     if (next_deadline > cur_mtime &&

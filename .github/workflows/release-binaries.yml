@@ -130,7 +130,7 @@ jobs:
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
-            gcc-toolset-15-libstdc++-devel \
+            gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
             libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
             bzip2-devel pkgconf-pkg-config tar wget which
           python3 -m pip install cmake==4.3.0 ninja || \
@@ -231,8 +231,23 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install musl build tools
         run: |
-          apk add --no-cache bash build-base boost-dev cmake libslirp-dev ninja pkgconf \
-            python3 tar gzip file linux-headers
+          apk add --no-cache bash build-base boost-dev cmake glib-dev glib-static \
+            gettext-static meson ninja pcre2-static pkgconf python3 tar gzip file \
+            linux-headers zlib-static
+      - name: Build static musl libslirp
+        shell: bash
+        run: |
+          set -euo pipefail
+          wget -q https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.bz2 \
+            -O /tmp/libslirp-v4.9.5.tar.bz2
+          echo '4f59df896cb345ea76d7f68b1e820872feaa9d8255a6761f6bf8a0f2d5144bcd  /tmp/libslirp-v4.9.5.tar.bz2' \
+            | sha256sum --check
+          tar -xjf /tmp/libslirp-v4.9.5.tar.bz2 -C /tmp
+          meson setup /tmp/libslirp-build /tmp/libslirp-v4.9.5 \
+            --prefix=/usr/local --buildtype=release --default-library=static \
+            -Dstatic=true
+          ninja -C /tmp/libslirp-build install
+          echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig' >> "$GITHUB_ENV"
       - name: Validate release tag
         id: names
         shell: bash
@@ -251,6 +266,7 @@ jobs:
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DSIMRV_WARNINGS_AS_ERRORS=ON \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DPKG_CONFIG_ARGN=--static \
             -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
@@ -295,7 +311,8 @@ jobs:
           set -euo pipefail
           apt-get update
           apt-get install -y --no-install-recommends git software-properties-common \
-            libboost1.83-dev libslirp-dev make binutils pkg-config python3 python3-pip dpkg-dev xz-utils lintian
+            libboost1.83-dev libglib2.0-dev libslirp-dev make binutils pkg-config \
+            python3 python3-pip dpkg-dev xz-utils lintian
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           apt-get install -y --no-install-recommends gcc-15 g++-15

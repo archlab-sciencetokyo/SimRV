@@ -2122,6 +2122,58 @@ void test_global_cycle_timer_phase_ordering() {
     std::cout << "[PASS] test_global_cycle_timer_phase_ordering\n";
 }
 
+void test_wfi_fast_forward_is_single_hart_only() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::Machine single_hart(
+        simrv::core::MachineConfig{.execution = {.appmode = true}});
+    single_hart.cpu.machine_ = &single_hart;
+    single_hart.cpu.reset();
+    auto& single_clint = single_hart.primary_hart().clint_mmio;
+    single_clint.mtime.store(5, std::memory_order_relaxed);
+    single_clint.mtimecmp.store(20, std::memory_order_relaxed);
+    single_hart.cpu.fast_forward_wfi(single_hart);
+    check(single_clint.mtime.load(std::memory_order_relaxed) == 20);
+    check((single_hart.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
+
+    single_clint.mtime.store(5, std::memory_order_relaxed);
+    single_clint.mtimecmp.store(std::numeric_limits<simrv::xlen::Counter>::max(),
+                                std::memory_order_relaxed);
+    auto& state = single_hart.cpu.state();
+    if constexpr (simrv::xlen::kIsXLen64) {
+        state.menvcfg |= uint64_t{1} << 63U;
+    } else {
+        state.menvcfgh |= uint32_t{1} << 31U;
+    }
+    state.henvcfg |= uint64_t{1} << 63U;
+    state.htimedelta = 10;
+    state.vstimecmp = 7;
+    single_hart.cpu.evaluate_timer_interrupt();
+    single_hart.cpu.fast_forward_wfi(single_hart);
+    check(single_clint.mtime.load(std::memory_order_relaxed) == 5);
+
+    simrv::core::Machine machine(
+        simrv::core::MachineConfig{.execution = {.appmode = true}});
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    machine.secondary_harts_.push_back(std::move(secondary));
+
+    auto& clint = machine.primary_hart().clint_mmio;
+    clint.mtime.store(5, std::memory_order_relaxed);
+    clint.mtimecmp.store(100, std::memory_order_relaxed);
+    clint.hart_mtimecmp.at(1).store(20, std::memory_order_relaxed);
+    machine.hart(1).fast_forward_wfi(machine);
+    check(clint.mtime.load(std::memory_order_relaxed) == 5);
+
+    std::cout << "[PASS] test_wfi_fast_forward_is_single_hart_only\n";
+}
+
 void test_ca_quantum_smp_batching() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -5046,6 +5098,7 @@ int main(int argc, char** argv) {
     test_global_cycle_smp_amo_retry();
     test_multithreaded_parallel_matches_global_cycle();
     test_global_cycle_timer_phase_ordering();
+    test_wfi_fast_forward_is_single_hart_only();
     test_ca_quantum_smp_batching();
     test_ca_quantum_single_hart_batching();
     // Exercise the pause/cycle boundary repeatedly; either side can reach the barrier first.
