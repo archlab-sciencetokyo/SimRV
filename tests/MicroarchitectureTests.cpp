@@ -409,15 +409,19 @@ void test_rvcomp_reset_and_ethernet_extensions() {
     arp[38] = 10;
     arp[40] = 2;
     arp[41] = 2;
-    tx->write32(simrv::memory::MmioOffset{0}, 60);
-    for (uint32_t word = 0; word < 15; ++word) {
-        tx->write32(simrv::memory::MmioOffset{4 + word * 4}, 0x03020100U + word * 0x04040404U);
+    tx->write32(simrv::memory::MmioOffset{0}, static_cast<uint32_t>(arp.size()));
+    for (uint32_t word = 0; word < (arp.size() + 3) / 4; ++word) {
+        uint32_t value = 0;
+        for (uint32_t byte = 0; byte < 4; ++byte) {
+            const auto index = word * 4 + byte;
+            if (index < arp.size()) value |= static_cast<uint32_t>(arp[index]) << (byte * 8);
+        }
+        tx->write32(simrv::memory::MmioOffset{4 + word * 4}, value);
     }
-    csr->write32(simrv::memory::MmioOffset{6 * 4}, 64);
+    csr->write32(simrv::memory::MmioOffset{6 * 4},
+                 static_cast<uint32_t>((4 + arp.size() + 3) & ~std::size_t{3}));
     TEST_CHECK(ethernet.backend().tx_packet_count() == 1);
-    // Exercise the shared host backend and ring-buffer adapter receive path with
-    // a valid ARP request; arbitrary frames are no longer looped back to the guest.
-    ethernet.backend().send_tx_packet(arp);
+    // Exercise a guest-style TX ring packet through libslirp and the ring-buffer RX adapter.
     TEST_CHECK(ethernet.backend().has_rx_packet());
     ethernet.poll_backend();
     TEST_CHECK(csr->read32(simrv::memory::MmioOffset{4}) >= arp.size());
