@@ -279,7 +279,8 @@ jobs:
             -DSIMRV_WARNINGS_AS_ERRORS=ON \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DPKG_CONFIG_ARGN=--static \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+            -DCMAKE_FIND_LIBRARY_SUFFIXES=.a \
+            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
           # Alpine's ldd exits successfully for static-pie binaries because they
