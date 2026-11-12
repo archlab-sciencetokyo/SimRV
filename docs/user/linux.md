@@ -274,7 +274,9 @@ guest startup.
 The default `user` network mode provides an isolated IPv4 subnet with DHCP, DNS, and outbound NAT
 through libslirp. Guest connections use the launching user's host network permissions, so no TAP
 device, firewall changes, or `sudo` setup is needed. It does not accept unsolicited inbound
-connections; use host-side port forwarding when that capability is added.
+connections; use host-side port forwarding when that capability is added. User-mode NAT does not
+reliably support ICMP echo, so `ping` timeouts do not establish that TCP, UDP, or DNS forwarding
+is broken.
 
 SimRV opens the selected disk image read-only and stores guest writes in a sparse temporary overlay.
 The original `rootfs.img` therefore remains unchanged, and test runs can use it directly without

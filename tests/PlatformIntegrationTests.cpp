@@ -3700,6 +3700,98 @@ void test_user_network_dhcp_offer() {
     check(offer[offer_udp + 8 + 236] == 0x63 && offer[offer_udp + 8 + 240] == 53 &&
               offer[offer_udp + 8 + 242] == 2,
           "DHCP response is a DHCPOFFER");
+    const auto options_begin = offer_udp + 8 + 240;
+    bool has_gateway = false;
+    bool has_dns = false;
+    for (std::size_t offset = options_begin; offset < offer.size();) {
+        const uint8_t option = offer[offset++];
+        if (option == 0) continue;
+        if (option == 255) break;
+        check(offset < offer.size(), "DHCP option includes its length");
+        const auto length = static_cast<std::size_t>(offer[offset++]);
+        check(length <= offer.size() - offset, "DHCP option stays within the response frame");
+        if (option == 3 && length >= 4) {
+            has_gateway = offer[offset] == 10 && offer[offset + 1] == 0 && offer[offset + 2] == 2 &&
+                          offer[offset + 3] == 2;
+        } else if (option == 6 && length >= 4) {
+            has_dns = offer[offset] == 10 && offer[offset + 1] == 0 && offer[offset + 2] == 2 &&
+                      offer[offset + 3] == 3;
+        }
+        offset += length;
+    }
+    check(has_gateway, "DHCP advertises the libslirp gateway at 10.0.2.2");
+    check(has_dns, "DHCP advertises the libslirp DNS proxy at 10.0.2.3");
+
+    // This opt-in smoke test requires outbound network access and stays outside
+    // hermetic CI runs.
+    if (std::getenv("SIMRV_TEST_EXTERNAL_DNS") != nullptr) {
+        std::array<uint8_t, 14 + 20 + 8 + 29> dns_query{};
+        std::fill_n(dns_query.begin(), 6, uint8_t{0xff});
+        std::copy(mac.begin(), mac.end(), dns_query.begin() + 6);
+        dns_query[12] = 0x08;
+        dns_query[13] = 0x00;
+        constexpr std::size_t dns_ip = 14;
+        constexpr std::size_t dns_udp = dns_ip + 20;
+        constexpr std::size_t dns_payload = dns_udp + 8;
+        dns_query[dns_ip] = 0x45;
+        dns_query[dns_ip + 2] = 0;
+        dns_query[dns_ip + 3] = 57;
+        dns_query[dns_ip + 8] = 64;
+        dns_query[dns_ip + 9] = 17;
+        dns_query[dns_ip + 12] = 10;
+        dns_query[dns_ip + 14] = 2;
+        dns_query[dns_ip + 15] = 15;
+        dns_query[dns_ip + 16] = 10;
+        dns_query[dns_ip + 18] = 2;
+        dns_query[dns_ip + 19] = 3;
+        uint32_t dns_ip_checksum = 0;
+        for (std::size_t offset = dns_ip; offset < dns_ip + 20; offset += 2) {
+            dns_ip_checksum +=
+                static_cast<uint32_t>(dns_query[offset] << 8U) | dns_query[offset + 1];
+        }
+        while ((dns_ip_checksum >> 16U) != 0) {
+            dns_ip_checksum = (dns_ip_checksum & 0xffffU) + (dns_ip_checksum >> 16U);
+        }
+        dns_ip_checksum = ~dns_ip_checksum;
+        dns_query[dns_ip + 10] = static_cast<uint8_t>(dns_ip_checksum >> 8U);
+        dns_query[dns_ip + 11] = static_cast<uint8_t>(dns_ip_checksum);
+        dns_query[dns_udp] = 0xc0;
+        dns_query[dns_udp + 1] = 0x00;
+        dns_query[dns_udp + 2] = 0;
+        dns_query[dns_udp + 3] = 53;
+        dns_query[dns_udp + 4] = 0;
+        dns_query[dns_udp + 5] = 37;
+        dns_query[dns_payload] = 0x12;
+        dns_query[dns_payload + 1] = 0x34;
+        dns_query[dns_payload + 2] = 1;
+        dns_query[dns_payload + 5] = 1;
+        dns_query[dns_payload + 12] = 7;
+        std::copy_n("example", 7, dns_query.begin() + dns_payload + 13);
+        dns_query[dns_payload + 20] = 3;
+        std::copy_n("com", 3, dns_query.begin() + dns_payload + 21);
+        dns_query[dns_payload + 24] = 0;
+        dns_query[dns_payload + 25] = 0;
+        dns_query[dns_payload + 26] = 1;
+        dns_query[dns_payload + 27] = 0;
+        dns_query[dns_payload + 28] = 1;
+        backend.send_tx_packet(dns_query);
+        const auto dns_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!backend.has_rx_packet() && std::chrono::steady_clock::now() < dns_deadline) {
+            (void)backend.poll_host_rx();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        check(backend.has_rx_packet(), "libslirp DNS query receives an upstream response");
+        const auto dns_response = backend.pop_rx_packet();
+        check(dns_response.size() >= 14 + 20 + 8 + 12,
+              "DNS response frame includes IP, UDP, and DNS headers");
+        const auto response_udp = 14 + static_cast<std::size_t>(dns_response[14] & 0x0fU) * 4;
+        check(dns_response.size() >= response_udp + 8 + 12 &&
+                  dns_response[response_udp + 8] == 0x12 &&
+                  dns_response[response_udp + 9] == 0x34 &&
+                  (dns_response[response_udp + 10] & 0x80U) != 0,
+              "DNS proxy returns a matching DNS response");
+        std::cout << "[PASS] test_user_network_external_dns\n";
+    }
     std::cout << "[PASS] test_user_network_dhcp_offer\n";
 }
 

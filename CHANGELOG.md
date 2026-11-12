@@ -8,6 +8,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [v3.0.0-rc.19] — 2026-11-12
 
 - Modernize CLI execution summary with adaptive duration units, visual progress bars, peak/average MIPS tracking, and conditional RVC share display.
+- Add rootless DHCP and DNS NAT networking through libslirp for supported Ethernet devices.
 - Improve bare-metal fast-path throughput.
 - Report host cache topology in `simrv doctor`.
 - Reduce ELF loading and initialization overhead.

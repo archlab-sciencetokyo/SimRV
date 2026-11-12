@@ -389,15 +389,42 @@ void test_rvcomp_reset_and_ethernet_extensions() {
     auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
     auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
     auto* rx = static_cast<simrv::memory::MmioDevice*>(ethernet.rx_node());
+    constexpr std::array<uint8_t, 6> mac{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+    std::array<uint8_t, 42> arp{};
+    std::fill_n(arp.begin(), 6, uint8_t{0xff});
+    std::copy(mac.begin(), mac.end(), arp.begin() + 6);
+    arp[12] = 0x08;
+    arp[13] = 0x06;
+    arp[14] = 0;
+    arp[15] = 1;
+    arp[16] = 0x08;
+    arp[17] = 0;
+    arp[18] = 6;
+    arp[19] = 4;
+    arp[21] = 1;
+    std::copy(mac.begin(), mac.end(), arp.begin() + 22);
+    arp[28] = 10;
+    arp[30] = 2;
+    arp[31] = 15;
+    arp[38] = 10;
+    arp[40] = 2;
+    arp[41] = 2;
     tx->write32(simrv::memory::MmioOffset{0}, 60);
     for (uint32_t word = 0; word < 15; ++word) {
         tx->write32(simrv::memory::MmioOffset{4 + word * 4}, 0x03020100U + word * 0x04040404U);
     }
     csr->write32(simrv::memory::MmioOffset{6 * 4}, 64);
     TEST_CHECK(ethernet.backend().tx_packet_count() == 1);
+    // Exercise the shared host backend and ring-buffer adapter receive path with
+    // a valid ARP request; arbitrary frames are no longer looped back to the guest.
+    ethernet.backend().send_tx_packet(arp);
+    TEST_CHECK(ethernet.backend().has_rx_packet());
     ethernet.poll_backend();
-    TEST_CHECK(csr->read32(simrv::memory::MmioOffset{4}) == 60);
-    TEST_CHECK(rx->read32(simrv::memory::MmioOffset{0}) == 0x03020100U);
+    TEST_CHECK(csr->read32(simrv::memory::MmioOffset{4}) >= arp.size());
+    const uint32_t arp_reply = rx->read32(simrv::memory::MmioOffset{0});
+    TEST_CHECK(arp_reply == 0xddccbbaaU);
+    TEST_CHECK((rx->read32(simrv::memory::MmioOffset{12}) & 0xffffU) == 0x0608U);
+    TEST_CHECK(rx->read32(simrv::memory::MmioOffset{20}) != 0);
 }
 
 void test_dummy_mmio_behavior() {

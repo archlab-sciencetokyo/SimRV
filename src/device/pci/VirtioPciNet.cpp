@@ -60,6 +60,14 @@ struct virtio::NetBackend::SlirpState {
         // The simulator polls libslirp on each runner cycle, so no host thread needs waking.
     }
 
+#if SLIRP_CHECK_VERSION(4, 9, 0)
+    static void register_poll_socket(slirp_os_socket, void*) {}
+    static void unregister_poll_socket(slirp_os_socket, void*) {}
+#else
+    static void register_poll_fd(int, void*) {}
+    static void unregister_poll_fd(int, void*) {}
+#endif
+
     static auto timer_new(SlirpTimerCb callback, void* callback_opaque, void* opaque) -> void* {
         auto& timers = static_cast<SlirpState*>(opaque)->timers;
         auto timer = std::make_unique<Timer>();
@@ -160,6 +168,12 @@ void virtio::NetBackend::initialize_user_mode_network() {
     slirp_ = std::make_unique<SlirpState>();
     slirp_->backend = this;
 
+    SlirpConfig config{};
+#if SLIRP_CHECK_VERSION(4, 9, 0)
+    config.version = SLIRP_CONFIG_VERSION_MAX;
+#else
+    config.version = 4;
+#endif
     slirp_->callbacks.send_packet = &SlirpState::receive_packet;
     slirp_->callbacks.guest_error = &SlirpState::guest_error;
     slirp_->callbacks.clock_get_ns = &SlirpState::clock_get_ns;
@@ -167,8 +181,16 @@ void virtio::NetBackend::initialize_user_mode_network() {
     slirp_->callbacks.timer_new = &SlirpState::timer_new;
     slirp_->callbacks.timer_free = &SlirpState::timer_free;
     slirp_->callbacks.timer_mod = &SlirpState::timer_mod;
-    SlirpConfig config{};
-    config.version = 1;
+#if SLIRP_CHECK_VERSION(4, 9, 0)
+    slirp_->callbacks.register_poll_socket = &SlirpState::register_poll_socket;
+    slirp_->callbacks.unregister_poll_socket = &SlirpState::unregister_poll_socket;
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    slirp_->callbacks.register_poll_fd = &SlirpState::register_poll_fd;
+    slirp_->callbacks.unregister_poll_fd = &SlirpState::unregister_poll_fd;
+#pragma GCC diagnostic pop
+#endif
     config.in_enabled = true;
     config.vnetwork.s_addr = htonl(0x0a000200U);
     config.vnetmask.s_addr = htonl(0xffffff00U);
