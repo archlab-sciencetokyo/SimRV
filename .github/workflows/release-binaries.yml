@@ -35,7 +35,7 @@ jobs:
       - name: Install build tools
         run: |
           dnf update -y
-          dnf install -y git cmake ninja-build libslirp-devel gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
+          dnf install -y git cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
 
       - name: Fetch and compile riscv-tests
         run: |
@@ -117,20 +117,34 @@ jobs:
     permissions:
       contents: read
     container:
-      # UBI 9 keeps the glibc baseline at 2.34 while GCC Toolset 15 supplies
+      # Rocky Linux 9 keeps the glibc baseline at 2.34 while GCC Toolset 15 supplies
       # the C++23 library needed by SimRV. The executable statically links the
-      # toolset C++ runtime so users do not need GCC Toolset installed.
-      image: registry.access.redhat.com/ubi9/ubi:latest
+      # toolset C++ runtime so users do not need GCC Toolset installed. Rocky's
+      # CRB repository provides libslirp-devel, which UBI does not publish.
+      image: rockylinux:9
     steps:
       - name: Install build tools
         shell: bash
         run: |
           set -euo pipefail
+          dnf install -y dnf-plugins-core
+          dnf config-manager --set-enabled crb
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             gcc-toolset-15-libstdc++-devel \
-            libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils
+            libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
+            bzip2-devel tar wget
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 \
+            -O /tmp/boost_1_83_0.tar.bz2
+          echo '6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e  /tmp/boost_1_83_0.tar.bz2' \
+            | sha256sum --check
+          tar -xjf /tmp/boost_1_83_0.tar.bz2 -C /tmp
+          cd /tmp/boost_1_83_0
+          ./bootstrap.sh
+          ./b2 --with-headers install --prefix=/opt/boost-1.83
+          echo "/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_PATH"
+          echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
           echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
@@ -217,7 +231,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install musl build tools
         run: |
-          apk add --no-cache bash build-base cmake ninja python3 tar gzip file linux-headers
+          apk add --no-cache bash build-base boost-dev cmake ninja python3 tar gzip file linux-headers
       - name: Validate release tag
         id: names
         shell: bash
@@ -280,7 +294,7 @@ jobs:
           set -euo pipefail
           apt-get update
           apt-get install -y --no-install-recommends git software-properties-common \
-            libslirp-dev make binutils python3 python3-pip dpkg-dev xz-utils lintian
+            libboost1.83-dev libslirp-dev make binutils python3 python3-pip dpkg-dev xz-utils lintian
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           apt-get install -y --no-install-recommends gcc-15 g++-15
