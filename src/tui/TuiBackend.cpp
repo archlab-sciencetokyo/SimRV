@@ -57,7 +57,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
         error("session ended");
     else if (request.generation != 0 && request.generation != generation_)
         error("stale inspection generation");
-    else if (request.hart >= machine.num_harts())
+    else if (request.hart.raw() >= machine.num_harts())
         error("invalid hart");
     else {
         const bool inspect = request.command >= BackendCommand::Registers &&
@@ -92,7 +92,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                         error("step requires pause and count=1");
                     else {
                         ++generation_;
-                        if (!machine.begin_debug_step(simrv::xlen::HartId{request.hart}))
+                        if (!machine.begin_debug_step(request.hart))
                             error("hart cannot step");
                         else {
                             const auto weak = weak_from_this();
@@ -120,7 +120,8 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                     break;
                 case BackendCommand::Registers: {
                     const auto& state = machine.hart(request.hart).state();
-                    reply.text = std::format("hart {} PC {:016x}\n", request.hart, state.pc.raw());
+                    reply.text =
+                        std::format("hart {} PC {:016x}\n", request.hart.raw(), state.pc.raw());
                     for (int r = 0; r < 32; ++r)
                         reply.text += std::format(
                             "x{:<2} {:016x}   f{:<2} {:016x}\n", r,

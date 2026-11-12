@@ -21,19 +21,19 @@ auto PcieRootComplex::attach_device(PciBdf bdf, std::shared_ptr<PciDevice> devic
     if (!device) return false;
     if (get_device(bdf) != nullptr) return false;
     device->set_root_complex(this, bdf);
-    if (bdf.bus == 0 && bdf.dev < kMaxSlots && bdf.func == 0) {
-        devices_by_slot_[bdf.dev] = device.get();
+    if (bdf.bus.raw() == 0 && bdf.dev.raw() < kMaxSlots && bdf.func.raw() == 0) {
+        devices_by_slot_[bdf.dev.raw()] = device.get();
     }
     intx_routes_.push_back(
-        {.bdf = bdf, .source = intx_source != 0 ? intx_source : 16U + (bdf.dev % 8U)});
+        {.bdf = bdf, .source = intx_source != 0 ? intx_source : 16U + (bdf.dev.raw() % 8U)});
     owned_devices_.push_back(device);
     rebuild_bar_mappings();
     return true;
 }
 
 auto PcieRootComplex::get_device(PciBdf bdf) const noexcept -> PciDevice* {
-    if (bdf.bus == 0 && bdf.dev < kMaxSlots && bdf.func == 0) {
-        return devices_by_slot_[bdf.dev];
+    if (bdf.bus.raw() == 0 && bdf.dev.raw() < kMaxSlots && bdf.func.raw() == 0) {
+        return devices_by_slot_[bdf.dev.raw()];
     }
     for (const auto& dev : owned_devices_) {
         if (dev && dev->bdf() == bdf) {
@@ -192,7 +192,7 @@ void PcieRootComplex::assert_device_irq(PciBdf bdf) {
     const auto route =
         std::ranges::find_if(intx_routes_, [bdf](const auto& entry) { return entry.bdf == bdf; });
     const simrv::xlen::InterruptSourceId irq_source =
-        route == intx_routes_.end() ? 16 + (bdf.dev % 8) : route->source;
+        route == intx_routes_.end() ? 16 + (bdf.dev.raw() % 8) : route->source;
 
     if (aplic_s_ != nullptr) {
         aplic_s_->set_irq(irq_source, true);
@@ -206,7 +206,7 @@ void PcieRootComplex::deassert_device_irq(PciBdf bdf) {
     const auto route =
         std::ranges::find_if(intx_routes_, [bdf](const auto& entry) { return entry.bdf == bdf; });
     const simrv::xlen::InterruptSourceId irq_source =
-        route == intx_routes_.end() ? 16 + (bdf.dev % 8) : route->source;
+        route == intx_routes_.end() ? 16 + (bdf.dev.raw() % 8) : route->source;
 
     if (aplic_s_ != nullptr) {
         aplic_s_->set_irq(irq_source, false);
@@ -221,12 +221,14 @@ void PcieRootComplex::send_msi(PciBdf bdf, simrv::xlen::PhysAddr paddr, uint32_t
     const auto addr = paddr.raw();
     if (imsic_s_ != nullptr && addr >= imsic_s_->base_address().raw() &&
         addr < imsic_s_->base_address().raw() + imsic_s_->size()) {
-        imsic_s_->write32(addr - imsic_s_->base_address().raw(), message_data);
+        imsic_s_->write32(simrv::memory::MmioOffset{addr - imsic_s_->base_address().raw()},
+                          message_data);
         return;
     }
     if (aplic_s_ != nullptr && addr >= aplic_s_->base_address().raw() &&
         addr < aplic_s_->base_address().raw() + aplic_s_->size()) {
-        aplic_s_->write32(addr - aplic_s_->base_address().raw(), message_data);
+        aplic_s_->write32(simrv::memory::MmioOffset{addr - aplic_s_->base_address().raw()},
+                          message_data);
         return;
     }
     if (machine_ != nullptr) {

@@ -38,10 +38,10 @@ class RingBufferEthernetMmio final {
     class Window;
     friend class Window;
 
-    auto read_csr(simrv::xlen::Address offset) -> uint32_t;
-    void write_csr(simrv::xlen::Address offset, uint32_t value);
-    auto read_buffer(bool tx, simrv::xlen::Address offset) -> uint32_t;
-    void write_buffer(bool tx, simrv::xlen::Address offset, uint32_t value);
+    auto read_csr(simrv::memory::MmioOffset offset) -> uint32_t;
+    void write_csr(simrv::memory::MmioOffset offset, uint32_t value);
+    auto read_buffer(bool tx, simrv::memory::MmioOffset offset) -> uint32_t;
+    void write_buffer(bool tx, simrv::memory::MmioOffset offset, uint32_t value);
     void drain_tx();
     void update_rx_irq();
     void receive_packet(std::span<const uint8_t> packet);

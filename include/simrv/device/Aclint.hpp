@@ -48,10 +48,10 @@ class AclintMtimer : public memory::MmioDevice {
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    [[nodiscard]] auto read64(simrv::xlen::Address offset) -> uint64_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
-    void write64(simrv::xlen::Address offset, uint64_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    [[nodiscard]] auto read64(simrv::memory::MmioOffset offset) -> uint64_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
+    void write64(simrv::memory::MmioOffset offset, uint64_t val) override;
 
     void tick();
     [[nodiscard]] auto mtime() const -> simrv::xlen::Counter { return mtime_; }
@@ -91,8 +91,8 @@ class AclintMswi : public memory::MmioDevice {
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
 
    private:
     simrv::core::IInterruptController* sink_{nullptr};

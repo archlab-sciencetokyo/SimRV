@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "simrv/xlen/IdentifierTypes.hpp"
+
 namespace simrv::core {
 
 class Machine;
@@ -32,7 +34,7 @@ struct Stat {
  * @brief Simulation telemetry captured for an individual hardware thread (hart).
  */
 struct HartStatsSnapshot {
-    uint32_t hart_id = 0;
+    simrv::xlen::HartId hart_id{};
     uint64_t retired_instructions = 0;
     uint64_t cycles = 0;
     double ipc = 0.0;

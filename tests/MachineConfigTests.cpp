@@ -624,7 +624,8 @@ auto main() -> int {
         const auto parsed = simrv::util::parse_command_line(trace_filter_args);
         expect(parsed.has_value() && parsed->options.trace_events == "call, return" &&
                    parsed->options.trace_function == "main" &&
-                   parsed->options.trace_device == "uart0" && parsed->options.trace_hart == 1 &&
+                   parsed->options.trace_device == "uart0" &&
+                   parsed->options.trace_hart == simrv::xlen::HartId{1} &&
                    parsed->options.trace_after_cycle == 100 &&
                    parsed->options.trace_before_cycle == 200 &&
                    parsed->options.trace_pc_start == simrv::xlen::VirtAddr{0x80000000} &&
@@ -633,7 +634,8 @@ auto main() -> int {
         if (parsed) {
             const auto cfg = parsed->options.to_machine_config();
             expect(cfg.debug.trace_events == "call, return" && cfg.debug.trace_function == "main" &&
-                       cfg.debug.trace_device == "uart0" && cfg.debug.trace_hart == 1 &&
+                       cfg.debug.trace_device == "uart0" &&
+                       cfg.debug.trace_hart == simrv::xlen::HartId{1} &&
                        cfg.debug.trace_pc_start == simrv::xlen::VirtAddr{0x80000000} &&
                        cfg.debug.trace_pc_end == simrv::xlen::VirtAddr{0x80001000} &&
                        cfg.debug.trace_after_cycle == 100 && cfg.debug.trace_before_cycle == 200,
@@ -1012,56 +1014,60 @@ auto main() -> int {
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) != 0,
                "PLIC pending set on level-assert");
         // Claim on context 0 (offset 0x200004)
-        const auto claim_id = plic_controller.mmio_read(0x200004);
+        const auto claim_id = plic_controller.mmio_read(simrv::memory::MmioOffset{0x200004});
         expect(claim_id == kLevelTestIrq, "PLIC claim returns active IRQ source");
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
                "PLIC pending cleared on claim");
         expect(plic_controller.is_irq_asserted(kLevelTestIrq),
                "PLIC still tracks physical line active while claimed");
         // Complete without dropping line -> must re-assert pending
-        plic_controller.mmio_write(0x200004, kLevelTestIrq);
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200004}, kLevelTestIrq);
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) != 0,
                "PLIC re-asserts pending on complete when level remains high");
         // Claim again while pending is re-asserted
-        const auto claim_id2 = plic_controller.mmio_read(0x200004);
+        const auto claim_id2 = plic_controller.mmio_read(simrv::memory::MmioOffset{0x200004});
         expect(claim_id2 == kLevelTestIrq, "Second claim retrieves re-asserted IRQ");
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
                "PLIC pending cleared on second claim");
         // Now drop line while claimed, then complete -> must stay clear
         plic_controller.set_irq(kLevelTestIrq, false);
         expect(!plic_controller.is_irq_asserted(kLevelTestIrq), "PLIC line dropped");
-        plic_controller.mmio_write(0x200004, kLevelTestIrq);
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200004}, kLevelTestIrq);
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
                "PLIC pending stays clear after complete when level is low");
-        const auto claim_id3 = plic_controller.mmio_read(0x200004);
+        const auto claim_id3 = plic_controller.mmio_read(simrv::memory::MmioOffset{0x200004});
         expect(claim_id3 == 0, "No pending interrupt after completion with level low");
 
         // Verify dynamic arbitration re-evaluation upon priority/threshold MMIO write
         constexpr uint32_t kDynIrq = 8;
-        plic_controller.mmio_write(0x200000, 5);            // Threshold = 5
-        plic_controller.mmio_write(kDynIrq * 4, 3);         // Priority = 3
-        plic_controller.mmio_write(0x2000, 1U << kDynIrq);  // Enable IRQ 8
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000}, 5);     // Threshold = 5
+        plic_controller.mmio_write(simrv::memory::MmioOffset{kDynIrq * 4}, 3);  // Priority = 3
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x2000},
+                                   1U << kDynIrq);  // Enable IRQ 8
         plic_controller.set_irq(kDynIrq, true);
         machine.primary_hart().apply_pending_interrupt_lines(machine);
         expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) == 0,
                "MEIP suppressed when priority (3) <= threshold (5)");
 
         // Lower threshold via MMIO -> must dynamically trigger update_mip
-        plic_controller.mmio_write(0x200000, 2);  // Threshold = 2 < Priority (3)
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000},
+                                   2);  // Threshold = 2 < Priority (3)
         machine.primary_hart().apply_pending_interrupt_lines(machine);
         expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) != 0,
                "MEIP immediately asserts when threshold lowered below pending priority");
 
         // Raise threshold via MMIO -> must dynamically suppress MEIP
-        plic_controller.mmio_write(0x200000, 4);  // Threshold = 4 > Priority (3)
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000},
+                                   4);  // Threshold = 4 > Priority (3)
         machine.primary_hart().apply_pending_interrupt_lines(machine);
         expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) == 0,
                "MEIP immediately suppresses when threshold raised above pending priority");
 
         // Clean up
         plic_controller.set_irq(kDynIrq, false);
-        plic_controller.mmio_write(0x200000, 0);        // Restore threshold to 0
-        plic_controller.mmio_write(0x200004, kDynIrq);  // Complete
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000},
+                                   0);  // Restore threshold to 0
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200004}, kDynIrq);  // Complete
         machine.primary_hart().apply_pending_interrupt_lines(machine);
     }
 
@@ -1223,7 +1229,9 @@ auto main() -> int {
             expect(bar_count == 1 &&
                        feature_word == simrv::device::virtio::kVirtioFVersion1FeatureWord,
                    "configured PCI BAR is routed through relocated MMIO aperture");
-            if (auto* endpoint = machine.pcie_root()->get_device(4, 9, 2)) {
+            if (auto* endpoint = machine.pcie_root()->get_device(
+                    simrv::device::PciBusNumber{4}, simrv::device::PciDeviceNumber{9},
+                    simrv::device::PciFunctionNumber{2})) {
                 endpoint->trigger_irq();
                 expect((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << 30U)) != 0,
                        "configured PCI endpoint asserts its configured INTx source");

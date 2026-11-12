@@ -14,7 +14,9 @@
 namespace simrv::device {
 
 VirtioPciBlock::VirtioPciBlock(const std::string& disk_path)
-    : VirtioPciDevice(virtio::kDevIdBlock, 0x010000, 1), backend_(disk_path) {}
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdBlock)},
+                      PciClassCode{0x010000}, 1),
+      backend_(disk_path) {}
 
 auto VirtioPciBlock::get_device_features(virtio::VirtioFeatureWord select)
     -> virtio::VirtioFeatureWord {

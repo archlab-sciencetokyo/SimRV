@@ -44,10 +44,10 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
-    const simrv::xlen::Address offset = req.address.raw() - base_.raw();
+    const simrv::memory::MmioOffset offset{req.address.raw() - base_.raw()};
 
     if (!is_write) {
-        switch (offset) {
+        switch (offset.raw()) {
             case kRtcOffset: {  // TIME_LOW (0x00)
                 const uint64_t rtc_ns = current_time_ns();
                 latched_time_high_ = static_cast<uint32_t>(rtc_ns >> 32);
@@ -68,7 +68,7 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
                 break;
         }
     } else {
-        switch (offset) {
+        switch (offset.raw()) {
             case kRtcOffset: {  // TIME_LOW (0x00)
                 const uint64_t target = (current_time_ns() & 0xffffffff00000000ULL) |
                                         (static_cast<uint64_t>(req.data) & 0xffffffffULL);

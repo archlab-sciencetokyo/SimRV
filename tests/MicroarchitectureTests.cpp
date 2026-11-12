@@ -79,7 +79,7 @@ class TestCustomMmio final : public simrv::memory::MmioDevice {
         return simrv::xlen::PhysAddr{base_};
     }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
-    [[nodiscard]] auto read32(simrv::xlen::Address) -> uint32_t override { return 0x51a7; }
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset) -> uint32_t override { return 0x51a7; }
 
    private:
     std::string name_;
@@ -358,7 +358,8 @@ void test_soc_manifest_export() {
     TEST_CHECK(runtime_timer != nullptr && runtime_timer->base_address() == 0x20003000 &&
                runtime_timer->size() == 0x1000);
     auto* runtime_mmio = dynamic_cast<simrv::memory::MmioDevice*>(runtime_timer);
-    TEST_CHECK(runtime_mmio != nullptr && runtime_mmio->read32(0) == 0x51a7);
+    TEST_CHECK(runtime_mmio != nullptr &&
+               runtime_mmio->read32(simrv::memory::MmioOffset{0}) == 0x51a7);
     auto* runtime_reset = custom_machine.memory().system_bus().router().find_by_name("reset");
     TEST_CHECK(runtime_reset != nullptr && runtime_reset->base_address() == 0x10000100);
 
@@ -367,7 +368,8 @@ void test_soc_manifest_export() {
     auto* isolated_timer =
         isolated_machine.memory().system_bus().router().find_by_name("custom-timer");
     auto* isolated_mmio = dynamic_cast<simrv::memory::MmioDevice*>(isolated_timer);
-    TEST_CHECK(isolated_mmio != nullptr && isolated_mmio->read32(0) == 0);
+    TEST_CHECK(isolated_mmio != nullptr &&
+               isolated_mmio->read32(simrv::memory::MmioOffset{0}) == 0);
     std::error_code ignored;
     std::filesystem::remove(image_path, ignored);
 }
@@ -377,7 +379,7 @@ void test_rvcomp_reset_and_ethernet_extensions() {
         .soc = simrv::core::SoCConfig::rvcomp(),
     });
     simrv::device::ResetControlMmio reset(machine, simrv::xlen::PhysAddr{0x10000100});
-    reset.write32(0, 0xdeadbeef);
+    reset.write32(simrv::memory::MmioOffset{0}, 0xdeadbeef);
     TEST_CHECK(machine.reboot_requested);
 
     simrv::device::RingBufferEthernetMmio ethernet(
@@ -387,15 +389,15 @@ void test_rvcomp_reset_and_ethernet_extensions() {
     auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
     auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
     auto* rx = static_cast<simrv::memory::MmioDevice*>(ethernet.rx_node());
-    tx->write32(0, 60);
+    tx->write32(simrv::memory::MmioOffset{0}, 60);
     for (uint32_t word = 0; word < 15; ++word) {
-        tx->write32(4 + word * 4, 0x03020100U + word * 0x04040404U);
+        tx->write32(simrv::memory::MmioOffset{4 + word * 4}, 0x03020100U + word * 0x04040404U);
     }
-    csr->write32(6 * 4, 64);
+    csr->write32(simrv::memory::MmioOffset{6 * 4}, 64);
     TEST_CHECK(ethernet.backend().tx_packet_count() == 1);
     ethernet.poll_backend();
-    TEST_CHECK(csr->read32(4) == 60);
-    TEST_CHECK(rx->read32(0) == 0x03020100U);
+    TEST_CHECK(csr->read32(simrv::memory::MmioOffset{4}) == 60);
+    TEST_CHECK(rx->read32(simrv::memory::MmioOffset{0}) == 0x03020100U);
 }
 
 void test_dummy_mmio_behavior() {
@@ -403,9 +405,9 @@ void test_dummy_mmio_behavior() {
                                     0x12345678);
     TEST_CHECK(std::string_view(device.name()) == "watchdog");
     TEST_CHECK(device.base_address() == 0x30000000 && device.size() == 0x1000);
-    TEST_CHECK(device.read32(0) == 0x12345678);
-    device.write32(0, 0xffffffff);
-    TEST_CHECK(device.read32(0) == 0x12345678);
+    TEST_CHECK(device.read32(simrv::memory::MmioOffset{0}) == 0x12345678);
+    device.write32(simrv::memory::MmioOffset{0}, 0xffffffff);
+    TEST_CHECK(device.read32(simrv::memory::MmioOffset{0}) == 0x12345678);
 }
 
 #if defined(SIMRV_TEST_RVCOMP_UART)
@@ -515,12 +517,12 @@ void test_rvcomp_mmc_plugin_and_device() {
     TEST_CHECK(full_dev->size() == 0x2000);
 
     // Guest driver requests partition block index 8192 (0x2000 = 32 MiB / 4096)
-    full_dev->write32(0, 8192);
-    TEST_CHECK(full_dev->read32(0) == 8192);
-    TEST_CHECK(full_dev->read32(0x1000) == 0x11223344U);
+    full_dev->write32(simrv::memory::MmioOffset{0}, 8192);
+    TEST_CHECK(full_dev->read32(simrv::memory::MmioOffset{0}) == 8192);
+    TEST_CHECK(full_dev->read32(simrv::memory::MmioOffset{0x1000}) == 0x11223344U);
 
-    full_dev->write32(0x1000, 0x55667788U);
-    full_dev->write32(0, 8193);
+    full_dev->write32(simrv::memory::MmioOffset{0x1000}, 0x55667788U);
+    full_dev->write32(simrv::memory::MmioOffset{0}, 8193);
 
     {
         std::ifstream img(full_image_path, std::ios::binary);
@@ -555,11 +557,11 @@ void test_rvcomp_mmc_plugin_and_device() {
 
     auto raw_dev = raw_machine.device_registry().create_mmio(raw_machine, full_cfg);
     TEST_CHECK(raw_dev != nullptr);
-    raw_dev->write32(0, 8192);
-    TEST_CHECK(raw_dev->read32(0x1000) == 0xaabbccddU);
+    raw_dev->write32(simrv::memory::MmioOffset{0}, 8192);
+    TEST_CHECK(raw_dev->read32(simrv::memory::MmioOffset{0x1000}) == 0xaabbccddU);
 
-    raw_dev->write32(0x1000, 0x12344321U);
-    raw_dev->write32(0, 8193);
+    raw_dev->write32(simrv::memory::MmioOffset{0x1000}, 0x12344321U);
+    raw_dev->write32(simrv::memory::MmioOffset{0}, 8193);
 
     {
         std::ifstream img(raw_image_path, std::ios::binary);

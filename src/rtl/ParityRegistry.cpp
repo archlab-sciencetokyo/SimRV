@@ -198,8 +198,7 @@ int main(void) {
 
 class PluginTargetAdapter final : public ParityTarget {
    public:
-    PluginTargetAdapter(const SimRvRtlTarget* target, void* dl_handle)
-        : target_(target), dl_handle_(dl_handle) {}
+    explicit PluginTargetAdapter(const SimRvRtlTarget* target) : target_(target) {}
 
     [[nodiscard]] auto name() const noexcept -> std::string_view override {
         return target_ && target_->name ? target_->name : "unknown";
@@ -231,7 +230,6 @@ class PluginTargetAdapter final : public ParityTarget {
 
    private:
     const SimRvRtlTarget* target_{nullptr};
-    void* dl_handle_{nullptr};
 };
 
 auto check_tool(std::string_view name) -> std::optional<std::filesystem::path> {
@@ -377,7 +375,7 @@ auto ParityRegistry::load_plugin(const std::filesystem::path& plugin_path) -> bo
     }
 
     dl_handles_.push_back(handle);
-    targets_.push_back(std::make_unique<PluginTargetAdapter>(target_desc, handle));
+    targets_.push_back(std::make_unique<PluginTargetAdapter>(target_desc));
     simrv::log::info("ParityRegistry: Loaded external RTL target plugin '{}' from {}",
                      target_desc->name ? target_desc->name : "unnamed", plugin_path.string());
     return true;

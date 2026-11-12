@@ -20,8 +20,8 @@ class ResetControlMmio final : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
     [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t value) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t value) override;
 
    private:
     core::Machine& machine_;

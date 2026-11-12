@@ -181,6 +181,7 @@ Machine::Machine(MachineConfig machine_config)
                     : transfer.complete ? MachineEventKind::DmaCompleted
                                         : MachineEventKind::DmaStarted,
             .cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle,
+            .hart = std::nullopt,
             .transfer_id = transfer.id,
             .byte_count = transfer.byte_count,
             .request_cycle = transfer.request_cycle,
@@ -565,6 +566,7 @@ void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
             .kind = asserted ? MachineEventKind::InterruptAsserted
                              : MachineEventKind::InterruptDeasserted,
             .cycle = runtime_->primary_cpu.clint_mmio.mcycle,
+            .hart = std::nullopt,
             .interrupt_source = irq,
             .component = "platform_irq",
         });
@@ -573,7 +575,7 @@ void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
 
 void Machine::set_hart_irq(simrv::xlen::HartId hart_id, InterruptType type,
                            simrv::xlen::PrivilegeLevel priv, bool asserted) {
-    if (hart_id.val >= num_harts()) {
+    if (hart_id.raw() >= num_harts()) {
         return;
     }
     MipBit pending_bit = MipBit::Msip;
@@ -1375,6 +1377,7 @@ void Machine::reset_state() {
         publish_machine_event(MachineEvent{
             .kind = MachineEventKind::InterruptDeasserted,
             .cycle = primary_hart().clint_mmio.mcycle,
+            .hart = std::nullopt,
             .interrupt_source = irq,
             .component = "platform_irq",
         });
@@ -1569,7 +1572,7 @@ void Machine::notify_interrupt_transition(simrv::xlen::HartId hart_id, uint32_t 
         .kind =
             asserted ? MachineEventKind::InterruptAsserted : MachineEventKind::InterruptDeasserted,
         .cycle = cycle,
-        .hart = hart_id.val,
+        .hart = hart_id,
         .interrupt_cause = cause,
         .component = std::string(source),
     });

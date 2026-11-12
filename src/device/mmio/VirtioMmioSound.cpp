@@ -16,9 +16,9 @@ VirtioMmioSound::VirtioMmioSound(simrv::xlen::PhysAddr base_address, uint32_t ir
     add_queue(64);  // rxq
 }
 
-auto VirtioMmioSound::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioSound::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
-    return backend_.read_config(offset, size);
+    return backend_.read_config(offset.raw(), size);
 }
 
 void VirtioMmioSound::on_queue_notify(uint32_t q_idx) {

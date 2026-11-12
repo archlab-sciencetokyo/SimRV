@@ -126,8 +126,9 @@ void PlatformBuilder::compose(Machine& machine) {
             const auto descriptor = SoCDeviceRegistry::descriptor(machine.config.soc, pci_kinds[i]);
             if (!descriptor) continue;
             machine.runtime_->pcie->attach_device(
-                {descriptor->pci_bus.value_or(0), descriptor->pci_slot.value_or(0),
-                 descriptor->pci_function.value_or(0)},
+                {simrv::device::PciBusNumber{descriptor->pci_bus.value_or(0)},
+                 simrv::device::PciDeviceNumber{descriptor->pci_slot.value_or(0)},
+                 simrv::device::PciFunctionNumber{descriptor->pci_function.value_or(0)}},
                 pci_devices[i], descriptor->pci_intx_source.value_or(0));
         }
     }

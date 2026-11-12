@@ -64,14 +64,14 @@ void VirtioMmioInput::push_mouse_wheel(int32_t delta) {
     push_event(0x00 /* EV_SYN */, 0 /* SYN_REPORT */, 0);
 }
 
-auto VirtioMmioInput::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioInput::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
-    return backend_.read_config(offset, static_cast<uint8_t>(size));
+    return backend_.read_config(offset.raw(), static_cast<uint8_t>(size));
 }
 
-void VirtioMmioInput::write_device_config(simrv::xlen::Address offset, uint64_t val,
+void VirtioMmioInput::write_device_config(simrv::memory::MmioOffset offset, uint64_t val,
                                           std::size_t size) {
-    backend_.write_config(offset, static_cast<uint32_t>(val), static_cast<uint8_t>(size));
+    backend_.write_config(offset.raw(), static_cast<uint32_t>(val), static_cast<uint8_t>(size));
 }
 
 }  // namespace simrv::device

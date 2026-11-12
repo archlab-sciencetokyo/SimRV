@@ -44,8 +44,8 @@ class Imsic : public memory::MmioDevice {
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
 
     // Indirect CSR register access via miselect/mireg or siselect/sireg
     [[nodiscard]] auto csr_read(simrv::xlen::HartId hart_idx, uint32_t reg_idx)
@@ -97,8 +97,8 @@ class Aplic : public memory::MmioDevice {
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
 
     // External device wire IRQ trigger
     void set_irq(simrv::xlen::InterruptSourceId irq_source, bool active);

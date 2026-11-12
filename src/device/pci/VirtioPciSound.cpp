@@ -6,12 +6,14 @@
 
 namespace simrv::device {
 
-VirtioPciSound::VirtioPciSound() : VirtioPciDevice(virtio::kDevIdSound, 0x040100, 4) {
+VirtioPciSound::VirtioPciSound()
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdSound)},
+                      PciClassCode{0x040100}, 4) {
     init_bar(4, sizeof(virtio::VirtioSndConfig), false, false);
 }
 
 auto VirtioPciSound::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
-    return backend_.read_config(offset, size);
+    return backend_.read_config(offset.raw(), size);
 }
 
 void VirtioPciSound::on_queue_notify(virtio::VirtioQueueIndex queue_index) {

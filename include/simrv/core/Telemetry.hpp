@@ -6,7 +6,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 
@@ -44,7 +47,7 @@ enum class MachineEventKind : uint8_t {
 struct MachineEvent {
     MachineEventKind kind{};
     uint64_t cycle{};
-    uint32_t hart = UINT32_MAX;
+    std::optional<simrv::xlen::HartId> hart;
     uint32_t interrupt_cause{};
     uint32_t interrupt_source{};
     uint64_t transfer_id{};

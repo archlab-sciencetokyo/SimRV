@@ -41,7 +41,7 @@ auto SmpTopologyConfig::validate() const -> std::expected<void, std::string> {
     if (auto result = validate_cache(l3, "shared L3", 512 * 1024, 16); !result) {
         return result;
     }
-    std::vector<uint32_t> assigned_harts;
+    std::vector<simrv::xlen::HartId> assigned_harts;
     std::vector<uint32_t> cluster_ids;
     for (const auto& cluster : clusters) {
         if (std::ranges::find(cluster_ids, cluster.id) != cluster_ids.end()) {
@@ -55,7 +55,7 @@ auto SmpTopologyConfig::validate() const -> std::expected<void, std::string> {
             return result;
         }
         for (const auto hart : cluster.harts) {
-            if (hart >= hart_count ||
+            if (hart.raw() >= hart_count ||
                 std::ranges::find(assigned_harts, hart) != assigned_harts.end()) {
                 return std::unexpected("each SMP hart must belong to exactly one valid cluster");
             }

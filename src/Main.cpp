@@ -148,11 +148,11 @@ auto write_machine_event(std::ofstream& out, const simrv::core::MachineEvent& ev
     if (!out) return;
     out << "{\"schema_version\":2,\"event\":\"" << event_name(event.kind) << "\",\"timestamp\":\""
         << lifecycle_timestamp() << "\",\"cycle\":" << event.cycle;
-    if (event.hart != UINT32_MAX) out << ",\"hart\":" << event.hart;
+    if (event.hart) out << ",\"hart\":" << event.hart->raw();
     out << ",\"component\":\"" << json_escape(event.component) << "\",\"payload\":{";
     if (event.kind == simrv::core::MachineEventKind::InterruptAsserted ||
         event.kind == simrv::core::MachineEventKind::InterruptDeasserted) {
-        if (event.hart == UINT32_MAX) {
+        if (!event.hart) {
             out << "\"source_id\":" << event.interrupt_source;
         } else {
             out << "\"cause\":" << event.interrupt_cause;

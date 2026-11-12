@@ -116,7 +116,7 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
         out << "{\"id\": " << cluster.id << ", \"harts\": [";
         for (size_t h = 0; h < cluster.harts.size(); ++h) {
             if (h != 0) out << ", ";
-            out << cluster.harts[h];
+            out << cluster.harts[h].raw();
         }
         out << "], \"l2\": ";
         write_cache(out, cluster.l2);

@@ -20,8 +20,8 @@ namespace simrv::device {
  */
 class VirtioPciDevice : public PciDevice, public virtio::IVirtioTransport {
    public:
-    static constexpr PciVendorId kVirtioPciVendorId = 0x1AF4;
-    static constexpr PciDeviceId kVirtioPciModernDeviceBase = 0x1040;
+    static constexpr PciVendorId kVirtioPciVendorId{0x1AF4};
+    static constexpr PciDeviceId kVirtioPciModernDeviceBase{0x1040};
 
     VirtioPciDevice(PciSubsystemId subsystem_device_id, PciClassCode class_code,
                     size_t max_queues = 2);

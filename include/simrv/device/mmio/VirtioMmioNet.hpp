@@ -24,7 +24,8 @@ class VirtioMmioNet : public VirtioMmioDevice {
 
    protected:
     void on_queue_notify(uint32_t q_idx) override;
-    auto read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t override;
+    auto read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+        -> uint64_t override;
 
    private:
     virtio::NetBackend backend_;

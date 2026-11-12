@@ -152,7 +152,7 @@ void test_mmio_plugin_replaces_standalone_builtin() {
         machine.memory().system_bus().router().resolve_device(simrv::xlen::PhysAddr{power.base});
     auto* replacement = dynamic_cast<simrv::memory::MmioDevice*>(node);
     TEST_CHECK(replacement != nullptr);
-    TEST_CHECK(replacement->read32(0) == 0xffffffffU);
+    TEST_CHECK(replacement->read32(simrv::memory::MmioOffset{0}) == 0xffffffffU);
 }
 
 void test_framebuffer_uses_mmio_device_context() {
@@ -166,7 +166,7 @@ void test_framebuffer_uses_mmio_device_context() {
     auto* framebuffer = dynamic_cast<simrv::device::FramebufferDevice*>(mmio.get());
     TEST_CHECK(framebuffer != nullptr);
     TEST_CHECK(framebuffer->framebuffer_data().size() == 4);
-    mmio->write8(16, 0x5a);
+    mmio->write8(simrv::memory::MmioOffset{16}, 0x5a);
     TEST_CHECK(framebuffer->framebuffer_data()[0] == 0x5a);
 
     simrv::core::MachineConfig cfg{};
@@ -186,10 +186,10 @@ void test_framebuffer_uses_mmio_device_context() {
         simrv::xlen::PhysAddr{config.base});
     auto* configured_mmio = dynamic_cast<simrv::memory::MmioDevice*>(node);
     TEST_CHECK(configured_mmio != nullptr);
-    configured_mmio->write8(16, 0xa5);
+    configured_mmio->write8(simrv::memory::MmioOffset{16}, 0xa5);
     TEST_CHECK(configured_fb->framebuffer_data()[0] == 0xa5);
     TEST_CHECK(configured.framebuffer_view().size() == 4);
-    configured_mmio->write8(20, 1);
+    configured_mmio->write8(simrv::memory::MmioOffset{20}, 1);
     TEST_CHECK(configured.framebuffer_view().data() == nullptr);
 }
 
@@ -369,9 +369,9 @@ void test_v1_compatibility() {
     config.compatible = "test,legacy-device";
     auto legacy = registry.create_mmio(machine, config);
     TEST_CHECK(legacy != nullptr);
-    TEST_CHECK(legacy->read32(4) == 0x12340004);
-    TEST_CHECK(legacy->read32(8) == 1);
-    legacy->write32(0, 1);
+    TEST_CHECK(legacy->read32(simrv::memory::MmioOffset{4}) == 0x12340004);
+    TEST_CHECK(legacy->read32(simrv::memory::MmioOffset{8}) == 1);
+    legacy->write32(simrv::memory::MmioOffset{0}, 1);
     TEST_CHECK((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << 7)) != 0);
     auto* external = dynamic_cast<simrv::device::ExternalMmioDevice*>(legacy.get());
     TEST_CHECK(external != nullptr && !external->has_cycle_ticking());
@@ -399,26 +399,26 @@ void test_example_timer_plugin_integration() {
     TEST_CHECK(mmio != nullptr);
 
     // Write limit = 50 cycles
-    mmio->write32(0x08, 50);
+    mmio->write32(simrv::memory::MmioOffset{0x08}, 50);
     // Write control = Enable (1) | IRQ Enable (2)
-    mmio->write32(0x00, 3);
+    mmio->write32(simrv::memory::MmioOffset{0x00}, 3);
 
     // Initial status: not expired
-    TEST_CHECK(mmio->read32(0x04) == 0);
+    TEST_CHECK(mmio->read32(simrv::memory::MmioOffset{0x04}) == 0);
 
     // Advance 30 cycles
     machine.advance_device_cycles(30);
-    TEST_CHECK(mmio->read32(0x0C) == 30);
-    TEST_CHECK(mmio->read32(0x04) == 0);
+    TEST_CHECK(mmio->read32(simrv::memory::MmioOffset{0x0C}) == 30);
+    TEST_CHECK(mmio->read32(simrv::memory::MmioOffset{0x04}) == 0);
 
     // Advance 25 more cycles (total 55 >= 50)
     machine.advance_device_cycles(25);
     // Status should be expired (bit 0 set)
-    TEST_CHECK((mmio->read32(0x04) & 1) != 0);
+    TEST_CHECK((mmio->read32(simrv::memory::MmioOffset{0x04}) & 1) != 0);
 
     // Clear status (W1C)
-    mmio->write32(0x04, 1);
-    TEST_CHECK(mmio->read32(0x04) == 0);
+    mmio->write32(simrv::memory::MmioOffset{0x04}, 1);
+    TEST_CHECK(mmio->read32(simrv::memory::MmioOffset{0x04}) == 0);
 }
 
 void test_timer_plugin_advances_in_fast_baremetal() {
@@ -451,11 +451,11 @@ void test_timer_plugin_advances_in_fast_baremetal() {
         machine.memory().system_bus().router().resolve_device(simrv::xlen::PhysAddr{0x10030000});
     auto* timer = dynamic_cast<simrv::memory::MmioDevice*>(node);
     TEST_CHECK(timer != nullptr);
-    timer->write32(0x08, 1000);
-    timer->write32(0x00, 1);
+    timer->write32(simrv::memory::MmioOffset{0x08}, 1000);
+    timer->write32(simrv::memory::MmioOffset{0x00}, 1);
     machine.run();
     TEST_CHECK(machine.retired_instruction_count() == 128);
-    TEST_CHECK(timer->read32(0x0c) == 128);
+    TEST_CHECK(timer->read32(simrv::memory::MmioOffset{0x0c}) == 128);
     std::error_code error;
     std::filesystem::remove(path, error);
 }
@@ -490,17 +490,17 @@ void test_example_dma_accel_plugin_integration() {
     TEST_CHECK(
         machine.memory().dma_write(simrv::xlen::PhysAddr{src_ram}, input.data(), input.size()));
 
-    mmio->write32(0x08, static_cast<uint32_t>(src_ram & 0xFFFFFFFFU));
-    mmio->write32(0x0C, static_cast<uint32_t>(src_ram >> 32U));
-    mmio->write32(0x10, static_cast<uint32_t>(dst_ram & 0xFFFFFFFFU));
-    mmio->write32(0x14, static_cast<uint32_t>(dst_ram >> 32U));
-    mmio->write32(0x18, static_cast<uint32_t>(input.size()));
+    mmio->write32(simrv::memory::MmioOffset{0x08}, static_cast<uint32_t>(src_ram & 0xFFFFFFFFU));
+    mmio->write32(simrv::memory::MmioOffset{0x0C}, static_cast<uint32_t>(src_ram >> 32U));
+    mmio->write32(simrv::memory::MmioOffset{0x10}, static_cast<uint32_t>(dst_ram & 0xFFFFFFFFU));
+    mmio->write32(simrv::memory::MmioOffset{0x14}, static_cast<uint32_t>(dst_ram >> 32U));
+    mmio->write32(simrv::memory::MmioOffset{0x18}, static_cast<uint32_t>(input.size()));
 
     // Control: Start (1) | Invert (4)
-    mmio->write32(0x00, 1 | 4);
+    mmio->write32(simrv::memory::MmioOffset{0x00}, 1 | 4);
 
     // Verify status done (bit 0 set)
-    TEST_CHECK((mmio->read32(0x04) & 1) != 0);
+    TEST_CHECK((mmio->read32(simrv::memory::MmioOffset{0x04}) & 1) != 0);
 
     // Read back inverted data from dst_ram
     std::vector<uint8_t> output(input.size());

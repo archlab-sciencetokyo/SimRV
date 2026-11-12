@@ -85,7 +85,8 @@ class CoherenceHub {
     [[nodiscard]] auto l3_cache() const noexcept -> const simrv::cache::L3Cache& {
         return l3_cache_;
     }
-    [[nodiscard]] auto shared_l2_for_hart(uint32_t hart) noexcept -> simrv::cache::L2Cache*;
+    [[nodiscard]] auto shared_l2_for_hart(simrv::xlen::HartId hart) noexcept
+        -> simrv::cache::L2Cache*;
     [[nodiscard]] auto shared_l3_enabled() const noexcept -> bool { return l3_enabled_; }
 
     [[nodiscard]] auto get_directory_state(simrv::xlen::PhysAddr line_base) const -> DirectoryEntry;
@@ -115,7 +116,7 @@ class CoherenceHub {
     simrv::cache::L3Cache l3_cache_{};
     struct ClusterCache {
         uint32_t id = 0;
-        std::vector<uint32_t> harts;
+        std::vector<simrv::xlen::HartId> harts;
         simrv::cache::L2Cache cache{};
         simrv::core::SharedCacheConfig config{};
     };
@@ -137,7 +138,7 @@ class CoherenceHub {
                            std::array<simrv::xlen::Byte, kLineBytes>& dirty_data);
 
     void probe_hart_icache(simrv::xlen::HartId hart_id, const TlChannelB& probe_req);
-    [[nodiscard]] auto l2_cache_for_hart(uint32_t hart) -> ClusterCache*;
+    [[nodiscard]] auto l2_cache_for_hart(simrv::xlen::HartId hart) -> ClusterCache*;
     void invalidate_shared_caches(LineAddress line_base);
     [[nodiscard]] auto allocate_sink() -> TlSinkId;
 };

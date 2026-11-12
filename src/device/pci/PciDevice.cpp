@@ -12,15 +12,15 @@ namespace simrv::device {
 
 PciDevice::PciDevice(PciVendorId vendor_id, PciDeviceId device_id, PciRevisionId revision_id,
                      PciClassCode class_code) {
-    config_space_[0x00] = static_cast<uint8_t>(vendor_id & 0xff);
-    config_space_[0x01] = static_cast<uint8_t>((vendor_id >> 8) & 0xff);
-    config_space_[0x02] = static_cast<uint8_t>(device_id & 0xff);
-    config_space_[0x03] = static_cast<uint8_t>((device_id >> 8) & 0xff);
+    config_space_[0x00] = static_cast<uint8_t>(vendor_id.raw() & 0xff);
+    config_space_[0x01] = static_cast<uint8_t>((vendor_id.raw() >> 8) & 0xff);
+    config_space_[0x02] = static_cast<uint8_t>(device_id.raw() & 0xff);
+    config_space_[0x03] = static_cast<uint8_t>((device_id.raw() >> 8) & 0xff);
 
-    config_space_[0x08] = revision_id;
-    config_space_[0x09] = static_cast<uint8_t>(class_code & 0xff);
-    config_space_[0x0A] = static_cast<uint8_t>((class_code >> 8) & 0xff);
-    config_space_[0x0B] = static_cast<uint8_t>((class_code >> 16) & 0xff);
+    config_space_[0x08] = revision_id.raw();
+    config_space_[0x09] = static_cast<uint8_t>(class_code.raw() & 0xff);
+    config_space_[0x0A] = static_cast<uint8_t>((class_code.raw() >> 8) & 0xff);
+    config_space_[0x0B] = static_cast<uint8_t>((class_code.raw() >> 16) & 0xff);
 
     config_space_[0x0E] = 0x00;  // Type 0 header
     config_space_[0x3D] = 0x01;  // INTA#
@@ -68,29 +68,30 @@ void PciDevice::trigger_msi(uint16_t vector) {
     }
 }
 
-void PciDevice::init_msi(uint8_t cap_offset, bool is_64bit) {
-    msi_cap_offset_ = cap_offset;
+void PciDevice::init_msi(PciConfigOffset cap_offset, bool is_64bit) {
+    const auto raw_offset = static_cast<uint8_t>(cap_offset.raw());
+    msi_cap_offset_ = raw_offset;
     config_space_[0x06] |= 0x10;  // Capabilities List present
 
     if (config_space_[0x34] == 0) {
-        config_space_[0x34] = cap_offset;
+        config_space_[0x34] = raw_offset;
     } else {
         uint8_t curr = config_space_[0x34];
-        while (config_space_[curr + 1] != 0 && config_space_[curr + 1] != cap_offset) {
+        while (config_space_[curr + 1] != 0 && config_space_[curr + 1] != raw_offset) {
             curr = config_space_[curr + 1];
         }
-        config_space_[curr + 1] = cap_offset;
+        config_space_[curr + 1] = raw_offset;
     }
 
-    config_space_[cap_offset] = static_cast<uint8_t>(PciCapabilityId::Msi);
-    config_space_[cap_offset + 1] = 0;
+    config_space_[raw_offset] = static_cast<uint8_t>(PciCapabilityId::Msi);
+    config_space_[raw_offset + 1] = 0;
     const uint16_t ctrl = is_64bit ? 0x0080U : 0x0000U;
-    std::memcpy(&config_space_[cap_offset + 2], &ctrl, 2);
+    std::memcpy(&config_space_[raw_offset + 2], &ctrl, 2);
     const uint32_t zero = 0;
-    std::memcpy(&config_space_[cap_offset + 4], &zero, 4);
-    std::memcpy(&config_space_[cap_offset + 8], &zero, 4);
+    std::memcpy(&config_space_[raw_offset + 4], &zero, 4);
+    std::memcpy(&config_space_[raw_offset + 8], &zero, 4);
     if (is_64bit) {
-        std::memcpy(&config_space_[cap_offset + 12], &zero, 4);
+        std::memcpy(&config_space_[raw_offset + 12], &zero, 4);
     }
 }
 
@@ -184,24 +185,24 @@ void PciDevice::init_bar(PciBarIndex bar_idx, PciBarSize size, bool is_64bit,
 }
 
 auto PciDevice::config_read(PciConfigOffset offset, PciAccessBytes size) -> PciConfigData {
-    if (offset + size > config_space_.size()) return 0xFFFFFFFFU;
+    if (offset.raw() + size > config_space_.size()) return 0xFFFFFFFFU;
     uint32_t val = 0;
-    std::memcpy(&val, &config_space_[offset], size);
+    std::memcpy(&val, &config_space_[offset.raw()], size);
     return val;
 }
 
 void PciDevice::config_write(PciConfigOffset offset, PciConfigData val, PciAccessBytes size) {
-    if (offset + size > config_space_.size()) return;
+    if (offset.raw() + size > config_space_.size()) return;
 
-    if (offset >= 0x10 && offset < 0x28) {
-        int bar_idx = static_cast<int>((offset - 0x10) / 4);
+    if (offset.raw() >= 0x10 && offset.raw() < 0x28) {
+        int bar_idx = static_cast<int>((offset.raw() - 0x10) / 4);
         if (bar_idx < 6) {
             const bool is_hi_of_64bit = (bar_idx > 0 && bar_is_64bit_[bar_idx - 1]);
             const int target_bar = is_hi_of_64bit ? bar_idx - 1 : bar_idx;
 
             if (bar_sizes_[target_bar] > 0) {
                 uint32_t cur = 0;
-                std::memcpy(&cur, &config_space_[offset], 4);
+                std::memcpy(&cur, &config_space_[offset.raw()], 4);
                 if (is_hi_of_64bit) {
                     const auto hi_mask = static_cast<uint32_t>(bar_masks_[target_bar] >> 32);
                     if (val == 0xFFFFFFFFU) {
@@ -209,7 +210,7 @@ void PciDevice::config_write(PciConfigOffset offset, PciConfigData val, PciAcces
                     } else {
                         cur = val & hi_mask;
                     }
-                    std::memcpy(&config_space_[offset], &cur, 4);
+                    std::memcpy(&config_space_[offset.raw()], &cur, 4);
                 } else {
                     const auto lo_mask =
                         static_cast<uint32_t>(bar_masks_[target_bar] & 0xFFFFFFFFULL);
@@ -219,7 +220,7 @@ void PciDevice::config_write(PciConfigOffset offset, PciConfigData val, PciAcces
                         cur = val & lo_mask;
                     }
                     if (bar_is_64bit_[target_bar]) cur |= 0x04;
-                    std::memcpy(&config_space_[offset], &cur, 4);
+                    std::memcpy(&config_space_[offset.raw()], &cur, 4);
                 }
                 bar_bases_[target_bar] = bar_base(static_cast<PciBarIndex>(target_bar));
                 on_bar_updated(static_cast<PciBarIndex>(target_bar));
@@ -228,7 +229,7 @@ void PciDevice::config_write(PciConfigOffset offset, PciConfigData val, PciAcces
         }
     }
 
-    std::memcpy(&config_space_[offset], &val, size);
+    std::memcpy(&config_space_[offset.raw()], &val, size);
 }
 
 auto PciDevice::bar_read(PciBarIndex bar_idx, PciBarOffset offset, PciAccessBytes size)

@@ -76,8 +76,24 @@ const simrv::xlen::PhysAddr uart_base{platform_uart_base};
 ```
 
 Use `.raw()` only when crossing an architectural, serialized, or C ABI boundary whose representation
-is scalar. Validate the external width before narrowing to the configured guest `Word`. Sizes,
-register offsets, and arithmetic displacements remain scalar values. `TLB::lookup` takes a virtual
+is scalar. Validate the external width before narrowing to the configured guest `Word`. Sizes and
+arithmetic displacements remain scalar values; MMIO register offsets use
+`simrv::memory::MmioOffset` and are distinct from physical addresses. Construct them explicitly at a
+device-register boundary, and use `.raw()` when indexing host storage or crossing a scalar ABI.
+PCI bus, device, and function numbers and PCI configuration offsets also have distinct wrappers;
+construct them explicitly when decoding ECAM addresses and extract `.raw()` when packing PCI
+configuration bytes. PCI vendor, device, subsystem, revision, and class-code values are distinct
+too; construct them explicitly at endpoint definitions and extract `.raw()` only when serializing
+the PCI configuration space.
+Hart identifiers use `simrv::xlen::HartId`; construct them explicitly when importing hart numbers
+from configuration, logs, or a plugin boundary, and use `.raw()` when formatting or serializing
+them. SMP cluster membership, TUI backend requests, trace contexts and filters, telemetry events,
+and per-hart statistics carry `HartId`; an absent hart in machine events or bus trace records is
+represented with `std::nullopt`. Dynamic CSR indices use `simrv::xlen::CsrNumber`; use the `Csr` enum
+overload when the CSR is known at compile time, and construct `CsrNumber` explicitly for decoded or
+externally supplied indices. Neither identifier converts implicitly to or from an integer, and the
+C plugin ABI keeps its scalar representation through the existing adapters.
+`TLB::lookup` takes a virtual
 address and `TLB::insert` receives a virtual tag and physical result. Device constructors and
 `MmioDevice::base_address()` use `PhysAddr`; address-based TUI backend requests carry a virtual or
 physical alternative selected by their command. The C plugin structures and callbacks remain

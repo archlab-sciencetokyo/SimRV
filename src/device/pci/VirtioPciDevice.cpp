@@ -16,24 +16,25 @@ namespace simrv::device {
 VirtioPciDevice::VirtioPciDevice(PciSubsystemId subsystem_device_id, PciClassCode class_code,
                                  size_t max_queues)
     : PciDevice(kVirtioPciVendorId,
-                static_cast<PciDeviceId>(kVirtioPciModernDeviceBase + subsystem_device_id), 0x01,
-                class_code),
+                PciDeviceId{static_cast<uint16_t>(kVirtioPciModernDeviceBase.raw() +
+                                                  subsystem_device_id.raw())},
+                PciRevisionId{0x01}, class_code),
       queues_(max_queues) {
-    config_space_[0x2C] = static_cast<uint8_t>(kVirtioPciVendorId & 0xff);
-    config_space_[0x2D] = static_cast<uint8_t>((kVirtioPciVendorId >> 8) & 0xff);
-    config_space_[0x2E] = static_cast<uint8_t>(subsystem_device_id & 0xff);
-    config_space_[0x2F] = static_cast<uint8_t>((subsystem_device_id >> 8) & 0xff);
+    config_space_[0x2C] = static_cast<uint8_t>(kVirtioPciVendorId.raw() & 0xff);
+    config_space_[0x2D] = static_cast<uint8_t>((kVirtioPciVendorId.raw() >> 8) & 0xff);
+    config_space_[0x2E] = static_cast<uint8_t>(subsystem_device_id.raw() & 0xff);
+    config_space_[0x2F] = static_cast<uint8_t>((subsystem_device_id.raw() >> 8) & 0xff);
 
     init_bar(0, 0x1000, false, false);
     config_space_[0x06] = 0x10;  // Capabilities List present
 
-    add_pci_cap(1, 0, 0x000, 0x100);     // Common cfg
-    add_pci_cap(2, 0, 0x100, 0x100, 4);  // Notify cfg
-    add_pci_cap(3, 0, 0x200, 0x100);     // ISR cfg
-    add_pci_cap(4, 0, 0x300, 0x100);     // Device cfg
+    add_pci_cap(1, 0, PciBarOffset{0x000}, 0x100);     // Common cfg
+    add_pci_cap(2, 0, PciBarOffset{0x100}, 0x100, 4);  // Notify cfg
+    add_pci_cap(3, 0, PciBarOffset{0x200}, 0x100);     // ISR cfg
+    add_pci_cap(4, 0, PciBarOffset{0x300}, 0x100);     // Device cfg
 
     init_msi(next_cap_offset_, true);  // Standard 64-bit MSI capability
-    next_cap_offset_ = static_cast<PciConfigOffset>(next_cap_offset_ + 24);
+    next_cap_offset_ = PciConfigOffset{static_cast<uint16_t>(next_cap_offset_.raw() + 24)};
 }
 
 void VirtioPciDevice::reset() {
@@ -55,7 +56,7 @@ void VirtioPciDevice::reset() {
 
 void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffset offset,
                                   PciBarSize length, uint32_t notify_mult) {
-    uint8_t cap_offset = next_cap_offset_;
+    const uint8_t cap_offset = static_cast<uint8_t>(next_cap_offset_.raw());
     uint8_t cap_len = (cap_type == 2) ? 20 : 16;
     if (cap_offset + cap_len > 0x100) return;
 
@@ -74,14 +75,14 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffse
     config_space_[cap_offset + 2] = cap_len;
     config_space_[cap_offset + 3] = cap_type;
     config_space_[cap_offset + 4] = bar;
-    auto offset_u32 = static_cast<uint32_t>(offset);
+    auto offset_u32 = static_cast<uint32_t>(offset.raw());
     auto length_u32 = static_cast<uint32_t>(length);
     std::memcpy(&config_space_[cap_offset + 8], &offset_u32, 4);
     std::memcpy(&config_space_[cap_offset + 12], &length_u32, 4);
     if (cap_type == 2) {
         std::memcpy(&config_space_[cap_offset + 16], &notify_mult, 4);
     }
-    next_cap_offset_ += cap_len;
+    next_cap_offset_ = PciConfigOffset{static_cast<uint16_t>(next_cap_offset_.raw() + cap_len)};
 }
 
 auto VirtioPciDevice::dma_read(simrv::xlen::PhysAddr paddr, void* dst, size_t len) -> bool {
@@ -137,7 +138,7 @@ auto VirtioPciDevice::bar_read(PciBarIndex bar_idx, PciBarOffset offset, PciAcce
 
     // Common Config (0x000 - 0x0FF)
     if (offset < 0x100) {
-        switch (offset) {
+        switch (offset.raw()) {
             case 0x00:
                 return device_features_sel_;
             case 0x04:
@@ -244,7 +245,7 @@ void VirtioPciDevice::bar_write(PciBarIndex bar_idx, PciBarOffset offset, PciMmi
 
     // Common Config
     if (offset < 0x100) {
-        switch (offset) {
+        switch (offset.raw()) {
             case 0x00:
                 device_features_sel_ = static_cast<virtio::VirtioFeatureWord>(val);
                 break;

@@ -98,7 +98,7 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
             .request_cycle = current_cycle,
             .completion_cycle = std::nullopt,
             .latency_cycles = std::nullopt,
-            .hart = req.hart.val,
+            .hart = req.hart,
             .transfer_size = req.size,
             .burst_length = static_cast<uint8_t>(
                 req.size > kTlBeatSize ? (1u << (req.size - kTlBeatSize)) : 1u),
@@ -106,7 +106,7 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
             .byte_enable = req.mask,
             .denied = std::nullopt,
             .corrupt = std::nullopt,
-            .master = std::format("hart-{}-{}", req.hart.val, data_port ? "data" : "instruction"),
+            .master = std::format("hart-{}-{}", req.hart.raw(), data_port ? "data" : "instruction"),
             .target = target != nullptr                                  ? target->name()
                       : machine_.memory_geometry().contains(req.address) ? "ram"
                                                                          : "unmapped",
@@ -131,8 +131,9 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
                 rhs.payload.logical_issue_sequence == std::numeric_limits<uint64_t>::max()
                     ? rhs.sequence
                     : rhs.payload.logical_issue_sequence;
-            return std::tuple{lhs.submitted_cycle, lhs.payload.hart.val, lhs_issue, lhs.sequence} <
-                   std::tuple{rhs.submitted_cycle, rhs.payload.hart.val, rhs_issue, rhs.sequence};
+            return std::tuple{lhs.submitted_cycle, lhs.payload.hart.raw(), lhs_issue,
+                              lhs.sequence} <
+                   std::tuple{rhs.submitted_cycle, rhs.payload.hart.raw(), rhs_issue, rhs.sequence};
         });
     req_queue_.insert(position, std::move(timed_request));
     has_pending_requests_.store(true, std::memory_order_release);
@@ -338,14 +339,14 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             .request_cycle = request.submitted_cycle,
             .completion_cycle = current_cycle + response_latency - 1,
             .latency_cycles = current_cycle + response_latency - 1 - request.submitted_cycle,
-            .hart = req.hart.val,
+            .hart = req.hart,
             .transfer_size = req.size,
             .burst_length = beat_count,
             .data = resp.data,
             .byte_enable = req.mask,
             .denied = resp.denied,
             .corrupt = resp.corrupt,
-            .master = std::format("hart-{}-{}", req.hart.val, data_port ? "data" : "instruction"),
+            .master = std::format("hart-{}-{}", req.hart.raw(), data_port ? "data" : "instruction"),
             .target = target != nullptr                                  ? target->name()
                       : machine_.memory_geometry().contains(req.address) ? "ram"
                                                                          : "unmapped",

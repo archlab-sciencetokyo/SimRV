@@ -66,14 +66,17 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         return true;
     }
 
+    simrv::xlen::Word raw_addr{};
     simrv::xlen::VirtAddr addr{};
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
-        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr.val, 16);
-        ok = (result.ec == std::errc{});
+        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), raw_addr, 16);
+        ok = result.ec == std::errc{} && result.ptr == input.data() + input.size();
+        if (ok) addr = simrv::xlen::VirtAddr{raw_addr};
     } else if (std::all_of(input.begin(), input.end(), ::isxdigit)) {
-        auto result = std::from_chars(input.data(), input.data() + input.size(), addr.val, 16);
-        ok = (result.ec == std::errc{});
+        auto result = std::from_chars(input.data(), input.data() + input.size(), raw_addr, 16);
+        ok = result.ec == std::errc{} && result.ptr == input.data() + input.size();
+        if (ok) addr = simrv::xlen::VirtAddr{raw_addr};
     } else {
         auto sym_opt = machine.symbol_table().lookup_name(input);
         if (sym_opt.has_value()) {

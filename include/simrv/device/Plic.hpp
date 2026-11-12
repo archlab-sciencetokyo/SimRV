@@ -11,6 +11,7 @@
 #include "simrv/core/InterruptTopology.hpp"
 #include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/Mmio.hpp"
+#include "simrv/memory/MmioTypes.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -54,12 +55,12 @@ class Plic : public memory::TileLinkNode {
         return address >= base_address_ && address.raw() - base_address_.raw() < size_;
     }
 
-    [[nodiscard]] auto offset(simrv::xlen::PhysAddr addr) const -> simrv::xlen::Address {
-        return addr.raw() - base_address_.raw();
+    [[nodiscard]] auto offset(simrv::xlen::PhysAddr addr) const -> simrv::memory::MmioOffset {
+        return simrv::memory::MmioOffset{addr.raw() - base_address_.raw()};
     }
 
-    auto mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word;
-    void mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata);
+    auto mmio_read(simrv::memory::MmioOffset offset) -> simrv::xlen::Word;
+    void mmio_write(simrv::memory::MmioOffset offset, simrv::xlen::Word wdata);
 
     void update_mip();
     void set_irq(simrv::xlen::IrqNumber irq_num, int state_val);
@@ -87,7 +88,7 @@ class Plic : public memory::TileLinkNode {
     core::CPU* cpu_{nullptr};
     simrv::xlen::PhysAddr base_address_ = kBaseAddress;
     simrv::xlen::Address size_ = kSize;
-    [[nodiscard]] auto get_context_for_offset(simrv::xlen::Address offset) const
+    [[nodiscard]] auto get_context_for_offset(simrv::memory::MmioOffset offset) const
         -> std::optional<simrv::xlen::PlicContextId>;
 };
 

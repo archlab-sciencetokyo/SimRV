@@ -53,7 +53,10 @@ int read(void* ctx, uint64_t offset, uint32_t size, uint64_t* out) {
 }
 int write(void* ctx, uint64_t offset, uint32_t size, uint64_t value) {
     auto& uart = *static_cast<Uart*>(ctx);
-    if (offset != 0 || size != 1 || !uart.serial || !uart.serial->write_byte) return -1;
+    if (offset != 0 || (size != 1 && size != 2 && size != 4) || !uart.serial ||
+        !uart.serial->write_byte) {
+        return -1;
+    }
     uart.serial->write_byte(uart.serial->host_ctx, static_cast<uint8_t>(value));
     return 0;
 }

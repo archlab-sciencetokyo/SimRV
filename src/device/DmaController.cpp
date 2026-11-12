@@ -16,21 +16,21 @@ DmaController::DmaController(core::Machine* machine, simrv::xlen::PhysAddr base_
                              simrv::xlen::Address size, uint32_t irq_num)
     : memory::MmioDevice(machine), base_address_(base_address), size_(size), irq_num_(irq_num) {}
 
-auto DmaController::read32(simrv::xlen::Address offset) -> uint32_t {
-    switch (offset) {
-        case kRegControl:
+auto DmaController::read32(simrv::memory::MmioOffset offset) -> uint32_t {
+    switch (offset.raw()) {
+        case kRegControl.raw():
             return (control_ & kControlIntEnable) | (busy_ ? kControlBusy : 0U);
-        case kRegStatus:
+        case kRegStatus.raw():
             return status_;
-        case kRegSrcAddrLo:
+        case kRegSrcAddrLo.raw():
             return src_addr_lo_;
-        case kRegSrcAddrHi:
+        case kRegSrcAddrHi.raw():
             return src_addr_hi_;
-        case kRegDstAddrLo:
+        case kRegDstAddrLo.raw():
             return dst_addr_lo_;
-        case kRegDstAddrHi:
+        case kRegDstAddrHi.raw():
             return dst_addr_hi_;
-        case kRegByteCount:
+        case kRegByteCount.raw():
             return byte_count_;
         default:
             // Interrupt acknowledgement and unmapped registers read as zero.
@@ -38,9 +38,9 @@ auto DmaController::read32(simrv::xlen::Address offset) -> uint32_t {
     }
 }
 
-void DmaController::write32(simrv::xlen::Address offset, uint32_t val) {
-    switch (offset) {
-        case kRegControl: {
+void DmaController::write32(simrv::memory::MmioOffset offset, uint32_t val) {
+    switch (offset.raw()) {
+        case kRegControl.raw(): {
             const bool was_int_enabled = (control_ & kControlIntEnable) != 0;
             control_ = val & kControlIntEnable;
             if (was_int_enabled && (control_ & kControlIntEnable) == 0 && machine_ != nullptr) {
@@ -51,25 +51,25 @@ void DmaController::write32(simrv::xlen::Address offset, uint32_t val) {
             }
             break;
         }
-        case kRegStatus:
+        case kRegStatus.raw():
             status_ &= ~val;
             break;
-        case kRegSrcAddrLo:
+        case kRegSrcAddrLo.raw():
             src_addr_lo_ = val;
             break;
-        case kRegSrcAddrHi:
+        case kRegSrcAddrHi.raw():
             src_addr_hi_ = val;
             break;
-        case kRegDstAddrLo:
+        case kRegDstAddrLo.raw():
             dst_addr_lo_ = val;
             break;
-        case kRegDstAddrHi:
+        case kRegDstAddrHi.raw():
             dst_addr_hi_ = val;
             break;
-        case kRegByteCount:
+        case kRegByteCount.raw():
             byte_count_ = val;
             break;
-        case kRegInterruptAck:
+        case kRegInterruptAck.raw():
             status_ &= ~(val != 0 ? val : (kStatusDone | kStatusError));
             if (machine_ != nullptr) {
                 machine_->set_platform_irq(irq_num_, false);

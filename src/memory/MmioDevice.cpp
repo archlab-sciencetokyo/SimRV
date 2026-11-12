@@ -23,15 +23,15 @@ concept NarrowMmioValue = std::same_as<T, uint8_t> || std::same_as<T, uint16_t>;
 
 template <NarrowMmioValue T>
 [[nodiscard]] auto read_narrow(MmioDevice& device, MmioOffset offset) -> T {
-    const auto aligned = offset & ~MmioOffset{3};
-    const auto shift = static_cast<unsigned>((offset & (4u - sizeof(T))) * 8u);
+    const MmioOffset aligned{offset.raw() & ~MmioOffset{3}.raw()};
+    const auto shift = static_cast<unsigned>((offset.raw() & (4u - sizeof(T))) * 8u);
     return static_cast<T>(device.read32(aligned) >> shift);
 }
 
 template <NarrowMmioValue T>
 void write_narrow(MmioDevice& device, MmioOffset offset, T value) {
-    const auto aligned = offset & ~MmioOffset{3};
-    const auto shift = static_cast<unsigned>((offset & (4u - sizeof(T))) * 8u);
+    const MmioOffset aligned{offset.raw() & ~MmioOffset{3}.raw()};
+    const auto shift = static_cast<unsigned>((offset.raw() & (4u - sizeof(T))) * 8u);
     const auto mask = static_cast<uint32_t>(std::numeric_limits<T>::max()) << shift;
     const auto previous = device.read32(aligned);
     device.write32(aligned, (previous & ~mask) | (static_cast<uint32_t>(value) << shift));
@@ -40,39 +40,33 @@ void write_narrow(MmioDevice& device, MmioOffset offset, T value) {
 
 MmioDevice::MmioDevice(simrv::core::Machine* machine) : machine_(machine) {}
 
-auto MmioDevice::read8(simrv::xlen::Address offset) -> uint8_t {
-    return read_narrow<uint8_t>(*this, offset);
-}
+auto MmioDevice::read8(MmioOffset offset) -> uint8_t { return read_narrow<uint8_t>(*this, offset); }
 
-auto MmioDevice::read16(simrv::xlen::Address offset) -> uint16_t {
+auto MmioDevice::read16(MmioOffset offset) -> uint16_t {
     return read_narrow<uint16_t>(*this, offset);
 }
 
-auto MmioDevice::read32(simrv::xlen::Address /*offset*/) -> uint32_t { return 0; }
+auto MmioDevice::read32(MmioOffset /*offset*/) -> uint32_t { return 0; }
 
-auto MmioDevice::read64(simrv::xlen::Address offset) -> uint64_t {
+auto MmioDevice::read64(MmioOffset offset) -> uint64_t {
     const uint64_t lo = read32(offset);
     const uint64_t hi = read32(offset + 4);
     return lo | (hi << 32);
 }
 
-void MmioDevice::write8(simrv::xlen::Address offset, uint8_t val) {
-    write_narrow(*this, offset, val);
-}
+void MmioDevice::write8(MmioOffset offset, uint8_t val) { write_narrow(*this, offset, val); }
 
-void MmioDevice::write16(simrv::xlen::Address offset, uint16_t val) {
-    write_narrow(*this, offset, val);
-}
+void MmioDevice::write16(MmioOffset offset, uint16_t val) { write_narrow(*this, offset, val); }
 
-void MmioDevice::write32(simrv::xlen::Address /*offset*/, uint32_t /*val*/) {}
+void MmioDevice::write32(MmioOffset /*offset*/, uint32_t /*val*/) {}
 
-void MmioDevice::write64(simrv::xlen::Address offset, uint64_t val) {
+void MmioDevice::write64(MmioOffset offset, uint64_t val) {
     write32(offset, static_cast<uint32_t>(val & 0xffffffffU));
     write32(offset + 4, static_cast<uint32_t>((val >> 32) & 0xffffffffU));
 }
 
 auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    const simrv::xlen::Address offset = req.address.raw() - base_address().raw();
+    const MmioOffset offset{req.address.raw() - base_address().raw()};
     resp.source = req.source;
     resp.size = req.size;
     resp.denied = false;

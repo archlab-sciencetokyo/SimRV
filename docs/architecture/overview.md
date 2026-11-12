@@ -154,7 +154,10 @@ The instruction timing cache keys virtual PCs rather than memory bus addresses. 
 request carries an explicit virtual or physical address alternative for its command. C plugin ABI
 and serialized formats retain scalar representations, with explicit typed adapters at those
 boundaries. Scalar range arithmetic remains in widened RAM and PMP helpers, AXI message records,
-device register offsets, and parsers until they validate the input width and establish its domain.
+protocol register fields, and parsers until they validate the input width and establish its domain.
+First-party MMIO register accessors use `MmioOffset`, distinct from `PhysAddr`; routing constructs the
+offset after it establishes the device-relative address. Explicit `.raw()` extraction is used at scalar
+decoding, host-indexing, and external-interface boundaries.
 The explainer distinguishes effective virtual addresses from translated physical addresses; its
 register base and offsets remain scalar arithmetic values. Its public explanation and disassembly
 entry points accept virtual PCs. Branch prediction feedback, BTB targets, and return-address stack

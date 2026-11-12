@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "simrv/memory/MmioTypes.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"

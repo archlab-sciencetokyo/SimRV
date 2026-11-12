@@ -62,6 +62,7 @@
 namespace simrv::tui {
 static_assert(std::same_as<decltype(BackendRequest::address),
                            std::variant<simrv::xlen::PhysAddr, simrv::xlen::VirtAddr>>);
+static_assert(std::same_as<decltype(BackendRequest::hart), simrv::xlen::HartId>);
 
 struct TuiTestAccess {
     static auto arrow(Tui& tui, std::string_view sequence) -> bool {
@@ -3044,6 +3045,18 @@ void test_memory_inspector_and_custom_address() {
     auto cb = [&](const std::string& msg) { status_msg = msg; };
     bool const ok = simrv::tui::modals::AddressModal::submit(reset_cmd, machine, &pane, cb);
     expect(ok && !pane.is_custom_memory_inspect(), "submitting 'sp' resets custom memory inspect");
+
+    std::string address_cmd = "0x80000010";
+    expect(simrv::tui::modals::AddressModal::submit(address_cmd, machine, &pane, cb),
+           "address modal accepts a complete virtual address");
+    expect(pane.get_inspect_addr() == simrv::xlen::VirtAddr{0x80000010},
+           "address modal stores a parsed virtual address");
+
+    address_cmd = "0x80000010trailing";
+    expect(!simrv::tui::modals::AddressModal::submit(address_cmd, machine, &pane, cb),
+           "address modal rejects trailing characters after a parsed address");
+    expect(pane.get_inspect_addr() == simrv::xlen::VirtAddr{0x80000010},
+           "rejected address input leaves the current inspection address unchanged");
 }
 
 void test_responsive_labels_and_header() {

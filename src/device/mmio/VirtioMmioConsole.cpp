@@ -18,7 +18,7 @@ VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::PhysAddr base_address, uint32_
     add_queue(64);  // tx
 }
 
-auto VirtioMmioConsole::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioConsole::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
     (void)size;
     if (offset == 0) return 80 | (24 << 16);  // cols=80, rows=24

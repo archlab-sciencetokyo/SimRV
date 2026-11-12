@@ -10,7 +10,9 @@
 
 namespace simrv::device {
 
-VirtioPciConsole::VirtioPciConsole() : VirtioPciDevice(virtio::kDevIdConsole, 0x070000, 2) {}
+VirtioPciConsole::VirtioPciConsole()
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdConsole)},
+                      PciClassCode{0x070000}, 2) {}
 
 auto VirtioPciConsole::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     (void)size;

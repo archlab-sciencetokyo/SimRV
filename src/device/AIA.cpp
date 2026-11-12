@@ -31,14 +31,14 @@ void Imsic::reset() {
     }
 }
 
-auto Imsic::read32(simrv::xlen::Address /*offset*/) -> uint32_t { return 0; }
+auto Imsic::read32(simrv::memory::MmioOffset /*offset*/) -> uint32_t { return 0; }
 
-void Imsic::write32(simrv::xlen::Address offset, uint32_t val) {
+void Imsic::write32(simrv::memory::MmioOffset offset, uint32_t val) {
     const auto hart_idx = static_cast<size_t>(offset / 0x4000U);
     if (hart_idx >= kMaxHarts) {
         return;
     }
-    const simrv::xlen::Address reg_offset = offset % 0x4000U;
+    const simrv::memory::MmioOffset reg_offset = offset % 0x4000U;
     if (reg_offset == 0x000U) {  // seteipnum_le
         const uint32_t id = val & 0x7ffU;
         if (id > 0 && id < kNumInterrupts) {
@@ -185,7 +185,7 @@ void Aplic::reset() {
     enabled_ = 0;
 }
 
-auto Aplic::read32(simrv::xlen::Address offset) -> uint32_t {
+auto Aplic::read32(simrv::memory::MmioOffset offset) -> uint32_t {
     if (offset == 0x0000U) {
         return domaincfg_;
     }
@@ -238,7 +238,7 @@ auto Aplic::read32(simrv::xlen::Address offset) -> uint32_t {
     return 0;
 }
 
-void Aplic::write32(simrv::xlen::Address offset, uint32_t val) {
+void Aplic::write32(simrv::memory::MmioOffset offset, uint32_t val) {
     if (act_test_hooks_ && offset == 0x0008U && machine_ != nullptr) {
         constexpr uint32_t kSetPending = uint32_t{1} << 31U;
         const uint32_t guest_interrupt = val & ~kSetPending;

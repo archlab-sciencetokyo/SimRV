@@ -19,6 +19,7 @@
 #include "simrv/core/InterruptTopology.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -179,7 +180,7 @@ struct SharedCacheConfig {
 
 struct SmpClusterConfig {
     uint32_t id = 0;
-    std::vector<uint32_t> harts;
+    std::vector<simrv::xlen::HartId> harts;
     SharedCacheConfig l2{};
 };
 
@@ -198,20 +199,22 @@ struct SmpTopologyConfig {
     void resize_harts(uint32_t count) {
         hart_count = count;
         for (auto& cluster : clusters) {
-            std::erase_if(cluster.harts, [count](uint32_t hart) { return hart >= count; });
+            std::erase_if(cluster.harts,
+                          [count](simrv::xlen::HartId hart) { return hart.raw() >= count; });
         }
         std::erase_if(clusters, [](const auto& cluster) { return cluster.harts.empty(); });
         if (clusters.empty()) return;
         for (uint32_t hart = 0; hart < count; ++hart) {
-            if (std::ranges::any_of(clusters, [hart](const auto& cluster) {
-                    return std::ranges::find(cluster.harts, hart) != cluster.harts.end();
+            const auto hart_id = simrv::xlen::HartId{hart};
+            if (std::ranges::any_of(clusters, [hart_id](const auto& cluster) {
+                    return std::ranges::find(cluster.harts, hart_id) != cluster.harts.end();
                 }))
                 continue;
-            clusters.front().harts.push_back(hart);
+            clusters.front().harts.push_back(hart_id);
         }
     }
 
-    [[nodiscard]] auto cluster_for_hart(uint32_t hart) const -> uint32_t {
+    [[nodiscard]] auto cluster_for_hart(simrv::xlen::HartId hart) const -> uint32_t {
         for (const auto& cluster : clusters) {
             if (std::ranges::find(cluster.harts, hart) != cluster.harts.end()) return cluster.id;
         }

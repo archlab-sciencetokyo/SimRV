@@ -13,6 +13,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::util {
 
@@ -61,7 +62,7 @@ struct RuntimeOptions {
     std::string trace_events;
     std::string trace_function;
     std::string trace_device;
-    std::optional<uint32_t> trace_hart;
+    std::optional<simrv::xlen::HartId> trace_hart;
     std::optional<simrv::xlen::VirtAddr> trace_pc_start;
     std::optional<simrv::xlen::VirtAddr> trace_pc_end;
     std::optional<simrv::xlen::Counter> trace_after_cycle;
@@ -86,6 +87,7 @@ struct RuntimeOptions {
     unsigned int misa_xlen = 0;
 
     bool appmode = true;
+    bool explicit_appmode = false;
     bool tuimode = false;
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;

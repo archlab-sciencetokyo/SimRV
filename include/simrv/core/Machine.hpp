@@ -441,8 +441,8 @@ class Machine final : public core::IInterruptController {
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
     [[nodiscard]] auto hart(size_t index = 0) -> CPU&;
     [[nodiscard]] auto hart(size_t index = 0) const -> const CPU&;
-    [[nodiscard]] auto hart(simrv::xlen::HartId id) -> CPU& { return hart(id.val); }
-    [[nodiscard]] auto hart(simrv::xlen::HartId id) const -> const CPU& { return hart(id.val); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) -> CPU& { return hart(id.raw()); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) const -> const CPU& { return hart(id.raw()); }
     [[nodiscard]] auto num_harts() const -> size_t;
     [[nodiscard]] auto primary_hart() noexcept -> CPU&;
     [[nodiscard]] auto primary_hart() const noexcept -> const CPU&;

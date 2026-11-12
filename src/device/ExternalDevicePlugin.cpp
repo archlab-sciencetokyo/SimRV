@@ -236,52 +236,52 @@ auto ExternalMmioDevice::handle_request(const memory::TlChannelA& req, memory::T
 auto ExternalMmioDevice::read8(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData8 {
     if (desc_ == nullptr || desc_->read == nullptr) return 0;
     uint64_t val = 0;
-    desc_->read(ctx_, offset, 1, &val);
+    desc_->read(ctx_, offset.raw(), 1, &val);
     return static_cast<simrv::memory::MmioData8>(val & 0xffU);
 }
 
 auto ExternalMmioDevice::read16(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData16 {
     if (desc_ == nullptr || desc_->read == nullptr) return 0;
     uint64_t val = 0;
-    desc_->read(ctx_, offset, 2, &val);
+    desc_->read(ctx_, offset.raw(), 2, &val);
     return static_cast<simrv::memory::MmioData16>(val & 0xffffU);
 }
 
 auto ExternalMmioDevice::read32(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData32 {
     if (desc_ == nullptr || desc_->read == nullptr) return 0;
     uint64_t val = 0;
-    desc_->read(ctx_, offset, 4, &val);
+    desc_->read(ctx_, offset.raw(), 4, &val);
     return static_cast<simrv::memory::MmioData32>(val & 0xffffffffU);
 }
 
 auto ExternalMmioDevice::read64(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData64 {
     if (desc_ == nullptr || desc_->read == nullptr) return 0;
     uint64_t val = 0;
-    desc_->read(ctx_, offset, 8, &val);
+    desc_->read(ctx_, offset.raw(), 8, &val);
     return val;
 }
 
 void ExternalMmioDevice::write8(simrv::memory::MmioOffset offset, simrv::memory::MmioData8 val) {
     if (desc_ != nullptr && desc_->write != nullptr) {
-        desc_->write(ctx_, offset, 1, val);
+        desc_->write(ctx_, offset.raw(), 1, val);
     }
 }
 
 void ExternalMmioDevice::write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16 val) {
     if (desc_ != nullptr && desc_->write != nullptr) {
-        desc_->write(ctx_, offset, 2, val);
+        desc_->write(ctx_, offset.raw(), 2, val);
     }
 }
 
 void ExternalMmioDevice::write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 val) {
     if (desc_ != nullptr && desc_->write != nullptr) {
-        desc_->write(ctx_, offset, 4, val);
+        desc_->write(ctx_, offset.raw(), 4, val);
     }
 }
 
 void ExternalMmioDevice::write64(simrv::memory::MmioOffset offset, simrv::memory::MmioData64 val) {
     if (desc_ != nullptr && desc_->write != nullptr) {
-        desc_->write(ctx_, offset, 8, val);
+        desc_->write(ctx_, offset.raw(), 8, val);
     }
 }
 

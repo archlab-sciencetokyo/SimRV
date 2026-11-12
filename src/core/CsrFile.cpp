@@ -835,7 +835,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             if (was_pending != is_pending) {
                 cpu_.machine_->trace().log_interrupt_signal(cpu_, kInterruptCauseBit | code,
                                                             is_pending, source);
-                cpu_.machine_->notify_interrupt_transition(cpu_.state().mhartid,
+                cpu_.machine_->notify_interrupt_transition(cpu_.hart_id(),
                                                            static_cast<uint32_t>(code), is_pending,
                                                            source, cpu_.clint_mmio.mcycle);
             }

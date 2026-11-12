@@ -16,10 +16,10 @@ class DummyMmio final : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
     [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
-    [[nodiscard]] auto read32(simrv::xlen::Address /*offset*/) -> uint32_t override {
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset /*offset*/) -> uint32_t override {
         return read_value_;
     }
-    void write32(simrv::xlen::Address /*offset*/, uint32_t /*value*/) override {}
+    void write32(simrv::memory::MmioOffset /*offset*/, uint32_t /*value*/) override {}
 
    private:
     std::string name_;

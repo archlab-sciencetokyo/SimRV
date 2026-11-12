@@ -74,7 +74,9 @@ auto virtio::NetBackend::poll_host_rx() -> std::size_t {
 #include "simrv/device/virtio/VirtioNetQueue.hpp"
 
 VirtioPciNet::VirtioPciNet(virtio::NetBackend::Mode mode)
-    : VirtioPciDevice(virtio::kDevIdNet, 0x020000, 2), backend_(mode) {}
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdNet)},
+                      PciClassCode{0x020000}, 2),
+      backend_(mode) {}
 
 void VirtioPciNet::poll_backend() {
     if (backend_.poll_host_rx() != 0) on_queue_notify(0);
@@ -99,7 +101,7 @@ auto VirtioPciNet::read_device_config(PciBarOffset offset, PciAccessBytes size) 
         const auto config_offset = offset + byte;
         uint8_t value_byte = 0;
         if (config_offset < mac.size()) {
-            value_byte = mac[config_offset];
+            value_byte = mac[config_offset.raw()];
         } else if (config_offset == 6) {
             value_byte = 1;  // VIRTIO_NET_S_LINK_UP
         }

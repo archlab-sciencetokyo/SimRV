@@ -18,7 +18,8 @@ VirtioMmioGpu::VirtioMmioGpu(simrv::xlen::PhysAddr base_address, uint32_t irq_nu
     add_queue(64);  // cursorq
 }
 
-auto VirtioMmioGpu::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioGpu::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+    -> uint64_t {
     (void)size;
     if (offset == 0) return 0;  // events_read
     if (offset == 4) return 0;  // events_clear

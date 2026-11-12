@@ -122,14 +122,18 @@ void test_za64rs_reservation_set() {
 
     ReservationTable table;
     constexpr simrv::xlen::Address kAddress = 0x8000103FULL;
-    table.set_reservation(0, simrv::xlen::PhysAddr{kAddress});
-    TEST_ASSERT(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001038ULL}));
-    TEST_ASSERT(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001030ULL}));
-    TEST_ASSERT(table.check_reservation(0, simrv::xlen::PhysAddr{0x8000103FULL}));
-    TEST_ASSERT(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001040ULL}));
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kAddress});
+    TEST_ASSERT(
+        table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001038ULL}));
+    TEST_ASSERT(
+        !table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001030ULL}));
+    TEST_ASSERT(
+        table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x8000103FULL}));
+    TEST_ASSERT(
+        !table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001040ULL}));
 
-    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001038ULL}, 1);
-    TEST_ASSERT(!table.check_reservation(0, simrv::xlen::PhysAddr{kAddress}));
+    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001038ULL}, simrv::xlen::HartId{1});
+    TEST_ASSERT(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kAddress}));
 }
 
 void test_ziccrse_eventual_lr_sc_success() {

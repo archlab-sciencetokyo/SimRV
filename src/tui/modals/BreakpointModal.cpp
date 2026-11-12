@@ -5,8 +5,8 @@
 #include "simrv/tui/modals/BreakpointModal.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <format>
 
 #include "simrv/core/Cpu.hpp"
@@ -24,13 +24,13 @@ namespace {
 
 auto parse_virtual_address(const std::string& input, const simrv::core::Machine& machine)
     -> std::optional<simrv::xlen::VirtAddr> {
-    simrv::xlen::VirtAddr address{};
+    simrv::xlen::Word raw_address{};
     auto first = input.data();
     auto last = first + input.size();
     int base = 16;
     if (input.starts_with("0x") || input.starts_with("0X")) first += 2;
-    const auto parsed = std::from_chars(first, last, address.val, base);
-    if (parsed.ec == std::errc{} && parsed.ptr == last) return address;
+    const auto parsed = std::from_chars(first, last, raw_address, base);
+    if (parsed.ec == std::errc{} && parsed.ptr == last) return simrv::xlen::VirtAddr{raw_address};
     return machine.symbol_table().lookup_name(input);
 }
 
@@ -173,7 +173,8 @@ void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Mach
     if (type == ModalType::SetBreakpoint) {
         input = std::format("0x{:08x}", machine.primary_hart().state().pc.raw());
     } else if (type == ModalType::SetWatchpoint) {
-        input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr().raw() : 0);
+        input =
+            std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr().raw() : 0);
     }
 }
 
@@ -210,9 +211,10 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return false;
         }
 
-        machine.breakpoint_manager().add_watchpoint(*address, 4,
-                                                    simrv::debug::WatchType::Write, "");
-        set_status_override_cb(std::format("Memory Write Watchpoint set at 0x{:08x}", address->raw()));
+        machine.breakpoint_manager().add_watchpoint(*address, 4, simrv::debug::WatchType::Write,
+                                                    "");
+        set_status_override_cb(
+            std::format("Memory Write Watchpoint set at 0x{:08x}", address->raw()));
         return true;
     }
     return false;

@@ -69,21 +69,25 @@ void VirtioMmioDevice::schedule_deferred_dma(size_t transfer_bytes,
     }
 }
 
-auto VirtioMmioDevice::read8(simrv::xlen::Address offset) -> uint8_t {
+auto VirtioMmioDevice::read8(simrv::memory::MmioOffset offset) -> uint8_t {
     if (offset >= 0x100) {
         return static_cast<uint8_t>(read_device_config(offset - 0x100, 1));
     }
-    return static_cast<uint8_t>(read32(offset & ~3ULL) >> ((offset & 3ULL) * 8));
+    return static_cast<uint8_t>(
+        read32(simrv::memory::MmioOffset{offset.raw() & ~simrv::xlen::Word{3}}) >>
+        ((offset.raw() & 3ULL) * 8));
 }
 
-auto VirtioMmioDevice::read16(simrv::xlen::Address offset) -> uint16_t {
+auto VirtioMmioDevice::read16(simrv::memory::MmioOffset offset) -> uint16_t {
     if (offset >= 0x100) {
         return static_cast<uint16_t>(read_device_config(offset - 0x100, 2));
     }
-    return static_cast<uint16_t>(read32(offset & ~3ULL) >> ((offset & 2ULL) * 8));
+    return static_cast<uint16_t>(
+        read32(simrv::memory::MmioOffset{offset.raw() & ~simrv::xlen::Word{3}}) >>
+        ((offset.raw() & 2ULL) * 8));
 }
 
-auto VirtioMmioDevice::read64(simrv::xlen::Address offset) -> uint64_t {
+auto VirtioMmioDevice::read64(simrv::memory::MmioOffset offset) -> uint64_t {
     if (offset >= 0x100) {
         return read_device_config(offset - 0x100, 8);
     }
@@ -92,23 +96,25 @@ auto VirtioMmioDevice::read64(simrv::xlen::Address offset) -> uint64_t {
     return lo | (hi << 32);
 }
 
-void VirtioMmioDevice::write8(simrv::xlen::Address offset, uint8_t val) {
+void VirtioMmioDevice::write8(simrv::memory::MmioOffset offset, uint8_t val) {
     if (offset >= 0x100) {
         write_device_config(offset - 0x100, val, 1);
         return;
     }
-    write32(offset & ~3ULL, static_cast<uint32_t>(val) << ((offset & 3ULL) * 8));
+    write32(simrv::memory::MmioOffset{offset.raw() & ~simrv::xlen::Word{3}},
+            static_cast<uint32_t>(val) << ((offset.raw() & 3ULL) * 8));
 }
 
-void VirtioMmioDevice::write16(simrv::xlen::Address offset, uint16_t val) {
+void VirtioMmioDevice::write16(simrv::memory::MmioOffset offset, uint16_t val) {
     if (offset >= 0x100) {
         write_device_config(offset - 0x100, val, 2);
         return;
     }
-    write32(offset & ~3ULL, static_cast<uint32_t>(val) << ((offset & 2ULL) * 8));
+    write32(simrv::memory::MmioOffset{offset.raw() & ~simrv::xlen::Word{3}},
+            static_cast<uint32_t>(val) << ((offset.raw() & 2ULL) * 8));
 }
 
-void VirtioMmioDevice::write64(simrv::xlen::Address offset, uint64_t val) {
+void VirtioMmioDevice::write64(simrv::memory::MmioOffset offset, uint64_t val) {
     if (offset >= 0x100) {
         write_device_config(offset - 0x100, val, 8);
         return;
@@ -117,12 +123,12 @@ void VirtioMmioDevice::write64(simrv::xlen::Address offset, uint64_t val) {
     write32(offset + 4, static_cast<uint32_t>(val >> 32));
 }
 
-auto VirtioMmioDevice::read32(simrv::xlen::Address offset) -> uint32_t {
+auto VirtioMmioDevice::read32(simrv::memory::MmioOffset offset) -> uint32_t {
     if (offset >= 0x100) {
         return static_cast<uint32_t>(read_device_config(offset - 0x100, 4));
     }
 
-    switch (offset) {
+    switch (offset.raw()) {
         case 0x00:
             return 0x74726976;  // Magic "virt"
         case 0x04:
@@ -161,13 +167,13 @@ auto VirtioMmioDevice::read32(simrv::xlen::Address offset) -> uint32_t {
     }
 }
 
-void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
+void VirtioMmioDevice::write32(simrv::memory::MmioOffset offset, uint32_t value) {
     if (offset >= 0x100) {
         write_device_config(offset - 0x100, value, 4);
         return;
     }
 
-    switch (offset) {
+    switch (offset.raw()) {
         case 0x14:
             device_features_sel_ = value;
             break;

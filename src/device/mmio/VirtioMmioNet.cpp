@@ -26,14 +26,15 @@ void VirtioMmioNet::poll_backend() {
     if (backend_.poll_host_rx() != 0) on_queue_notify(0);
 }
 
-auto VirtioMmioNet::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioNet::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+    -> uint64_t {
     const auto& mac = backend_.get_mac();
     uint64_t value = 0;
     for (std::size_t byte = 0; byte < size && byte < sizeof(value); ++byte) {
         const auto config_offset = offset + byte;
         uint8_t value_byte = 0;
         if (config_offset < mac.size()) {
-            value_byte = mac[config_offset];
+            value_byte = mac[config_offset.raw()];
         } else if (config_offset == 6) {
             value_byte = 1;  // VIRTIO_NET_S_LINK_UP
         }

@@ -12,10 +12,11 @@ VirtioMmioFs::VirtioMmioFs(simrv::xlen::PhysAddr base, uint32_t irq, core::Machi
     add_queue(128);  // REQUEST
 }
 
-auto VirtioMmioFs::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioFs::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+    -> uint64_t {
     uint64_t value = 0;
     for (std::size_t i = 0; i < size && i < 8; ++i) {
-        const auto index = static_cast<size_t>(offset + i);
+        const auto index = static_cast<size_t>((offset + i).raw());
         const uint8_t byte = index < backend_.tag().size() ? backend_.tag()[index]
                              : index == 36                 ? 1
                                                            : 0;

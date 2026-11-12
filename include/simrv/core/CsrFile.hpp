@@ -6,6 +6,7 @@
 
 #include <expected>
 
+#include "simrv/core/CsrTypes.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -33,8 +34,14 @@ class CsrFile {
     void setMstatus(simrv::xlen::CsrValue wdata);
     [[nodiscard]] auto read(simrv::xlen::CsrNumber csr) const
         -> std::expected<simrv::xlen::CsrValue, ExceptionCode>;
+    [[nodiscard]] auto read(Csr csr) const -> std::expected<simrv::xlen::CsrValue, ExceptionCode> {
+        return read(simrv::xlen::CsrNumber{csr});
+    }
     auto write(simrv::xlen::CsrNumber csr, simrv::xlen::CsrValue wdata)
         -> std::expected<void, ExceptionCode>;
+    auto write(Csr csr, simrv::xlen::CsrValue wdata) -> std::expected<void, ExceptionCode> {
+        return write(simrv::xlen::CsrNumber{csr}, wdata);
+    }
 
    private:
     CPU& cpu_;

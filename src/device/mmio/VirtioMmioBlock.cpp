@@ -20,7 +20,7 @@ VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::PhysAddr base_address, uint32_t ir
     add_queue(64);
 }
 
-auto VirtioMmioBlock::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioBlock::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
     (void)size;
     const uint64_t capacity = backend_.capacity_sectors();

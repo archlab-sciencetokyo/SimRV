@@ -280,7 +280,7 @@ inline constexpr TlManagerCapabilities kMmioCapabilities{
 }
 
 [[nodiscard]] constexpr auto make_tl_source(simrv::xlen::HartId hart, TlPort port) -> TlSourceId {
-    return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.val) << 1u) |
+    return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.raw()) << 1u) |
                                    static_cast<TlSourceId>(port));
 }
 

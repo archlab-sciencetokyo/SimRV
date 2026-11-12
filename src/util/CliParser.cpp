@@ -981,10 +981,12 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     }
     if (option_id == "--baremetal") {
         result.options.appmode = true;
+        result.options.explicit_appmode = true;
         return true;
     }
     if (option_id == "--os") {
         result.options.appmode = false;
+        result.options.explicit_appmode = true;
         return true;
     }
     if (option_id == "--no-sbi") {
@@ -1423,7 +1425,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
     if (option_id == "--trace-hart") {
         auto value = parse_u32_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        options.trace_hart = *value;
+        options.trace_hart = simrv::xlen::HartId{*value};
         return true;
     }
     if (option_id == "--trace-after-cycle" || option_id == "--trace-before-cycle") {
@@ -1953,6 +1955,46 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
+    if (!result.options.explicit_appmode) {
+        const bool is_disk_image = result.options.fn_memimg.ends_with(".img") ||
+                                   result.options.fn_memimg.ends_with(".raw") ||
+                                   result.options.fn_memimg.ends_with(".ext4");
+        if (is_disk_image) {
+            result.options.appmode = false;
+        }
+    }
+    if (!result.options.appmode && result.options.fn_dvtree.empty()) {
+        const bool is_rvcomp = result.options.config_target.contains("rvcomp") ||
+                               result.options.fn_memimg.contains("rvcomp") ||
+                               result.options.fn_memimg.contains("sys_full") ||
+                               result.options.fn_memimg.contains("sys_minimal");
+        if (is_rvcomp) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            if (result.options.config_target.empty()) {
+                for (const auto& candidate : {"configs/models/rvcomp.cfg"}) {
+                    if (fs::is_regular_file(candidate, ec) && !ec) {
+                        result.options.config_target = candidate;
+                        result.options.fn_config = candidate;
+                        break;
+                    }
+                }
+            }
+            for (const auto& candidate : {"linux-images/rv98.dtb", "rv98.dtb"}) {
+                if (fs::is_regular_file(candidate, ec) && !ec) {
+                    result.options.fn_dvtree = candidate;
+                    break;
+                }
+            }
+            if (result.options.fn_dskimg.empty() && (result.options.fn_memimg.ends_with(".img") ||
+                                                     result.options.fn_memimg.ends_with(".raw") ||
+                                                     result.options.fn_memimg.ends_with(".ext4") ||
+                                                     result.options.fn_memimg.ends_with(".bin"))) {
+                result.options.fn_dskimg = result.options.fn_memimg;
+                result.options.use_disk = true;
+            }
+        }
+    }
     if (!result.options.appmode &&
         (result.options.fn_memimg.empty() || result.options.fn_dvtree.empty())) {
         if (auto auto_bundle = simrv::util::resolve_buildroot_image_bundle("")) {
@@ -1997,7 +2039,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected("--trace-register-writes requires --arch-trace");
     }
     if (result.options.trace_hart &&
-        *result.options.trace_hart >= simrv::core::ExecutionConfig::kMaxHarts) {
+        result.options.trace_hart->raw() >= simrv::core::ExecutionConfig::kMaxHarts) {
         return std::unexpected("--trace-hart must identify a supported hart (0-15)");
     }
     if (result.options.trace_pc_start && result.options.trace_pc_end &&

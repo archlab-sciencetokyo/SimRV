@@ -4,7 +4,9 @@
 namespace simrv::device {
 
 VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)
-    : VirtioPciDevice(virtio::kDevIdFs, 0x010000, 2), backend_(std::move(tag)) {
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdFs)},
+                      PciClassCode{0x010000}, 2),
+      backend_(std::move(tag)) {
     (void)backend_.set_shared_directory(shared_directory);
     queues_[0].num_max = queues_[0].num = 8;    // HIPRIO
     queues_[1].num_max = queues_[1].num = 128;  // REQUEST
@@ -13,7 +15,7 @@ VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)
 auto VirtioPciFs::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     PciMmioData value = 0;
     for (uint8_t i = 0; i < size && i < sizeof(PciMmioData); ++i) {
-        const auto index = static_cast<size_t>(offset + i);
+        const auto index = static_cast<size_t>((offset + i).raw());
         const uint8_t byte = index < backend_.tag().size() ? backend_.tag()[index]
                              : index == 36                 ? 1
                                                            : 0;

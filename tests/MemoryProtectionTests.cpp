@@ -197,31 +197,33 @@ void test_pmp_csr_locking_and_updates() {
 
     // Write pmpcfg0 and pmpaddr0
     const simrv::xlen::Address test_addr = 0x80001000 >> 2;
-    auto res_addr = cpu.write_csr(0x3B0, static_cast<simrv::xlen::CsrValue>(test_addr));
+    auto res_addr =
+        cpu.write_csr(simrv::xlen::CsrNumber{0x3B0}, static_cast<simrv::xlen::CsrValue>(test_addr));
     expect(res_addr.has_value(), "Write to pmpaddr0 succeeded");
 
     // Write pmpcfg0 with L = 1, NA4, R
     const simrv::xlen::CsrValue cfg_val =
         simrv::core::pmp::kPmpL | simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR;
-    auto res_cfg = cpu.write_csr(0x3A0, cfg_val);
+    auto res_cfg = cpu.write_csr(simrv::xlen::CsrNumber{0x3A0}, cfg_val);
     expect(res_cfg.has_value(), "Write to pmpcfg0 succeeded");
 
     // Verify written values
-    auto read_addr = cpu.read_csr(0x3B0);
+    auto read_addr = cpu.read_csr(simrv::xlen::CsrNumber{0x3B0});
     expect(read_addr.has_value() && *read_addr == test_addr, "Read pmpaddr0 matches written value");
-    auto read_cfg = cpu.read_csr(0x3A0);
+    auto read_cfg = cpu.read_csr(simrv::xlen::CsrNumber{0x3A0});
     expect(read_cfg.has_value() && (*read_cfg & 0xFF) == cfg_val,
            "Read pmpcfg0 matches written value with L=1");
 
     // Attempt to write locked pmpaddr0 - should be ignored
-    (void)cpu.write_csr(0x3B0, static_cast<simrv::xlen::CsrValue>(0x90000000 >> 2));
-    read_addr = cpu.read_csr(0x3B0);
+    (void)cpu.write_csr(simrv::xlen::CsrNumber{0x3B0},
+                        static_cast<simrv::xlen::CsrValue>(0x90000000 >> 2));
+    read_addr = cpu.read_csr(simrv::xlen::CsrNumber{0x3B0});
     expect(read_addr.has_value() && *read_addr == test_addr,
            "Locked pmpaddr0 ignored subsequent write");
 
     // Attempt to write locked pmpcfg0 - should be ignored
-    (void)cpu.write_csr(0x3A0, 0);
-    read_cfg = cpu.read_csr(0x3A0);
+    (void)cpu.write_csr(simrv::xlen::CsrNumber{0x3A0}, 0);
+    read_cfg = cpu.read_csr(simrv::xlen::CsrNumber{0x3A0});
     expect(read_cfg.has_value() && (*read_cfg & 0xFF) == cfg_val,
            "Locked pmpcfg0 ignored subsequent write");
 }
@@ -271,13 +273,13 @@ void test_smepmp_status_tracking() {
     expect(!cpu.state().has_locked_pmp, "Initial has_locked_pmp is false");
 
     // Write mseccfg with MML = 1 (bit 0)
-    auto res = cpu.write_csr(0x747, 1);
+    auto res = cpu.write_csr(simrv::xlen::CsrNumber{0x747}, 1);
     expect(res.has_value(), "Write to mseccfg succeeded");
     expect((cpu.state().mseccfg & 1u) == 1u, "cpu.state().mseccfg updated with MML=1");
     expect(cpu.state().has_locked_pmp, "Writing mseccfg with MML=1 sets has_locked_pmp to true");
 
     // Smepmp MML/MMWP bits 0..2 are sticky
-    auto res_clear = cpu.write_csr(0x747, 0);
+    auto res_clear = cpu.write_csr(simrv::xlen::CsrNumber{0x747}, 0);
     expect(res_clear.has_value(), "Write to mseccfg succeeded");
     expect((cpu.state().mseccfg & 1u) == 1u, "mseccfg MML bit is sticky and remains set");
     expect(cpu.state().has_locked_pmp, "has_locked_pmp remains true due to sticky MML");
@@ -757,51 +759,54 @@ void test_ratified_privilege_csrs() {
         "stimecmp read rejected in User mode");
 
     // B. Verify CSR read/write state preservation and architectural masking
-    expect(cpu.csr_file.write(Csr::Mcountinhibit, 0x7).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Mcountinhibit), 0x7).has_value(),
            "Write to mcountinhibit succeeds");
-    auto countinhibit_val = cpu.csr_file.read(Csr::Mcountinhibit);
+    auto countinhibit_val = cpu.csr_file.read(csr_num(Csr::Mcountinhibit));
     expect(countinhibit_val.has_value() && *countinhibit_val == 0x5,
            "Read from mcountinhibit returns 0x5 with reserved bit 1 masked to 0");
 
-    expect(cpu.csr_file.write(Csr::Mseccfg, 0x7).has_value(), "Write to mseccfg succeeds");
-    expect(cpu.csr_file.write(Csr::Mseccfg, 0x0).has_value(), "Second write to mseccfg succeeds");
-    auto mseccfg_val = cpu.csr_file.read(Csr::Mseccfg);
+    expect(cpu.csr_file.write(csr_num(Csr::Mseccfg), 0x7).has_value(), "Write to mseccfg succeeds");
+    expect(cpu.csr_file.write(csr_num(Csr::Mseccfg), 0x0).has_value(),
+           "Second write to mseccfg succeeds");
+    auto mseccfg_val = cpu.csr_file.read(csr_num(Csr::Mseccfg));
     expect(mseccfg_val.has_value() && *mseccfg_val == 0x7,
            "Sticky bits MML/MMWP/RLB in mseccfg remain set after writing 0");
 
-    expect(cpu.csr_file.write(Csr::Menvcfg, 0x113).has_value(), "Write to menvcfg succeeds");
-    auto menvcfg_val = cpu.csr_file.read(Csr::Menvcfg);
+    expect(cpu.csr_file.write(csr_num(Csr::Menvcfg), 0x113).has_value(),
+           "Write to menvcfg succeeds");
+    auto menvcfg_val = cpu.csr_file.read(csr_num(Csr::Menvcfg));
     expect(menvcfg_val.has_value() && *menvcfg_val == 0x113,
            "Read from menvcfg returns written value");
-    expect(cpu.csr_file.write(Csr::Menvcfg, 0x123).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Menvcfg), 0x123).has_value(),
            "Write with reserved CBIE encoding succeeds");
-    menvcfg_val = cpu.csr_file.read(Csr::Menvcfg);
+    menvcfg_val = cpu.csr_file.read(csr_num(Csr::Menvcfg));
     expect(menvcfg_val.has_value() && *menvcfg_val == 0x103,
            "Read from menvcfg masks reserved CBIE encoding");
 
-    expect(cpu.csr_file.write(Csr::Senvcfg, 0x456).has_value(), "Write to senvcfg succeeds");
-    auto senvcfg_val = cpu.csr_file.read(Csr::Senvcfg);
+    expect(cpu.csr_file.write(csr_num(Csr::Senvcfg), 0x456).has_value(),
+           "Write to senvcfg succeeds");
+    auto senvcfg_val = cpu.csr_file.read(csr_num(Csr::Senvcfg));
     expect(senvcfg_val.has_value() && *senvcfg_val == 0x50,
            "Read from senvcfg masks reserved fields");
 
     // C. Verify Sstc stimecmp 64-bit value handling and XLEN legality
 #if SIMRV_XLEN == 64
-    expect(cpu.csr_file.write(Csr::Stimecmp, 0x1122334455667788ULL).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Stimecmp), 0x1122334455667788ULL).has_value(),
            "Write to stimecmp in RV64 succeeds");
-    auto stimecmp_val = cpu.csr_file.read(Csr::Stimecmp);
+    auto stimecmp_val = cpu.csr_file.read(csr_num(Csr::Stimecmp));
     expect(stimecmp_val.has_value() && *stimecmp_val == 0x1122334455667788ULL,
            "Read from stimecmp in RV64 returns 64-bit value");
     // High-word CSRs must be rejected in RV64
-    expect(!cpu.csr_file.read(Csr::Stimecmph).has_value(), "stimecmph rejected in RV64");
-    expect(!cpu.csr_file.read(Csr::Menvcfgh).has_value(), "menvcfgh rejected in RV64");
-    expect(!cpu.csr_file.read(Csr::Mseccfgh).has_value(), "mseccfgh rejected in RV64");
+    expect(!cpu.csr_file.read(csr_num(Csr::Stimecmph)).has_value(), "stimecmph rejected in RV64");
+    expect(!cpu.csr_file.read(csr_num(Csr::Menvcfgh)).has_value(), "menvcfgh rejected in RV64");
+    expect(!cpu.csr_file.read(csr_num(Csr::Mseccfgh)).has_value(), "mseccfgh rejected in RV64");
 #else
-    expect(cpu.csr_file.write(Csr::Stimecmp, 0x55667788U).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Stimecmp), 0x55667788U).has_value(),
            "Write to stimecmp in RV32 succeeds");
-    expect(cpu.csr_file.write(Csr::Stimecmph, 0x11223344U).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Stimecmph), 0x11223344U).has_value(),
            "Write to stimecmph in RV32 succeeds");
-    auto lo_val = cpu.csr_file.read(Csr::Stimecmp);
-    auto hi_val = cpu.csr_file.read(Csr::Stimecmph);
+    auto lo_val = cpu.csr_file.read(csr_num(Csr::Stimecmp));
+    auto hi_val = cpu.csr_file.read(csr_num(Csr::Stimecmph));
     expect(lo_val.has_value() && *lo_val == 0x55667788U,
            "Read from stimecmp in RV32 returns low 32 bits");
     expect(hi_val.has_value() && *hi_val == 0x11223344U,
@@ -813,7 +818,7 @@ void test_ratified_privilege_csrs() {
     // D. Verify Sstc STCE privilege gating and timer interrupt generation
     cpu.state().priv = PrivilegeLevel::Supervisor;
     // Without STCE enabled, Supervisor access to stimecmp must be rejected
-    expect(!cpu.csr_file.read(Csr::Stimecmp).has_value(),
+    expect(!cpu.csr_file.read(csr_num(Csr::Stimecmp)).has_value(),
            "stimecmp access in Supervisor mode rejected when STCE=0");
 
     // Enable STCE
@@ -825,7 +830,7 @@ void test_ratified_privilege_csrs() {
     cpu.state().menvcfgh |= (1UL << 31U);
 #endif
     cpu.state().priv = PrivilegeLevel::Supervisor;
-    expect(cpu.csr_file.read(Csr::Stimecmp).has_value(),
+    expect(cpu.csr_file.read(csr_num(Csr::Stimecmp)).has_value(),
            "stimecmp access in Supervisor mode succeeds when STCE=1");
 
     // Program stimecmp and verify timer interrupt generation
@@ -849,30 +854,33 @@ void test_ratified_privilege_csrs() {
     cpu.state().misa |= kH;
     cpu.state().priv = PrivilegeLevel::Machine;
     cpu.state().menvcfg |= kStce;
-    expect(cpu.csr_file.write(Csr::Henvcfg, kStce).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Henvcfg), kStce).has_value(),
            "Machine mode enables Sstc for virtual supervisor mode");
-    expect((cpu.csr_file.read(Csr::Henvcfg).value_or(0) & kStce) != 0,
+    expect((cpu.csr_file.read(csr_num(Csr::Henvcfg)).value_or(0) & kStce) != 0,
            "henvcfg.STCE reads back when menvcfg.STCE is set");
-    expect(cpu.csr_file.write(Csr::Vstimecmp, 1005).has_value(), "HS mode writes vstimecmp");
+    expect(cpu.csr_file.write(csr_num(Csr::Vstimecmp), 1005).has_value(),
+           "HS mode writes vstimecmp");
     cpu.state().htimedelta = 5;
     cpu.clint_mmio.mtime.store(1000ULL, std::memory_order_relaxed);
     cpu.evaluate_timer_interrupt();
     expect(cpu.state().vstip_sstc, "Virtual time compare asserts hip.VSTIP");
-    expect((cpu.csr_file.read(Csr::Hip).value_or(0) & (simrv::xlen::CsrValue{1} << 6U)) != 0,
-           "hip exposes the virtual timer pending bit");
+    expect(
+        (cpu.csr_file.read(csr_num(Csr::Hip)).value_or(0) & (simrv::xlen::CsrValue{1} << 6U)) != 0,
+        "hip exposes the virtual timer pending bit");
 
     cpu.state().virt = true;
     cpu.state().priv = PrivilegeLevel::Supervisor;
     cpu.state().mcounteren |= kTimerEnable;
     cpu.state().hcounteren |= kTimerEnable;
-    expect(cpu.csr_file.write(Csr::Stimecmp, 2000).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Stimecmp), 2000).has_value(),
            "VS-mode stimecmp accesses the vstimecmp register");
     expect(cpu.state().vstimecmp == 2000,
            "VS-mode stimecmp write updates the virtual compare value");
     cpu.state().priv = PrivilegeLevel::Machine;
-    expect(cpu.csr_file.write(Csr::Henvcfg, 0).has_value(), "Machine mode disables virtual Sstc");
+    expect(cpu.csr_file.write(csr_num(Csr::Henvcfg), 0).has_value(),
+           "Machine mode disables virtual Sstc");
     cpu.state().priv = PrivilegeLevel::Supervisor;
-    const auto disabled_vstimecmp = cpu.csr_file.read(Csr::Stimecmp);
+    const auto disabled_vstimecmp = cpu.csr_file.read(csr_num(Csr::Stimecmp));
     expect(!disabled_vstimecmp.has_value() &&
                disabled_vstimecmp.error() == simrv::isa::ExceptionCode::VirtualInstruction,
            "VS-mode stimecmp traps virtually when henvcfg.STCE is clear");
@@ -889,7 +897,7 @@ void test_read_only_csr_write_rejection() {
     cpu.state().priv = PrivilegeLevel::Machine;
 
     const auto check_ro = [&](Csr csr, const char* name) {
-        const auto res = cpu.csr_file.write(csr, 0x12345678);
+        const auto res = cpu.csr_file.write(simrv::xlen::CsrNumber{csr}, 0x12345678);
         expect(!res.has_value() && res.error() == ExceptionCode::IllegalInstruction,
                std::string("Write to read-only CSR ") + name + " must raise IllegalInstruction");
     };
@@ -908,7 +916,7 @@ void test_read_only_csr_write_rejection() {
 #endif
 
     // Writable WARL CSRs like MISA accept writes without raising an exception
-    expect(cpu.csr_file.write(Csr::Misa, 0).has_value(),
+    expect(cpu.csr_file.write(csr_num(Csr::Misa), 0).has_value(),
            "Write to writable WARL CSR misa does not raise exception");
 }
 

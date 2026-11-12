@@ -11,6 +11,7 @@
 
 #include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/Mmio.hpp"
+#include "simrv/memory/MmioTypes.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -52,12 +53,12 @@ class Clint : public memory::TileLinkNode {
         return address >= base_address_ && address.raw() - base_address_.raw() < size_;
     }
 
-    [[nodiscard]] auto offset(simrv::xlen::PhysAddr addr) const -> simrv::xlen::Address {
-        return addr.raw() - base_address_.raw();
+    [[nodiscard]] auto offset(simrv::xlen::PhysAddr addr) const -> simrv::memory::MmioOffset {
+        return simrv::memory::MmioOffset{addr.raw() - base_address_.raw()};
     }
 
-    [[nodiscard]] auto mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word;
-    void mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata);
+    [[nodiscard]] auto mmio_read(simrv::memory::MmioOffset offset) const -> simrv::xlen::Word;
+    void mmio_write(simrv::memory::MmioOffset offset, simrv::xlen::Word wdata);
 
     std::atomic<simrv::xlen::Counter> mtime{1};
     std::atomic<simrv::xlen::Counter> mtimecmp{0};

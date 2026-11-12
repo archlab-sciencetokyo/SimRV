@@ -336,8 +336,8 @@ void CPU::evaluate_timer_interrupt() {
             if (before != after) {
                 machine_->trace().log_interrupt_signal(*this, kInterruptCauseBit | code, after,
                                                        source);
-                machine_->notify_interrupt_transition(state_.mhartid, static_cast<uint32_t>(code),
-                                                      after, source, clint_mmio.mcycle);
+                machine_->notify_interrupt_transition(hart_id(), static_cast<uint32_t>(code), after,
+                                                      source, clint_mmio.mcycle);
             }
         };
         log_transition(MipBit::Mtip, 7, "aclint_mtimer");
@@ -428,8 +428,8 @@ void CPU::apply_pending_interrupt_lines(Machine& machine) {
         if (before != after) {
             machine.trace().log_interrupt_signal(*this, kInterruptCauseBit | causes[i], after,
                                                  sources[i]);
-            machine.notify_interrupt_transition(state_.mhartid, static_cast<uint32_t>(causes[i]),
-                                                after, sources[i], clint_mmio.mcycle);
+            machine.notify_interrupt_transition(hart_id(), static_cast<uint32_t>(causes[i]), after,
+                                                sources[i], clint_mmio.mcycle);
         }
     }
 }

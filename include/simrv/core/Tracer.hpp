@@ -41,7 +41,7 @@ struct BusTraceContext {
     std::optional<uint64_t> request_cycle;
     std::optional<uint64_t> completion_cycle;
     std::optional<uint64_t> latency_cycles;
-    std::optional<uint32_t> hart;
+    std::optional<simrv::xlen::HartId> hart;
     std::optional<uint8_t> transfer_size;
     std::optional<uint8_t> burst_length;
     std::optional<uint64_t> data;
@@ -154,7 +154,7 @@ class Tracer {
     [[nodiscard]] auto trace_level_at_least(unsigned level) const noexcept -> bool;
     [[nodiscard]] auto trace_event_selected(std::string_view event) const noexcept -> bool;
     [[nodiscard]] auto accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle,
-                                           uint32_t hart,
+                                           std::optional<simrv::xlen::HartId> hart,
                                            std::optional<simrv::xlen::VirtAddr> pc = std::nullopt,
                                            std::string_view component = {}) const noexcept -> bool;
 

@@ -12,9 +12,9 @@ ResetControlMmio::ResetControlMmio(core::Machine& machine, simrv::xlen::PhysAddr
       size_(size),
       name_(std::move(name)) {}
 
-auto ResetControlMmio::read32(simrv::xlen::Address /*offset*/) -> uint32_t { return 0; }
+auto ResetControlMmio::read32(simrv::memory::MmioOffset /*offset*/) -> uint32_t { return 0; }
 
-void ResetControlMmio::write32(simrv::xlen::Address offset, uint32_t /*value*/) {
+void ResetControlMmio::write32(simrv::memory::MmioOffset offset, uint32_t /*value*/) {
     if (offset == 0) machine_.request_reboot();
 }
 

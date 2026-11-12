@@ -20,6 +20,8 @@
 #include "simrv/core/Pmp.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/core/SimulationStats.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/core/TrapDescriptor.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
@@ -238,9 +240,9 @@ static_assert(!ReservationRangeAddress<simrv::xlen::Address>);
 
 template <typename A>
 concept ReservationAddress = requires(simrv::memory::ReservationTable& table, A addr) {
-    table.set_reservation(0, addr);
-    table.check_reservation(0, addr);
-    table.check_and_clear_reservation(0, addr);
+    table.set_reservation(simrv::xlen::HartId{0}, addr);
+    table.check_reservation(simrv::xlen::HartId{0}, addr);
+    table.check_and_clear_reservation(simrv::xlen::HartId{0}, addr);
     table.invalidate_matching(addr);
 };
 static_assert(ReservationAddress<simrv::xlen::PhysAddr>);
@@ -831,7 +833,7 @@ void test_compressed_instruction_decode_and_flush() {
     // Write to mstatus altering FS field: must trigger TLB_flush which clears decode_cache
     const simrv::xlen::CsrValue curr_mstatus = cpu.state().mstatus;
     const simrv::xlen::CsrValue new_mstatus = curr_mstatus ^ simrv::core::MstatusBit::Fs;
-    auto res = csr.write(csr_addr(simrv::core::Csr::Mstatus), new_mstatus);
+    auto res = csr.write(csr_num(simrv::core::Csr::Mstatus), new_mstatus);
     (void)res;
     expect(cpu.decode_cache.lookup(test_op.cpc) == nullptr,
            "mstatus FS toggle flushes decode cache to invalidate cached execution legality");
@@ -1218,13 +1220,16 @@ void test_csr_summary_and_presence_rules() {
                "RV32 cause writes discard sign-extension bits before translating interrupt");
     }
 #endif
-    expect(pmp_csr_exists(0x3A1, 32), "RV32 defines odd-numbered pmpcfg CSRs");
-    expect(!pmp_csr_exists(0x3A1, 64), "RV64 reserves odd-numbered pmpcfg CSR addresses");
-    expect(pmp_csr_exists(0x3A2, 64), "RV64 defines even-numbered pmpcfg CSRs");
+    expect(pmp_csr_exists(simrv::xlen::CsrNumber{0x3A1}, 32),
+           "RV32 defines odd-numbered pmpcfg CSRs");
+    expect(!pmp_csr_exists(simrv::xlen::CsrNumber{0x3A1}, 64),
+           "RV64 reserves odd-numbered pmpcfg CSR addresses");
+    expect(pmp_csr_exists(simrv::xlen::CsrNumber{0x3A2}, 64),
+           "RV64 defines even-numbered pmpcfg CSRs");
     expect(
-        simrv::core::is_debug_csr(0x7B0),
+        simrv::core::is_debug_csr(simrv::xlen::CsrNumber{0x7B0}),
         "debug-only CSR encodings (0x7B0-0x7BF) are identified independently of M-mode privilege");
-    expect(!simrv::core::is_debug_csr(0x7A0),
+    expect(!simrv::core::is_debug_csr(simrv::xlen::CsrNumber{0x7A0}),
            "Sdtrig trigger CSRs (0x7A0-0x7AF) are accessible to M-mode");
 
     const simrv::xlen::CsrValue m_only =
@@ -2060,9 +2065,9 @@ void test_vector_bulk_memory_operations() {
     auto& csr = cpu.csr_file;
     const auto type_header =
         static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (regs.xlen == 64 ? 60U : 28U));
-    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 0);
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), type_header | (1U << 6U) | 3U);
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), (ram.base() + 0x403).raw());
+    (void)csr.write(csr_num(simrv::core::Csr::Tselect), 0);
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata1), type_header | (1U << 6U) | 3U);
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata2), (ram.base() + 0x403).raw());
     expect(!machine.execute_fast_batch_for_testing(0),
            "active architectural triggers disable fast instruction batching");
     cpu.pipeline_context.opcode = simrv::isa::Opcode::Load;
@@ -2096,7 +2101,7 @@ void test_vector_bulk_memory_operations() {
                cpu.state().vstart == 3,
            "bulk vector store falls back at the triggering element");
     cpu.active_context().pending_exception.reset();
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata1), 0);
     cpu.state().vstart = 0;
     cpu.state().lr_reservation_active = true;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
@@ -4110,21 +4115,29 @@ void test_privileged_decode_legality() {
 }
 
 void test_csr_privilege_presence() {
-    expect(!simrv::core::csr_access_permitted(kPrivMachine, false, false, 0x100, false),
+    expect(!simrv::core::csr_access_permitted(kPrivMachine, false, false,
+                                              simrv::xlen::CsrNumber{0x100}, false),
            "M-mode cannot read an unimplemented supervisor CSR");
-    expect(simrv::core::csr_access_permitted(kPrivMachine, true, true, 0x100, false),
+    expect(simrv::core::csr_access_permitted(kPrivMachine, true, true,
+                                             simrv::xlen::CsrNumber{0x100}, false),
            "M-mode can read an implemented supervisor CSR");
-    expect(!simrv::core::csr_access_permitted(kPrivSupervisor, true, true, 0x300, false),
+    expect(!simrv::core::csr_access_permitted(kPrivSupervisor, true, true,
+                                              simrv::xlen::CsrNumber{0x300}, false),
            "S-mode cannot access machine CSRs");
-    expect(!simrv::core::csr_access_permitted(kPrivMachine, true, true, 0xC00, true),
+    expect(!simrv::core::csr_access_permitted(kPrivMachine, true, true,
+                                              simrv::xlen::CsrNumber{0xC00}, true),
            "read-only CSR encodings reject writes even from M-mode");
-    expect(!simrv::core::csr_access_permitted(kPrivMachine, false, false, 0x302, false) &&
-               !simrv::core::csr_access_permitted(kPrivMachine, false, false, 0x303, false),
+    expect(!simrv::core::csr_access_permitted(kPrivMachine, false, false,
+                                              simrv::xlen::CsrNumber{0x302}, false) &&
+               !simrv::core::csr_access_permitted(kPrivMachine, false, false,
+                                                  simrv::xlen::CsrNumber{0x303}, false),
            "trap delegation CSRs do not exist without S-mode");
-    expect(!simrv::core::csr_access_permitted(kPrivMachine, false, false, 0x306, false),
+    expect(!simrv::core::csr_access_permitted(kPrivMachine, false, false,
+                                              simrv::xlen::CsrNumber{0x306}, false),
            "mcounteren does not exist without U-mode");
-    expect(simrv::core::is_zero_hpm_csr(0xB83, 32) && !simrv::core::is_zero_hpm_csr(0xB83, 64) &&
-               simrv::core::is_zero_hpm_csr(0xB03, 64),
+    expect(simrv::core::is_zero_hpm_csr(simrv::xlen::CsrNumber{0xB83}, 32) &&
+               !simrv::core::is_zero_hpm_csr(simrv::xlen::CsrNumber{0xB83}, 64) &&
+               simrv::core::is_zero_hpm_csr(simrv::xlen::CsrNumber{0xB03}, 64),
            "HPM high halves exist only for RV32 while low halves exist for both XLENs");
 }
 
@@ -4256,74 +4269,78 @@ void test_smp_reservation_table() {
     simrv::memory::ReservationTable table;
     expect(!table.may_have_reservations(), "New reservation table has a lock-free empty state");
 
-    table.set_reservation(0, simrv::xlen::PhysAddr{0x80001000});
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001000});
     expect(table.may_have_reservations(), "Setting LR marks possible reservations");
-    expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+    expect(table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001000}),
            "Hart 0 holds reservation at 0x80001000");
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001008}),
+    expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001008}),
            "Hart 0 does not hold reservation in the next eight-byte set");
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001040}),
+    expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001040}),
            "Hart 0 does not hold reservation in different granule");
-    expect(!table.check_reservation(1, simrv::xlen::PhysAddr{0x80001000}),
+    expect(!table.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0x80001000}),
            "Hart 1 does not hold Hart 0's reservation");
 
-    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001000}, 0);
-    expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001000}, simrv::xlen::HartId{0});
+    expect(table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001000}),
            "Store from Hart 0 does not invalidate its own reservation before SC");
 
-    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001004}, 1);
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001004}, simrv::xlen::HartId{1});
+    expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001000}),
            "Store from Hart 1 invalidates Hart 0's reservation");
-    expect(!table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+    expect(!table.check_and_clear_reservation(simrv::xlen::HartId{0},
+                                              simrv::xlen::PhysAddr{0x80001000}),
            "SC on invalidated reservation fails");
 
-    table.set_reservation(0, simrv::xlen::PhysAddr{0x80001000});
-    expect(!table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80001008}),
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001000});
+    expect(!table.check_and_clear_reservation(simrv::xlen::HartId{0},
+                                              simrv::xlen::PhysAddr{0x80001008}),
            "SC to a different reservation set fails");
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+    expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001000}),
            "Failed SC clears the previous reservation");
 
-    table.set_reservation(0, simrv::xlen::PhysAddr{0x80002000});
-    table.set_reservation(1, simrv::xlen::PhysAddr{0x80003000});
-    expect(table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80002000}),
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80002000});
+    table.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0x80003000});
+    expect(table.check_and_clear_reservation(simrv::xlen::HartId{0},
+                                             simrv::xlen::PhysAddr{0x80002000}),
            "SC on valid reservation succeeds");
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80002000}),
+    expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80002000}),
            "Reservation is cleared after successful SC");
-    expect(table.check_reservation(1, simrv::xlen::PhysAddr{0x80003000}),
+    expect(table.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0x80003000}),
            "Hart 1's reservation remains intact");
 
     table.clear_all();
     expect(!table.may_have_reservations(), "clear_all restores the lock-free empty state");
-    expect(!table.check_reservation(1, simrv::xlen::PhysAddr{0x80003000}),
+    expect(!table.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0x80003000}),
            "clear_all invalidates all active reservations");
 
-    table.set_reservation(0, simrv::xlen::PhysAddr{0x80004000});
-    table.set_reservation(1, simrv::xlen::PhysAddr{0x80004008});
-    table.set_reservation(2, simrv::xlen::PhysAddr{0x80004000});
-    table.invalidate_range(simrv::xlen::PhysAddr{0x80004004}, 8, 2);
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80004000}) &&
-               !table.check_reservation(1, simrv::xlen::PhysAddr{0x80004008}) &&
-               table.check_reservation(2, simrv::xlen::PhysAddr{0x80004000}),
-           "A physical write spanning two reservation granules invalidates other harts only");
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80004000});
+    table.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0x80004008});
+    table.set_reservation(simrv::xlen::HartId{2}, simrv::xlen::PhysAddr{0x80004000});
+    table.invalidate_range(simrv::xlen::PhysAddr{0x80004004}, 8, simrv::xlen::HartId{2});
+    expect(
+        !table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80004000}) &&
+            !table.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0x80004008}) &&
+            table.check_reservation(simrv::xlen::HartId{2}, simrv::xlen::PhysAddr{0x80004000}),
+        "A physical write spanning two reservation granules invalidates other harts only");
 
     table.clear_all();
     constexpr auto kLastAddress = std::numeric_limits<simrv::xlen::Address>::max();
-    table.set_reservation(0, simrv::xlen::PhysAddr{kLastAddress});
-    table.set_reservation(1, simrv::xlen::PhysAddr{0});
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kLastAddress});
+    table.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0});
     table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 0);
-    expect(table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}),
+    expect(table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kLastAddress}),
            "An empty write preserves reservations");
     table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 16);
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}) &&
-               table.check_reservation(1, simrv::xlen::PhysAddr{0}),
+    expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kLastAddress}) &&
+               table.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{0}),
            "A range beyond the physical address limit saturates without wrapping");
 
     if constexpr (sizeof(size_t) > sizeof(simrv::xlen::Address)) {
         table.clear_all();
-        table.set_reservation(0, simrv::xlen::PhysAddr{0x80004008});
+        table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80004008});
         table.invalidate_range(simrv::xlen::PhysAddr{0x80004000},
                                static_cast<size_t>(uint64_t{1} << 32) + 1);
-        expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80004008}),
+        expect(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80004008}),
                "A host-sized write larger than the guest address space invalidates its range");
     }
 }
@@ -4518,7 +4535,7 @@ void test_pmp_semantics() {
 
     simrv::core::Machine machine;
     auto& cpu = machine.hart(simrv::xlen::HartId{0});
-    const auto pmpcfg0 = csr_addr(simrv::core::Csr::Pmpcfg0);
+    const auto pmpcfg0 = csr_num(simrv::core::Csr::Pmpcfg0);
     // Entry 0 writes reserved bits plus legal RWX; entry 1 writes NAPOT + W without R.
     const simrv::xlen::CsrValue invalid_pmpcfg = static_cast<simrv::xlen::CsrValue>(0x1A7FU);
     expect(cpu.csr_file.write(pmpcfg0, invalid_pmpcfg).has_value(),
@@ -4671,7 +4688,7 @@ void test_tilelink_c_protocol_checker() {
                        .grow = TlGrow::NtoB,
                        .size = kTlBlockSize,
                        .source = 9,
-                       .hart = 0,
+                       .hart = simrv::xlen::HartId{0},
                        .address = simrv::xlen::PhysAddr{0x80000040}};
     expect(checker.accept_a(acquire).has_value(), "checker accepts one-block AcquireBlock");
     TlChannelD grant{.opcode = TlOpcodeD::GrantData,
@@ -4747,6 +4764,22 @@ void test_strong_semantic_types() {
     static_assert(sizeof(simrv::xlen::VirtAddr) == sizeof(simrv::xlen::Word));
     static_assert(sizeof(simrv::xlen::HartId) == sizeof(uint32_t));
     static_assert(sizeof(simrv::xlen::CsrNumber) == sizeof(uint16_t));
+    static_assert(std::is_standard_layout_v<simrv::xlen::HartId>);
+    static_assert(std::is_trivially_copyable_v<simrv::xlen::HartId>);
+    static_assert(std::is_standard_layout_v<simrv::xlen::CsrNumber>);
+    static_assert(std::is_trivially_copyable_v<simrv::xlen::CsrNumber>);
+    static_assert(!std::convertible_to<uint32_t, simrv::xlen::HartId>);
+    static_assert(!std::convertible_to<uint16_t, simrv::xlen::CsrNumber>);
+    static_assert(!std::is_assignable_v<simrv::xlen::HartId&, uint32_t>);
+    static_assert(!std::is_assignable_v<simrv::xlen::CsrNumber&, uint16_t>);
+    static_assert(
+        std::same_as<decltype(simrv::core::HartStatsSnapshot::hart_id), simrv::xlen::HartId>);
+    static_assert(std::same_as<decltype(simrv::core::MachineEvent::hart),
+                               std::optional<simrv::xlen::HartId>>);
+    static_assert(std::same_as<decltype(simrv::core::BusTraceContext::hart),
+                               std::optional<simrv::xlen::HartId>>);
+    static_assert(std::same_as<decltype(simrv::core::SmpClusterConfig{}.harts),
+                               std::vector<simrv::xlen::HartId>>);
     static_assert(std::same_as<decltype(simrv::core::TlbFlushFilter::vaddr),
                                std::optional<simrv::xlen::VirtAddr>>);
     static_assert(!std::is_assignable_v<decltype(simrv::core::TlbFlushFilter::vaddr)&,
@@ -4766,7 +4799,7 @@ void test_strong_semantic_types() {
     expect(p1 == 0x80000000ULL, "PhysAddr equality with integer literal");
 
     simrv::xlen::PhysAddr p2 = p1 + 0x100U;
-    expect(p2.val == 0x80000100ULL, "PhysAddr addition with unsigned integer");
+    expect(p2.raw() == 0x80000100ULL, "PhysAddr addition with unsigned integer");
     expect((p2 - p1) == 0x100, "PhysAddr subtraction yields SignedWord offset");
 
     simrv::xlen::PhysAddr p3 = p2 & ~0xFFFULL;
@@ -4819,7 +4852,7 @@ void test_strong_semantic_types() {
            "std::format specialization formats PhysAddr as hex integer");
 
     const auto hash_val = std::hash<simrv::xlen::PhysAddr>{}(p1);
-    expect(hash_val == std::hash<simrv::xlen::Word>{}(p1.val),
+    expect(hash_val == std::hash<simrv::xlen::Word>{}(p1.raw()),
            "std::hash<PhysAddr> matches underlying Word hash");
 }
 
@@ -4886,17 +4919,17 @@ void test_sdtrig_trigger_registers() {
     auto& csr = cpu.csr_file;
 
     // 1. Initial trigger state
-    auto tselect_val = csr.read(csr_addr(simrv::core::Csr::Tselect));
+    auto tselect_val = csr.read(csr_num(simrv::core::Csr::Tselect));
     expect(tselect_val.has_value() && *tselect_val == 0, "tselect initialized to 0");
 
-    auto tinfo_val = csr.read(csr_addr(simrv::core::Csr::Tinfo));
+    auto tinfo_val = csr.read(csr_num(simrv::core::Csr::Tinfo));
     expect(tinfo_val.has_value() && (*tinfo_val & 0x4U) == 0x4U,
            "tinfo reports mcontrol (type 2) support in bit 2");
 
     // 2. Select trigger 1 and write tdata1/tdata2
-    auto res_sel = csr.write(csr_addr(simrv::core::Csr::Tselect), 1);
+    auto res_sel = csr.write(csr_num(simrv::core::Csr::Tselect), 1);
     expect(res_sel.has_value(), "tselect write succeeded");
-    auto cur_sel = csr.read(csr_addr(simrv::core::Csr::Tselect));
+    auto cur_sel = csr.read(csr_num(simrv::core::Csr::Tselect));
     expect(cur_sel.has_value() && *cur_sel == 1, "tselect reflects written index 1");
 
     // Configure mcontrol on trigger 1: type=2, execute=1 (bit 2), m=1 (bit 6), s=1 (bit 4), u=1
@@ -4906,19 +4939,19 @@ void test_sdtrig_trigger_registers() {
         static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (xlen == 64 ? 60U : 28U));
     const simrv::xlen::CsrValue mcontrol_cfg =
         type_hdr | (1U << 6U) | (1U << 4U) | (1U << 3U) | (1U << 2U);
-    auto res_tdata1 = csr.write(csr_addr(simrv::core::Csr::Tdata1), mcontrol_cfg);
+    auto res_tdata1 = csr.write(csr_num(simrv::core::Csr::Tdata1), mcontrol_cfg);
     expect(res_tdata1.has_value(), "tdata1 write succeeded");
 
-    auto tdata1_read = csr.read(csr_addr(simrv::core::Csr::Tdata1));
+    auto tdata1_read = csr.read(csr_num(simrv::core::Csr::Tdata1));
     expect(tdata1_read.has_value() && *tdata1_read == mcontrol_cfg,
            "tdata1 preserves mcontrol configuration");
     expect(cpu.state().has_active_triggers, "has_active_triggers flag set after enabling trigger");
 
     const simrv::xlen::VirtAddr target_pc{0x80001000};
-    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), target_pc.raw());
+    auto res_tdata2 = csr.write(csr_num(simrv::core::Csr::Tdata2), target_pc.raw());
     expect(res_tdata2.has_value(), "tdata2 write succeeded");
 
-    auto tdata2_read = csr.read(csr_addr(simrv::core::Csr::Tdata2));
+    auto tdata2_read = csr.read(csr_num(simrv::core::Csr::Tdata2));
     expect(tdata2_read.has_value() && *tdata2_read == target_pc.raw(), "tdata2 preserves match PC");
 
     // 3. Trigger matching check
@@ -4940,7 +4973,7 @@ void test_sdtrig_trigger_registers() {
            "Machine mode access to tselect permitted");
 
     // 5. Disable trigger 1
-    auto res_dis = csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    auto res_dis = csr.write(csr_num(simrv::core::Csr::Tdata1), 0);
     expect(res_dis.has_value(), "tdata1 disable succeeded");
     expect(!cpu.state().has_active_triggers,
            "has_active_triggers cleared when all triggers disabled");
@@ -4954,7 +4987,7 @@ void test_sdtrig_memory_watchpoints() {
     const unsigned xlen = cpu.state().regs.xlen;
 
     // 1. Configure trigger 2 as a store watchpoint at 0x80002000
-    auto res_sel = csr.write(csr_addr(simrv::core::Csr::Tselect), 2);
+    auto res_sel = csr.write(csr_num(simrv::core::Csr::Tselect), 2);
     expect(res_sel.has_value(), "tselect write to 2 succeeded");
 
     // store=1 (bit 1), load=0 (bit 0), m=1 (bit 6), s=1 (bit 4), u=1 (bit 3)
@@ -4962,11 +4995,11 @@ void test_sdtrig_memory_watchpoints() {
         static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (xlen == 64 ? 60U : 28U));
     const simrv::xlen::CsrValue store_cfg =
         type_hdr | (1U << 6U) | (1U << 4U) | (1U << 3U) | (1U << 1U);
-    auto res_tdata1 = csr.write(csr_addr(simrv::core::Csr::Tdata1), store_cfg);
+    auto res_tdata1 = csr.write(csr_num(simrv::core::Csr::Tdata1), store_cfg);
     expect(res_tdata1.has_value(), "tdata1 store watchpoint write succeeded");
 
     const simrv::xlen::VirtAddr watch_addr{0x80002000};
-    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), watch_addr.raw());
+    auto res_tdata2 = csr.write(csr_num(simrv::core::Csr::Tdata2), watch_addr.raw());
     expect(res_tdata2.has_value(), "tdata2 watch address write succeeded");
     expect(cpu.state().has_active_triggers, "has_active_triggers is true for store watchpoint");
 
@@ -4979,11 +5012,11 @@ void test_sdtrig_memory_watchpoints() {
            "store watchpoint matches overlapping write access");
 
     // 3. Configure trigger 3 as a load-only watchpoint at 0x80003000 (M-mode only)
-    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 3);
+    (void)csr.write(csr_num(simrv::core::Csr::Tselect), 3);
     const simrv::xlen::CsrValue load_cfg = type_hdr | (1U << 6U) | (1U << 0U);  // m=1, load=1
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), load_cfg);
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata1), load_cfg);
     const simrv::xlen::VirtAddr load_addr{0x80003000};
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), load_addr.raw());
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata2), load_addr.raw());
 
     expect(cpu.check_triggers_mem(load_addr, 4, false),
            "load watchpoint matches read access in M-mode");
@@ -4996,10 +5029,10 @@ void test_sdtrig_memory_watchpoints() {
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
 
     // 4. Clean up triggers
-    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 2);
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
-    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 3);
-    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    (void)csr.write(csr_num(simrv::core::Csr::Tselect), 2);
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata1), 0);
+    (void)csr.write(csr_num(simrv::core::Csr::Tselect), 3);
+    (void)csr.write(csr_num(simrv::core::Csr::Tdata1), 0);
     expect(!cpu.state().has_active_triggers, "has_active_triggers cleared after cleaning up");
 }
 

@@ -82,8 +82,8 @@ void benchmark_decode_cache(ankerl::nanobench::Bench& bench) {
 
 void benchmark_reservation_table(ankerl::nanobench::Bench& bench) {
     simrv::memory::ReservationTable table;
-    constexpr simrv::xlen::HartId kHart0 = 0;
-    constexpr simrv::xlen::HartId kHart1 = 1;
+    constexpr simrv::xlen::HartId kHart0{0};
+    constexpr simrv::xlen::HartId kHart1{1};
     const simrv::xlen::PhysAddr addr0{0x80001000U};
     const simrv::xlen::PhysAddr addr1{0x80002000U};
 

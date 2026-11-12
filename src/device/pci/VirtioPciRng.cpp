@@ -4,7 +4,9 @@
 
 namespace simrv::device {
 
-VirtioPciRng::VirtioPciRng() : VirtioPciDevice(virtio::kDevIdRng, 0x00FF00, 1) {}
+VirtioPciRng::VirtioPciRng()
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdRng)},
+                      PciClassCode{0x00FF00}, 1) {}
 
 void VirtioPciRng::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;

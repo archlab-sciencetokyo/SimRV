@@ -23,6 +23,7 @@
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 
@@ -93,7 +94,7 @@ struct DebugConfig {
     std::string trace_events;
     std::string trace_function;
     std::string trace_device;
-    std::optional<uint32_t> trace_hart;
+    std::optional<simrv::xlen::HartId> trace_hart;
     std::optional<simrv::xlen::VirtAddr> trace_pc_start;
     std::optional<simrv::xlen::VirtAddr> trace_pc_end;
     std::optional<simrv::xlen::Counter> trace_after_cycle;

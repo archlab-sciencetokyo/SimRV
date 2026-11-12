@@ -423,21 +423,29 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
             }
         }
     } else {
+        const size_t load_size = std::min(file_size, capacity);
         if (file_size > capacity) {
-            simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)", image_name,
-                              file_path, file_size, capacity);
-            std::exit(EXIT_FAILURE);
+            if (file_path.ends_with(".img") || file_path.ends_with(".raw") ||
+                file_path.ends_with(".bin") || file_path.ends_with(".ext4")) {
+                simrv::log::info(
+                    "{} image {} ({} bytes) exceeds DRAM capacity ({} bytes); loading initial "
+                    "{} bytes into RAM",
+                    image_name, file_path, file_size, capacity, load_size);
+            } else {
+                simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)",
+                                  image_name, file_path, file_size, capacity);
+                std::exit(EXIT_FAILURE);
+            }
         }
         in.seekg(0, std::ios::beg);
         if (!in.read(reinterpret_cast<char*>(ram),
                      static_cast<std::streamsize>(
-                         file_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                         load_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             simrv::log::error("Failed to read {} image {}", image_name, file_path);
             std::exit(EXIT_FAILURE);
         }
         if (machine != nullptr) {
-            machine->record_loaded_segment(simrv::xlen::PhysAddr{ram_view.base()},
-                                           std::min(file_size, capacity), true);
+            machine->record_loaded_segment(simrv::xlen::PhysAddr{ram_view.base()}, load_size, true);
         }
     }
 }

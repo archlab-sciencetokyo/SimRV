@@ -11,6 +11,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -77,6 +78,12 @@ concept VirtioTransportAcceptsDmaAddress =
 
 static_assert(VirtioTransportAcceptsDmaAddress<simrv::xlen::PhysAddr>);
 static_assert(!VirtioTransportAcceptsDmaAddress<uint64_t>);
+static_assert(sizeof(simrv::memory::MmioOffset) == sizeof(simrv::xlen::Word));
+static_assert(!std::same_as<simrv::memory::MmioOffset, simrv::xlen::PhysAddr>);
+static_assert(!std::same_as<simrv::memory::MmioOffset, simrv::xlen::VirtAddr>);
+static_assert(!std::convertible_to<simrv::xlen::Address, simrv::memory::MmioOffset>);
+static_assert(!std::convertible_to<simrv::memory::MmioOffset, simrv::xlen::Address>);
+static_assert(!std::convertible_to<simrv::xlen::PhysAddr, simrv::memory::MmioOffset>);
 
 void check(bool condition, const char* message = "check assertion failed") {
     if (!condition) {
@@ -106,6 +113,27 @@ concept PciPhysicalAddress = requires(
 static_assert(PciPhysicalAddress<simrv::xlen::PhysAddr>);
 static_assert(!PciPhysicalAddress<simrv::xlen::VirtAddr>);
 static_assert(!PciPhysicalAddress<simrv::xlen::Address>);
+static_assert(std::same_as<simrv::device::PciBarOffset, simrv::memory::MmioOffset>);
+template <typename Offset>
+concept PciBarAccessAccepts = requires(simrv::device::PciDevice& device, Offset offset) {
+    device.bar_read(simrv::device::PciBarIndex{0}, offset, simrv::device::PciAccessBytes{4});
+    device.bar_write(simrv::device::PciBarIndex{0}, offset, simrv::device::PciMmioData{0},
+                     simrv::device::PciAccessBytes{4});
+};
+static_assert(PciBarAccessAccepts<simrv::device::PciBarOffset>);
+static_assert(!PciBarAccessAccepts<simrv::xlen::Address>);
+static_assert(sizeof(simrv::device::PciBdf) == 3);
+static_assert(std::is_standard_layout_v<simrv::device::PciBdf>);
+static_assert(!std::convertible_to<simrv::device::PciBusNumber, simrv::device::PciDeviceNumber>);
+static_assert(
+    !std::convertible_to<simrv::device::PciDeviceNumber, simrv::device::PciFunctionNumber>);
+static_assert(!std::convertible_to<uint8_t, simrv::device::PciBusNumber>);
+static_assert(!std::convertible_to<simrv::device::PciConfigOffset, uint16_t>);
+static_assert(!std::convertible_to<uint16_t, simrv::device::PciVendorId>);
+static_assert(!std::convertible_to<simrv::device::PciVendorId, simrv::device::PciDeviceId>);
+static_assert(!std::convertible_to<simrv::device::PciSubsystemId, simrv::device::PciDeviceId>);
+static_assert(!std::convertible_to<uint8_t, simrv::device::PciRevisionId>);
+static_assert(!std::convertible_to<simrv::device::PciClassCode, uint32_t>);
 static_assert(std::same_as<decltype(std::declval<const simrv::device::PciDevice&>().msi_address()),
                            simrv::xlen::PhysAddr>);
 
@@ -183,13 +211,13 @@ class DummyDevice : public simrv::memory::MmioDevice {
     }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x100U; }
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override {
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override {
         ++reads_;
-        return static_cast<uint32_t>(0xABCD0000U + offset);
+        return static_cast<uint32_t>(0xABCD0000U + offset.raw());
     }
-    void write32(simrv::xlen::Address offset, uint32_t val) override {
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override {
         ++writes_;
-        last_val_ = val + static_cast<uint32_t>(offset);
+        last_val_ = val + static_cast<uint32_t>(offset.raw());
     }
     uint32_t last_val_{0};
     unsigned reads_{0};
@@ -294,21 +322,21 @@ void test_mmio_device_and_dma() {
 
     DummyDevice dev(&machine);
     assert(dev.base_address() == 0x1000U);
-    assert(dev.read32(0x04) == 0xABCD0004U);
-    assert(dev.read8(0x04) == 0x04U);
-    assert(dev.read16(0x04) == 0x0004U);
+    assert(dev.read32(simrv::memory::MmioOffset{0x04}) == 0xABCD0004U);
+    assert(dev.read8(simrv::memory::MmioOffset{0x04}) == 0x04U);
+    assert(dev.read16(simrv::memory::MmioOffset{0x04}) == 0x0004U);
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    check(dev.read8(0x06) == 0xCDU);
-    check(dev.read16(0x06) == 0xABCDU);
+    check(dev.read8(simrv::memory::MmioOffset{0x06}) == 0xCDU);
+    check(dev.read16(simrv::memory::MmioOffset{0x06}) == 0xABCDU);
     dev.reads_ = 0;
     dev.writes_ = 0;
-    dev.write8(0x05, 0x12U);
+    dev.write8(simrv::memory::MmioOffset{0x05}, 0x12U);
     check(dev.last_val_ == 0xABCD1208U && dev.reads_ == 1 && dev.writes_ == 1);
     dev.reads_ = 0;
     dev.writes_ = 0;
-    dev.write16(0x06, 0x5678U);
+    dev.write16(simrv::memory::MmioOffset{0x06}, 0x5678U);
     check(dev.last_val_ == 0x56780008U && dev.reads_ == 1 && dev.writes_ == 1);
 
     // Test DMA
@@ -324,7 +352,8 @@ void test_mmio_device_and_dma() {
     simrv::device::VirtioMmioRng mmio_rng(simrv::xlen::PhysAddr{0x10003000}, 4, &machine);
     simrv::device::PcieRootComplex root(&machine);
     auto pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
-    check(root.attach_device(0, 3, 0, pci_rng));
+    check(root.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{3},
+                             simrv::device::PciFunctionNumber{0}, pci_rng));
     auto& mmio_transport = static_cast<simrv::device::virtio::IVirtioTransport&>(mmio_rng);
     auto& pci_transport = static_cast<simrv::device::virtio::IVirtioTransport&>(*pci_rng);
     const uint64_t low = static_cast<uint64_t>(simrv::memory::kDramBaseAddress.raw()) + 0x100;
@@ -347,59 +376,59 @@ void test_mmio_device_and_dma() {
     const uint16_t avail_idx = 1;
     std::memcpy(ram.data() + 0x202, &avail_idx, sizeof(avail_idx));
     const auto base = static_cast<uint32_t>(simrv::memory::kDramBaseAddress.raw());
-    mmio_rng.write32(0x38, 8);
-    mmio_rng.write32(0x80, base + 0x100);
-    mmio_rng.write32(0x90, base + 0x200);
-    mmio_rng.write32(0x94, 1);
-    mmio_rng.write32(0xa0, base + 0x300);
-    mmio_rng.write32(0x44, 1);
-    mmio_rng.write32(0x50, 0);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x38}, 8);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x80}, base + 0x100);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x90}, base + 0x200);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x94}, 1);
+    mmio_rng.write32(simrv::memory::MmioOffset{0xa0}, base + 0x300);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x44}, 1);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x50}, 0);
     check(mmio_rng.get_queue_state(0)->last_avail_idx == 0);
-    pci_rng->bar_write(0, 0x18, 8, 2);
-    pci_rng->bar_write(0, 0x20, base + 0x100, 4);
-    pci_rng->bar_write(0, 0x28, base + 0x200, 4);
-    pci_rng->bar_write(0, 0x2c, 1, 4);
-    pci_rng->bar_write(0, 0x30, base + 0x300, 4);
-    pci_rng->bar_write(0, 0x1c, 1, 2);
-    pci_rng->bar_write(0, 0x100, 0, 2);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x18}, 8, 2);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x20}, base + 0x100, 4);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x28}, base + 0x200, 4);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x2c}, 1, 4);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x30}, base + 0x300, 4);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x1c}, 1, 2);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(pci_rng->get_queue_state(0)->last_avail_idx == 0);
 
     // Invalid queue sizes and wrapping ring addresses must not access RAM or divide by zero.
-    mmio_rng.write32(0x94, 0);
-    pci_rng->bar_write(0, 0x2c, 0, 4);
-    mmio_rng.write32(0x38, 0);
-    pci_rng->bar_write(0, 0x18, 0, 2);
-    mmio_rng.write32(0x50, 0);
-    pci_rng->bar_write(0, 0x100, 0, 2);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x94}, 0);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x2c}, 0, 4);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x38}, 0);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x18}, 0, 2);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x50}, 0);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(mmio_rng.get_queue_state(0)->last_avail_idx == 0);
     check(pci_rng->get_queue_state(0)->last_avail_idx == 0);
-    mmio_rng.write32(0x38, 8);
-    pci_rng->bar_write(0, 0x18, 8, 2);
-    mmio_rng.write32(0x90, 0xfffffffeU);
-    mmio_rng.write32(0x94, 0xffffffffU);
-    pci_rng->bar_write(0, 0x28, 0xfffffffeU, 4);
-    pci_rng->bar_write(0, 0x2c, 0xffffffffU, 4);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x38}, 8);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x18}, 8, 2);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x90}, 0xfffffffeU);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x94}, 0xffffffffU);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x28}, 0xfffffffeU, 4);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x2c}, 0xffffffffU, 4);
     check(!mmio_rng.get_queue_state(0)->usable());
     check(!pci_rng->get_queue_state(0)->usable());
-    mmio_rng.write32(0x50, 0);
-    pci_rng->bar_write(0, 0x100, 0, 2);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x50}, 0);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(mmio_rng.get_queue_state(0)->last_avail_idx == 0);
     check(pci_rng->get_queue_state(0)->last_avail_idx == 0);
-    mmio_rng.write32(0x90, base + 0x200);
-    mmio_rng.write32(0x94, 0);
-    pci_rng->bar_write(0, 0x28, base + 0x200, 4);
-    pci_rng->bar_write(0, 0x2c, 0, 4);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x90}, base + 0x200);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x94}, 0);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x28}, base + 0x200, 4);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x2c}, 0, 4);
     const uint16_t invalid_head = 8;
     std::memcpy(ram.data() + 0x204, &invalid_head, sizeof(invalid_head));
-    mmio_rng.write32(0x50, 0);
-    pci_rng->bar_write(0, 0x100, 0, 2);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x50}, 0);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(mmio_rng.get_queue_state(0)->last_avail_idx == 0);
     check(pci_rng->get_queue_state(0)->last_avail_idx == 0);
     const uint16_t valid_head = 0;
     std::memcpy(ram.data() + 0x204, &valid_head, sizeof(valid_head));
-    mmio_rng.write32(0x50, 0);
+    mmio_rng.write32(simrv::memory::MmioOffset{0x50}, 0);
     check(mmio_rng.get_queue_state(0)->last_avail_idx == 1);
-    pci_rng->bar_write(0, 0x100, 0, 2);
+    pci_rng->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(pci_rng->get_queue_state(0)->last_avail_idx == 1);
 
     // A reset invalidates deferred completions, even if the same queue is restored.
@@ -411,28 +440,29 @@ void test_mmio_device_and_dma() {
     machine.dma_engine().set_config(timing);
     simrv::device::VirtioMmioBlock mmio_block(simrv::xlen::PhysAddr{0x10001000}, 2, &machine);
     auto pci_block = std::make_shared<simrv::device::VirtioPciBlock>();
-    check(root.attach_device(0, 4, 0, pci_block));
+    check(root.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{4},
+                             simrv::device::PciFunctionNumber{0}, pci_block));
     const auto configure_mmio = [&] {
-        mmio_block.write32(0x38, 8);
-        mmio_block.write32(0x80, base + 0x400);
-        mmio_block.write32(0x90, base + 0x500);
-        mmio_block.write32(0xa0, base + 0x600);
-        mmio_block.write32(0x44, 1);
+        mmio_block.write32(simrv::memory::MmioOffset{0x38}, 8);
+        mmio_block.write32(simrv::memory::MmioOffset{0x80}, base + 0x400);
+        mmio_block.write32(simrv::memory::MmioOffset{0x90}, base + 0x500);
+        mmio_block.write32(simrv::memory::MmioOffset{0xa0}, base + 0x600);
+        mmio_block.write32(simrv::memory::MmioOffset{0x44}, 1);
     };
     const auto configure_pci = [&] {
-        pci_block->bar_write(0, 0x18, 8, 2);
-        pci_block->bar_write(0, 0x20, base + 0x400, 4);
-        pci_block->bar_write(0, 0x28, base + 0x500, 4);
-        pci_block->bar_write(0, 0x30, base + 0x700, 4);
-        pci_block->bar_write(0, 0x1c, 1, 2);
+        pci_block->bar_write(0, simrv::device::PciBarOffset{0x18}, 8, 2);
+        pci_block->bar_write(0, simrv::device::PciBarOffset{0x20}, base + 0x400, 4);
+        pci_block->bar_write(0, simrv::device::PciBarOffset{0x28}, base + 0x500, 4);
+        pci_block->bar_write(0, simrv::device::PciBarOffset{0x30}, base + 0x700, 4);
+        pci_block->bar_write(0, simrv::device::PciBarOffset{0x1c}, 1, 2);
     };
     std::memcpy(ram.data() + 0x502, &avail_idx, sizeof(avail_idx));
     configure_mmio();
     configure_pci();
-    mmio_block.write32(0x50, 0);
-    pci_block->bar_write(0, 0x100, 0, 2);
+    mmio_block.write32(simrv::memory::MmioOffset{0x50}, 0);
+    pci_block->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(machine.dma_engine().pending_tasks() == 2);
-    mmio_block.write32(0x70, 0);
+    mmio_block.write32(simrv::memory::MmioOffset{0x70}, 0);
     pci_block->reset();
     configure_mmio();
     configure_pci();
@@ -440,8 +470,8 @@ void test_mmio_device_and_dma() {
     check(machine.dma_engine().pending_tasks() == 0);
     check(ram[0x602] == std::byte{0} && ram[0x702] == std::byte{0});
     check(mmio_block.isr_status() == 0 && pci_block->isr_status() == 0);
-    mmio_block.write32(0x50, 0);
-    pci_block->bar_write(0, 0x100, 0, 2);
+    mmio_block.write32(simrv::memory::MmioOffset{0x50}, 0);
+    pci_block->bar_write(0, simrv::device::PciBarOffset{0x100}, 0, 2);
     check(machine.dma_engine().pending_tasks() == 2);
     machine.dma_engine().advance_cycle(2000);
     check(ram[0x602] == std::byte{1} && ram[0x702] == std::byte{1});
@@ -449,37 +479,38 @@ void test_mmio_device_and_dma() {
 
     simrv::device::VirtioMmioNet mmio_net(simrv::xlen::PhysAddr{0x10007000}, 8, &machine);
     auto pci_net = std::make_shared<simrv::device::VirtioPciNet>();
-    check(root.attach_device(0, 5, 0, pci_net));
+    check(root.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{5},
+                             simrv::device::PciFunctionNumber{0}, pci_net));
     const auto configure_mmio_net = [&] {
-        mmio_net.write32(0x30, 1);
-        mmio_net.write32(0x38, 8);
-        mmio_net.write32(0x80, base + 0x400);
-        mmio_net.write32(0x90, base + 0x500);
-        mmio_net.write32(0xa0, base + 0x800);
-        mmio_net.write32(0x44, 1);
+        mmio_net.write32(simrv::memory::MmioOffset{0x30}, 1);
+        mmio_net.write32(simrv::memory::MmioOffset{0x38}, 8);
+        mmio_net.write32(simrv::memory::MmioOffset{0x80}, base + 0x400);
+        mmio_net.write32(simrv::memory::MmioOffset{0x90}, base + 0x500);
+        mmio_net.write32(simrv::memory::MmioOffset{0xa0}, base + 0x800);
+        mmio_net.write32(simrv::memory::MmioOffset{0x44}, 1);
     };
     const auto configure_pci_net = [&] {
-        pci_net->bar_write(0, 0x16, 1, 2);
-        pci_net->bar_write(0, 0x18, 8, 2);
-        pci_net->bar_write(0, 0x20, base + 0x400, 4);
-        pci_net->bar_write(0, 0x28, base + 0x500, 4);
-        pci_net->bar_write(0, 0x30, base + 0x900, 4);
-        pci_net->bar_write(0, 0x1c, 1, 2);
+        pci_net->bar_write(0, simrv::device::PciBarOffset{0x16}, 1, 2);
+        pci_net->bar_write(0, simrv::device::PciBarOffset{0x18}, 8, 2);
+        pci_net->bar_write(0, simrv::device::PciBarOffset{0x20}, base + 0x400, 4);
+        pci_net->bar_write(0, simrv::device::PciBarOffset{0x28}, base + 0x500, 4);
+        pci_net->bar_write(0, simrv::device::PciBarOffset{0x30}, base + 0x900, 4);
+        pci_net->bar_write(0, simrv::device::PciBarOffset{0x1c}, 1, 2);
     };
     configure_mmio_net();
     configure_pci_net();
-    mmio_net.write32(0x50, 1);
-    pci_net->bar_write(0, 0x100, 1, 2);
+    mmio_net.write32(simrv::memory::MmioOffset{0x50}, 1);
+    pci_net->bar_write(0, simrv::device::PciBarOffset{0x100}, 1, 2);
     check(machine.dma_engine().pending_tasks() == 2);
-    mmio_net.write32(0x70, 0);
+    mmio_net.write32(simrv::memory::MmioOffset{0x70}, 0);
     pci_net->reset();
     configure_mmio_net();
     configure_pci_net();
     machine.dma_engine().advance_cycle(3000);
     check(ram[0x802] == std::byte{0} && ram[0x902] == std::byte{0});
     check(mmio_net.isr_status() == 0 && pci_net->isr_status() == 0);
-    mmio_net.write32(0x50, 1);
-    pci_net->bar_write(0, 0x100, 1, 2);
+    mmio_net.write32(simrv::memory::MmioOffset{0x50}, 1);
+    pci_net->bar_write(0, simrv::device::PciBarOffset{0x100}, 1, 2);
     check(machine.dma_engine().pending_tasks() == 2);
     machine.dma_engine().advance_cycle(4000);
     check(ram[0x802] == std::byte{1} && ram[0x902] == std::byte{1});
@@ -1249,7 +1280,7 @@ void test_timed_smp_coherence_ordering() {
     owner.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
     owner.grow = simrv::memory::TlGrow::NtoT;
     owner.source = 9;  // Deliberately unrelated to hart identity.
-    owner.hart = 0;
+    owner.hart = simrv::xlen::HartId{0};
     owner.address = simrv::xlen::PhysAddr{line};
     owner.size = simrv::memory::kTlBlockSize;
     check(bus.send_request(owner));
@@ -1270,7 +1301,7 @@ void test_timed_smp_coherence_ordering() {
     simrv::memory::TlChannelA reader = owner;
     reader.grow = simrv::memory::TlGrow::NtoB;
     reader.source = 3;
-    reader.hart = 1;
+    reader.hart = simrv::xlen::HartId{1};
     check(bus.send_request(reader));
     for (unsigned beat = 0; beat < simrv::memory::kTlBlockBytes / simrv::memory::kTlBeatBytes;
          ++beat) {
@@ -1425,7 +1456,7 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
     acquire.grow = simrv::memory::TlGrow::NtoT;
     acquire.source = 1;
-    acquire.hart = 0;
+    acquire.hart = simrv::xlen::HartId{0};
     acquire.address = simrv::xlen::PhysAddr{line};
     acquire.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD response{};
@@ -1436,7 +1467,7 @@ void test_modified_line_does_not_refill_stale_shared_data() {
                               simrv::memory::MesiState::Exclusive);
 
     check(machine.cpu.dcache.write(simrv::xlen::PhysAddr{line}, updated, simrv::isa::Funct3::Sw));
-    bus.mark_modified(simrv::xlen::PhysAddr{line}, 0);
+    bus.mark_modified(simrv::xlen::PhysAddr{line}, simrv::xlen::HartId{0});
     std::memcpy(ram.data() + 0x180, &updated, sizeof(updated));
 
     // Model an L1 eviction whose write-through value is already in DRAM. The directory still
@@ -1472,8 +1503,9 @@ void test_release_data_writes_back_without_directory_entry() {
     release.report =
         simrv::memory::report_for(simrv::memory::MesiState::Modified, simrv::memory::TlCap::ToN);
     release.size = simrv::memory::kTlBlockSize;
-    release.source = simrv::memory::make_tl_source(0, simrv::memory::TlPort::Data);
-    release.hart = 0;
+    release.source =
+        simrv::memory::make_tl_source(simrv::xlen::HartId{0}, simrv::memory::TlPort::Data);
+    release.hart = simrv::xlen::HartId{0};
     release.address = simrv::xlen::PhysAddr{line};
 
     simrv::memory::TlChannelD response{};
@@ -1507,7 +1539,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
     acquire.grow = simrv::memory::TlGrow::NtoT;
     acquire.source = 3;
-    acquire.hart = 0;
+    acquire.hart = simrv::xlen::HartId{0};
     acquire.address = simrv::xlen::PhysAddr{line};
     acquire.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD response{};
@@ -1517,7 +1549,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     machine.cpu.dcache.insert(simrv::xlen::PhysAddr{line}, data.data(),
                               simrv::memory::MesiState::Exclusive);
     check(machine.cpu.dcache.write(simrv::xlen::PhysAddr{line}, value, simrv::isa::Funct3::Sw));
-    bus.mark_modified(simrv::xlen::PhysAddr{line}, 0);
+    bus.mark_modified(simrv::xlen::PhysAddr{line}, simrv::xlen::HartId{0});
     std::memcpy(ram.data() + 0x280, &value, sizeof(value));
     check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line}).state ==
           simrv::memory::MesiState::Modified);
@@ -1575,7 +1607,7 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
         acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
         acquire.grow = simrv::memory::TlGrow::NtoB;
         acquire.source = static_cast<simrv::memory::TlSourceId>(4 + index * 2);
-        acquire.hart = 0;
+        acquire.hart = simrv::xlen::HartId{0};
         acquire.address =
             simrv::xlen::PhysAddr{first_line + index * simrv::memory::CoherenceHub::kLineBytes};
         acquire.size = simrv::memory::kTlBlockSize;
@@ -1630,8 +1662,9 @@ void test_profiled_shared_cache_clusters() {
                                                    .line_bytes = 32,
                                                    .hit_latency = 3,
                                                    .miss_latency = 7};
-    config.soc.smp.clusters = {{.id = 0, .harts = {0, 1}, .l2 = l2_config},
-                               {.id = 2, .harts = {2}, .l2 = l2_config}};
+    config.soc.smp.clusters = {
+        {.id = 0, .harts = {simrv::xlen::HartId{0}, simrv::xlen::HartId{1}}, .l2 = l2_config},
+        {.id = 2, .harts = {simrv::xlen::HartId{2}}, .l2 = l2_config}};
     ConcreteMachine machine(config);
     auto& hub = machine.memory().system_bus().coherence_hub();
     const auto configured = hub.configure_topology(config.soc.smp);
@@ -1639,9 +1672,9 @@ void test_profiled_shared_cache_clusters() {
         std::cerr << "shared-cache cluster configuration failed: " << configured.error() << '\n';
         std::abort();
     }
-    auto* hart0_l2 = hub.shared_l2_for_hart(0);
-    auto* hart1_l2 = hub.shared_l2_for_hart(1);
-    auto* hart2_l2 = hub.shared_l2_for_hart(2);
+    auto* hart0_l2 = hub.shared_l2_for_hart(simrv::xlen::HartId{0});
+    auto* hart1_l2 = hub.shared_l2_for_hart(simrv::xlen::HartId{1});
+    auto* hart2_l2 = hub.shared_l2_for_hart(simrv::xlen::HartId{2});
     check(hart0_l2 != nullptr && hart0_l2 == hart1_l2 && hart2_l2 != nullptr &&
           hart2_l2 != hart0_l2);
     check(hart0_l2->capacity_bytes() == 32 * 1024 && hart0_l2->associativity() == 4);
@@ -1685,7 +1718,7 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
     request.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
     request.grow = simrv::memory::TlGrow::NtoB;
     request.source = 20;
-    request.hart = 0;
+    request.hart = simrv::xlen::HartId{0};
     request.address = simrv::xlen::PhysAddr{line};
     request.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD response{};
@@ -1717,7 +1750,7 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
                               [](auto value) { return value == simrv::xlen::Byte{0}; }));
 
     request.source = 21;
-    request.hart = 1;
+    request.hart = simrv::xlen::HartId{1};
     request.grow = simrv::memory::TlGrow::NtoT;
     check(bus.acquire_block(request, response, data));
     bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
@@ -1783,7 +1816,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     acq0.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
     acq0.grow = simrv::memory::TlGrow::NtoB;
     acq0.source = 10;
-    acq0.hart = 0;
+    acq0.hart = simrv::xlen::HartId{0};
     acq0.address = simrv::xlen::PhysAddr{line};
     acq0.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD resp0{};
@@ -1796,7 +1829,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     // Hart 1 acquires line as Branch (Shared)
     simrv::memory::TlChannelA acq1 = acq0;
     acq1.source = 11;
-    acq1.hart = 1;
+    acq1.hart = simrv::xlen::HartId{1};
     simrv::memory::TlChannelD resp1{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data1{};
     check(bus.acquire_block(acq1, resp1, data1));
@@ -1814,7 +1847,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     upg.opcode = simrv::memory::TlOpcodeA::AcquirePerm;
     upg.grow = simrv::memory::TlGrow::BtoT;
     upg.source = 12;
-    upg.hart = 0;
+    upg.hart = simrv::xlen::HartId{0};
     upg.address = simrv::xlen::PhysAddr{line};
     upg.size = simrv::memory::kTlBlockSize;
     simrv::memory::TlChannelD upg_resp{};
@@ -1827,7 +1860,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
                                                     simrv::memory::MesiState::Exclusive));
     check(machine.hart(0).dcache.write(simrv::xlen::PhysAddr{line}, 0xcafebeef,
                                        simrv::isa::Funct3::Sw));
-    bus.mark_modified(simrv::xlen::PhysAddr{line}, 0);
+    bus.mark_modified(simrv::xlen::PhysAddr{line}, simrv::xlen::HartId{0});
 
     // Hart 1 should have been probed and invalidated by CoherenceHub during AcquirePerm
     check(machine.hart(1).dcache.line_state(simrv::xlen::PhysAddr{line}) ==
@@ -1864,7 +1897,7 @@ void test_tilelink_c_prefetch_intent() {
     intent.opcode = simrv::memory::TlOpcodeA::Intent;
     intent.intent = simrv::memory::TlIntent::PrefetchRead;
     intent.source = 20;
-    intent.hart = 0;
+    intent.hart = simrv::xlen::HartId{0};
     intent.address = simrv::xlen::PhysAddr{line};
     intent.size = simrv::memory::kTlBlockSize;
 
@@ -3265,35 +3298,35 @@ void test_aclint() {
     assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) == 0);
 
     // MSWI test
-    mswi.write32(0x00, 1);
+    mswi.write32(simrv::memory::MmioOffset{0x00}, 1);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) != 0);
-    assert(mswi.read32(0x00) == 1);
-    mswi.write32(0x00, 0);
+    assert(mswi.read32(simrv::memory::MmioOffset{0x00}) == 1);
+    mswi.write32(simrv::memory::MmioOffset{0x00}, 0);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) == 0);
 
     // MTIMER test: set mtimecmp = 100, mtime = 150
-    mtimer.write64(0x4000, 100);
-    mtimer.write64(0x7ff8, 150);
+    mtimer.write64(simrv::memory::MmioOffset{0x4000}, 100);
+    mtimer.write64(simrv::memory::MmioOffset{0x7ff8}, 150);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
 
     // Clear by setting mtimecmp higher
-    mtimer.write64(0x4000, 200);
+    mtimer.write64(simrv::memory::MmioOffset{0x4000}, 200);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
 
     // MTIMER 32-bit MMIO word write test to ACLINT 0x7ff8 / 0x7ffc
-    mtimer.write32(0x7ff8, 250);
-    mtimer.write32(0x7ffc, 0);
+    mtimer.write32(simrv::memory::MmioOffset{0x7ff8}, 250);
+    mtimer.write32(simrv::memory::MmioOffset{0x7ffc}, 0);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
-    assert(mtimer.read32(0x7ff8) == 250);
-    assert(mtimer.read32(0x7ffc) == 0);
+    assert(mtimer.read32(simrv::memory::MmioOffset{0x7ff8}) == 250);
+    assert(mtimer.read32(simrv::memory::MmioOffset{0x7ffc}) == 0);
 
     // Lower mtime below mtimecmp via 32-bit write
-    mtimer.write32(0x7ff8, 50);
+    mtimer.write32(simrv::memory::MmioOffset{0x7ff8}, 50);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
     std::cout << "[PASS] test_aclint\n";
@@ -3310,8 +3343,8 @@ void test_aia_aplic_and_imsic() {
                                  &imsic_s);
 
     // Direct mode interrupt testing
-    aplic_s.write32(0x0000, 0x100);    // IE=1, DM=0 (Direct mode)
-    aplic_s.write32(0x1e00, 1U << 1);  // Enable source 1
+    aplic_s.write32(simrv::memory::MmioOffset{0x0000}, 0x100);    // IE=1, DM=0 (Direct mode)
+    aplic_s.write32(simrv::memory::MmioOffset{0x1e00}, 1U << 1);  // Enable source 1
     aplic_s.set_irq(1, true);
     machine.cpu.apply_pending_interrupt_lines(machine);
 
@@ -3319,7 +3352,7 @@ void test_aia_aplic_and_imsic() {
 
     // Direct mode de-assertion when source is dropped and cleared
     aplic_s.set_irq(1, false);
-    aplic_s.write32(0x1d00, 1U << 1);  // in_clrip (clear source 1)
+    aplic_s.write32(simrv::memory::MmioOffset{0x1d00}, 1U << 1);  // in_clrip (clear source 1)
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) == 0);
 
@@ -3327,21 +3360,21 @@ void test_aia_aplic_and_imsic() {
     aplic_s.set_irq(1, true);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
-    aplic_s.write32(0x0000, 0x000);  // IE=0
+    aplic_s.write32(simrv::memory::MmioOffset{0x0000}, 0x000);  // IE=0
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) == 0);
-    aplic_s.write32(0x0000, 0x100);  // Restore IE=1
+    aplic_s.write32(simrv::memory::MmioOffset{0x0000}, 0x100);  // Restore IE=1
     aplic_s.set_irq(1, false);
-    aplic_s.write32(0x1d00, 1U << 1);  // Clean pending
+    aplic_s.write32(simrv::memory::MmioOffset{0x1d00}, 1U << 1);  // Clean pending
 
     // MSI delivery via IMSIC testing
-    imsic_s.csr_write(0, 0x70, 1);        // eidelivery = 1
-    imsic_s.csr_write(0, 0xC0, 1U << 5);  // enable interrupt ID 5
-    imsic_s.trigger_msi(0, 5);
+    imsic_s.csr_write(simrv::xlen::HartId{0}, 0x70, 1);        // eidelivery = 1
+    imsic_s.csr_write(simrv::xlen::HartId{0}, 0xC0, 1U << 5);  // enable interrupt ID 5
+    imsic_s.trigger_msi(simrv::xlen::HartId{0}, 5);
     machine.cpu.apply_pending_interrupt_lines(machine);
 
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
-    assert((imsic_s.csr_read(0, 0x44) & 0xffff) == 5);  // topei returns ID 5
+    assert((imsic_s.csr_read(simrv::xlen::HartId{0}, 0x44) & 0xffff) == 5);  // topei returns ID 5
     std::cout << "[PASS] test_aia_aplic_and_imsic\n";
 }
 
@@ -3354,21 +3387,25 @@ void test_pcie_and_virtio_pci() {
                                  simrv::mmio::kImsicSBaseAddress, simrv::mmio::kImsicSSize);
     simrv::device::PcieRootComplex rc(&machine, nullptr, &imsic_s);
     auto blk = std::make_shared<simrv::device::VirtioPciBlock>();
-    blk->bar_write(0, 0x00, 0, 4);
-    const uint32_t block_features = blk->bar_read(0, 0x04, 4);
+    blk->bar_write(0, simrv::device::PciBarOffset{0x00}, 0, 4);
+    const uint32_t block_features = blk->bar_read(0, simrv::device::PciBarOffset{0x04}, 4);
     if ((block_features & ((1U << 9) | (1U << 13) | (1U << 14))) !=
         ((1U << 9) | (1U << 13) | (1U << 14))) {
         std::cerr << "VirtIO PCI block features missing\n";
         std::abort();
     }
-    if (blk->bar_read(0, 0x300 + 36, 4) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
-        blk->bar_read(0, 0x300 + 40, 4) != 1 ||
-        blk->bar_read(0, 0x300 + 48, 4) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
-        blk->bar_read(0, 0x300 + 52, 4) != 1 || blk->bar_read(0, 0x300 + 56, 1) != 1) {
+    if (blk->bar_read(0, simrv::device::PciBarOffset{0x300 + 36}, 4) !=
+            simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk->bar_read(0, simrv::device::PciBarOffset{0x300 + 40}, 4) != 1 ||
+        blk->bar_read(0, simrv::device::PciBarOffset{0x300 + 48}, 4) !=
+            simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk->bar_read(0, simrv::device::PciBarOffset{0x300 + 52}, 4) != 1 ||
+        blk->bar_read(0, simrv::device::PciBarOffset{0x300 + 56}, 1) != 1) {
         std::cerr << "VirtIO PCI block range configuration mismatch\n";
         std::abort();
     }
-    rc.attach_device(0, 1, 0, blk);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{1},
+                     simrv::device::PciFunctionNumber{0}, blk);
 
     // Test ECAM discovery of device at Bus 0, Dev 1, Func 0
     // Offset in ECAM: (0 << 20) | (1 << 15) | (0 << 12) = 0x8000
@@ -3388,8 +3425,10 @@ void test_pcie_and_virtio_pci() {
 
     // Fast active BAR routing verification
     assert(rc.active_bar_count() == 1);
-    assert(rc.get_device(0, 1, 0) == blk.get());
-    assert(rc.get_device(0, 8, 0) == nullptr);
+    assert(rc.get_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{1},
+                         simrv::device::PciFunctionNumber{0}) == blk.get());
+    assert(rc.get_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{8},
+                         simrv::device::PciFunctionNumber{0}) == nullptr);
 
     // MMIO read/write routed to BAR 0
     rc.mmio_write(simrv::xlen::PhysAddr{0x40001000 + 0x00}, 1, 4);
@@ -3434,10 +3473,10 @@ void test_pcie_and_virtio_pci() {
     assert(blk->msi_address() == simrv::mmio::kImsicSBaseAddress);
     assert(blk->msi_data() == 9);
 
-    imsic_s.csr_write(0, 0x70, 1);        // eidelivery = 1
-    imsic_s.csr_write(0, 0xC0, 1U << 9);  // enable interrupt ID 9
-    blk->trigger_irq();                   // With MSI enabled, routes via send_msi to IMSIC
-    assert((imsic_s.csr_read(0, 0x44) & 0xffff) == 9);  // topei returns ID 9
+    imsic_s.csr_write(simrv::xlen::HartId{0}, 0x70, 1);        // eidelivery = 1
+    imsic_s.csr_write(simrv::xlen::HartId{0}, 0xC0, 1U << 9);  // enable interrupt ID 9
+    blk->trigger_irq();  // With MSI enabled, routes via send_msi to IMSIC
+    assert((imsic_s.csr_read(simrv::xlen::HartId{0}, 0x44) & 0xffff) == 9);  // topei returns ID 9
 
     // Disable MSI: subsequent interrupts fall back to INTx pin assertion
     rc.ecam_write(0x8000 + 0x84 + 0x02, 0x0080U, 2);
@@ -3447,18 +3486,18 @@ void test_pcie_and_virtio_pci() {
     auto console = std::make_shared<simrv::device::VirtioPciConsole>();
     auto rng = std::make_shared<simrv::device::VirtioPciRng>();
     auto gpu = std::make_shared<simrv::device::VirtioPciGpu>();
-    gpu->bar_write(0, 0x00, 0, 4);
-    if ((gpu->bar_read(0, 0x04, 4) & (1U << 1)) != 0) {
+    gpu->bar_write(0, simrv::device::PciBarOffset{0x00}, 0, 4);
+    if ((gpu->bar_read(0, simrv::device::PciBarOffset{0x04}, 4) & (1U << 1)) != 0) {
         std::cerr << "VirtIO GPU advertises unsupported VirGL\n";
         std::abort();
     }
     auto input = std::make_shared<simrv::device::VirtioPciInput>();
     auto sound = std::make_shared<simrv::device::VirtioPciSound>();
     const auto advertises_version_1 = [](simrv::device::VirtioPciDevice& device) {
-        device.bar_write(0, 0x00, 1, 4);
-        const bool supported =
-            device.bar_read(0, 0x04, 4) == simrv::device::virtio::kVirtioFVersion1FeatureWord;
-        device.bar_write(0, 0x00, 0, 4);
+        device.bar_write(0, simrv::device::PciBarOffset{0x00}, 1, 4);
+        const bool supported = device.bar_read(0, simrv::device::PciBarOffset{0x04}, 4) ==
+                               simrv::device::virtio::kVirtioFVersion1FeatureWord;
+        device.bar_write(0, simrv::device::PciBarOffset{0x00}, 0, 4);
         return supported;
     };
     if (!advertises_version_1(*blk) || !advertises_version_1(*console) ||
@@ -3468,11 +3507,16 @@ void test_pcie_and_virtio_pci() {
         std::abort();
     }
 
-    rc.attach_device(0, 2, 0, console);
-    rc.attach_device(0, 3, 0, rng);
-    rc.attach_device(0, 4, 0, gpu);
-    rc.attach_device(0, 5, 0, input);
-    rc.attach_device(0, 6, 0, sound);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{2},
+                     simrv::device::PciFunctionNumber{0}, console);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{3},
+                     simrv::device::PciFunctionNumber{0}, rng);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{4},
+                     simrv::device::PciFunctionNumber{0}, gpu);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{5},
+                     simrv::device::PciFunctionNumber{0}, input);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{6},
+                     simrv::device::PciFunctionNumber{0}, sound);
 
     // Verify Console at 00:02.0 (ECAM offset 0x10000)
     const uint32_t console_id = rc.ecam_read((2 << 15) + 0x00, 4);
@@ -3510,7 +3554,8 @@ void test_pcie_and_virtio_pci() {
         std::cerr << "VirtIO PCI net must advertise the shared VERSION_1 feature word\n";
         std::abort();
     }
-    rc.attach_device(0, 7, 0, net);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{7},
+                     simrv::device::PciFunctionNumber{0}, net);
     const uint32_t net_id = rc.ecam_read((7 << 15) + 0x00, 4);
     assert((net_id & 0xffff) == 0x1AF4);
     assert((net_id >> 16) == 0x1041);
@@ -3519,7 +3564,9 @@ void test_pcie_and_virtio_pci() {
     // 64-bit BAR probe sizing and addressing on a 64-bit endpoint
     class Test64BitEndpoint : public simrv::device::PciDevice {
        public:
-        Test64BitEndpoint() : PciDevice(0x1234, 0x5678, 0x01, 0x020000) {
+        Test64BitEndpoint()
+            : PciDevice(simrv::device::PciVendorId{0x1234}, simrv::device::PciDeviceId{0x5678},
+                        simrv::device::PciRevisionId{0x01}, simrv::device::PciClassCode{0x020000}) {
             init_bar(0, 0x4000, true, false);  // 16KB 64-bit BAR at BAR 0/1
         }
         auto bar_read(simrv::device::PciBarIndex bar_idx, simrv::device::PciBarOffset offset,
@@ -3531,7 +3578,8 @@ void test_pcie_and_virtio_pci() {
         }
     };
     auto test_ep = std::make_shared<Test64BitEndpoint>();
-    rc.attach_device(0, 8, 0, test_ep);
+    rc.attach_device(simrv::device::PciBusNumber{0}, simrv::device::PciDeviceNumber{8},
+                     simrv::device::PciFunctionNumber{0}, test_ep);
     // ECAM offset for dev 8: (8 << 15) = 0x40000
     // Probe BAR 0 (low dword):
     rc.ecam_write(0x40000 + 0x10, 0xFFFFFFFFU, 4);
@@ -3622,57 +3670,61 @@ void test_virtio_mmio_v2() {
     simrv::device::VirtioMmioGpu gpu(simrv::xlen::PhysAddr{0x10008000}, 10, &machine);
 
     // Test Magic (0x74726976) and Version 2
-    assert(blk.read32(0x00) == 0x74726976);
-    assert(blk.read32(0x04) == 2);
-    assert(blk.read32(0x08) == 2);  // Block Device ID
-    blk.write32(0x14, 0);           // device_features_sel = 0
-    const uint32_t block_features = blk.read32(0x10);
+    assert(blk.read32(simrv::memory::MmioOffset{0x00}) == 0x74726976);
+    assert(blk.read32(simrv::memory::MmioOffset{0x04}) == 2);
+    assert(blk.read32(simrv::memory::MmioOffset{0x08}) == 2);  // Block Device ID
+    blk.write32(simrv::memory::MmioOffset{0x14}, 0);           // device_features_sel = 0
+    const uint32_t block_features = blk.read32(simrv::memory::MmioOffset{0x10});
     if ((block_features & ((1U << 9) | (1U << 13) | (1U << 14))) !=
             ((1U << 9) | (1U << 13) | (1U << 14)) ||
         (block_features & (1U << 1)) != 0 ||
-        blk.read32(0x100 + 36) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
-        blk.read32(0x100 + 40) != 1 ||
-        blk.read32(0x100 + 48) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
-        blk.read32(0x100 + 52) != 1 || blk.read32(0x100 + 56) != 1) {
+        blk.read32(simrv::memory::MmioOffset{0x100 + 36}) !=
+            simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk.read32(simrv::memory::MmioOffset{0x100 + 40}) != 1 ||
+        blk.read32(simrv::memory::MmioOffset{0x100 + 48}) !=
+            simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk.read32(simrv::memory::MmioOffset{0x100 + 52}) != 1 ||
+        blk.read32(simrv::memory::MmioOffset{0x100 + 56}) != 1) {
         std::cerr << "VirtIO block feature advertisement mismatch\n";
         std::abort();
     }
-    blk.write32(0x14, 1);
-    if (blk.read32(0x10) != simrv::device::virtio::kVirtioFVersion1FeatureWord) {
+    blk.write32(simrv::memory::MmioOffset{0x14}, 1);
+    if (blk.read32(simrv::memory::MmioOffset{0x10}) !=
+        simrv::device::virtio::kVirtioFVersion1FeatureWord) {
         std::cerr << "VirtIO MMIO block VERSION_1 feature word mismatch\n";
         std::abort();
     }
-    blk.write32(0x14, 0);
+    blk.write32(simrv::memory::MmioOffset{0x14}, 0);
 
-    assert(con.read32(0x00) == 0x74726976);
-    assert(con.read32(0x04) == 2);
-    assert(con.read32(0x08) == 3);  // Console Device ID
+    assert(con.read32(simrv::memory::MmioOffset{0x00}) == 0x74726976);
+    assert(con.read32(simrv::memory::MmioOffset{0x04}) == 2);
+    assert(con.read32(simrv::memory::MmioOffset{0x08}) == 3);  // Console Device ID
 
-    assert(rng.read32(0x00) == 0x74726976);
-    assert(rng.read32(0x04) == 2);
-    assert(rng.read32(0x08) == 4);  // RNG Device ID
+    assert(rng.read32(simrv::memory::MmioOffset{0x00}) == 0x74726976);
+    assert(rng.read32(simrv::memory::MmioOffset{0x04}) == 2);
+    assert(rng.read32(simrv::memory::MmioOffset{0x08}) == 4);  // RNG Device ID
 
-    assert(net.read32(0x00) == 0x74726976);
-    assert(net.read32(0x04) == 2);
-    assert(net.read32(0x08) == 1);  // Net Device ID
-    gpu.write32(0x14, 0);
-    if ((gpu.read32(0x10) & (1U << 1)) != 0) {
+    assert(net.read32(simrv::memory::MmioOffset{0x00}) == 0x74726976);
+    assert(net.read32(simrv::memory::MmioOffset{0x04}) == 2);
+    assert(net.read32(simrv::memory::MmioOffset{0x08}) == 1);  // Net Device ID
+    gpu.write32(simrv::memory::MmioOffset{0x14}, 0);
+    if ((gpu.read32(simrv::memory::MmioOffset{0x10}) & (1U << 1)) != 0) {
         std::cerr << "VirtIO MMIO GPU advertises unsupported VirGL\n";
         std::abort();
     }
 
     // Test Queue config and status transitions
-    blk.write32(0x30, 0);            // queue_sel = 0
-    assert(blk.read32(0x34) == 64);  // queue_num_max = 64
-    blk.write32(0x38, 32);           // queue_num = 32
-    blk.write32(0x80, 0x80001000);   // desc_lo
-    blk.write32(0x84, 0);            // desc_hi
-    blk.write32(0x90, 0x80002000);   // driver_lo
-    blk.write32(0x94, 0);            // driver_hi
-    blk.write32(0xA0, 0x80003000);   // device_lo
-    blk.write32(0xA4, 0);            // device_hi
-    blk.write32(0x44, 1);            // queue_ready = 1
-    assert(blk.read32(0x44) == 1);
+    blk.write32(simrv::memory::MmioOffset{0x30}, 0);            // queue_sel = 0
+    assert(blk.read32(simrv::memory::MmioOffset{0x34}) == 64);  // queue_num_max = 64
+    blk.write32(simrv::memory::MmioOffset{0x38}, 32);           // queue_num = 32
+    blk.write32(simrv::memory::MmioOffset{0x80}, 0x80001000);   // desc_lo
+    blk.write32(simrv::memory::MmioOffset{0x84}, 0);            // desc_hi
+    blk.write32(simrv::memory::MmioOffset{0x90}, 0x80002000);   // driver_lo
+    blk.write32(simrv::memory::MmioOffset{0x94}, 0);            // driver_hi
+    blk.write32(simrv::memory::MmioOffset{0xA0}, 0x80003000);   // device_lo
+    blk.write32(simrv::memory::MmioOffset{0xA4}, 0);            // device_hi
+    blk.write32(simrv::memory::MmioOffset{0x44}, 1);            // queue_ready = 1
+    assert(blk.read32(simrv::memory::MmioOffset{0x44}) == 1);
 
     const auto* q = blk.get_queue_state(0);
     assert(q != nullptr);
@@ -3684,7 +3736,7 @@ void test_virtio_mmio_v2() {
     (void)q;
 
     // Test Device Status
-    blk.write32(0x70, 0x0F);  // DRIVER_OK
+    blk.write32(simrv::memory::MmioOffset{0x70}, 0x0F);  // DRIVER_OK
     assert(blk.device_status() == 0x0F);
 
     const auto check_block = [](bool condition, const char* message) {
@@ -3750,7 +3802,7 @@ void test_virtio_mmio_v2() {
         const uint16_t head = 0;
         std::memcpy(guest_pointer(kAvailRing + 2), &request_index, sizeof(request_index));
         std::memcpy(guest_pointer(kAvailRing + 4 + (request_index - 1) * 2), &head, sizeof(head));
-        blk.write32(0x50, 0);  // Notify queue 0
+        blk.write32(simrv::memory::MmioOffset{0x50}, 0);  // Notify queue 0
 
         uint8_t status = 0xff;
         std::memcpy(&status, guest_pointer(kStatusAddr), sizeof(status));
@@ -3893,7 +3945,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.run_memory_stage(machine);
     check(h0.pipeline_context.mem_paddr.raw() == target_addr);
     check(machine.memory().reservation_table().check_reservation(
-        0, simrv::xlen::PhysAddr{target_addr}));
+        simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{target_addr}));
 
     h0.pipeline_context = {};
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
@@ -3941,7 +3993,7 @@ void test_ia_multihart_lr_sc_coherence() {
     check(h0.state().load_res == target_addr);
     check(h0.state().lr_reservation_active);
     check(machine.memory().reservation_table().check_reservation(
-        0, simrv::xlen::PhysAddr{target_addr}));
+        simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{target_addr}));
 
     // 2. Hart 1 performs a store to the same address in IA mode
     auto& h1 = machine.hart(1);
@@ -3956,7 +4008,7 @@ void test_ia_multihart_lr_sc_coherence() {
 
     // 3. Hart 0's reservation must now be invalidated
     check(!machine.memory().reservation_table().check_reservation(
-        0, simrv::xlen::PhysAddr{target_addr}));
+        simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{target_addr}));
 
     // 4. Hart 0 attempts SC.W, which must fail
     h0.pipeline_context = {};
@@ -4256,24 +4308,25 @@ void test_virtio_sound_negotiation_and_playback() {
     simrv::device::VirtioMmioSound sound(simrv::xlen::PhysAddr{0x10006000}, 6, &machine);
 
     // 1. MMIO Discovery
-    check(sound.read32(0x00) == 0x74726976);                          // "virt" magic
-    check(sound.read32(0x04) == 2);                                   // Version 2
-    check(sound.read32(0x08) == simrv::device::virtio::kDevIdSound);  // ID 25
+    check(sound.read32(simrv::memory::MmioOffset{0x00}) == 0x74726976);  // "virt" magic
+    check(sound.read32(simrv::memory::MmioOffset{0x04}) == 2);           // Version 2
+    check(sound.read32(simrv::memory::MmioOffset{0x08}) ==
+          simrv::device::virtio::kDevIdSound);  // ID 25
     check(sound.device_status() == 0);
 
     // 2. Config space
-    check(sound.read32(0x100) == 1);  // jacks
-    check(sound.read32(0x104) == 1);  // streams
-    check(sound.read32(0x108) == 1);  // chmaps
+    check(sound.read32(simrv::memory::MmioOffset{0x100}) == 1);  // jacks
+    check(sound.read32(simrv::memory::MmioOffset{0x104}) == 1);  // streams
+    check(sound.read32(simrv::memory::MmioOffset{0x108}) == 1);  // chmaps
 
     // 3. Status negotiation
-    sound.write32(0x70, 0x01);  // ACKNOWLEDGE
+    sound.write32(simrv::memory::MmioOffset{0x70}, 0x01);  // ACKNOWLEDGE
     check(sound.device_status() == 0x01);
-    sound.write32(0x70, 0x03);  // DRIVER
+    sound.write32(simrv::memory::MmioOffset{0x70}, 0x03);  // DRIVER
     check(sound.device_status() == 0x03);
-    sound.write32(0x70, 0x0B);  // FEATURES_OK
+    sound.write32(simrv::memory::MmioOffset{0x70}, 0x0B);  // FEATURES_OK
     check(sound.device_status() == 0x0B);
-    sound.write32(0x70, 0x0F);  // DRIVER_OK
+    sound.write32(simrv::memory::MmioOffset{0x70}, 0x0F);  // DRIVER_OK
     check(sound.device_status() == 0x0F);
 
     // 4. Queue 0 (Control Queue) setup
@@ -4283,17 +4336,17 @@ void test_virtio_sound_negotiation_and_playback() {
     constexpr simrv::xlen::Address kReqBufAddr = 0x80013000;
     constexpr simrv::xlen::Address kRespBufAddr = 0x80014000;
 
-    sound.write32(0x30, simrv::device::virtio::kVirtioSndVqControl);
-    check(sound.read32(0x34) == 64);
-    sound.write32(0x38, 16);
-    sound.write32(0x80, static_cast<uint32_t>(kDesc0Addr));
-    sound.write32(0x84, 0);
-    sound.write32(0x90, static_cast<uint32_t>(kAvail0Addr));
-    sound.write32(0x94, 0);
-    sound.write32(0xA0, static_cast<uint32_t>(kUsed0Addr));
-    sound.write32(0xA4, 0);
-    sound.write32(0x44, 1);
-    check(sound.read32(0x44) == 1);
+    sound.write32(simrv::memory::MmioOffset{0x30}, simrv::device::virtio::kVirtioSndVqControl);
+    check(sound.read32(simrv::memory::MmioOffset{0x34}) == 64);
+    sound.write32(simrv::memory::MmioOffset{0x38}, 16);
+    sound.write32(simrv::memory::MmioOffset{0x80}, static_cast<uint32_t>(kDesc0Addr));
+    sound.write32(simrv::memory::MmioOffset{0x84}, 0);
+    sound.write32(simrv::memory::MmioOffset{0x90}, static_cast<uint32_t>(kAvail0Addr));
+    sound.write32(simrv::memory::MmioOffset{0x94}, 0);
+    sound.write32(simrv::memory::MmioOffset{0xA0}, static_cast<uint32_t>(kUsed0Addr));
+    sound.write32(simrv::memory::MmioOffset{0xA4}, 0);
+    sound.write32(simrv::memory::MmioOffset{0x44}, 1);
+    check(sound.read32(simrv::memory::MmioOffset{0x44}) == 1);
 
     auto ram_ptr = [&](simrv::xlen::Address paddr) -> uint8_t* {
         return reinterpret_cast<uint8_t*>(ram.data()) + (paddr - 0x80000000);
@@ -4324,7 +4377,7 @@ void test_virtio_sound_negotiation_and_playback() {
         avail_idx++;
         std::memcpy(ram_ptr(kAvail0Addr + 2), &avail_idx, 2);
 
-        sound.write32(0x50, simrv::device::virtio::kVirtioSndVqControl);
+        sound.write32(simrv::memory::MmioOffset{0x50}, simrv::device::virtio::kVirtioSndVqControl);
 
         std::memcpy(resp_data, ram_ptr(kRespBufAddr), resp_len);
     };
@@ -4377,15 +4430,15 @@ void test_virtio_sound_negotiation_and_playback() {
     constexpr simrv::xlen::Address kPcmBufAddr = 0x80023000;
     constexpr simrv::xlen::Address kPcmStatusAddr = 0x80024000;
 
-    sound.write32(0x30, simrv::device::virtio::kVirtioSndVqTx);
-    sound.write32(0x38, 16);
-    sound.write32(0x80, static_cast<uint32_t>(kDesc2Addr));
-    sound.write32(0x84, 0);
-    sound.write32(0x90, static_cast<uint32_t>(kAvail2Addr));
-    sound.write32(0x94, 0);
-    sound.write32(0xA0, static_cast<uint32_t>(kUsed2Addr));
-    sound.write32(0xA4, 0);
-    sound.write32(0x44, 1);
+    sound.write32(simrv::memory::MmioOffset{0x30}, simrv::device::virtio::kVirtioSndVqTx);
+    sound.write32(simrv::memory::MmioOffset{0x38}, 16);
+    sound.write32(simrv::memory::MmioOffset{0x80}, static_cast<uint32_t>(kDesc2Addr));
+    sound.write32(simrv::memory::MmioOffset{0x84}, 0);
+    sound.write32(simrv::memory::MmioOffset{0x90}, static_cast<uint32_t>(kAvail2Addr));
+    sound.write32(simrv::memory::MmioOffset{0x94}, 0);
+    sound.write32(simrv::memory::MmioOffset{0xA0}, static_cast<uint32_t>(kUsed2Addr));
+    sound.write32(simrv::memory::MmioOffset{0xA4}, 0);
+    sound.write32(simrv::memory::MmioOffset{0x44}, 1);
 
     constexpr size_t kSampleBytes = 128;
     std::vector<uint8_t> pcm_packet(sizeof(simrv::device::virtio::VirtioSndPcmXfer) + kSampleBytes,
@@ -4413,7 +4466,7 @@ void test_virtio_sound_negotiation_and_playback() {
     std::memcpy(ram_ptr(kAvail2Addr + 2), &avail2_idx, 2);
 
     const uint64_t prev_total = simrv::device::virtio::HostAudioSink::instance().total_bytes();
-    sound.write32(0x50, simrv::device::virtio::kVirtioSndVqTx);
+    sound.write32(simrv::memory::MmioOffset{0x50}, simrv::device::virtio::kVirtioSndVqTx);
 
     check(simrv::device::virtio::HostAudioSink::instance().total_bytes() ==
           prev_total + kSampleBytes);
@@ -4434,8 +4487,9 @@ void test_virtio_sound_negotiation_and_playback() {
 
     // 6. Test VirtioPciSound Device Discovery
     auto pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
-    check(pci_sound->config_read(0x00, 2) == 0x1AF4);
-    check(pci_sound->config_read(0x02, 2) == 0x1059);  // Modern Sound PCI ID
+    check(pci_sound->config_read(simrv::device::PciConfigOffset{0x00}, 2) == 0x1AF4);
+    check(pci_sound->config_read(simrv::device::PciConfigOffset{0x02}, 2) ==
+          0x1059);  // Modern Sound PCI ID
 
     std::cout << "[PASS] test_virtio_sound_negotiation_and_playback\n";
 }
@@ -4669,23 +4723,25 @@ void test_pflash_cfi_query() {
     simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x20000000}, kSize, kSectorSize,
                                  false, "pflash0");
 
-    check(pflash.read8(0x0) == 0xFF);
-    pflash.write8(0x0, 0x98);  // Enter CFI query mode
+    check(pflash.read8(simrv::memory::MmioOffset{0x0}) == 0xFF);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0x98);  // Enter CFI query mode
 
-    check(pflash.read8(0x10) == 'Q');
-    check(pflash.read8(0x11) == 'R');
-    check(pflash.read8(0x12) == 'Y');
-    check(pflash.read8(0x13) == 0x01);
-    check(pflash.read8(0x14) == 0x00);
-    check(pflash.read8(0x27) == 25);
-    check(pflash.read8(0x2C) == 0x01);
+    check(pflash.read8(simrv::memory::MmioOffset{0x10}) == 'Q');
+    check(pflash.read8(simrv::memory::MmioOffset{0x11}) == 'R');
+    check(pflash.read8(simrv::memory::MmioOffset{0x12}) == 'Y');
+    check(pflash.read8(simrv::memory::MmioOffset{0x13}) == 0x01);
+    check(pflash.read8(simrv::memory::MmioOffset{0x14}) == 0x00);
+    check(pflash.read8(simrv::memory::MmioOffset{0x27}) == 25);
+    check(pflash.read8(simrv::memory::MmioOffset{0x2C}) == 0x01);
 
     const uint32_t num_sectors = kSize / kSectorSize;
-    check(pflash.read8(0x2D) == static_cast<uint8_t>((num_sectors - 1) & 0xFF));
-    check(pflash.read8(0x2E) == static_cast<uint8_t>(((num_sectors - 1) >> 8) & 0xFF));
+    check(pflash.read8(simrv::memory::MmioOffset{0x2D}) ==
+          static_cast<uint8_t>((num_sectors - 1) & 0xFF));
+    check(pflash.read8(simrv::memory::MmioOffset{0x2E}) ==
+          static_cast<uint8_t>(((num_sectors - 1) >> 8) & 0xFF));
 
-    pflash.write8(0x0, 0xFF);  // Reset to read array
-    check(pflash.read8(0x10) == 0xFF);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0xFF);  // Reset to read array
+    check(pflash.read8(simrv::memory::MmioOffset{0x10}) == 0xFF);
 }
 
 void test_pflash_read_status_and_id() {
@@ -4695,14 +4751,14 @@ void test_pflash_read_status_and_id() {
 
     simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x20000000}, 1024 * 1024, 64 * 1024,
                                  false, "pflash0");
-    pflash.write8(0x0, 0x70);
-    check(pflash.read8(0x0) == 0x80);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0x70);
+    check(pflash.read8(simrv::memory::MmioOffset{0x0}) == 0x80);
 
-    pflash.write8(0x0, 0x90);
-    check(pflash.read8(0x0) == 0x89);
-    check(pflash.read8(0x1) == 0x18);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0x90);
+    check(pflash.read8(simrv::memory::MmioOffset{0x0}) == 0x89);
+    check(pflash.read8(simrv::memory::MmioOffset{0x1}) == 0x18);
 
-    pflash.write8(0x0, 0xFF);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0xFF);
 }
 
 void test_pflash_program_and_erase() {
@@ -4715,17 +4771,17 @@ void test_pflash_program_and_erase() {
     simrv::device::PFlash pflash(machine, simrv::xlen::PhysAddr{0x20000000}, kSize, kSectorSize,
                                  false, "pflash0");
 
-    pflash.write8(0x100, 0x40);
-    pflash.write8(0x100, 0xA5);
-    check((pflash.read8(0x100) & 0x80) != 0);
+    pflash.write8(simrv::memory::MmioOffset{0x100}, 0x40);
+    pflash.write8(simrv::memory::MmioOffset{0x100}, 0xA5);
+    check((pflash.read8(simrv::memory::MmioOffset{0x100}) & 0x80) != 0);
 
-    pflash.write8(0x0, 0xFF);
-    check(pflash.read8(0x100) == 0xA5);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0xFF);
+    check(pflash.read8(simrv::memory::MmioOffset{0x100}) == 0xA5);
 
-    pflash.write8(0x100, 0x20);
-    pflash.write8(0x100, 0xD0);
-    pflash.write8(0x0, 0xFF);
-    check(pflash.read8(0x100) == 0xFF);
+    pflash.write8(simrv::memory::MmioOffset{0x100}, 0x20);
+    pflash.write8(simrv::memory::MmioOffset{0x100}, 0xD0);
+    pflash.write8(simrv::memory::MmioOffset{0x0}, 0xFF);
+    check(pflash.read8(simrv::memory::MmioOffset{0x100}) == 0xFF);
 }
 
 void test_pflash_persistence() {
@@ -4741,8 +4797,8 @@ void test_pflash_persistence() {
                                      64 * 1024, false, "pflash1");
         pflash.set_backing_file(test_file);
 
-        pflash.write8(0x10, 0x40);
-        pflash.write8(0x10, 0x5A);
+        pflash.write8(simrv::memory::MmioOffset{0x10}, 0x40);
+        pflash.write8(simrv::memory::MmioOffset{0x10}, 0x5A);
         pflash.sync();
     }
 

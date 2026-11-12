@@ -49,14 +49,14 @@ auto CoherenceHub::configure_topology(const simrv::core::SmpTopologyConfig& topo
     return {};
 }
 
-auto CoherenceHub::l2_cache_for_hart(uint32_t hart) -> ClusterCache* {
+auto CoherenceHub::l2_cache_for_hart(simrv::xlen::HartId hart) -> ClusterCache* {
     const auto cluster_id = topology_.cluster_for_hart(hart);
     const auto it = std::ranges::find_if(
         l2_caches_, [cluster_id](const auto& cache) { return cache->id == cluster_id; });
     return it == l2_caches_.end() ? nullptr : it->get();
 }
 
-auto CoherenceHub::shared_l2_for_hart(uint32_t hart) noexcept -> simrv::cache::L2Cache* {
+auto CoherenceHub::shared_l2_for_hart(simrv::xlen::HartId hart) noexcept -> simrv::cache::L2Cache* {
     auto* cluster = l2_cache_for_hart(hart);
     return cluster == nullptr ? nullptr : &cluster->cache;
 }
@@ -184,8 +184,8 @@ void CoherenceHub::invalidate_line_broadcast(simrv::xlen::PhysAddr address,
         if (h != initiator_hart.value()) {
             TlChannelC resp{};
             std::array<simrv::xlen::Byte, kLineBytes> dirty{};
-            probe_hart_dcache(h, probe_req, resp, dirty);
-            probe_hart_icache(h, probe_req);
+            probe_hart_dcache(simrv::xlen::HartId{h}, probe_req, resp, dirty);
+            probe_hart_icache(simrv::xlen::HartId{h}, probe_req);
             stats_.invalidation_count++;
         }
     }
@@ -213,7 +213,7 @@ void CoherenceHub::invalidate_line_external(simrv::xlen::PhysAddr address) {
             }
             TlChannelC response{};
             std::array<simrv::xlen::Byte, kLineBytes> dirty{};
-            probe_hart_dcache(hart, probe, response, dirty);
+            probe_hart_dcache(simrv::xlen::HartId{hart}, probe, response, dirty);
             if (response.opcode == TlOpcodeC::ProbeAckData) {
                 auto* dram = machine_.ram_data();
                 const auto geometry = machine_.memory_geometry();
@@ -222,7 +222,7 @@ void CoherenceHub::invalidate_line_external(simrv::xlen::PhysAddr address) {
                                 dirty.data(), kLineBytes);
                 }
             }
-            probe_hart_icache(hart, probe);
+            probe_hart_icache(simrv::xlen::HartId{hart}, probe);
             ++stats_.invalidation_count;
         }
     }
@@ -239,7 +239,7 @@ void CoherenceHub::register_preloaded_line(simrv::xlen::PhysAddr address,
     if (lookup_dir_entry(aligned_addr, entry) && entry.state != MesiState::Shared) return;
     entry.state = MesiState::Shared;
     entry.owner_hart.reset();
-    entry.sharers_mask |= (uint64_t{1} << hart.val);
+    entry.sharers_mask |= (uint64_t{1} << hart.raw());
     update_dir_entry(aligned_addr, entry);
 }
 
@@ -270,8 +270,8 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                     probe_req.address = line_base;
                     TlChannelC probe_resp{};
                     std::array<simrv::xlen::Byte, kLineBytes> dirty{};
-                    probe_hart_dcache(h, probe_req, probe_resp, dirty);
-                    probe_hart_icache(h, probe_req);
+                    probe_hart_dcache(simrv::xlen::HartId{h}, probe_req, probe_resp, dirty);
+                    probe_hart_icache(simrv::xlen::HartId{h}, probe_req);
                     stats_.invalidation_count++;
                 }
             }
@@ -324,7 +324,7 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                 std::memcpy(line_buffer.data(), dirty.data(), kLineBytes);
                 data_fetched_from_owner = true;
                 if (l3_enabled_) l3_cache_.write_line(line_base, line_buffer, MesiState::Exclusive);
-                if (auto* l2 = l2_cache_for_hart(req.hart.val)) {
+                if (auto* l2 = l2_cache_for_hart(req.hart)) {
                     l2->cache.write_line(line_base, line_buffer, MesiState::Exclusive);
                     service_latency = l2->config.miss_latency;
                 }
@@ -358,8 +358,8 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                     probe_req.address = line_base;
                     TlChannelC probe_resp{};
                     std::array<simrv::xlen::Byte, kLineBytes> dirty{};
-                    probe_hart_dcache(h, probe_req, probe_resp, dirty);
-                    probe_hart_icache(h, probe_req);
+                    probe_hart_dcache(simrv::xlen::HartId{h}, probe_req, probe_resp, dirty);
+                    probe_hart_icache(simrv::xlen::HartId{h}, probe_req);
                     stats_.invalidation_count++;
                 }
             }
@@ -382,7 +382,7 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
     }
 
     if (!data_fetched_from_owner) {
-        auto* l2 = l2_cache_for_hart(req.hart.val);
+        auto* l2 = l2_cache_for_hart(req.hart);
         if (l2 != nullptr && l2->cache.read_line(line_base, line_buffer)) {
             service_latency = l2->config.hit_latency;
         } else {
@@ -443,7 +443,7 @@ auto CoherenceHub::handle_intent(const TlChannelA& req, TlChannelD& resp) -> boo
             if (l3_enabled_) l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
         }
     }
-    if (auto* l2 = l2_cache_for_hart(req.hart.val))
+    if (auto* l2 = l2_cache_for_hart(req.hart))
         l2->cache.write_line(line_base, line_buf, MesiState::Exclusive);
 
     resp.opcode = TlOpcodeD::HintAck;
@@ -463,7 +463,7 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
 
     if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
         if (l3_enabled_) l3_cache_.write_line(line_base, *release_data, MesiState::Exclusive);
-        if (auto* l2 = l2_cache_for_hart(req.hart.val))
+        if (auto* l2 = l2_cache_for_hart(req.hart))
             l2->cache.write_line(line_base, *release_data, MesiState::Exclusive);
         auto* dram_ptr = machine_.ram_data();
         const auto geometry = machine_.memory_geometry();

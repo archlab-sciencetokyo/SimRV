@@ -1045,7 +1045,7 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 while (std::getline(hart_stream, hart_text, ',')) {
                     const auto parsed = detail::parse_scaled_u64(detail::trim(hart_text));
                     if (!parsed || *parsed > std::numeric_limits<uint32_t>::max()) return false;
-                    cluster->harts.push_back(static_cast<uint32_t>(*parsed));
+                    cluster->harts.push_back(simrv::xlen::HartId{static_cast<uint32_t>(*parsed)});
                 }
             } else if (key == "l2_enabled") {
                 if (const auto parsed = detail::parse_bool(value)) cluster->l2.enabled = *parsed;

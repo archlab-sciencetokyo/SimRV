@@ -6,6 +6,7 @@
 
 #include <compare>
 #include <concepts>
+#include <type_traits>
 
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -14,10 +15,10 @@ namespace simrv::xlen {
 /** A zero-overhead address value whose tag identifies its semantic domain. */
 template <typename Tag>
 struct BasicAddress {
-    Word val{0};
-
     constexpr BasicAddress() noexcept = default;
     constexpr explicit BasicAddress(Word value) noexcept : val(value) {}
+    template <std::integral I>
+    constexpr explicit BasicAddress(I value) noexcept : val(static_cast<Word>(value)) {}
 
     [[nodiscard]] constexpr auto value() const noexcept -> Word { return val; }
     [[nodiscard]] constexpr auto raw() const noexcept -> Word { return val; }
@@ -107,6 +108,11 @@ struct BasicAddress {
         return BasicAddress{val % static_cast<Word>(divisor)};
     }
 
+    template <std::integral I>
+    constexpr auto operator/(I divisor) const noexcept -> Word {
+        return val / static_cast<Word>(divisor);
+    }
+
     constexpr auto operator~() const noexcept -> BasicAddress { return BasicAddress{~val}; }
 
     constexpr auto operator>>(unsigned shift) const noexcept -> BasicAddress {
@@ -134,6 +140,9 @@ struct BasicAddress {
         val ^= static_cast<Word>(mask);
         return *this;
     }
+
+   private:
+    Word val{0};
 };
 
 struct VirtAddrTag {};
@@ -141,5 +150,14 @@ struct PhysAddrTag {};
 
 template <typename T>
 concept StrongAddress = std::same_as<T, PhysAddr> || std::same_as<T, VirtAddr>;
+
+static_assert(sizeof(VirtAddr) == sizeof(Word));
+static_assert(sizeof(PhysAddr) == sizeof(Word));
+static_assert(std::is_standard_layout_v<VirtAddr> && std::is_trivially_copyable_v<VirtAddr>);
+static_assert(std::is_standard_layout_v<PhysAddr> && std::is_trivially_copyable_v<PhysAddr>);
+static_assert(!std::convertible_to<VirtAddr, PhysAddr>);
+static_assert(!std::convertible_to<PhysAddr, VirtAddr>);
+static_assert(!std::convertible_to<Word, VirtAddr>);
+static_assert(!std::convertible_to<Word, PhysAddr>);
 
 }  // namespace simrv::xlen

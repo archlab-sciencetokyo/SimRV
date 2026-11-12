@@ -52,7 +52,7 @@ class PciDevice {
     void trigger_irq();
     void deassert_irq();
 
-    void init_msi(uint8_t cap_offset = 0x48, bool is_64bit = true);
+    void init_msi(PciConfigOffset cap_offset = PciConfigOffset{0x48}, bool is_64bit = true);
     [[nodiscard]] auto is_msi_enabled() const noexcept -> bool;
     [[nodiscard]] auto msi_address() const noexcept -> simrv::xlen::PhysAddr;
     [[nodiscard]] auto msi_data() const noexcept -> uint16_t;

@@ -84,8 +84,8 @@ class PFlash final : public memory::MmioDevice {
 
    private:
     void ensure_storage();
-    [[nodiscard]] auto read_cfi(simrv::xlen::Address offset) const -> uint8_t;
-    void handle_command(simrv::xlen::Address offset, uint32_t value);
+    [[nodiscard]] auto read_cfi(simrv::memory::MmioOffset offset) const -> uint8_t;
+    void handle_command(simrv::memory::MmioOffset offset, uint32_t value);
 
     [[maybe_unused]] core::Machine& machine_;
     simrv::xlen::PhysAddr base_;

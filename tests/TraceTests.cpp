@@ -554,7 +554,7 @@ void test_trace_hart_identity() {
 void test_arch_trace_event_hart_and_cycle_filters() {
     simrv::core::MachineConfig config;
     config.debug.trace_events = "ignored, call";
-    config.debug.trace_hart = 1;
+    config.debug.trace_hart = simrv::xlen::HartId{1};
     config.debug.trace_pc_start = simrv::xlen::VirtAddr{kPc};
     config.debug.trace_pc_end = simrv::xlen::VirtAddr{kPc + 0x10};
     config.debug.trace_after_cycle = 0;
@@ -630,8 +630,10 @@ void test_arch_trace_device_filter() {
     machine.primary_hart().reset();
     const auto path = trace_path("device-filter");
     machine.trace().init_architecture_trace(path.string());
-    machine.trace().log_mmio(0, "other-device", simrv::xlen::PhysAddr{0x1000}, 4, 1, true);
-    machine.trace().log_mmio(0, "trace-test-device", simrv::xlen::PhysAddr{0x2000}, 4, 2, true);
+    machine.trace().log_mmio(simrv::xlen::HartId{0}, "other-device", simrv::xlen::PhysAddr{0x1000},
+                             4, 1, true);
+    machine.trace().log_mmio(simrv::xlen::HartId{0}, "trace-test-device",
+                             simrv::xlen::PhysAddr{0x2000}, 4, 2, true);
     machine.trace().flush_all();
     const auto devices = read_trace(sibling_path(path, "devices.jsonl"));
     if (devices.size() != 2 ||
@@ -890,7 +892,7 @@ void test_custom_extension_is_not_advertised() {
     Machine machine;
     auto& cpu = machine.primary_hart();
     if (simrv::isa::misa_has_extension(cpu.state().misa, simrv::isa::IsaExtension::X)) std::abort();
-    if (cpu.read_csr(0x800)) std::abort();
+    if (cpu.read_csr(simrv::xlen::CsrNumber{0x800})) std::abort();
 
     simrv::core::MachineConfig config;
     config.isa.misa_override = true;

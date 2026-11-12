@@ -36,15 +36,15 @@ class VirtioMmioDevice : public memory::MmioDevice, public virtio::IVirtioTransp
     }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
-    [[nodiscard]] auto read8(simrv::xlen::Address offset) -> uint8_t override;
-    [[nodiscard]] auto read16(simrv::xlen::Address offset) -> uint16_t override;
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    [[nodiscard]] auto read64(simrv::xlen::Address offset) -> uint64_t override;
+    [[nodiscard]] auto read8(simrv::memory::MmioOffset offset) -> uint8_t override;
+    [[nodiscard]] auto read16(simrv::memory::MmioOffset offset) -> uint16_t override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    [[nodiscard]] auto read64(simrv::memory::MmioOffset offset) -> uint64_t override;
 
-    void write8(simrv::xlen::Address offset, uint8_t val) override;
-    void write16(simrv::xlen::Address offset, uint16_t val) override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
-    void write64(simrv::xlen::Address offset, uint64_t val) override;
+    void write8(simrv::memory::MmioOffset offset, uint8_t val) override;
+    void write16(simrv::memory::MmioOffset offset, uint16_t val) override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
+    void write64(simrv::memory::MmioOffset offset, uint64_t val) override;
 
     [[nodiscard]] auto device_id() const -> uint32_t { return device_id_; }
     [[nodiscard]] auto device_status() const -> uint32_t { return status_; }
@@ -64,12 +64,13 @@ class VirtioMmioDevice : public memory::MmioDevice, public virtio::IVirtioTransp
 
    protected:
     virtual void on_queue_notify(uint32_t q_idx) = 0;
-    virtual auto read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
+    virtual auto read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+        -> uint64_t {
         (void)offset;
         (void)size;
         return 0;
     }
-    virtual void write_device_config(simrv::xlen::Address offset, uint64_t value,
+    virtual void write_device_config(simrv::memory::MmioOffset offset, uint64_t value,
                                      std::size_t size) {
         (void)offset;
         (void)value;
