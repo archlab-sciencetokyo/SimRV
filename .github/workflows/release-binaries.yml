@@ -3,6 +3,13 @@ name: Release Binaries
 on:
   pull_request:
     branches: [main, dev]
+    paths-ignore:
+      - 'docs/**'
+      - 'zensical.yml'
+      - 'mkdocs.yml'
+      - '.github/requirements-docs.txt'
+      - 'pyproject.toml'
+      - 'uv.lock'
   push:
     tags: ['v*']
 
@@ -18,6 +25,7 @@ env:
 
 jobs:
   build-and-upload:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -108,7 +116,7 @@ jobs:
           ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
   rpm-packages:
@@ -291,7 +299,7 @@ jobs:
           tar -tzf "${{ steps.names.outputs.asset_base }}.tar.gz" > portable-archive.list
           grep -q '^usr/share/SimRV/SimRVBuildMetadata.json$' portable-archive.list
           grep -q '^usr/share/SimRV/schemas/simrv-build-metadata.schema.json$' portable-archive.list
-          build/rv64-release/simrv-release-check --binary build/rv64-musl-release/simrv
+          build/rv64-musl-release/simrv-release-check --binary build/rv64-musl-release/simrv
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}
@@ -414,7 +422,7 @@ jobs:
           retention-days: 14
 
   package-distro-matrix:
-    needs: [build-and-upload, rpm-packages, debian-packages, portable-musl]
+    needs: [rpm-packages, debian-packages, portable-musl]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
