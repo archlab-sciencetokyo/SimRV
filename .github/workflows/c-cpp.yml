@@ -68,7 +68,7 @@ jobs:
     - name: Install build tools
       run: |
         dnf update -y
-        dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
+        dnf install -y git cmake ninja-build boost-devel gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
 
     - name: Cache RISC-V GCC toolchain
       id: cache-toolchain
@@ -199,7 +199,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Install quality tools
-      run: dnf install -y git cmake ninja-build gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra
+      run: dnf install -y git cmake ninja-build boost-devel gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra
     - name: Check formatting
       shell: bash
       run: |
@@ -236,7 +236,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Install build tools
-      run: dnf install -y cmake ninja-build gcc gcc-c++ libtsan python3 util-linux
+      run: dnf install -y cmake ninja-build boost-devel gcc gcc-c++ libtsan python3 util-linux
     - name: Configure TSan
       run: >-
         cmake -S . -B build/tsan -G Ninja
