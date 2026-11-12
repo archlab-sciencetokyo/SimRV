@@ -1956,8 +1956,13 @@ void test_vector_memory_fast_path_does_not_require_scalar_fp_state() {
 
     expect(!cpu.active_context().pending_exception.has_value(),
            "vector load succeeds with VS enabled while scalar FS remains off");
+    load.op_id = simrv::isa::OperationId::VSE32_V;
+    load.ir = 0x0205A027;  // vse32.v v0, (a1); shares STORE-FP opcode 0x27.
+    cpu.execute_cached_op_fast<false, false>(machine, load, machine.ram_view());
+    expect(!cpu.active_context().pending_exception.has_value(),
+           "vector store succeeds with VS enabled while scalar FS remains off");
     expect(!state.extension_state_enabled(simrv::core::MstatusBit::Fs),
-           "vector load does not enable scalar floating-point state");
+           "vector memory does not enable scalar floating-point state");
 }
 
 void test_vector_bulk_memory_operations() {

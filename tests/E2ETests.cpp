@@ -55,8 +55,8 @@ int main() {
         if (!hello_elf) return;
         auto res = run({"--cli", "--baremetal", "-m", hello_elf->string(), "--steps", "500"});
         expect(res.exit_code == 0_i);
-        expect(res.stdout_output.contains("Elapsed cycles"));
-        expect(res.stdout_output.contains("Executed instructions"));
+        expect(res.stdout_output.contains("Elapsed Cycles"));
+        expect(res.stdout_output.contains("Retired Instructions"));
         expect(res.stdout_output.contains("500"));
     };
 
@@ -163,8 +163,8 @@ int main() {
         if (!arithmetic_elf) return;
         auto res = run({"--cli", "--baremetal", "-m", arithmetic_elf->string(), "--steps", "2000"});
         expect(res.exit_code == 0_i);
-        expect(res.stdout_output.contains("Process exit status      :                      0") ||
-               res.stdout_output.contains("Executed instructions"));
+        expect(res.stdout_output.contains("Exit Status           : 0 (Success)") ||
+               res.stdout_output.contains("Retired Instructions"));
     };
 
     "tier4: traps handling execution"_test = [&] {
