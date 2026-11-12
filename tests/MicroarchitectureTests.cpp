@@ -386,49 +386,114 @@ void test_rvcomp_reset_and_ethernet_extensions() {
         machine, "ethernet", simrv::xlen::PhysAddr{0x14000000}, 0x4000, 2,
         simrv::xlen::PhysAddr{0x18000000}, 0x4000, simrv::xlen::PhysAddr{0x1c000000}, 0x2000,
         {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, simrv::device::virtio::NetBackend::Mode::User);
-    auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
-    auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
-    auto* rx = static_cast<simrv::memory::MmioDevice*>(ethernet.rx_node());
+    auto& bus = machine.memory().system_bus();
+    TEST_CHECK(bus.add_node(ethernet.csr_node()));
+    TEST_CHECK(bus.add_node(ethernet.rx_node()));
+    TEST_CHECK(bus.add_node(ethernet.tx_node()));
+    uint16_t source = 0;
+    const auto read32 = [&](simrv::xlen::PhysAddr address) {
+        simrv::memory::TlChannelA request{};
+        request.opcode = simrv::memory::TlOpcodeA::Get;
+        request.size = 2;
+        request.source = source++;
+        request.address = address;
+        TEST_CHECK(bus.send_request(request));
+        simrv::memory::TlChannelD response{};
+        TEST_CHECK(bus.get_response(request.source, response));
+        TEST_CHECK(!response.failed());
+        return static_cast<uint32_t>(response.data);
+    };
+    const auto write32 = [&](simrv::xlen::PhysAddr address, uint32_t value) {
+        simrv::memory::TlChannelA request{};
+        request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+        request.size = 2;
+        request.source = source++;
+        request.address = address;
+        request.mask = simrv::memory::TlChannelA::compute_mask(request.size, address);
+        request.data = value;
+        TEST_CHECK(bus.send_request(request));
+        simrv::memory::TlChannelD response{};
+        TEST_CHECK(bus.get_response(request.source, response));
+        TEST_CHECK(!response.failed());
+    };
+    constexpr simrv::xlen::PhysAddr csr_base{0x14000000};
+    constexpr simrv::xlen::PhysAddr rx_base{0x18000000};
+    constexpr simrv::xlen::PhysAddr tx_base{0x1c000000};
     constexpr std::array<uint8_t, 6> mac{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
-    std::array<uint8_t, 42> arp{};
-    std::fill_n(arp.begin(), 6, uint8_t{0xff});
-    std::copy(mac.begin(), mac.end(), arp.begin() + 6);
-    arp[12] = 0x08;
-    arp[13] = 0x06;
-    arp[14] = 0;
-    arp[15] = 1;
-    arp[16] = 0x08;
-    arp[17] = 0;
-    arp[18] = 6;
-    arp[19] = 4;
-    arp[21] = 1;
-    std::copy(mac.begin(), mac.end(), arp.begin() + 22);
-    arp[28] = 10;
-    arp[30] = 2;
-    arp[31] = 15;
-    arp[38] = 10;
-    arp[40] = 2;
-    arp[41] = 2;
-    tx->write32(simrv::memory::MmioOffset{0}, static_cast<uint32_t>(arp.size()));
-    for (uint32_t word = 0; word < (arp.size() + 3) / 4; ++word) {
-        uint32_t value = 0;
-        for (uint32_t byte = 0; byte < 4; ++byte) {
-            const auto index = word * 4 + byte;
-            if (index < arp.size()) value |= static_cast<uint32_t>(arp[index]) << (byte * 8);
-        }
-        tx->write32(simrv::memory::MmioOffset{4 + word * 4}, value);
-    }
-    csr->write32(simrv::memory::MmioOffset{6 * 4},
-                 static_cast<uint32_t>((4 + arp.size() + 3) & ~std::size_t{3}));
-    TEST_CHECK(ethernet.backend().tx_packet_count() == 1);
-    // Exercise a guest-style TX ring packet through libslirp and the ring-buffer RX adapter.
-    TEST_CHECK(ethernet.backend().has_rx_packet());
+    // The RVComp Linux driver pads short frames to Ethernet's 60-byte minimum.
+    std::array<uint8_t, 60> arp{};
+    const auto rx_byte = [&](std::size_t offset) {
+        const auto word = read32(rx_base + (offset & ~size_t{3}));
+        return static_cast<uint8_t>(word >> ((offset & 3U) * 8U));
+    };
+
+    // The guest driver advances RX starts to the next 32-bit word. Preserve that
+    // alignment after an odd-length packet, such as a variable-sized DHCP reply.
+    std::array<uint8_t, 43> preceding_packet{};
+    preceding_packet.fill(0xa5);
+    ethernet.backend().push_rx_packet(preceding_packet);
     ethernet.poll_backend();
-    TEST_CHECK(csr->read32(simrv::memory::MmioOffset{4}) >= arp.size());
-    const uint32_t arp_reply = rx->read32(simrv::memory::MmioOffset{0});
-    TEST_CHECK(arp_reply == 0xddccbbaaU);
-    TEST_CHECK((rx->read32(simrv::memory::MmioOffset{12}) & 0xffffU) == 0x0608U);
-    TEST_CHECK(rx->read32(simrv::memory::MmioOffset{20}) != 0);
+    constexpr std::size_t preceding_packet_end = 44;
+    TEST_CHECK(read32(csr_base + 4) == preceding_packet_end);
+    TEST_CHECK(rx_byte(preceding_packet_end - 1) == 0);
+    write32(csr_base, preceding_packet_end);
+
+    const auto send_arp_request = [&](uint8_t target_last_octet) {
+        arp.fill(0);
+        std::fill_n(arp.begin(), 6, uint8_t{0xff});
+        std::copy(mac.begin(), mac.end(), arp.begin() + 6);
+        arp[12] = 0x08;
+        arp[13] = 0x06;
+        arp[15] = 1;
+        arp[16] = 0x08;
+        arp[18] = 6;
+        arp[19] = 4;
+        arp[21] = 1;
+        std::copy(mac.begin(), mac.end(), arp.begin() + 22);
+        arp[28] = 10;
+        arp[30] = 2;
+        arp[31] = 15;
+        arp[38] = 10;
+        arp[40] = 2;
+        arp[41] = target_last_octet;
+
+        write32(csr_base, (read32(csr_base + 4) + 3U) & ~3U);
+        const uint32_t tx_start = read32(csr_base + 20);
+        write32(tx_base + tx_start, static_cast<uint32_t>(arp.size()));
+        for (uint32_t word = 0; word < (arp.size() + 3) / 4; ++word) {
+            uint32_t value = 0;
+            for (uint32_t byte = 0; byte < 4; ++byte) {
+                const auto index = word * 4 + byte;
+                if (index < arp.size()) value |= static_cast<uint32_t>(arp[index]) << (byte * 8);
+            }
+            write32(tx_base + tx_start + 4 + word * 4, value);
+        }
+        write32(csr_base + 24, static_cast<uint32_t>((tx_start + 4 + arp.size() + 3) & ~size_t{3}));
+        TEST_CHECK(ethernet.backend().has_rx_packet());
+        ethernet.poll_backend();
+        return static_cast<std::size_t>(read32(csr_base + 4));
+    };
+
+    const auto gateway_rx_end = send_arp_request(2);
+    TEST_CHECK(gateway_rx_end > preceding_packet_end);
+    const auto dns_rx_end = send_arp_request(3);
+    TEST_CHECK(dns_rx_end > gateway_rx_end);
+
+    const auto dns_reply = [&](std::size_t offset) {
+        TEST_CHECK(rx_byte(offset + 12) == 0x08 && rx_byte(offset + 13) == 0x06);
+        TEST_CHECK(rx_byte(offset + 20) == 0 && rx_byte(offset + 21) == 2);
+        TEST_CHECK(rx_byte(offset + 28) == 10 && rx_byte(offset + 29) == 0 &&
+                   rx_byte(offset + 30) == 2 && rx_byte(offset + 31) == 3);
+        TEST_CHECK(rx_byte(offset + 38) == 10 && rx_byte(offset + 39) == 0 &&
+                   rx_byte(offset + 40) == 2 && rx_byte(offset + 41) == 15);
+        TEST_CHECK((rx_byte(offset + 22) & 1U) == 0);
+        bool has_sender_mac_byte = false;
+        for (std::size_t i = 0; i < mac.size(); ++i)
+            has_sender_mac_byte |= rx_byte(offset + 22 + i) != 0;
+        TEST_CHECK(has_sender_mac_byte);
+        for (std::size_t i = 0; i < mac.size(); ++i) TEST_CHECK(rx_byte(offset + 32 + i) == mac[i]);
+    };
+    dns_reply((gateway_rx_end + 3U) & ~3U);
 }
 
 void test_dummy_mmio_behavior() {

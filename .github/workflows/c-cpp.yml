@@ -194,6 +194,7 @@ jobs:
     timeout-minutes: 30
     container:
       image: fedora:44
+      options: --security-opt seccomp=unconfined
     steps:
     - uses: actions/checkout@v6
       with:

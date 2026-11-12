@@ -152,16 +152,17 @@ void RingBufferEthernetMmio::receive_packet(std::span<const uint8_t> packet) {
     if (packet.empty() || packet.size() > 1514) return;
     const uint32_t start = csr_[0] & static_cast<uint32_t>(rx_size_ - 1);
     const uint32_t end = csr_[1] & static_cast<uint32_t>(rx_size_ - 1);
+    const auto aligned_size = (packet.size() + 3U) & ~size_t{3};
     const uint32_t used =
         (end + static_cast<uint32_t>(rx_size_) - start) % static_cast<uint32_t>(rx_size_);
     const uint32_t free = static_cast<uint32_t>(rx_size_) - used - 4;
-    if (packet.size() > free) {
+    if (aligned_size > free) {
         csr_[3] |= 1U;
         return;
     }
     uint32_t cursor = end;
-    for (const uint8_t byte : packet) {
-        rx_buffer_[cursor] = byte;
+    for (size_t index = 0; index < aligned_size; ++index) {
+        rx_buffer_[cursor] = index < packet.size() ? packet[index] : 0;
         cursor = (cursor + 1) % static_cast<uint32_t>(rx_size_);
     }
     csr_[1] = cursor;
