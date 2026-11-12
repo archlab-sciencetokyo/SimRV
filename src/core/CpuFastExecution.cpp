@@ -772,10 +772,11 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     const simrv::xlen::Register rrs1 = state_.regs.read(op.rs1);
     const auto cached_opcode = op.opcode();
     const bool uses_fp_state =
-        cached_opcode == isa::Opcode::LoadFp || cached_opcode == isa::Opcode::StoreFp ||
-        cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
-        cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
-        cached_opcode == isa::Opcode::NMAdd;
+        !simrv::isa::is_vector_op(op.op_id) &&
+        (cached_opcode == isa::Opcode::LoadFp || cached_opcode == isa::Opcode::StoreFp ||
+         cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
+         cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
+         cached_opcode == isa::Opcode::NMAdd);
     if (simrv::compiler::unlikely(uses_fp_state &&
                                   !state_.extension_state_enabled(MstatusBit::Fs))) {
         raise_exception(ExceptionCode::IllegalInstruction, op.ir);

@@ -1931,6 +1931,35 @@ void test_cached_store_legacy_tohost() {
            "soft TLB store publishes a translated legacy tohost write");
 }
 
+void test_vector_memory_fast_path_does_not_require_scalar_fp_state() {
+    simrv::core::Machine machine;
+    std::array<simrv::xlen::Byte, 8192> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+    auto& cpu = machine.hart(simrv::xlen::HartId{0});
+    auto& state = cpu.state();
+    state.mstatus = std::to_underlying(simrv::core::MstatusBit::Vs);
+    state.vtype = 0xD3;  // e32, m8, ta, ma
+    state.vl = 8;
+    state.vstart = 0;
+    state.pc = simrv::xlen::VirtAddr{0x80000000};
+    state.regs.write(simrv::xlen::RegId::A1, 0x80000003);
+
+    simrv::core::CachedOp load{};
+    load.cpc = state.pc;
+    load.op_id = simrv::isa::OperationId::VLE32_V;
+    load.ir = 0x0205E007;  // vle32.v v0, (a1); shares LOAD-FP opcode 0x07.
+    load.rd = simrv::xlen::RegId::Zero;
+    load.rs1 = simrv::xlen::RegId::A1;
+
+    cpu.execute_cached_op_fast<false, false>(machine, load, machine.ram_view());
+
+    expect(!cpu.active_context().pending_exception.has_value(),
+           "vector load succeeds with VS enabled while scalar FS remains off");
+    expect(!state.extension_state_enabled(simrv::core::MstatusBit::Fs),
+           "vector load does not enable scalar floating-point state");
+}
+
 void test_vector_bulk_memory_operations() {
     simrv::core::Machine machine;
     std::array<simrv::xlen::Byte, 8192> backing{};
@@ -5238,6 +5267,7 @@ int main() {
     test_fast_block_successor_cache_collision();
     test_fast_baremetal_misaligned_control_transfer();
     test_cached_store_legacy_tohost();
+    test_vector_memory_fast_path_does_not_require_scalar_fp_state();
     test_vector_bulk_memory_operations();
     test_vector_integer_remainder_and_reverse_subtract();
     test_zvbb_integer_semantics();

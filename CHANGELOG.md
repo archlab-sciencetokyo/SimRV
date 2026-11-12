@@ -13,6 +13,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Reduce ELF loading and initialization overhead.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
 - Fix missing UART line interrupts when the receive FIFO overruns.
+- Fix vector memory instructions being rejected when scalar floating-point state is disabled.
 - Flush UART buffers immediately in CLI mode so interactive guest prompts appear without latency.
 - Remove redundant termination logs prior to the execution summary box.
 - Fix RV32 guest compatibility on RV64 for selective TLB invalidation, SBI RFENCE, and SSTC `stimecmp` timer CSRs.

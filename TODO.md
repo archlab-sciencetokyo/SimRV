@@ -13,6 +13,7 @@ Target: `dev`
 - [x] Add `gcc-toolset-15-libstdc++-devel` to UBI9 RPM release workflow for static C++ runtime linkage.
 - [x] Validate RV64 and native RV32 integration gates (34/34 passed on each build).
 - [x] Validate hosted RV32 ISA smoke coverage on the RV64 build (37/37 passed).
+- [x] Allow vector memory instructions when VS is enabled and scalar FS is disabled.
 - [x] Modernize CLI execution summary with adaptive durations, visual progress bar, peak/average MIPS throughput, and conditional RVC share display.
 - [x] Unbuffer UART TX in CLI mode to ensure guest prompts display without delay.
 - [x] Eliminate legacy Python harnesses and rewrite compliance/benchmarking in native C++.
