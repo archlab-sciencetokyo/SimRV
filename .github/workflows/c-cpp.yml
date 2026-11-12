@@ -193,6 +193,29 @@ jobs:
         path: evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
         retention-days: 14
 
+  native-arm64:
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    container:
+      image: fedora:44
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install native build tools
+        run: dnf install -y cmake ninja-build boost-devel libslirp-devel gcc gcc-c++
+      - name: Configure native ARM64 optimization
+        run: >-
+          cmake --preset rv64-gcc-release
+          -DSIMRV_WARNINGS_AS_ERRORS=ON
+          -DSIMRV_NATIVE_HOST_OPTIMIZATIONS=ON
+      - name: Build native ARM64 simulator
+        run: cmake --build --preset rv64-gcc-release --parallel 3
+      - name: Smoke test native ARM64 simulator
+        run: >-
+          build/rv64-gcc-release/simrv-smoke
+          --simrv build/rv64-gcc-release/simrv
+
   quality:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
