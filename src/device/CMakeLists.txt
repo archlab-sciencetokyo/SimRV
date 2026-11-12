@@ -37,5 +37,5 @@ simrv_add_component(simrv-platform
   virtio/VirtioSoundBackend.cpp
   virtio/VirtioBlockBackend.cpp
 )
-target_link_libraries(simrv-platform PUBLIC ${CMAKE_DL_LIBS})
+target_link_libraries(simrv-platform PRIVATE PkgConfig::LIBSLIRP PUBLIC ${CMAKE_DL_LIBS})
 add_library(simrv::platform ALIAS simrv-platform)

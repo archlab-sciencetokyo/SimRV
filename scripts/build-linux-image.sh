@@ -1146,12 +1146,8 @@ fi
 export SIMRV_LINUX_OPENSBI="\$IMAGES_DIR/opensbi-dynamic.bin"
 export SIMRV_LINUX_PROFILE="${PROFILE}"
 export SIMRV_LINUX_ROOTFS="${ROOTFS_VARIANT}"
-export SIMRV_LINUX_TAP_SETUP="${SCRIPT_DIR}/setup-simrv-tap.sh"
 export SIMRV_LINUX_TIMEOUT=60
 export SIMRV_LINUX_END=1200000
-simrv_linux_setup_network() {
-    sudo "\$SIMRV_LINUX_TAP_SETUP"
-}
 for _simrv_setup_file in "\$SIMRV_LINUX_MEM_IMG" "\$SIMRV_LINUX_DISK_IMG" \\
                          "\$SIMRV_LINUX_DTB" "\$SIMRV_LINUX_IMAGE" "\$SIMRV_LINUX_OPENSBI"; do
     if [ ! -f "\$_simrv_setup_file" ]; then
@@ -1167,7 +1163,7 @@ echo "├─ OpenSBI dynamic: \$SIMRV_LINUX_OPENSBI"
 echo "├─ Linux Image: \$SIMRV_LINUX_IMAGE"
 echo "├─ Disk image: \$SIMRV_LINUX_DISK_IMG"
 echo "└─ Device tree: \$SIMRV_LINUX_DTB"
-echo "Guest network: 10.0.2.2/24 via 10.0.2.1; run simrv_linux_setup_network for TAP/NAT access"
+echo "Guest networking: DHCP through SimRV user-mode NAT; no host network setup required"
 EOF
 chmod +x "$IMAGES_DIR/setup.sh"
 
@@ -1365,18 +1361,13 @@ EOF
 #!/bin/sh
 set -eu
 
-# The TAP helper on the host provides 10.0.2.1/24. Keep this quiet when the
-# guest is launched without a network device or with the deterministic user backend.
+# Keep this quiet when the guest is launched without a network device.
 if ! ip link show eth0 >/dev/null 2>&1; then
     exit 0
 fi
 ip link set eth0 up 2>/dev/null || true
-ip addr add 10.0.2.2/24 dev eth0 2>/dev/null || true
-ip route add default via 10.0.2.1 dev eth0 2>/dev/null || true
-# The TAP helper relays DNS from the host at the guest gateway. Keep public
-# fallbacks for native hosts where the relay is unavailable.
-printf '%s\n' 'nameserver 10.0.2.1' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
-echo '[NET] eth0 configured as 10.0.2.2/24' > /dev/ttyS0
+udhcpc -i eth0 -q -n -t 3 -T 1 >/dev/null 2>&1 || true
+echo '[NET] DHCP configuration requested for eth0' > /dev/ttyS0
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network"
     cat > "$ROOTFS_DISK_DIR/usr/local/bin/simrv-early-boot" <<'EOF'

@@ -3602,6 +3602,107 @@ void test_pcie_and_virtio_pci() {
     std::cout << "[PASS] test_pcie_and_virtio_pci\n";
 }
 
+void test_user_network_dhcp_offer() {
+    using simrv::device::virtio::NetBackend;
+    const auto check = [](bool condition, const char* message) {
+        if (!condition) {
+            std::cerr << message << '\n';
+            std::abort();
+        }
+    };
+    NetBackend backend(NetBackend::Mode::User);
+
+    std::array<uint8_t, 42> arp{};
+    std::fill_n(arp.begin(), 6, uint8_t{0xff});
+    constexpr std::array<uint8_t, 6> mac = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    std::copy(mac.begin(), mac.end(), arp.begin() + 6);
+    arp[12] = 0x08;
+    arp[13] = 0x06;
+    arp[14] = 0x00;
+    arp[15] = 0x01;
+    arp[16] = 0x08;
+    arp[17] = 0x00;
+    arp[18] = 6;
+    arp[19] = 4;
+    arp[21] = 1;  // ARP request
+    std::copy(mac.begin(), mac.end(), arp.begin() + 22);
+    arp[28] = 10;
+    arp[30] = 2;
+    arp[31] = 15;
+    arp[38] = 10;
+    arp[40] = 2;
+    arp[41] = 2;  // Ask for the virtual host address 10.0.2.2
+    backend.send_tx_packet(arp);
+    check(backend.host_backend_available(),
+          "libslirp user-mode backend initializes on first packet");
+    check(backend.has_rx_packet(), "ARP request receives a virtual-host response");
+    (void)backend.pop_rx_packet();
+
+    std::array<uint8_t, 14 + 20 + 8 + 300> frame{};
+    std::fill_n(frame.begin(), 6, uint8_t{0xff});
+    std::copy(mac.begin(), mac.end(), frame.begin() + 6);
+    frame[12] = 0x08;
+    frame[13] = 0x00;
+
+    constexpr std::size_t ip_offset = 14;
+    constexpr std::size_t udp_offset = ip_offset + 20;
+    constexpr std::size_t bootp_offset = udp_offset + 8;
+    frame[ip_offset] = 0x45;
+    frame[ip_offset + 2] = 0x01;
+    frame[ip_offset + 3] = 0x48;  // IPv4 total length: 20 + 8 + 300
+    frame[ip_offset + 8] = 64;
+    frame[ip_offset + 9] = 17;
+    std::fill(frame.begin() + static_cast<std::ptrdiff_t>(ip_offset + 16),
+              frame.begin() + static_cast<std::ptrdiff_t>(ip_offset + 20), uint8_t{0xff});
+    uint32_t checksum = 0;
+    for (std::size_t offset = ip_offset; offset < ip_offset + 20; offset += 2) {
+        checksum += static_cast<uint32_t>(frame[offset] << 8U) | frame[offset + 1];
+    }
+    while ((checksum >> 16U) != 0) checksum = (checksum & 0xffffU) + (checksum >> 16U);
+    const uint16_t ip_checksum = static_cast<uint16_t>(~checksum);
+    frame[ip_offset + 10] = static_cast<uint8_t>(ip_checksum >> 8U);
+    frame[ip_offset + 11] = static_cast<uint8_t>(ip_checksum);
+    frame[udp_offset + 1] = 68;
+    frame[udp_offset + 2] = 0;
+    frame[udp_offset + 3] = 67;
+    frame[udp_offset + 4] = 1;
+    frame[udp_offset + 5] = 0x34;
+
+    auto* bootp = frame.data() + bootp_offset;
+    bootp[0] = 1;  // BOOTREQUEST
+    bootp[1] = 1;  // Ethernet
+    bootp[2] = 6;  // MAC address length
+    bootp[4] = 0x12;
+    bootp[5] = 0x34;
+    bootp[6] = 0x56;
+    bootp[7] = 0x78;
+    bootp[10] = 0x80;  // Broadcast reply
+    std::copy(mac.begin(), mac.end(), bootp + 28);
+    bootp[236] = 0x63;
+    bootp[237] = 0x82;
+    bootp[238] = 0x53;
+    bootp[239] = 0x63;
+    bootp[240] = 53;  // DHCP message type
+    bootp[241] = 1;
+    bootp[242] = 1;    // DHCPDISCOVER
+    bootp[243] = 255;  // End options
+
+    backend.send_tx_packet(frame);
+    (void)backend.poll_host_rx();
+    check(backend.has_rx_packet(), "DHCPDISCOVER receives a DHCP response");
+    const auto offer = backend.pop_rx_packet();
+    check(offer.size() >= 14 + 20 + 8 + 244, "DHCP offer frame has a complete packet");
+    check(offer[12] == 0x08 && offer[13] == 0x00, "DHCP offer uses IPv4 Ethernet framing");
+    const std::size_t offer_udp = 14 + static_cast<std::size_t>(offer[14] & 0x0fU) * 4;
+    check(offer_udp + 8 + 244 <= offer.size(), "DHCP offer includes its BOOTP payload");
+    check(offer[offer_udp + 2] == 0 && offer[offer_udp + 3] == 68,
+          "DHCP offer targets the guest client port");
+    check(offer[offer_udp + 8 + 236] == 0x63 && offer[offer_udp + 8 + 240] == 53 &&
+              offer[offer_udp + 8 + 242] == 2,
+          "DHCP response is a DHCPOFFER");
+    std::cout << "[PASS] test_user_network_dhcp_offer\n";
+}
+
 void test_virtio_block_overlay_preserves_base_image() {
     const auto check = [](bool condition, const char* message) {
         if (!condition) {
@@ -4878,6 +4979,7 @@ int main(int argc, char** argv) {
     test_aclint();
     test_aia_aplic_and_imsic();
     test_pcie_and_virtio_pci();
+    test_user_network_dhcp_offer();
     test_virtio_block_overlay_preserves_base_image();
     test_virtio_mmio_v2();
     test_sbi_multihart_rfence();

@@ -7,14 +7,12 @@
 #include <algorithm>
 #include <array>
 #include <boost/circular_buffer.hpp>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <memory>
 #include <random>
 #include <span>
 #include <string>
@@ -193,11 +191,11 @@ inline constexpr uint64_t kVirtioNetFStatus = (1ULL << 16);
 
 class NetBackend {
    public:
+    struct SlirpState;
+
     enum class Mode : uint8_t {
-        User = 0,    // User-mode packet buffer / frame echo
-        Tap = 1,     // Host Linux TAP bridge
-        Socket = 2,  // UDP/TCP socket tunnel
-        None = 3,    // Disabled
+        User = 0,  // User-mode NAT through libslirp
+        None = 1,  // Disabled
     };
 
     explicit NetBackend(Mode mode = Mode::User);
@@ -205,27 +203,30 @@ class NetBackend {
 
     NetBackend(const NetBackend&) = delete;
     auto operator=(const NetBackend&) -> NetBackend& = delete;
-    NetBackend(NetBackend&&) noexcept = default;
-    auto operator=(NetBackend&&) noexcept -> NetBackend& = default;
+    NetBackend(NetBackend&&) noexcept;
+    auto operator=(NetBackend&&) noexcept -> NetBackend&;
 
     void set_mac(std::array<uint8_t, 6> mac) { mac_ = mac; }
     [[nodiscard]] auto get_mac() const -> const std::array<uint8_t, 6>& { return mac_; }
     [[nodiscard]] auto mode() const -> Mode { return mode_; }
-    void set_mode(Mode m) { mode_ = m; }
+    void set_mode(Mode mode);
     auto poll_host_rx() -> std::size_t;
-    [[nodiscard]] auto host_backend_available() const noexcept -> bool {
-        return host_fd_.get() >= 0;
-    }
+    [[nodiscard]] auto host_backend_available() const noexcept -> bool;
 
-    void push_rx_packet(const std::vector<uint8_t>& packet) { rx_queue_.push_back(packet); }
+    void push_rx_packet(const std::vector<uint8_t>& packet) {
+        rx_queue_.push_back(packet);
+        ++pending_rx_packets_;
+    }
     void push_rx_packet(std::span<const uint8_t> packet) {
         rx_queue_.emplace_back(packet.begin(), packet.end());
+        ++pending_rx_packets_;
     }
 
     [[nodiscard]] auto has_rx_packet() const -> bool { return !rx_queue_.empty(); }
     void reset() {
         rx_queue_.clear();
         tx_history_.clear();
+      pending_rx_packets_ = 0;
     }
 
     auto pop_rx_packet() -> std::vector<uint8_t> {
@@ -235,19 +236,7 @@ class NetBackend {
         return pkt;
     }
 
-    void send_tx_packet(std::span<const uint8_t> data) {
-        std::vector<uint8_t> pkt(data.begin(), data.end());
-        tx_history_.push_back(pkt);
-        if (mode_ == Mode::User) {
-            // Loopback ARP/ICMP frame simulation if requested
-            if (data.size() >= 14) {
-                // If destination matches our MAC or broadcast, echo
-                push_rx_packet(pkt);
-            }
-        } else if (mode_ == Mode::Tap && host_fd_) {
-            (void)::write(host_fd_.get(), pkt.data(), pkt.size());
-        }
-    }
+    void send_tx_packet(std::span<const uint8_t> data);
 
     void send_tx_packet(const uint8_t* data, std::size_t len) {
         send_tx_packet(std::span<const uint8_t>(data, len));
@@ -256,11 +245,14 @@ class NetBackend {
     [[nodiscard]] auto tx_packet_count() const -> std::size_t { return tx_history_.size(); }
 
    private:
+    void initialize_user_mode_network();
+
     Mode mode_{Mode::User};
     std::array<uint8_t, 6> mac_{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
     std::deque<std::vector<uint8_t>> rx_queue_;
     std::vector<std::vector<uint8_t>> tx_history_;
-    util::UniqueFd host_fd_;
+    std::size_t pending_rx_packets_{0};
+    std::unique_ptr<SlirpState> slirp_;
 };
 
 struct VirtioInputEvent {

@@ -86,8 +86,7 @@ Set the vector register length from 128 through 1024 bits.
 Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcomp\fR) or load a platform configuration file defining SoC topology and microarchitectural parameters.
 .TP
 .B \-\-net=\fIbackend\fR
-Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBnone\fR.
-The host TAP backend is available on Linux only.
+Select user-mode NAT networking through libslirp or disable the VirtIO network with \fBnone\fR.
 .TP
 .B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
 Write the normalized SoC registry as JSON for a built-in preset or platform configuration file. Pass \fB\-\fR or omit output to stream JSON to stdout.

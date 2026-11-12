@@ -25,7 +25,6 @@ Release qualification and verification tools have been rewritten as fast native 
 ### 3. Linux Kernel, Rootfs & Integration
 
 - **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images, including the RV64 Alpine UEFI disk profile. Supports `SIMRV_GUEST_BUILD_DIR` / `SIMRV_LINUX_BUILD_DIR` and `SIMRV_LINUX_IMAGES_DIR`.
-- **`setup-simrv-tap.sh`**: Helper script to configure TAP networking for guest simulation.
 - **`templates/`**: Device tree sources (`virt-rv64.dts`, `virt-rv32.dts`) and early boot payloads.
 
 ### 4. Code Quality & Extension Verification

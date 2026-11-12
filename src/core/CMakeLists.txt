@@ -69,6 +69,7 @@ set_property(TARGET simrv-runtime PROPERTY INTERFACE_LINK_LIBRARIES "")
 if(CMAKE_DL_LIBS)
   target_link_libraries(simrv-runtime INTERFACE ${CMAKE_DL_LIBS})
 endif()
+target_link_libraries(simrv-runtime INTERFACE PkgConfig::LIBSLIRP)
 
 add_library(simrv-devel INTERFACE)
 add_library(simrv::devel ALIAS simrv-devel)

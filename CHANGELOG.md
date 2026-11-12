@@ -307,9 +307,7 @@ This release candidate hardens the Linux GUI smoke path and makes repeated profi
   guest font caches, and remove the optional `xclock` dependency so JWM starts reliably.
 - Build the Linux root filesystem as standard journaled ext4, validate it with `e2fsck`, and add
   a safe per-run clone helper for profiling and emulator smoke tests.
-- Add TAP gateway DNS relay documentation and use the gateway resolver before public fallbacks.
 - Use the absolute `/sbin/switch_root` path in the initramfs handoff.
-- Qualify RV32/RV64 gates and the GUI/TAP browser smoke path for this release candidate.
 
 ## [v3.0.0-rc.3] — 2026-10-03
 

@@ -1157,9 +1157,9 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         std::string_view net_opt = *value;
-        if (net_opt != "user" && net_opt != "tap" && net_opt != "socket" && net_opt != "none") {
+        if (net_opt != "user" && net_opt != "none") {
             return std::unexpected(
-                std::format("invalid network mode: {}. Allowed: user, tap, socket, none", net_opt));
+                std::format("invalid network mode: {}. Allowed: user, none", net_opt));
         }
         result.options.net_mode = std::string(net_opt);
         return true;
@@ -2624,7 +2624,7 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--dump-soc-manifest <PRESET> [FILE]",
                .description = "Export the normalized SoC registry as JSON."},
               {.option = "--net <BACKEND>",
-               .description = "Select the VirtIO network backend: user, tap, socket, or none."}}},
+               .description = "Select user-mode NAT networking or disable the VirtIO network."}}},
         {.title = "Execution and pipeline",
          .entries =
              {{.option = "-s, -e, --steps <N>",

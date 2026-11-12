@@ -4,18 +4,15 @@
  */
 #include "simrv/device/pci/VirtioPciNet.hpp"
 
-#include <unistd.h>
+#include <arpa/inet.h>
+#include <poll.h>
+#include <slirp/libslirp.h>
 
-#if defined(__linux__)
-#include <fcntl.h>
-#include <linux/if_tun.h>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#endif
-
-#include <cerrno>
-#include <cstdlib>
-#include <cstring>
+#include <chrono>
+#include <climits>
+#include <cstdint>
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
@@ -26,49 +23,202 @@
 
 namespace simrv::device {
 
-virtio::NetBackend::NetBackend(Mode mode) : mode_(mode) {
-    if (mode_ != Mode::Tap) return;
+struct virtio::NetBackend::SlirpState {
+    virtio::NetBackend* backend{};
+    Slirp* stack{};
+    SlirpCb callbacks{};
+    std::vector<pollfd> poll_fds;
+    struct Timer {
+        SlirpTimerCb callback{};
+        void* callback_opaque{};
+        int64_t expires_ms{};
+        bool armed{false};
+    };
+    std::vector<std::unique_ptr<Timer>> timers;
 
-#if defined(__linux__)
-    const char* requested = std::getenv("SIMRV_TAP_IFACE");
-    const char* interface_name = (requested && *requested) ? requested : "simrv0";
-    const int fd = ::open("/dev/net/tun", O_RDWR | O_NONBLOCK | O_CLOEXEC);
-    if (fd < 0) {
-        simrv::log::warn("VirtIO TAP backend unavailable: cannot open /dev/net/tun");
-        return;
+    ~SlirpState() {
+        if (stack != nullptr) slirp_cleanup(stack);
     }
 
-    ifreq ifr{};
-    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
-    std::strncpy(ifr.ifr_name, interface_name, IFNAMSIZ - 1);
-    if (::ioctl(fd, TUNSETIFF, &ifr) < 0) {
-        ::close(fd);
-        simrv::log::warn("VirtIO TAP backend unavailable: TUNSETIFF failed for {}", interface_name);
-        return;
+    static auto receive_packet(const void* packet, std::size_t size, void* opaque) -> ssize_t {
+        auto& state = *static_cast<SlirpState*>(opaque);
+        state.backend->push_rx_packet(
+            std::span<const uint8_t>(static_cast<const uint8_t*>(packet), size));
+        return static_cast<ssize_t>(size);
     }
-    host_fd_ = util::UniqueFd(fd);
-#else
-    simrv::log::warn("VirtIO TAP backend is only available on Linux");
-#endif
-}
+
+    static void guest_error(const char* message, void*) {
+        simrv::log::warn("libslirp rejected guest network packet: {}", message);
+    }
+
+    static auto clock_get_ns(void*) -> int64_t {
+        using namespace std::chrono;
+        return duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+    }
+
+    static void notify(void*) {
+        // The simulator polls libslirp on each runner cycle, so no host thread needs waking.
+    }
+
+    static auto timer_new(SlirpTimerCb callback, void* callback_opaque, void* opaque) -> void* {
+        auto& timers = static_cast<SlirpState*>(opaque)->timers;
+        auto timer = std::make_unique<Timer>();
+        timer->callback = callback;
+        timer->callback_opaque = callback_opaque;
+        auto* result = timer.get();
+        timers.push_back(std::move(timer));
+        return result;
+    }
+
+    static void timer_free(void* timer, void* opaque) {
+        auto& timers = static_cast<SlirpState*>(opaque)->timers;
+        std::erase_if(timers, [timer](const auto& entry) { return entry.get() == timer; });
+    }
+
+    static void timer_mod(void* timer, int64_t expires_ms, void*) {
+        auto& entry = *static_cast<Timer*>(timer);
+        entry.expires_ms = expires_ms;
+        entry.armed = true;
+    }
+
+    void run_timers() {
+        const int64_t now_ms = clock_get_ns(nullptr) / 1'000'000;
+        for (;;) {
+            const auto ready = std::ranges::find_if(timers, [now_ms](const auto& timer) {
+                return timer->armed && timer->expires_ms <= now_ms;
+            });
+            if (ready == timers.end()) return;
+            auto* timer = ready->get();
+            timer->armed = false;
+            const auto callback = timer->callback;
+            void* const callback_opaque = timer->callback_opaque;
+            if (callback != nullptr) callback(callback_opaque);
+        }
+    }
+
+    static auto add_poll_fd(int fd, int events, void* opaque) -> int {
+        auto& fds = static_cast<SlirpState*>(opaque)->poll_fds;
+        short poll_events = 0;
+        if ((events & SLIRP_POLL_IN) != 0) poll_events |= POLLIN;
+        if ((events & SLIRP_POLL_OUT) != 0) poll_events |= POLLOUT;
+        if ((events & SLIRP_POLL_PRI) != 0) poll_events |= POLLPRI;
+        fds.push_back(pollfd{.fd = fd, .events = poll_events, .revents = 0});
+        return static_cast<int>(fds.size() - 1);
+    }
+
+    static auto get_poll_events(int index, void* opaque) -> int {
+        const auto& fds = static_cast<SlirpState*>(opaque)->poll_fds;
+        if (index < 0 || static_cast<std::size_t>(index) >= fds.size()) return SLIRP_POLL_ERR;
+        const short events = fds[static_cast<std::size_t>(index)].revents;
+        int result = 0;
+        if ((events & POLLIN) != 0) result |= SLIRP_POLL_IN;
+        if ((events & POLLOUT) != 0) result |= SLIRP_POLL_OUT;
+        if ((events & POLLPRI) != 0) result |= SLIRP_POLL_PRI;
+        if ((events & POLLERR) != 0) result |= SLIRP_POLL_ERR;
+        if ((events & POLLHUP) != 0) result |= SLIRP_POLL_HUP;
+        return result;
+    }
+};
+
+virtio::NetBackend::NetBackend(Mode mode) : mode_(mode) {}
 
 virtio::NetBackend::~NetBackend() = default;
 
-auto virtio::NetBackend::poll_host_rx() -> std::size_t {
-    if (mode_ != Mode::Tap || !host_fd_) return 0;
-    std::size_t received = 0;
-    std::array<uint8_t, 65536> frame{};
-    for (;;) {
-        const auto count = ::read(host_fd_.get(), frame.data(), frame.size());
-        if (count > 0) {
-            push_rx_packet(std::span<const uint8_t>(frame.data(), static_cast<size_t>(count)));
-            ++received;
-            continue;
-        }
-        if (count < 0 && errno == EAGAIN) break;
-        break;
+virtio::NetBackend::NetBackend(NetBackend&& other) noexcept
+    : mode_(other.mode_),
+      mac_(other.mac_),
+      rx_queue_(std::move(other.rx_queue_)),
+      tx_history_(std::move(other.tx_history_)),
+      pending_rx_packets_(other.pending_rx_packets_),
+      slirp_(std::move(other.slirp_)) {
+    if (slirp_ != nullptr) slirp_->backend = this;
+    other.mode_ = Mode::None;
+    other.pending_rx_packets_ = 0;
+}
+
+auto virtio::NetBackend::operator=(NetBackend&& other) noexcept -> NetBackend& {
+    if (this == &other) return *this;
+    mode_ = other.mode_;
+    mac_ = other.mac_;
+    rx_queue_ = std::move(other.rx_queue_);
+    tx_history_ = std::move(other.tx_history_);
+    pending_rx_packets_ = other.pending_rx_packets_;
+    slirp_ = std::move(other.slirp_);
+    if (slirp_ != nullptr) slirp_->backend = this;
+    other.mode_ = Mode::None;
+    other.pending_rx_packets_ = 0;
+    return *this;
+}
+
+void virtio::NetBackend::set_mode(Mode mode) {
+    if (mode_ == mode) return;
+    mode_ = mode;
+    if (mode_ == Mode::None) slirp_.reset();
+}
+
+void virtio::NetBackend::initialize_user_mode_network() {
+    slirp_ = std::make_unique<SlirpState>();
+    slirp_->backend = this;
+
+    slirp_->callbacks.send_packet = &SlirpState::receive_packet;
+    slirp_->callbacks.guest_error = &SlirpState::guest_error;
+    slirp_->callbacks.clock_get_ns = &SlirpState::clock_get_ns;
+    slirp_->callbacks.notify = &SlirpState::notify;
+    slirp_->callbacks.timer_new = &SlirpState::timer_new;
+    slirp_->callbacks.timer_free = &SlirpState::timer_free;
+    slirp_->callbacks.timer_mod = &SlirpState::timer_mod;
+    SlirpConfig config{};
+    config.version = 1;
+    config.in_enabled = true;
+    config.vnetwork.s_addr = htonl(0x0a000200U);
+    config.vnetmask.s_addr = htonl(0xffffff00U);
+    config.vhost.s_addr = htonl(0x0a000202U);
+    config.vdhcp_start.s_addr = htonl(0x0a00020fU);
+    config.vnameserver.s_addr = htonl(0x0a000203U);
+    config.in6_enabled = false;
+    // libslirp retains the callbacks pointer for the lifetime of the stack.
+    slirp_->stack = slirp_new(&config, &slirp_->callbacks, slirp_.get());
+    if (slirp_->stack == nullptr) {
+        simrv::log::error("VirtIO user-mode networking could not initialize libslirp");
+        slirp_.reset();
     }
-    return received;
+}
+
+auto virtio::NetBackend::host_backend_available() const noexcept -> bool {
+    return mode_ == Mode::User && slirp_ != nullptr && slirp_->stack != nullptr;
+}
+
+auto virtio::NetBackend::poll_host_rx() -> std::size_t {
+    if (!host_backend_available()) return 0;
+
+    slirp_->run_timers();
+    slirp_->poll_fds.clear();
+    uint32_t timeout = 0;
+#if SLIRP_CHECK_VERSION(4, 7, 0)
+    slirp_pollfds_fill_socket(slirp_->stack, &timeout, &SlirpState::add_poll_fd, slirp_.get());
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    slirp_pollfds_fill(slirp_->stack, &timeout, &SlirpState::add_poll_fd, slirp_.get());
+#pragma GCC diagnostic pop
+#endif
+    const int result = ::poll(slirp_->poll_fds.data(), slirp_->poll_fds.size(), 0);
+    if (result < 0 && errno != EINTR) {
+        slirp_pollfds_poll(slirp_->stack, 1, &SlirpState::get_poll_events, slirp_.get());
+    } else {
+        slirp_pollfds_poll(slirp_->stack, 0, &SlirpState::get_poll_events, slirp_.get());
+    }
+    slirp_->run_timers();
+    return std::exchange(pending_rx_packets_, 0);
+}
+
+void virtio::NetBackend::send_tx_packet(std::span<const uint8_t> data) {
+    tx_history_.emplace_back(data.begin(), data.end());
+    if (mode_ == Mode::User && data.size() <= INT_MAX) {
+        if (slirp_ == nullptr) initialize_user_mode_network();
+        if (slirp_ == nullptr || slirp_->stack == nullptr) return;
+        slirp_input(slirp_->stack, data.data(), static_cast<int>(data.size()));
+    }
 }
 
 #include "simrv/device/virtio/VirtioNetQueue.hpp"

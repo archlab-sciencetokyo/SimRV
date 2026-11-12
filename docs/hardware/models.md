@@ -172,7 +172,7 @@ Its preset describes the devices SimRV can register at their RTL addresses: UART
 `0x10000000`, CLINT at `0x02000000`, PLIC at `0x0c000000`, software reset at `0x10000100`, and
 the custom Ethernet MAC at `0x14000000`. The UART descriptor uses its 16-byte register window and
 PLIC source 1. The Ethernet model uses PLIC source 2 and the RTL-compatible CSR/RX/TX windows; its
-packet transport reuses SimRV's user, TAP, or socket network backend. The model reproduces the
+packet transport reuses SimRV's user-mode libslirp backend or can be disabled. The model reproduces the
 guest-visible register and ring-buffer behavior, while external packet transport and PHY
 serialization are not cycle-by-cycle RTL emulation. The RTL's broader
 address decode also contains these board resources:

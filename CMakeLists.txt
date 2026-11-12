@@ -269,6 +269,8 @@ configure_file(
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(SimRVOptions)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBSLIRP REQUIRED IMPORTED_TARGET slirp)
 
 add_subdirectory(src/pipeline)
 add_subdirectory(src/execute)

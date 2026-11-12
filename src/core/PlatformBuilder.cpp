@@ -35,8 +35,6 @@ void PlatformBuilder::compose(Machine& machine) {
     const auto& disk_path = machine.config.files.disk_path;
     const auto network_mode = [&]() {
         using Mode = simrv::device::virtio::NetBackend::Mode;
-        if (machine.config.network.mode == "tap") return Mode::Tap;
-        if (machine.config.network.mode == "socket") return Mode::Socket;
         if (machine.config.network.mode == "none") return Mode::None;
         return Mode::User;
     }();

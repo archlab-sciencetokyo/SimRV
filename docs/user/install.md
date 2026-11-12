@@ -5,8 +5,8 @@ guests and provides RV32 guest compatibility. Native RV32 builds remain a source
 target and are not distributed separately.
 
 Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
-on macOS 26 for Apple silicon and Intel; macOS packages are not published yet. Host TAP networking
-and VirtIO-FS directory sharing are Linux-only. Windows users should run SimRV inside
+on macOS 26 for Apple silicon and Intel; macOS packages are not published yet. VirtIO-FS directory
+sharing is Linux-only. User-mode networking uses libslirp on Linux and macOS. Windows users should run SimRV inside
 [WSL2](https://learn.microsoft.com/windows/wsl/) with a supported Linux distribution; native
 Windows builds are not currently supported.
 
@@ -15,6 +15,9 @@ Download the newest package bundle or portable archive from
 as prereleases.
 
 ## Build from source on macOS
+
+Install libslirp with the platform package manager before configuring: `brew install libslirp` on
+macOS, `dnf install libslirp-devel` on Fedora, or `apt install libslirp-dev` on Debian and Ubuntu.
 
 The macOS build is an experimental source-build target, validated on macOS 26 with GCC 16 on both
 Apple silicon and Intel. The compatibility workflow also runs `simrv --help` as a startup smoke
