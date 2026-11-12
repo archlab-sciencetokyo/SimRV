@@ -2137,6 +2137,22 @@ void test_wfi_fast_forward_is_single_hart_only() {
     check(single_clint.mtime.load(std::memory_order_relaxed) == 20);
     check((single_hart.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
 
+    single_clint.mtime.store(5, std::memory_order_relaxed);
+    single_clint.mtimecmp.store(std::numeric_limits<simrv::xlen::Counter>::max(),
+                                std::memory_order_relaxed);
+    auto& state = single_hart.cpu.state();
+    if constexpr (simrv::xlen::kIsXLen64) {
+        state.menvcfg |= uint64_t{1} << 63U;
+    } else {
+        state.menvcfgh |= uint32_t{1} << 31U;
+    }
+    state.henvcfg |= uint64_t{1} << 63U;
+    state.htimedelta = 10;
+    state.vstimecmp = 7;
+    single_hart.cpu.evaluate_timer_interrupt();
+    single_hart.cpu.fast_forward_wfi(single_hart);
+    check(single_clint.mtime.load(std::memory_order_relaxed) == 5);
+
     simrv::core::Machine machine(
         simrv::core::MachineConfig{.execution = {.appmode = true}});
     machine.cpu.machine_ = &machine;

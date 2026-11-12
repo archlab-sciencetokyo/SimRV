@@ -152,6 +152,7 @@ The following findings describe guest correctness, rather than security severity
 | A compact block could bypass misaligned taken-branch exceptions when compressed instructions were disabled. | High | Bare-metal fast execution falls back to scalar execution for IALIGN=32; `CoreSemanticsTests` checks jumps and branches on RV64, hosted RV32, and native RV32. |
 | A UART receive overrun in a later device tick could leave the line interrupt unpublished. | Medium | Overrun transitions now schedule an interrupt update; `PlatformIntegrationTests` exercises an overrun after a full FIFO was established in an earlier tick. |
 | DHCP could advertise a working-looking DNS proxy while guest DNS requests timed out. | Medium | The libslirp callback table must outlive its stack, and its poll-registration callbacks must be present even when SimRV polls synchronously. `PlatformIntegrationTests::test_user_network_external_dns` verifies an upstream response when explicitly enabled. |
+| WFI could advance a shared timer in SMP, or wrap a due virtual timer deadline into a far-future `mtime`. | Medium | Fast-forward is now single-hart-only, and virtual deadlines are converted only when `vstimecmp > htimedelta`. `PlatformIntegrationTests::test_wfi_fast_forward_is_single_hart_only` covers both boundaries. |
 
 This inventory records the major first-party execution, memory, cache, and device shortcuts; it is
 not a machine-checked proof or an exhaustive review of every optimization. Full architecture-suite
