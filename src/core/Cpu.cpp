@@ -346,7 +346,10 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::fast_forward_wfi(Machine& machine) {
-    if (!machine.appmode_enabled() || (state_.mip & state_.mie) != 0) {
+    // mtime is shared by all harts. Advancing it from one hart's WFI is only sound
+    // when no other hart can independently advance or observe the virtual deadline.
+    if (!machine.appmode_enabled() || machine.num_harts() != 1 ||
+        (state_.mip & state_.mie) != 0) {
         return;
     }
     auto& primary_clint = machine.primary_hart().clint_mmio;
