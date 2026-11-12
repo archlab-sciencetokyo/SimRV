@@ -17,8 +17,10 @@ Target: `dev`
 - [x] Unbuffer UART TX in CLI mode to ensure guest prompts display without delay.
 - [x] Eliminate legacy Python harnesses and rewrite compliance/benchmarking in native C++.
 - [x] Validate release metadata, schema consistency, and code formatting across codebase.
-- [ ] Required CI qualification remains pending. `lintian` and `rpmlint` were unavailable locally;
-      the native package-consumer test passed for both builds.
+- [ ] Required CI qualification remains pending. The native package-consumer test passed for both
+      builds. Local linting of Fedora-generated rc.19 packages found issues to triage: rpmlint 2.9.0
+      reported 1 error and 17 warnings across four RPMs; lintian 2.122.0 reported 21 errors and 16
+      warnings across four DEBs.
 
 This candidate is being qualified locally. Do not tag or publish it as part of this handoff.
 The distributed artifact remains the RV64-capable `simrv` binary; native RV32 is the strict-width
