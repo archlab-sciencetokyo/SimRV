@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install build tools
-        run: brew install cmake ninja gcc
+        run: brew install boost cmake ninja gcc
       - name: Configure native macOS build
         run: |
           cmake -S . -B build/macos -G Ninja \
