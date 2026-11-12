@@ -30,6 +30,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Allow custom MMIO plugins to provide a framebuffer for the TUI.
 - Allow MMIO plugins to receive host keyboard events and add an optional RV98 PS/2 keyboard plugin.
 - Fix missed TUI display updates for small framebuffers and rows with trailing bytes.
+- Fix garbled Sixel framebuffer colors in the TUI.
+- Fix DHCP and DNS timeouts on rootless Ethernet networking.
 - Fix a multi-hart cycle-mode hang when pausing execution.
 - Fix secondary harts stopping after switching execution modes in multi-threaded simulations.
 - Fix RAM view lookups that could wrap across the physical address limit.
