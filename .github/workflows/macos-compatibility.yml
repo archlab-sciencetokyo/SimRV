@@ -3,10 +3,23 @@ name: macOS Build and Smoke Test
 on:
   push:
     branches: [test/macos, dev, 'release/**']
+  pull_request:
+    branches: [main, dev]
+    paths-ignore:
+      - 'docs/**'
+      - 'zensical.yml'
+      - 'mkdocs.yml'
+      - '.github/requirements-docs.txt'
+      - 'pyproject.toml'
+      - 'uv.lock'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
