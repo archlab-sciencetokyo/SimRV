@@ -1,6 +1,8 @@
 # ==============================================================================
 # SimRV External Device and Extension Plugins
 # ==============================================================================
+include(GNUInstallDirs)
+
 option(SIMRV_BUILD_RVCOMP_PLUGINS "Build RVComp reference external device plugins" ON)
 option(SIMRV_BUILD_CFU_PLUGINS "Build CFU hardware reference plugins" ON)
 
