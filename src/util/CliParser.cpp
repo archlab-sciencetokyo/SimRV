@@ -1980,7 +1980,8 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                     }
                 }
             }
-            for (const auto& candidate : {"linux-images/rv98.dtb", "rv98.dtb"}) {
+            for (const auto& candidate :
+                 {"linux-images/rv98/rv98.dtb", "linux-images/rv98.dtb", "rv98.dtb"}) {
                 if (fs::is_regular_file(candidate, ec) && !ec) {
                     result.options.fn_dvtree = candidate;
                     break;

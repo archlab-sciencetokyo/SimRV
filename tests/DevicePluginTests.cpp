@@ -16,8 +16,10 @@
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/ExternalFramebufferDevice.h"
+#include "simrv/device/ExternalInputDevice.h"
 #include "simrv/device/ExternalSerialDevice.h"
 #include "simrv/device/FramebufferDevice.hpp"
+#include "simrv/device/InputDevice.hpp"
 #include "simrv/device/SerialDevice.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
@@ -27,6 +29,8 @@ static_assert(std::is_standard_layout_v<SimRvSerialHostServices>);
 static_assert(std::is_standard_layout_v<SimRvExternalSerialDevice>);
 static_assert(SIMRV_EXTERNAL_SERIAL_API_VERSION == 1);
 static_assert(std::is_standard_layout_v<SimRvExternalFramebufferDevice>);
+static_assert(std::is_standard_layout_v<SimRvExternalInputDevice>);
+static_assert(SIMRV_EXTERNAL_INPUT_API_VERSION == 1);
 static_assert(std::is_standard_layout_v<SimRvHostServices>);
 static_assert(std::is_standard_layout_v<SimRvExternalDevice>);
 static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION == 2);
@@ -192,6 +196,44 @@ void test_framebuffer_uses_mmio_device_context() {
     configured_mmio->write8(simrv::memory::MmioOffset{20}, 1);
     TEST_CHECK(configured.framebuffer_view().data() == nullptr);
 }
+
+#ifdef TEST_RV98_KEYBOARD_PLUGIN_PATH
+void test_external_input_plugin_translates_key_events() {
+    simrv::core::MachineConfig machine_config{};
+    machine_config.files.device_plugins.push_back(TEST_RV98_KEYBOARD_PLUGIN_PATH);
+    simrv::core::SoCDeviceConfig config{};
+    config.kind = simrv::core::SoCDeviceKind::CustomMmio;
+    config.name = "keyboard";
+    config.compatible = "isct,rv98-keyboard";
+    config.base = simrv::xlen::PhysAddr{0x1d000000};
+    config.size = 0x1000;
+    machine_config.soc.devices.push_back(config);
+    simrv::core::Machine machine{machine_config};
+    TEST_CHECK(machine.initialize().has_value());
+
+    auto* mmio = dynamic_cast<simrv::memory::MmioDevice*>(
+        machine.memory().system_bus().router().resolve_device(config.base));
+    TEST_CHECK(mmio != nullptr);
+    auto* input = dynamic_cast<simrv::device::InputDevice*>(mmio);
+    TEST_CHECK(input != nullptr);
+
+    input->send_key(30, true);  // KEY_A make code.
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0x1c);
+    input->send_key(30, false);
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0xf0);
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0x1c);
+
+    input->send_key(103, true);  // KEY_UP uses an extended scan code.
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0xe0);
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0x75);
+    input->send_key(103, false);
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0xe0);
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0xf0);
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0x75);
+    input->send_key(0xffff, true);  // Unknown Linux keycodes are ignored.
+    TEST_CHECK(mmio->read8(simrv::memory::MmioOffset{0}) == 0);
+}
+#endif
 
 void test_replacement_creation_failure_is_not_silently_ignored() {
     simrv::core::MachineConfig cfg{};
@@ -564,6 +606,9 @@ int main() {
     test_serial_plugin_device_ticks_in_fast_baremetal();
     test_mmio_plugin_replaces_standalone_builtin();
     test_framebuffer_uses_mmio_device_context();
+#ifdef TEST_RV98_KEYBOARD_PLUGIN_PATH
+    test_external_input_plugin_translates_key_events();
+#endif
     test_replacement_creation_failure_is_not_silently_ignored();
     test_capability_registration_is_atomic();
     test_v2_host_services_dma_and_logging();

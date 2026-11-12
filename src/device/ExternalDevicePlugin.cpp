@@ -14,8 +14,10 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/ExternalFramebufferDevice.h"
+#include "simrv/device/ExternalInputDevice.h"
 #include "simrv/device/ExternalSerialDevice.h"
 #include "simrv/device/FramebufferDevice.hpp"
+#include "simrv/device/InputDevice.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 
@@ -78,7 +80,7 @@ class ExternalSerialAdapter final : public Uart {
     ExternalMmioDevice mmio_;
 };
 
-class ExternalFramebufferAdapter final : public ExternalMmioDevice, public FramebufferDevice {
+class ExternalFramebufferAdapter : public ExternalMmioDevice, public FramebufferDevice {
    public:
     ExternalFramebufferAdapter(const SimRvExternalDevice* dev,
                                const SimRvExternalFramebufferDevice* fb, void* ctx,
@@ -116,6 +118,47 @@ class ExternalFramebufferAdapter final : public ExternalMmioDevice, public Frame
 
    private:
     const SimRvExternalFramebufferDevice* fb_;
+    void* ctx_;
+};
+
+class ExternalFramebufferInputAdapter final : public ExternalFramebufferAdapter,
+                                              public InputDevice {
+   public:
+    ExternalFramebufferInputAdapter(const SimRvExternalDevice* dev,
+                                    const SimRvExternalFramebufferDevice* framebuffer,
+                                    const SimRvExternalInputDevice* input, void* ctx,
+                                    std::string name, simrv::xlen::PhysAddr base,
+                                    simrv::xlen::Address size, simrv::core::Machine& machine)
+        : ExternalFramebufferAdapter(dev, framebuffer, ctx, std::move(name), base, size, machine),
+          input_(input),
+          ctx_(ctx) {}
+
+    void send_key(uint16_t code, bool pressed) override {
+        input_->send_key(ctx_, code, pressed ? 1 : 0);
+    }
+
+   private:
+    const SimRvExternalInputDevice* input_;
+    void* ctx_;
+};
+
+class ExternalInputAdapter final : public ExternalMmioDevice, public InputDevice {
+   public:
+    ExternalInputAdapter(const SimRvExternalDevice* dev, const SimRvExternalInputDevice* input,
+                         void* ctx, std::string name, simrv::xlen::PhysAddr base,
+                         simrv::xlen::Address size, simrv::core::Machine& machine)
+        : ExternalMmioDevice(dev, ctx, std::move(name), base, size, machine),
+          input_(input),
+          ctx_(ctx) {}
+
+    void send_key(uint16_t code, bool pressed) override {
+        if (input_ && input_->send_key) {
+            input_->send_key(ctx_, code, pressed ? 1 : 0);
+        }
+    }
+
+   private:
+    const SimRvExternalInputDevice* input_;
     void* ctx_;
 };
 }  // namespace
@@ -425,6 +468,16 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         return false;
     }
 
+    auto input_init =
+        reinterpret_cast<SimRvInputPluginInitFn>(dlsym(handle, "simrv_input_plugin_init"));
+    const SimRvExternalInputDevice* input = input_init ? input_init() : nullptr;
+    if (input_init && (!input || input->api_version != SIMRV_EXTERNAL_INPUT_API_VERSION ||
+                       !input->send_key || compatible.empty())) {
+        simrv::log::error("Plugin '{}' returned invalid input capability", path);
+        dlclose(handle);
+        return false;
+    }
+
     simrv::log::info("Loaded external device plugin '{}' ({}, compatible: '{}')", path, name,
                      compatible);
 
@@ -440,7 +493,7 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         };
     }
 
-    auto factory = [dev, fb, default_args = std::move(args), name](
+    auto factory = [dev, fb, input, default_args = std::move(args), name](
                        simrv::core::Machine& machine, const simrv::core::SoCDeviceConfig& config)
         -> std::unique_ptr<simrv::memory::MmioDevice> {
         void* ctx = nullptr;
@@ -464,9 +517,17 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         const auto size = config.size != 0 ? config.size : dev->default_size;
         const auto dev_name = !config.name.empty() ? config.name : name;
         const auto physical_base = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(base)};
+        if (fb && input) {
+            return std::make_unique<ExternalFramebufferInputAdapter>(dev, fb, input, ctx, dev_name,
+                                                                     physical_base, size, machine);
+        }
         if (fb) {
             return std::make_unique<ExternalFramebufferAdapter>(dev, fb, ctx, dev_name,
                                                                 physical_base, size, machine);
+        }
+        if (input) {
+            return std::make_unique<ExternalInputAdapter>(dev, input, ctx, dev_name, physical_base,
+                                                          size, machine);
         }
         return std::make_unique<ExternalMmioDevice>(dev, ctx, dev_name, physical_base, size,
                                                     machine);

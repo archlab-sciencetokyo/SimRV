@@ -132,6 +132,11 @@ if(BUILD_TESTING)
                              TEST_TIMER_PLUGIN_PATH="$<TARGET_FILE:simrv-demo-timer>"
                              TEST_DMA_PLUGIN_PATH="$<TARGET_FILE:simrv-demo-dma-accel>")
   add_dependencies(simrv-device-plugin-tests simrv-test-serial-plugin simrv-demo-timer simrv-demo-dma-accel simrv-test-legacy-device-plugin)
+  if(TARGET simrv-rv98-keyboard)
+    target_compile_definitions(simrv-device-plugin-tests PRIVATE
+                               TEST_RV98_KEYBOARD_PLUGIN_PATH="$<TARGET_FILE:simrv-rv98-keyboard>")
+    add_dependencies(simrv-device-plugin-tests simrv-rv98-keyboard)
+  endif()
   if(TARGET simrv-mmc)
     add_dependencies(simrv-microarchitecture-tests simrv-mmc)
   endif()
@@ -626,6 +631,8 @@ if(BUILD_TESTING)
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR} -D
       SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR}
+      -D SIMRV_BUILD_PLUGINS=${SIMRV_BUILD_PLUGINS}
+      -D SIMRV_BUILD_RVCOMP_PLUGINS=${SIMRV_BUILD_RVCOMP_PLUGINS}
       -D "CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       -D "CMAKE_CXX_FLAGS=${_consumer_cxx_flags}"
       -D "CMAKE_EXE_LINKER_FLAGS=${_consumer_exe_linker_flags}" -P

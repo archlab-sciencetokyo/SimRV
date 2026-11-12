@@ -27,6 +27,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix unsupported wide direct data-cache accesses in native RV32.
 - Allow serial plugins to replace the configured UART and compatible MMIO plugins to replace standalone power and RTC devices. Plugin MMIO errors now reach the guest.
 - Allow custom MMIO plugins to provide a framebuffer for the TUI.
+- Allow MMIO plugins to receive host keyboard events and add an optional RV98 PS/2 keyboard plugin.
 - Fix missed TUI display updates for small framebuffers and rows with trailing bytes.
 - Fix a multi-hart cycle-mode hang when pausing execution.
 - Fix secondary harts stopping after switching execution modes in multi-threaded simulations.

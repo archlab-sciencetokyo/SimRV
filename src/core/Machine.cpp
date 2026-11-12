@@ -785,6 +785,11 @@ void Machine::service_pending_input() {
                     break;
             }
         }
+        if (event.type == PendingInputEvent::Type::Key) {
+            for (auto* input : runtime_->input_devices) {
+                input->send_key(event.code, event.pressed);
+            }
+        }
     }
 }
 

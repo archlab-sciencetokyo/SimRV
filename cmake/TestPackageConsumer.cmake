@@ -89,6 +89,20 @@ foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark s
   endif()
 endforeach()
 
+if(SIMRV_BUILD_PLUGINS AND SIMRV_BUILD_RVCOMP_PLUGINS)
+  file(GLOB installed_rv98_keyboard_plugins
+       "${install_root}/lib*/simrv/plugins/*rv98-keyboard*")
+  if(NOT installed_rv98_keyboard_plugins)
+    message(FATAL_ERROR "Expected the optional RV98 keyboard plugin in the tools install")
+  endif()
+  foreach(plugin IN LISTS installed_rv98_keyboard_plugins)
+    file(GET_PERMISSIONS "${plugin}" plugin_permissions)
+    if(plugin_permissions MATCHES "(OWNER_EXECUTE|GROUP_EXECUTE|WORLD_EXECUTE)")
+      message(FATAL_ERROR "Shared library plugin must not be executable: ${plugin}")
+    endif()
+  endforeach()
+endif()
+
 if(NOT EXISTS "${install_root}/share/man/man1/simrv.1")
   message(
     FATAL_ERROR

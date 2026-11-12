@@ -739,6 +739,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (auto* framebuffer = dynamic_cast<simrv::device::FramebufferDevice*>(device.get())) {
             runtime_->framebuffer = framebuffer;
         }
+        if (auto* input = dynamic_cast<simrv::device::InputDevice*>(device.get())) {
+            runtime_->input_devices.push_back(input);
+        }
         if (device->has_cycle_ticking()) {
             runtime_->ticked_extension_mmios.push_back(device.get());
         }
@@ -1061,6 +1064,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                         if (auto* framebuffer =
                                 dynamic_cast<simrv::device::FramebufferDevice*>(extension.get())) {
                             runtime_->framebuffer = framebuffer;
+                        }
+                        if (auto* input =
+                                dynamic_cast<simrv::device::InputDevice*>(extension.get())) {
+                            runtime_->input_devices.push_back(input);
                         }
                         if (extension->has_cycle_ticking()) {
                             runtime_->ticked_extension_mmios.push_back(extension.get());

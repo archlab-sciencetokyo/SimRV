@@ -253,6 +253,15 @@ same device context as MMIO. Keep the returned pixel buffer valid while the devi
 synchronize access with the simulation and display threads. The optional frame ID allows the TUI
 to avoid redrawing an unchanged frame; returning zero selects the normal framebuffer check.
 
+A plugin can receive host keyboard events by exporting the optional
+`simrv_input_plugin_init` symbol and returning the versioned descriptor in
+`simrv/device/ExternalInputDevice.h`. This capability is independent of the existing device ABI;
+the plugin still exports `simrv_device_plugin_init` and implements the MMIO device. The
+`send_key` callback receives Linux input keycodes and a press/release flag on the simulation thread.
+Use it to translate host input into the device's guest-visible protocol. For example, the bundled
+`rv98-keyboard` plugin translates key events to PS/2 Set 2 scan codes without adding RV98-specific
+behavior to the simulator core.
+
 ```c
 // my_device.c
 #include <stdint.h>
