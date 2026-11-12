@@ -112,7 +112,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                             static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma)) {
                         const bool match_all_vaddr = (std::to_underlying(ctx.rs1) == 0);
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
-                        TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,
+                        TLB_flush(match_all_vaddr, simrv::xlen::VirtAddr{ctx.rrs1}, match_all_asid,
                                   static_cast<simrv::xlen::Word>(ctx.rrs2));
                     } else if (ctx.funct7 ==
                                    static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceVvma) ||
@@ -139,7 +139,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     }
 
     if (ctx.pending_exception.has_value()) {
-        state_.pc = ctx.cpc.raw();
+        state_.pc = ctx.cpc;
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -151,13 +151,12 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                 raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
                 return;
             }
-            state_.pc = ctx.jmp_pc.raw();
+            state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+            state_.pc = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
         }
         if (state_.regs.xlen == 32) {
-            state_.pc = static_cast<simrv::xlen::Register>(
-                static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            state_.canonicalize_pc();
         }
         dispatch_pending_interrupts();
     }

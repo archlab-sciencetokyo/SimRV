@@ -16,12 +16,27 @@ uint32_t test_cfu_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint3
     return (src1 ^ src2) + funct7;
 }
 
+uint64_t test_cfu_execute64(uint32_t funct7, uint32_t funct3, uint64_t src1, uint64_t src2,
+                            uint32_t* latency_cycles) {
+    if (latency_cycles != nullptr) {
+        *latency_cycles = (funct3 == 1) ? 3 : 1;
+    }
+    return (src1 ^ src2) + static_cast<uint64_t>(funct7);
+}
+
+uint32_t test_cfu_query_latency(uint32_t /*funct7*/, uint32_t funct3) {
+    return (funct3 == 1) ? 3 : 1;
+}
+
 void test_cfu_reset() {}
 
 const simrv::execute::SimRvCfuPlugin kPlugin = {
     .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
     .execute = test_cfu_execute,
     .reset = test_cfu_reset,
+    .execute64 = test_cfu_execute64,
+    .query_latency = test_cfu_query_latency,
+    .name = "test-cfu",
 };
 
 }  // namespace

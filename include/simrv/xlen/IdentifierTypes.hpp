@@ -16,19 +16,12 @@ namespace simrv::xlen {
  * @brief Strong zero-overhead semantic wrapper representing hardware thread (Hart) identifiers.
  */
 struct HartId {
-    uint32_t val{0};
-
     constexpr HartId() noexcept = default;
-    constexpr HartId(uint32_t v) noexcept : val(v) {}
+    constexpr explicit HartId(uint32_t v) noexcept : val(v) {}
 
     [[nodiscard]] constexpr auto value() const noexcept -> uint32_t { return val; }
     [[nodiscard]] constexpr auto raw() const noexcept -> uint32_t { return val; }
     [[nodiscard]] constexpr explicit operator uint32_t() const noexcept { return val; }
-
-    constexpr auto operator=(uint32_t v) noexcept -> HartId& {
-        val = v;
-        return *this;
-    }
 
     constexpr auto operator<=>(const HartId&) const noexcept = default;
     constexpr bool operator==(const HartId&) const noexcept = default;
@@ -71,6 +64,9 @@ struct HartId {
         val -= static_cast<uint32_t>(offset);
         return *this;
     }
+
+   private:
+    uint32_t val{0};
 };
 
 /**
@@ -78,22 +74,15 @@ struct HartId {
  * @brief Strong semantic type for CSR (Control and Status Register) index numbers.
  */
 struct CsrNumber {
-    uint16_t val{0};
-
     constexpr CsrNumber() noexcept = default;
-    constexpr CsrNumber(uint16_t v) noexcept : val(v) {}
+    constexpr explicit CsrNumber(uint16_t v) noexcept : val(v) {}
     template <typename T>
         requires(std::is_enum_v<T> || (std::is_integral_v<T> && !std::is_same_v<T, uint16_t>))
-    constexpr CsrNumber(T v) noexcept : val(static_cast<uint16_t>(v)) {}
+    constexpr explicit CsrNumber(T v) noexcept : val(static_cast<uint16_t>(v)) {}
 
     [[nodiscard]] constexpr auto value() const noexcept -> uint16_t { return val; }
     [[nodiscard]] constexpr auto raw() const noexcept -> uint16_t { return val; }
     [[nodiscard]] constexpr explicit operator uint16_t() const noexcept { return val; }
-
-    constexpr auto operator=(uint16_t v) noexcept -> CsrNumber& {
-        val = v;
-        return *this;
-    }
 
     constexpr auto operator<=>(const CsrNumber&) const noexcept = default;
     constexpr bool operator==(const CsrNumber&) const noexcept = default;
@@ -116,6 +105,9 @@ struct CsrNumber {
     [[nodiscard]] constexpr auto privilege_level() const noexcept -> PrivilegeLevel {
         return static_cast<PrivilegeLevel>((val >> 8U) & 0x3U);
     }
+
+   private:
+    uint16_t val{0};
 };
 
 }  // namespace simrv::xlen

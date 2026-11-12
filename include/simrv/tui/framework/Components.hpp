@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "simrv/tui/framework/ScreenBuffer.hpp"
 #include "simrv/tui/framework/Types.hpp"
 
 namespace simrv::tui::framework {
@@ -31,5 +32,13 @@ struct Tab {
     -> RenderedControl;
 [[nodiscard]] auto section_divider(std::string_view title, int width) -> std::string;
 [[nodiscard]] auto scroll_indicator(int before, int after, int width) -> std::string;
+
+// Modern Canvas-based rendering primitives
+void draw_box(Canvas& canvas, ScreenRect rect, BoxBorderKind border_kind = BoxBorderKind::Single,
+              Style style = {});
+void draw_table_header(Canvas& canvas, int y, std::span<const std::string_view> headers,
+                       std::span<const int> widths, Style style = {});
+void draw_tab_bar(Canvas& canvas, int y, std::span<const Tab> tabs, std::size_t selected,
+                  Style active_style = {}, Style inactive_style = {});
 
 }  // namespace simrv::tui::framework

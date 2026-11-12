@@ -12,7 +12,19 @@
 extern "C" {
 #endif
 
-#define SIMRV_EXTERNAL_DEVICE_API_VERSION 1
+#define SIMRV_EXTERNAL_DEVICE_API_VERSION_V1 1
+#define SIMRV_EXTERNAL_DEVICE_API_VERSION 2
+
+/**
+ * @brief Severity levels for host log messages.
+ */
+typedef enum SimRvLogLevel {
+    SIMRV_LOG_TRACE = 0,
+    SIMRV_LOG_DEBUG = 1,
+    SIMRV_LOG_INFO = 2,
+    SIMRV_LOG_WARN = 3,
+    SIMRV_LOG_ERROR = 4,
+} SimRvLogLevel;
 
 /**
  * @brief Host simulation services exposed to external device plugins.
@@ -22,13 +34,49 @@ typedef struct SimRvHostServices {
     void (*set_irq)(void* host_ctx, uint32_t irq, int level);
     void (*request_reboot)(void* host_ctx);
     void (*request_poweroff)(void* host_ctx);
+
+    /* V2 Host Services */
+    /**
+     * @brief Direct Physical Memory Read (DMA Master).
+     * @param host_ctx Host context pointer.
+     * @param paddr Guest physical address.
+     * @param dst Destination buffer to receive copied bytes.
+     * @param len Number of bytes to read.
+     * @return 0 on success, non-zero on bus/address error.
+     */
+    int (*dma_read)(void* host_ctx, uint64_t paddr, void* dst, size_t len);
+
+    /**
+     * @brief Direct Physical Memory Write (DMA Master).
+     * @param host_ctx Host context pointer.
+     * @param paddr Guest physical address.
+     * @param src Source buffer containing bytes to write.
+     * @param len Number of bytes to write.
+     * @return 0 on success, non-zero on bus/address error.
+     */
+    int (*dma_write)(void* host_ctx, uint64_t paddr, const void* src, size_t len);
+
+    /**
+     * @brief Query current simulation cycle count.
+     * @param host_ctx Host context pointer.
+     * @return Current simulation cycle count.
+     */
+    uint64_t (*get_cycle_count)(void* host_ctx);
+
+    /**
+     * @brief Emit structured log message through SimRV's logger.
+     * @param host_ctx Host context pointer.
+     * @param level Severity level (SimRvLogLevel).
+     * @param msg Null-terminated string message.
+     */
+    void (*log_msg)(void* host_ctx, int level, const char* msg);
 } SimRvHostServices;
 
 /**
  * @brief Descriptor for an external MMIO device simulated outside the core engine.
  */
 typedef struct SimRvExternalDevice {
-    uint32_t api_version;   /**< Must be SIMRV_EXTERNAL_DEVICE_API_VERSION (1) */
+    uint32_t api_version;   /**< Must be SIMRV_EXTERNAL_DEVICE_API_VERSION (2) or (1) */
     const char* name;       /**< Human-readable device name (e.g. "rvcomp-mmc") */
     const char* compatible; /**< DeviceTree compatible string (e.g. "isct,rvcomp-mmc") */
     uint64_t default_base;  /**< Default MMIO base physical address */
@@ -80,6 +128,15 @@ typedef struct SimRvExternalDevice {
      * @param services Host services structure.
      */
     void (*set_host_services)(void* ctx, const SimRvHostServices* services);
+
+    /* V2 Callbacks (optional in v2, may be NULL) */
+    /**
+     * @brief Simulation cycle tick callback.
+     * Called on the simulation thread during cycle advancement.
+     * @param ctx User context pointer.
+     * @param cycles Number of clock cycles advanced.
+     */
+    void (*advance_cycles)(void* ctx, uint64_t cycles);
 } SimRvExternalDevice;
 
 /**

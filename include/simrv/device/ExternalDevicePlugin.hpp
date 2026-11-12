@@ -18,15 +18,18 @@ namespace simrv::device {
  * @class ExternalMmioDevice
  * @brief Adapts a C-ABI SimRvExternalDevice descriptor into a SimRV TileLink MmioDevice.
  */
-class ExternalMmioDevice final : public memory::MmioDevice {
+class ExternalMmioDevice : public memory::MmioDevice {
    public:
     ExternalMmioDevice(const SimRvExternalDevice* desc, void* ctx, std::string name,
-                       simrv::xlen::Address base, simrv::xlen::Address size);
+                       simrv::xlen::PhysAddr base, simrv::xlen::Address size,
+                       simrv::core::Machine& machine, bool defer_reset = false);
     ~ExternalMmioDevice() override;
+    void reset() override;
 
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
+    auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
     [[nodiscard]] auto read8(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData8 override;
     [[nodiscard]] auto read16(simrv::memory::MmioOffset offset)
@@ -41,11 +44,15 @@ class ExternalMmioDevice final : public memory::MmioDevice {
     void write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 val) override;
     void write64(simrv::memory::MmioOffset offset, simrv::memory::MmioData64 val) override;
 
+    void advance_cycles(uint64_t cycles) override;
+    [[nodiscard]] auto has_cycle_ticking() const noexcept -> bool override;
+
    private:
+    SimRvHostServices host_services_{};
     const SimRvExternalDevice* desc_{nullptr};
     void* ctx_{nullptr};
     std::string name_;
-    simrv::xlen::Address base_{0};
+    simrv::xlen::PhysAddr base_{};
     simrv::xlen::Address size_{0};
 };
 

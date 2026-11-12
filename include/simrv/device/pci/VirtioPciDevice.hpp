@@ -20,8 +20,8 @@ namespace simrv::device {
  */
 class VirtioPciDevice : public PciDevice, public virtio::IVirtioTransport {
    public:
-    static constexpr PciVendorId kVirtioPciVendorId = 0x1AF4;
-    static constexpr PciDeviceId kVirtioPciModernDeviceBase = 0x1040;
+    static constexpr PciVendorId kVirtioPciVendorId{0x1AF4};
+    static constexpr PciDeviceId kVirtioPciModernDeviceBase{0x1040};
 
     VirtioPciDevice(PciSubsystemId subsystem_device_id, PciClassCode class_code,
                     size_t max_queues = 2);
@@ -46,8 +46,9 @@ class VirtioPciDevice : public PciDevice, public virtio::IVirtioTransport {
     }
 
     void trigger_irq() override;
-    auto dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool override;
-    auto dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
+    auto dma_read_bytes(simrv::xlen::PhysAddr phys_addr, std::byte* dst, std::size_t len)
+        -> bool override;
+    auto dma_write_bytes(simrv::xlen::PhysAddr phys_addr, const std::byte* src, std::size_t len)
         -> bool override;
     [[nodiscard]] auto is_cycle_mode() const noexcept -> bool override;
     [[nodiscard]] auto is_dma_enabled() const noexcept -> bool override;
@@ -76,8 +77,8 @@ class VirtioPciDevice : public PciDevice, public virtio::IVirtioTransport {
         (void)size;
     }
 
-    auto dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool;
-    auto dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool;
+    auto dma_read(simrv::xlen::PhysAddr paddr, void* dst, size_t len) -> bool;
+    auto dma_write(simrv::xlen::PhysAddr paddr, const void* src, size_t len) -> bool;
 
     void add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffset offset, PciBarSize length,
                      uint32_t notify_mult = 0);

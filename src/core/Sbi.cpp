@@ -156,9 +156,16 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
         if (fid == RfenceFid::RemoteFenceI) {
             target_cpu.icache.flush();
             target_cpu.decode_cache.flush();
+            target_cpu.block_cache.flush();
         } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
-            const simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
-            const simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);
+            simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
+            simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (cpu_.state().regs.xlen == 32) {
+                    start_addr &= 0xFFFFFFFFULL;
+                    size &= 0xFFFFFFFFULL;
+                }
+            }
             const std::optional<Asid> filter_asid =
                 (fid == RfenceFid::RemoteSfenceVmaAsid)
                     ? std::make_optional(
@@ -166,14 +173,18 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
                     : std::nullopt;
 
             constexpr simrv::xlen::Address kAllMask = ~static_cast<simrv::xlen::Address>(0);
-            if ((start_addr == 0 && size == 0) || size == kAllMask || size > (16 * 4096) ||
+            const bool is_all_mask =
+                (size == kAllMask) || (cpu_.state().regs.xlen == 32 &&
+                                       size == static_cast<simrv::xlen::Address>(0xFFFFFFFFULL));
+            if ((start_addr == 0 && size == 0) || is_all_mask || size > (16 * 4096) ||
                 (start_addr + size < start_addr)) {
                 target_cpu.TLB_flush(
                     core::TlbFlushFilter{.vaddr = std::nullopt, .asid = filter_asid});
             } else {
                 for (simrv::xlen::Address addr = start_addr; addr < start_addr + size;
                      addr += 4096) {
-                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = addr, .asid = filter_asid});
+                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{addr},
+                                                              .asid = filter_asid});
                 }
             }
         }
@@ -244,10 +255,9 @@ auto Sbi::handle_hsm(simrv::xlen::Word func_id) -> bool {
                 sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::AlreadyStarted), 0);
                 return true;
             }
-            target_cpu.state().pc = start_addr;
+            target_cpu.state().pc = simrv::xlen::VirtAddr{start_addr};
             if (target_cpu.state().regs.xlen == 32) {
-                target_cpu.state().pc = static_cast<simrv::xlen::Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(start_addr)));
+                target_cpu.state().canonicalize_pc();
             }
             target_cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
             target_cpu.state().regs.write(simrv::xlen::RegId::A0, target_hart);
@@ -324,17 +334,22 @@ auto Sbi::handle_dbcn(simrv::xlen::Word func_id) -> bool {
                 static_cast<size_t>(cpu_.state().regs.read(simrv::xlen::RegId::A0));
             const auto base_addr_lo = cpu_.state().regs.read(simrv::xlen::RegId::A1);
             const auto base_addr_hi = cpu_.state().regs.read(simrv::xlen::RegId::A2);
-            const auto paddr = static_cast<simrv::xlen::Address>(
-                (static_cast<uint64_t>(base_addr_hi) << 32) | static_cast<uint64_t>(base_addr_lo));
+            const uint64_t raw_paddr =
+                (static_cast<uint64_t>(base_addr_hi) << 32) | static_cast<uint64_t>(base_addr_lo);
+            if (raw_paddr > std::numeric_limits<simrv::xlen::Address>::max()) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::InvalidParam), 0);
+                return true;
+            }
+            const simrv::xlen::PhysAddr paddr{static_cast<simrv::xlen::Address>(raw_paddr)};
 
             size_t written = 0;
             for (size_t i = 0; i < num_bytes; ++i) {
-                const simrv::xlen::Address byte_addr = paddr + i;
+                const simrv::xlen::PhysAddr byte_addr = paddr + i;
                 if (cpu_.machine_ != nullptr &&
                     cpu_.machine_->memory_geometry().contains(byte_addr)) {
                     const auto geometry = cpu_.machine_->memory_geometry();
                     const auto ch = static_cast<char>(
-                        cpu_.machine_->ram_data()[byte_addr - geometry.dram_base]);
+                        cpu_.machine_->ram_data()[byte_addr.raw() - geometry.dram_base.raw()]);
                     cpu_.machine_->console_write(ch);
                     written++;
                 }
@@ -642,7 +657,7 @@ auto Sbi::handle_ecall(simrv::xlen::TrapCause cause) -> bool {
                                        cpu_.clint_mmio.mcycle, static_cast<unsigned>(cause), ext_id,
                                        func_id, cpu_.state().regs.read(simrv::xlen::RegId::A0),
                                        cpu_.state().regs.read(simrv::xlen::RegId::A1),
-                                       cpu_.pipeline_context.cpc.raw(), cpu_.hart_id());
+                                       cpu_.pipeline_context.cpc, cpu_.hart_id());
     }
 
     switch (static_cast<ExtId>(ext_id)) {

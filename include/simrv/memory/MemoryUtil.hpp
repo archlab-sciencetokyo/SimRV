@@ -58,8 +58,8 @@ template <typename T>
 concept StoreFunct3Like = std::unsigned_integral<T>;
 
 /// Check a physical range against explicitly supplied DRAM geometry.
-[[nodiscard]] constexpr auto is_dram_access(simrv::xlen::Address base, simrv::xlen::Address extent,
-                                            simrv::xlen::Address p_addr, size_t size) -> bool {
+[[nodiscard]] constexpr auto is_dram_access(simrv::xlen::PhysAddr base, simrv::xlen::Address extent,
+                                            simrv::xlen::PhysAddr p_addr, size_t size) -> bool {
     return address_range_contains(base, extent, p_addr, size);
 }
 
@@ -257,20 +257,10 @@ SIMRV_ALWAYS_INLINE void host_write_fast_aligned(simrv::xlen::Byte* host_ptr,
     host_write_fast_aligned(host_ptr, val, static_cast<simrv::xlen::Instruction>(funct3));
 }
 
-/// Fast inline RAM read. The caller validates the address against its RamView.
-SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::Address addr, simrv::xlen::Instruction funct3,
-                                       const RamView& ram) noexcept -> simrv::xlen::Word {
-    return host_read_fast(ram.unchecked_ptr(addr), funct3);
-}
-
+/// Fast inline RAM read. The caller validates the physical address against its RamView.
 SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Instruction funct3,
                                        const RamView& ram) noexcept -> simrv::xlen::Word {
     return host_read_fast(ram.unchecked_ptr(addr), funct3);
-}
-
-SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::Address addr, isa::Funct3 funct3,
-                                       const RamView& ram) noexcept -> simrv::xlen::Word {
-    return ram_read_fast(addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
 SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, isa::Funct3 funct3,
@@ -280,23 +270,12 @@ SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, isa::Funct3 f
 
 // ========== Fast RAM Write Operations ==========
 
-/// Fast inline RAM write. The caller validates the address against its RamView.
+/// Fast inline RAM write. The caller validates the physical address against its RamView.
 /// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
-SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::Address addr, simrv::xlen::Word wdata,
-                                        simrv::xlen::Instruction funct3,
-                                        const RamView& ram) noexcept {
-    host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
-}
-
 SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,
                                         simrv::xlen::Instruction funct3,
                                         const RamView& ram) noexcept {
     host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
-}
-
-SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::Address addr, simrv::xlen::Word wdata,
-                                        isa::Funct3 funct3, const RamView& ram) noexcept {
-    ram_write_fast(addr, wdata, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
 SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,

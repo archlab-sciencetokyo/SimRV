@@ -11,7 +11,7 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
     enum class Kind : uint8_t { Csr, Rx, Tx };
 
     Window(RingBufferEthernetMmio& owner, core::Machine& machine, Kind kind,
-           simrv::xlen::Address base, simrv::xlen::Address size, std::string label)
+           simrv::xlen::PhysAddr base, simrv::xlen::Address size, std::string label)
         : memory::MmioDevice(&machine),
           owner_(owner),
           kind_(kind),
@@ -20,13 +20,13 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
           label_(std::move(label)) {}
 
     [[nodiscard]] auto name() const -> const char* override { return label_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override {
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override {
         if (kind_ == Kind::Csr) return owner_.read_csr(offset);
         return owner_.read_buffer(kind_ == Kind::Tx, offset);
     }
-    void write32(simrv::xlen::Address offset, uint32_t value) override {
+    void write32(simrv::memory::MmioOffset offset, uint32_t value) override {
         if (kind_ == Kind::Csr) {
             owner_.write_csr(offset, value);
         } else {
@@ -37,15 +37,15 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
    private:
     RingBufferEthernetMmio& owner_;
     Kind kind_;
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
     std::string label_;
 };
 
 RingBufferEthernetMmio::RingBufferEthernetMmio(
-    core::Machine& machine, std::string name, simrv::xlen::Address csr_base,
-    simrv::xlen::Address csr_size, uint32_t irq, simrv::xlen::Address rx_base,
-    simrv::xlen::Address rx_size, simrv::xlen::Address tx_base, simrv::xlen::Address tx_size,
+    core::Machine& machine, std::string name, simrv::xlen::PhysAddr csr_base,
+    simrv::xlen::Address csr_size, uint32_t irq, simrv::xlen::PhysAddr rx_base,
+    simrv::xlen::Address rx_size, simrv::xlen::PhysAddr tx_base, simrv::xlen::Address tx_size,
     std::array<uint8_t, 6> mac_address, virtio::NetBackend::Mode mode)
     : machine_(machine),
       name_(std::move(name)),
@@ -72,7 +72,7 @@ auto RingBufferEthernetMmio::csr_node() -> memory::TileLinkNode* { return csr_wi
 auto RingBufferEthernetMmio::rx_node() -> memory::TileLinkNode* { return rx_window_.get(); }
 auto RingBufferEthernetMmio::tx_node() -> memory::TileLinkNode* { return tx_window_.get(); }
 
-auto RingBufferEthernetMmio::read_csr(simrv::xlen::Address offset) -> uint32_t {
+auto RingBufferEthernetMmio::read_csr(simrv::memory::MmioOffset offset) -> uint32_t {
     const auto index = static_cast<size_t>(offset / 4);
     if (index >= csr_.size()) return 0;
     if (index == 4) {
@@ -83,7 +83,7 @@ auto RingBufferEthernetMmio::read_csr(simrv::xlen::Address offset) -> uint32_t {
     return csr_[index];
 }
 
-void RingBufferEthernetMmio::write_csr(simrv::xlen::Address offset, uint32_t value) {
+void RingBufferEthernetMmio::write_csr(simrv::memory::MmioOffset offset, uint32_t value) {
     if ((offset & 3U) != 0) return;
     switch (offset / 4) {
         case 0:
@@ -102,20 +102,22 @@ void RingBufferEthernetMmio::write_csr(simrv::xlen::Address offset, uint32_t val
     }
 }
 
-auto RingBufferEthernetMmio::read_buffer(bool tx, simrv::xlen::Address offset) -> uint32_t {
+auto RingBufferEthernetMmio::read_buffer(bool tx, simrv::memory::MmioOffset offset) -> uint32_t {
     const auto& buffer = tx ? tx_buffer_ : rx_buffer_;
     if (offset >= buffer.size() || (offset + 4) > buffer.size()) return 0;
-    return static_cast<uint32_t>(buffer[static_cast<size_t>(offset)]) |
-           (static_cast<uint32_t>(buffer[static_cast<size_t>(offset + 1)]) << 8) |
-           (static_cast<uint32_t>(buffer[static_cast<size_t>(offset + 2)]) << 16) |
-           (static_cast<uint32_t>(buffer[static_cast<size_t>(offset + 3)]) << 24);
+    return static_cast<uint32_t>(buffer[static_cast<size_t>(offset.raw())]) |
+           (static_cast<uint32_t>(buffer[static_cast<size_t>((offset + 1).raw())]) << 8) |
+           (static_cast<uint32_t>(buffer[static_cast<size_t>((offset + 2).raw())]) << 16) |
+           (static_cast<uint32_t>(buffer[static_cast<size_t>((offset + 3).raw())]) << 24);
 }
 
-void RingBufferEthernetMmio::write_buffer(bool tx, simrv::xlen::Address offset, uint32_t value) {
+void RingBufferEthernetMmio::write_buffer(bool tx, simrv::memory::MmioOffset offset,
+                                          uint32_t value) {
     auto& buffer = tx ? tx_buffer_ : rx_buffer_;
     if (offset >= buffer.size() || (offset + 4) > buffer.size()) return;
     for (size_t byte = 0; byte < 4; ++byte) {
-        buffer[static_cast<size_t>(offset) + byte] = static_cast<uint8_t>(value >> (byte * 8));
+        buffer[static_cast<size_t>(offset.raw()) + byte] =
+            static_cast<uint8_t>(value >> (byte * 8));
     }
 }
 
@@ -150,16 +152,17 @@ void RingBufferEthernetMmio::receive_packet(std::span<const uint8_t> packet) {
     if (packet.empty() || packet.size() > 1514) return;
     const uint32_t start = csr_[0] & static_cast<uint32_t>(rx_size_ - 1);
     const uint32_t end = csr_[1] & static_cast<uint32_t>(rx_size_ - 1);
+    const auto aligned_size = (packet.size() + 3U) & ~size_t{3};
     const uint32_t used =
         (end + static_cast<uint32_t>(rx_size_) - start) % static_cast<uint32_t>(rx_size_);
     const uint32_t free = static_cast<uint32_t>(rx_size_) - used - 4;
-    if (packet.size() > free) {
+    if (aligned_size > free) {
         csr_[3] |= 1U;
         return;
     }
     uint32_t cursor = end;
-    for (const uint8_t byte : packet) {
-        rx_buffer_[cursor] = byte;
+    for (size_t index = 0; index < aligned_size; ++index) {
+        rx_buffer_[cursor] = index < packet.size() ? packet[index] : 0;
         cursor = (cursor + 1) % static_cast<uint32_t>(rx_size_);
     }
     csr_[1] = cursor;

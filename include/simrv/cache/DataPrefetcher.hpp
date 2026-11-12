@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <optional>
 
-#include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::cache {
 
@@ -21,7 +21,7 @@ class DataPrefetcher {
     static constexpr uint8_t kThreshold = 2;
 
     struct StreamEntry {
-        simrv::xlen::Address last_addr = 0;
+        simrv::xlen::PhysAddr last_addr{};
         int64_t stride = 0;
         uint8_t confidence = 0;
         bool valid = false;
@@ -35,12 +35,12 @@ class DataPrefetcher {
      * @param line_bytes Cache line byte size.
      * @return Prefetch target line address if confidence threshold is met.
      */
-    auto observe(simrv::xlen::Address addr, uint32_t line_bytes) noexcept
-        -> std::optional<simrv::xlen::Address> {
+    auto observe(simrv::xlen::PhysAddr addr, uint32_t line_bytes) noexcept
+        -> std::optional<simrv::xlen::PhysAddr> {
         if (!enabled_) return std::nullopt;
 
         const auto line_mask = ~static_cast<simrv::xlen::Address>(line_bytes - 1u);
-        const simrv::xlen::Address line_addr = addr & line_mask;
+        const simrv::xlen::PhysAddr line_addr = addr & line_mask;
 
         size_t match_idx = kTableEntries;
         size_t victim_idx = 0;
@@ -50,8 +50,8 @@ class DataPrefetcher {
                 victim_idx = i;
                 break;
             }
-            const int64_t diff =
-                static_cast<int64_t>(line_addr) - static_cast<int64_t>(entries_[i].last_addr);
+            const int64_t diff = static_cast<int64_t>(line_addr.raw()) -
+                                 static_cast<int64_t>(entries_[i].last_addr.raw());
             if (diff != 0 && std::abs(diff) <= static_cast<int64_t>(line_bytes * 16u)) {
                 match_idx = i;
                 break;
@@ -61,7 +61,7 @@ class DataPrefetcher {
         if (match_idx < kTableEntries) {
             auto& entry = entries_[match_idx];
             const int64_t current_stride =
-                static_cast<int64_t>(line_addr) - static_cast<int64_t>(entry.last_addr);
+                static_cast<int64_t>(line_addr.raw()) - static_cast<int64_t>(entry.last_addr.raw());
             if (current_stride == entry.stride) {
                 if (entry.confidence < kMaxConfidence) ++entry.confidence;
             } else {
@@ -72,8 +72,8 @@ class DataPrefetcher {
 
             if (entry.confidence >= kThreshold) {
                 ++prefetches_issued_;
-                return static_cast<simrv::xlen::Address>(static_cast<int64_t>(line_addr) +
-                                                         entry.stride);
+                return simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(
+                    static_cast<int64_t>(line_addr.raw()) + entry.stride)};
             }
             return std::nullopt;
         }

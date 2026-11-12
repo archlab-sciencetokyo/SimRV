@@ -172,10 +172,16 @@ Its preset describes the devices SimRV can register at their RTL addresses: UART
 `0x10000000`, CLINT at `0x02000000`, PLIC at `0x0c000000`, software reset at `0x10000100`, and
 the custom Ethernet MAC at `0x14000000`. The UART descriptor uses its 16-byte register window and
 PLIC source 1. The Ethernet model uses PLIC source 2 and the RTL-compatible CSR/RX/TX windows; its
-packet transport reuses SimRV's user, TAP, or socket network backend. The model reproduces the
+packet transport reuses SimRV's user-mode libslirp backend or can be disabled. The model reproduces the
 guest-visible register and ring-buffer behavior, while external packet transport and PHY
 serialization are not cycle-by-cycle RTL emulation. The RTL's broader
 address decode also contains these board resources:
+
+The RVComp preset loads the `rvcomp-uart` serial plugin for the board's data, TX-full, and
+RX-empty registers. This is a distinct register interface from the built-in 16550. The plugin
+delivers transmitted bytes to the host immediately; its serial timing is not cycle-accurate.
+An empty data-register read returns zero rather than stalling, so software should check RX-empty
+first. The plugin is installed with the optional tools component.
 
 !!! info "Decode map and modeled devices are different views"
     The table includes the RTL's decoded address regions, including resources SimRV does not
@@ -461,7 +467,7 @@ To calibrate SimRV to an external RTL core:
 3. **Verify via Evaluation Tooling**:
 
    ```bash
-   python3 scripts/evaluate_rvcomp.py --rvcomp-dir /path/to/RVComp \
+   simrv-parity rvcomp --rvcomp-dir /path/to/RVComp \
      --trace-dir build/rvcomp_traces
    ```
 
@@ -475,10 +481,10 @@ To calibrate SimRV to an external RTL core:
 
 4. **Automated Microarchitecture Calibration Optimizer**:
 
-   SimRV provides `scripts/tune_cpu_model.py` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
+   SimRV provides `simrv-tune` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
 
    ```bash
-   python3 scripts/tune_cpu_model.py --base-config configs/models/rvcomp.cfg --apply
+   simrv-tune rvcomp --config configs/models/rvcomp.cfg --apply
    ```
 
    The tuner performs multi-parameter coordinate descent across interconnect latencies, cache

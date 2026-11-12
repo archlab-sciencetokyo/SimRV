@@ -49,7 +49,7 @@ auto AddressModal::handle_click(framework::ScreenCoord local_pt) -> framework::M
 }
 
 void AddressModal::open(std::string& input, InspectorPane* inspector_pane) {
-    input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
+    input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr().raw() : 0);
 }
 
 auto AddressModal::submit(const std::string& input, simrv::core::Machine& machine,
@@ -66,14 +66,17 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         return true;
     }
 
-    simrv::xlen::Address addr = 0;
+    simrv::xlen::Word raw_addr{};
+    simrv::xlen::VirtAddr addr{};
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
-        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
-        ok = (result.ec == std::errc{});
+        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), raw_addr, 16);
+        ok = result.ec == std::errc{} && result.ptr == input.data() + input.size();
+        if (ok) addr = simrv::xlen::VirtAddr{raw_addr};
     } else if (std::all_of(input.begin(), input.end(), ::isxdigit)) {
-        auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
-        ok = (result.ec == std::errc{});
+        auto result = std::from_chars(input.data(), input.data() + input.size(), raw_addr, 16);
+        ok = result.ec == std::errc{} && result.ptr == input.data() + input.size();
+        if (ok) addr = simrv::xlen::VirtAddr{raw_addr};
     } else {
         auto sym_opt = machine.symbol_table().lookup_name(input);
         if (sym_opt.has_value()) {
@@ -86,7 +89,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         if (inspector_pane) {
             inspector_pane->set_inspect_addr(addr);
         }
-        set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr));
+        set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr.raw()));
         return true;
     }
 

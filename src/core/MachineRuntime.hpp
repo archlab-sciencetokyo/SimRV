@@ -23,6 +23,8 @@
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
 #include "simrv/device/DummyMmio.hpp"
+#include "simrv/device/FramebufferDevice.hpp"
+#include "simrv/device/InputDevice.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/Rtc.hpp"
@@ -66,9 +68,9 @@ class RunnerBase {
     void stop_threads();
 
     std::vector<std::jthread> worker_threads_;
-    alignas(64) std::atomic<uint64_t> cycle_generation_{0};
-    alignas(64) std::atomic<uint32_t> workers_sleeping_{0};
-    alignas(64) std::atomic<size_t> cycle_completed_{0};
+    // The primary waits for every worker each cycle, so a worker cannot miss an entire wrap.
+    alignas(64) std::atomic<uint32_t> cycle_generation_{0};
+    alignas(64) std::atomic<uint32_t> cycle_completed_{0};
     alignas(64) std::atomic<bool> workers_running_{false};
     std::atomic<uint32_t> workers_in_cycle_{0};
     Machine* machine_ = nullptr;
@@ -150,11 +152,14 @@ class Machine::Runtime {
 
     RamStorage ram;
     std::unique_ptr<simrv::Rtc> rtc;
-    std::unique_ptr<simrv::device::Uart> uart;
+    std::unique_ptr<simrv::device::SerialDevice> uart;
+    simrv::device::FramebufferDevice* framebuffer = nullptr;  // Owned by extension_mmios.
+    std::vector<simrv::device::InputDevice*> input_devices;   // Owned by extension_mmios.
     std::unique_ptr<simrv::device::PowerMmio> power;
     std::unique_ptr<simrv::device::RingBufferEthernetMmio> ring_buffer_ethernet;
     std::vector<std::unique_ptr<simrv::device::DummyMmio>> dummy_mmios;
     std::vector<std::unique_ptr<simrv::memory::MmioDevice>> extension_mmios;
+    std::vector<simrv::memory::MmioDevice*> ticked_extension_mmios;
     std::unique_ptr<simrv::device::DmaController> dma_controller;
     std::unique_ptr<simrv::memory::Axi4Bridge> axi_bridge;
     std::unique_ptr<simrv::device::AclintMtimer> aclint_mtimer;

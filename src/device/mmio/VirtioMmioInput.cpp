@@ -8,7 +8,7 @@
 
 namespace simrv::device {
 
-VirtioMmioInput::VirtioMmioInput(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioInput::VirtioMmioInput(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                  core::Machine* machine)
     : VirtioMmioDevice("virtio-input-mmio", base_address, 0x1000, virtio::kDevIdInput, irq_num,
                        machine) {
@@ -27,10 +27,10 @@ void VirtioMmioInput::process_eventq() {
     virtio::process_input_event_queue(
         queues_[0], backend_,
         [this](uint64_t address, void* data, std::size_t size) {
-            return dma_read_bytes(address, reinterpret_cast<std::byte*>(data), size);
+            return dma_read_wire_address(address, reinterpret_cast<std::byte*>(data), size);
         },
         [this](uint64_t address, const void* data, std::size_t size) {
-            return dma_write_bytes(address, reinterpret_cast<const std::byte*>(data), size);
+            return dma_write_wire_address(address, reinterpret_cast<const std::byte*>(data), size);
         },
         [this]() { trigger_irq(); });
 }
@@ -64,14 +64,14 @@ void VirtioMmioInput::push_mouse_wheel(int32_t delta) {
     push_event(0x00 /* EV_SYN */, 0 /* SYN_REPORT */, 0);
 }
 
-auto VirtioMmioInput::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioInput::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
-    return backend_.read_config(offset, static_cast<uint8_t>(size));
+    return backend_.read_config(offset.raw(), static_cast<uint8_t>(size));
 }
 
-void VirtioMmioInput::write_device_config(simrv::xlen::Address offset, uint64_t val,
+void VirtioMmioInput::write_device_config(simrv::memory::MmioOffset offset, uint64_t val,
                                           std::size_t size) {
-    backend_.write_config(offset, static_cast<uint32_t>(val), static_cast<uint8_t>(size));
+    backend_.write_config(offset.raw(), static_cast<uint32_t>(val), static_cast<uint8_t>(size));
 }
 
 }  // namespace simrv::device

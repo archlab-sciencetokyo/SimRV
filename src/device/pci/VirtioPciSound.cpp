@@ -6,23 +6,26 @@
 
 namespace simrv::device {
 
-VirtioPciSound::VirtioPciSound() : VirtioPciDevice(virtio::kDevIdSound, 0x040100, 4) {
+VirtioPciSound::VirtioPciSound()
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdSound)},
+                      PciClassCode{0x040100}, 4) {
     init_bar(4, sizeof(virtio::VirtioSndConfig), false, false);
 }
 
 auto VirtioPciSound::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
-    return backend_.read_config(offset, size);
+    return backend_.read_config(offset.raw(), size);
 }
 
 void VirtioPciSound::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     auto& q = queues_[queue_index];
 
-    auto dma_read_fn = [this](uint64_t addr, void* dst, std::size_t len) -> bool {
-        return dma_read(addr, dst, len);
+    auto dma_read_fn = [this](simrv::xlen::PhysAddr addr, void* dst, std::size_t len) -> bool {
+        return dma_read_bytes(addr, static_cast<std::byte*>(dst), len);
     };
-    auto dma_write_fn = [this](uint64_t addr, const void* src, std::size_t len) -> bool {
-        return dma_write(addr, src, len);
+    auto dma_write_fn = [this](simrv::xlen::PhysAddr addr, const void* src,
+                               std::size_t len) -> bool {
+        return dma_write_bytes(addr, static_cast<const std::byte*>(src), len);
     };
     auto trigger_irq_fn = [this]() { trigger_irq(); };
 

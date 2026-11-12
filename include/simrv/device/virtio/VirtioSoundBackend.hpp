@@ -13,13 +13,15 @@
 #include "simrv/device/virtio/HostAudioSink.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::device::virtio {
 
 class VirtioSoundBackend {
    public:
-    using DmaReadFn = std::function<bool(uint64_t addr, void* dst, std::size_t len)>;
-    using DmaWriteFn = std::function<bool(uint64_t addr, const void* src, std::size_t len)>;
+    using DmaReadFn = std::function<bool(simrv::xlen::PhysAddr addr, void* dst, std::size_t len)>;
+    using DmaWriteFn =
+        std::function<bool(simrv::xlen::PhysAddr addr, const void* src, std::size_t len)>;
 
     VirtioSoundBackend() = default;
 

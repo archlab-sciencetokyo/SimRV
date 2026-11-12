@@ -31,7 +31,7 @@ class Imsic : public memory::MmioDevice {
 
     enum class Privilege : uint8_t { Machine = 0, Supervisor = 1 };
 
-    Imsic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
+    Imsic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::PhysAddr base_addr,
           simrv::xlen::Address size);
     ~Imsic() override = default;
 
@@ -40,12 +40,12 @@ class Imsic : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "imsic-m" : "imsic-s";
     }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_addr_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_addr_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
 
     // Indirect CSR register access via miselect/mireg or siselect/sireg
     [[nodiscard]] auto csr_read(simrv::xlen::HartId hart_idx, uint32_t reg_idx)
@@ -61,7 +61,7 @@ class Imsic : public memory::MmioDevice {
    private:
     simrv::core::IInterruptController* sink_{nullptr};
     Privilege priv_{Privilege::Machine};
-    simrv::xlen::Address base_addr_{0};
+    simrv::xlen::PhysAddr base_addr_{};
     simrv::xlen::Address size_{0};
 
     struct HartInterruptFile {
@@ -83,7 +83,7 @@ class Aplic : public memory::MmioDevice {
     static constexpr size_t kMaxSources = 64;  // Sources 1..63
     enum class Privilege : uint8_t { Machine = 0, Supervisor = 1 };
 
-    Aplic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
+    Aplic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::PhysAddr base_addr,
           simrv::xlen::Address size, Imsic* imsic = nullptr);
     ~Aplic() override = default;
 
@@ -93,12 +93,12 @@ class Aplic : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "aplic-m" : "aplic-s";
     }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_addr_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_addr_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
 
     // External device wire IRQ trigger
     void set_irq(simrv::xlen::InterruptSourceId irq_source, bool active);
@@ -110,7 +110,7 @@ class Aplic : public memory::MmioDevice {
     simrv::core::IInterruptController* sink_{nullptr};
     Privilege priv_{Privilege::Machine};
     bool act_test_hooks_{false};
-    simrv::xlen::Address base_addr_{0};
+    simrv::xlen::PhysAddr base_addr_{};
     simrv::xlen::Address size_{0};
     Imsic* imsic_{nullptr};
 

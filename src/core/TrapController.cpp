@@ -25,13 +25,13 @@ namespace {
 
 [[nodiscard]] constexpr auto calculate_trap_target(simrv::xlen::CsrValue tvec,
                                                    simrv::xlen::TrapCause cause) noexcept
-    -> simrv::xlen::Address {
+    -> simrv::xlen::VirtAddr {
     const simrv::xlen::Address tvec_base = tvec & ~simrv::xlen::Address{3};
     const simrv::xlen::Word tvec_mode = tvec & 3;
     if (tvec_mode == 1 && trap_is_interrupt(cause)) {
-        return tvec_base + 4 * trap_exception_code(cause);
+        return simrv::xlen::VirtAddr{tvec_base + 4 * trap_exception_code(cause)};
     }
-    return tvec_base;
+    return simrv::xlen::VirtAddr{tvec_base};
 }
 
 auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause cause) -> bool {
@@ -89,10 +89,11 @@ void restore_trap_interrupt_state(simrv::xlen::CsrValue& mstatus, MstatusBit int
     mstatus |= previous_interrupt_enable;
 }
 
-auto sign_extend_return_pc(const ArchState& state, simrv::xlen::Address pc) noexcept
-    -> simrv::xlen::Register {
+auto sign_extend_return_pc(const ArchState& state, simrv::xlen::VirtAddr pc) noexcept
+    -> simrv::xlen::VirtAddr {
     if (state.regs.xlen == 32) {
-        return static_cast<simrv::xlen::Register>(static_cast<int64_t>(static_cast<int32_t>(pc)));
+        return simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(pc.raw())))};
     }
     return pc;
 }
@@ -237,7 +238,8 @@ auto TrapController::predict_mret(const ArchState& state) noexcept -> TrapReturn
         mstatus &= ~MstatusBit::Mprv;
     }
 
-    ret.target_pc = sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa));
+    ret.target_pc = sign_extend_return_pc(
+        state, simrv::xlen::VirtAddr{isa::epc_read_value(state.mepc, state.misa)});
     ret.target_priv = target_priv;
     ret.target_virtualization = return_to_guest;
     ret.next_mstatus = mstatus;
@@ -265,7 +267,8 @@ auto TrapController::predict_sret(const ArchState& state) noexcept -> TrapReturn
     ret.target_virtualization = state.virt || return_to_guest;
     ret.target_priv = target_priv;
     const auto return_pc = state.virt ? state.vsepc : state.sepc;
-    ret.target_pc = sign_extend_return_pc(state, isa::epc_read_value(return_pc, state.misa));
+    ret.target_pc = sign_extend_return_pc(
+        state, simrv::xlen::VirtAddr{isa::epc_read_value(return_pc, state.misa)});
     return ret;
 }
 
@@ -275,7 +278,8 @@ void TrapController::mret(ArchState& state) {
     state.priv = ret.target_priv;
     state.virt = ret.target_virtualization;
     state.update_xlen();
-    state.pc = sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa));
+    state.pc = sign_extend_return_pc(
+        state, simrv::xlen::VirtAddr{isa::epc_read_value(state.mepc, state.misa)});
     state.lr_reservation_active = false;
 }
 
@@ -291,35 +295,37 @@ void TrapController::sret(ArchState& state) {
     state.lr_reservation_active = false;
 }
 
-void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
-                                     simrv::xlen::CsrValue tval) {
+auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> TrapDisposition {
     ArchState& state = cpu.state();
-    const simrv::xlen::Address trap_pc = state.pc;
-    const simrv::xlen::PrivilegeLevel source_mode = state.priv;
+    const simrv::xlen::Address trap_pc = desc.origin_pc.raw();
+    const simrv::xlen::PrivilegeLevel source_mode = desc.origin_priv;
     const simrv::xlen::CsrValue reported_tval =
-        !trap_is_interrupt(cause) && to_exception_code(cause) == isa::ExceptionCode::Breakpoint
+        !desc.is_interrupt() && to_exception_code(desc.cause) == isa::ExceptionCode::Breakpoint
             ? trap_pc
-            : tval;
+            : desc.tval;
 
     if (cpu.machine_ != nullptr &&
         simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled() ||
                                   cpu.machine_->trace().is_architecture_trace_enabled())) {
-        cpu.machine_->trace().log_trap(cpu.clint_mmio.mtime.load(std::memory_order_relaxed),
-                                       cpu.clint_mmio.mcycle, cause, trap_pc, state.priv, state,
-                                       tval, cpu);
+        cpu.machine_->trace().log_trap(
+            cpu.clint_mmio.mtime.load(std::memory_order_relaxed), cpu.clint_mmio.mcycle, desc.cause,
+            simrv::xlen::VirtAddr{trap_pc}, state.priv, state, desc.tval, cpu);
     }
 
-    if (cpu.sbi.handle_ecall(cause)) {
+    if (cpu.sbi.handle_ecall(desc.cause)) {
         state.lr_reservation_active = false;
         cpu.pipeline_context.pending_exception = std::nullopt;
         cpu.pipeline_context.pending_tval = 0;
-        return;
+        return TrapDisposition::HandledByHost;
     }
 
-    const bool guest_source = state.virt;
+    ++state.consecutive_traps;
+
+    const bool guest_source = desc.origin_virt;
     const bool hypervisor_memory_access = cpu.active_context().hypervisor_memory_access_fault;
-    const bool delegated = trap_delegated_to_supervisor(state, cause);
-    const bool delegated_to_vs = delegated && trap_delegated_to_virtual_supervisor(state, cause);
+    const bool delegated = trap_delegated_to_supervisor(state, desc.cause);
+    const bool delegated_to_vs =
+        delegated && trap_delegated_to_virtual_supervisor(state, desc.cause);
     const bool delegated_to_hs =
         delegated && ((guest_source && !delegated_to_vs) || hypervisor_memory_access);
     const simrv::xlen::PrivilegeLevel target_mode = delegated ? kPrivSupervisor : kPrivMachine;
@@ -329,6 +335,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
         delegated && !delegated_to_vs ? MstatusBit::Spie : MstatusBit::Mpie;
     const simrv::xlen::CsrValue trap_vector =
         delegated_to_vs ? state.vstvec : (delegated ? state.stvec : state.mtvec);
+
     if (delegated_to_vs) {
         auto& status = state.vsstatus;
         if ((status & MstatusBit::Sie) != 0) {
@@ -340,18 +347,19 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     } else {
         stack_trap_interrupt_state(state, interrupt_enable, previous_interrupt_enable);
     }
+
     if (delegated_to_vs) {
-        const auto cause_code = trap_exception_code(cause);
-        const auto vs_cause =
-            trap_is_interrupt(cause) && (cause_code == 2U || cause_code == 6U || cause_code == 10U)
-                ? (cause_code - 1U)
-                : cause_code;
-        state.vscause = (cause & kInterruptCauseBit) | vs_cause;
+        const auto cause_code = trap_exception_code(desc.cause);
+        const auto vs_cause = trap_is_interrupt(desc.cause) &&
+                                      (cause_code == 2U || cause_code == 6U || cause_code == 10U)
+                                  ? (cause_code - 1U)
+                                  : cause_code;
+        state.vscause = (desc.cause & kInterruptCauseBit) | vs_cause;
         state.vsepc = trap_pc;
         state.vstval = reported_tval;
         state.vsstatus = mstatus_with_spp(state.vsstatus, state.priv);
     } else if (delegated) {
-        state.scause = cause;
+        state.scause = desc.cause;
         state.sepc = trap_pc;
         state.stval = reported_tval;
         state.mstatus = mstatus_with_spp(state.mstatus, state.priv);
@@ -366,7 +374,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
                 state.hstatus = (state.hstatus & ~(kSpv | kSpvp)) | kSpv |
                                 (source_mode == kPrivSupervisor ? kSpvp : 0);
             }
-            if (hypervisor_memory_access || trap_value_is_guest_virtual_address(cause)) {
+            if (hypervisor_memory_access || trap_value_is_guest_virtual_address(desc.cause)) {
                 state.hstatus |= simrv::xlen::CsrValue{1} << 6U;
             } else {
                 state.hstatus &= ~(simrv::xlen::CsrValue{1} << 6U);
@@ -374,9 +382,9 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
             state.virt = false;
         }
         if (isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
-            const auto exception = trap_exception_code(cause);
+            const auto exception = trap_exception_code(desc.cause);
             const bool guest_page_fault =
-                !trap_is_interrupt(cause) &&
+                !trap_is_interrupt(desc.cause) &&
                 (exception == std::to_underlying(isa::ExceptionCode::GuestInstructionPageFault) ||
                  exception == std::to_underlying(isa::ExceptionCode::GuestLoadPageFault) ||
                  exception == std::to_underlying(isa::ExceptionCode::GuestStorePageFault));
@@ -384,13 +392,13 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
             state.htinst = guest_page_fault ? cpu.active_context().pending_htinst : 0;
         }
     } else {
-        state.mcause = cause;
+        state.mcause = desc.cause;
         state.mepc = trap_pc;
         state.mtval = reported_tval;
         if (isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
-            const auto exception = trap_exception_code(cause);
+            const auto exception = trap_exception_code(desc.cause);
             const bool guest_page_fault =
-                !trap_is_interrupt(cause) &&
+                !trap_is_interrupt(desc.cause) &&
                 (exception == std::to_underlying(isa::ExceptionCode::GuestInstructionPageFault) ||
                  exception == std::to_underlying(isa::ExceptionCode::GuestLoadPageFault) ||
                  exception == std::to_underlying(isa::ExceptionCode::GuestStorePageFault));
@@ -404,30 +412,37 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
         }
         if ((guest_source || hypervisor_memory_access) &&
             isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
-            (hypervisor_memory_access || trap_value_is_guest_virtual_address(cause))) {
+            (hypervisor_memory_access || trap_value_is_guest_virtual_address(desc.cause))) {
             state.mstatus |= MstatusBit::Gva;
         } else {
             state.mstatus &= ~MstatusBit::Gva;
         }
         state.virt = false;
     }
+
     state.priv = target_mode;
     state.update_xlen();
-    state.pc = calculate_trap_target(trap_vector, cause);
+    state.pc = calculate_trap_target(trap_vector, desc.cause);
     if (state.regs.xlen == 32) {
-        state.pc = static_cast<simrv::xlen::Register>(
-            static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+        state.canonicalize_pc();
     }
+
     if (cpu.machine_ != nullptr) {
-        cpu.machine_->trace().log_architectural_trap_entry(cpu, cause, trap_pc, source_mode, tval);
+        cpu.machine_->trace().log_architectural_trap_entry(
+            cpu, desc.cause, simrv::xlen::VirtAddr{trap_pc}, source_mode, desc.tval);
     }
-    // A delivered trap resumes through its guest handler.  The simulator only stops when no
-    // handler exists; debugger breakpoints and watchpoints pause independently in CPU::run_cycle.
-    if (state.pc == 0) {
+
+    const uint32_t max_consecutive =
+        (cpu.machine_ != nullptr) ? cpu.machine_->configuration().execution.max_consecutive_traps
+                                  : 3;
+
+    // Detect unrecoverable traps: zero trap vector or infinite recursive trap loop
+    if (state.pc == 0 || trap_vector == 0) {
         simrv::log::error(
             "[FATAL] Trap vector (mtvec/stvec) is 0. Cannot handle trap: {} (0x{:x}) at PC 0x{:x}. "
             "Halting simulator.",
-            trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
+            trap_cause_name(desc.cause), static_cast<uint64_t>(desc.cause),
+            static_cast<uint64_t>(trap_pc));
         if (cpu.machine_) {
             if (auto sink = cpu.machine_->telemetry_sink()) {
                 sink->set_persistent_status_override("\033[1;31m UNHANDLED TRAP \033[0m");
@@ -435,12 +450,62 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
             }
             cpu.machine_->stop(Machine::StopReason::UnhandledTrap);
         }
+        return TrapDisposition::Unrecoverable;
     }
+
+    if (state.consecutive_traps >= max_consecutive) {
+        simrv::log::error(
+            "[FATAL] Unrecoverable trap loop detected! Origin PC: 0x{:x}, Trap Cause: {} (0x{:x}), "
+            "Vector Target: 0x{:x}. (Consecutive traps without retirement: {}). Halting simulator.",
+            static_cast<uint64_t>(trap_pc), trap_cause_name(desc.cause),
+            static_cast<uint64_t>(desc.cause), static_cast<uint64_t>(state.pc.raw()),
+            state.consecutive_traps);
+        if (cpu.machine_) {
+            if (auto sink = cpu.machine_->telemetry_sink()) {
+                sink->set_persistent_status_override(
+                    std::format("\033[1;31m TRAP LOOP ({}) \033[0m", trap_cause_name(desc.cause)));
+                sink->pause_loop();
+            }
+            cpu.machine_->stop(Machine::StopReason::TrapLoop);
+        }
+        return TrapDisposition::Unrecoverable;
+    }
+
+    if (desc.is_fatal()) {
+        simrv::log::error(
+            "[FATAL] Fatal hardware error trap (cause 19) occurred at PC 0x{:x}. Halting "
+            "simulator.",
+            static_cast<uint64_t>(trap_pc));
+        if (cpu.machine_) {
+            if (auto sink = cpu.machine_->telemetry_sink()) {
+                sink->set_persistent_status_override("\033[1;31m HARDWARE ERROR TRAP \033[0m");
+                sink->pause_loop();
+            }
+            cpu.machine_->stop(Machine::StopReason::UnhandledTrap);
+        }
+        return TrapDisposition::Unrecoverable;
+    }
+
     state.lr_reservation_active = false;
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
     cpu.pipeline_context.pending_htval = 0;
     cpu.pipeline_context.pending_htinst = 0;
+    return TrapDisposition::Delivered;
+}
+
+void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
+                                     simrv::xlen::CsrValue tval) {
+    const TrapDescriptor desc{
+        .cause = cause,
+        .origin_pc = cpu.state().pc,
+        .tval = tval,
+        .htval = cpu.active_context().pending_htval,
+        .htinst = cpu.active_context().pending_htinst,
+        .origin_priv = cpu.state().priv,
+        .origin_virt = cpu.state().virt,
+    };
+    dispatch_trap(cpu, desc);
 }
 
 auto TrapController::check_privileged_instruction(const ArchState& state,

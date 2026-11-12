@@ -12,7 +12,7 @@
 
 namespace simrv::device {
 
-VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                  core::Machine* machine, const std::string& disk_path)
     : VirtioMmioDevice("virtio-block-mmio", base_address, 0x1000, virtio::kDevIdBlock, irq_num,
                        machine),
@@ -20,7 +20,7 @@ VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::Address base_address, uint32_t irq
     add_queue(64);
 }
 
-auto VirtioMmioBlock::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioBlock::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
     (void)size;
     const uint64_t capacity = backend_.capacity_sectors();
@@ -39,26 +39,31 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                                   machine_->runtime_profile.is_cycle_mode() &&
                                   machine_->dma_engine().is_enabled();
 
-    auto dma_read = [this](simrv::xlen::Address addr, void* buf, size_t size) {
-        return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), size);
+    auto dma_read = [this](uint64_t addr, void* buf, size_t size) {
+        return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(buf), size);
     };
-    auto dma_write = [this](simrv::xlen::Address addr, const void* buf, size_t size) {
-        return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), size);
+    auto dma_write = [this](uint64_t addr, const void* buf, size_t size) {
+        return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(buf), size);
     };
     auto schedule_deferred = [this, q_idx](size_t transfer_bytes, uint16_t head_desc_idx,
                                            uint32_t total_written) {
         const auto current_cycle = machine_->memory().system_bus().cycle();
+        const auto generation = queues_[q_idx].generation;
         machine_->dma_engine().schedule_transfer(
             transfer_bytes, current_cycle,
-            [this, q_idx, head_desc_idx, total_written]() {
+            [this, q_idx, head_desc_idx, total_written, generation]() {
                 auto& q = queues_[q_idx];
+                if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                if (!dma_read_wire_address(q.device_addr + 2,
+                                           reinterpret_cast<std::byte*>(&used_idx), 2))
+                    return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
-                dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
-                                reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                dma_write_wire_address(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                       reinterpret_cast<std::byte*>(&elem), sizeof(elem));
                 used_idx++;
-                dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                dma_write_wire_address(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                       2);
                 trigger_irq();
             },
             "virtio-mmio-block");

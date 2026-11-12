@@ -93,21 +93,21 @@ void explain_instruction(uint32_t raw_inst);
 /**
  * @brief Format a raw 32-bit or 16-bit compressed instruction into its canonical assembly string.
  */
-[[nodiscard]] auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::Address pc = 0,
+[[nodiscard]] auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::VirtAddr pc = {},
                                                unsigned xlen = simrv::xlen::kXLenBits)
     -> std::string;
 
 /**
  * @brief Build a formal InstructionExplanation from a raw instruction word without live state.
  */
-[[nodiscard]] auto explain_static(uint32_t raw_inst, simrv::xlen::Address pc = 0,
+[[nodiscard]] auto explain_static(uint32_t raw_inst, simrv::xlen::VirtAddr pc = {},
                                   unsigned xlen = simrv::xlen::kXLenBits) -> InstructionExplanation;
 
 /**
  * @brief Evaluate an instruction word formally against a live ArchState, optional CPU, and
  *        optional Machine (100% side-effect-free).
  */
-[[nodiscard]] auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::Address pc,
+[[nodiscard]] auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::VirtAddr pc,
                                     uint32_t raw_inst, const simrv::core::CPU* cpu = nullptr,
                                     const simrv::core::Machine* machine = nullptr)
     -> InstructionExplanation;
@@ -117,7 +117,7 @@ void explain_instruction(uint32_t raw_inst);
  *        mutating caches, TLB replacement state, PC, pipeline stages, or counters.
  */
 [[nodiscard]] auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index = 0,
-                                 std::optional<simrv::xlen::Address> override_pc = std::nullopt)
+                                 std::optional<simrv::xlen::VirtAddr> override_pc = std::nullopt)
     -> std::optional<InstructionExplanation>;
 
 }  // namespace simrv::explain

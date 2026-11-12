@@ -1,43 +1,34 @@
 /**
  * @file CpuFastExecution.cpp
- * @brief Cached instruction execution and optimized memory access paths.
+ * @brief Cached single-instruction execution and optimized memory access paths.
  */
 #include <array>
-#include <limits>
 #include <shared_mutex>
 #include <utility>
 
-#include "CpuExecutionHelpers.hpp"
+#include "CpuFastExecutionInternal.hpp"
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Pmp.hpp"
-#include "simrv/core/Tracer.hpp"
-#include "simrv/debug/GdbStub.hpp"
-#include "simrv/device/Uart.hpp"
-#include "simrv/execute/ExecuteUnitZb.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Math.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 using isa::Funct3;
 
-namespace {
-[[nodiscard]] constexpr auto is_csr_instruction(isa::OperationId op) noexcept -> bool {
-    return op >= isa::CSRRW && op <= isa::CSRRCI;
-}
-}  // namespace
-
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
-    simrv::xlen::Register const next_pc = state_.pc + op.len();
+    simrv::xlen::Register const next_pc = state_.pc.raw() + op.len();
     pipeline_context.tkn = true;
-    pipeline_context.jmp_pc = simrv::xlen::VirtAddr{state_.pc + op.imm};
+    pipeline_context.jmp_pc = state_.pc + op.imm;
+    if (state_.regs.xlen == 32) {
+        pipeline_context.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc.raw())))};
+    }
     if (simrv::compiler::unlikely((pipeline_context.jmp_pc & state_.fetch_align_mask) != 0)) {
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
@@ -47,7 +38,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
 }
 
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, simrv::xlen::Register rrs1) {
-    simrv::xlen::Register const next_pc = state_.pc + op.len();
+    simrv::xlen::Register const next_pc = state_.pc.raw() + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc =
         simrv::xlen::VirtAddr{(rrs1 + op.imm) & ~static_cast<simrv::xlen::Register>(1)};
@@ -70,15 +61,39 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
                   kBranchOp == isa::BGE || kBranchOp == isa::BLTU || kBranchOp == isa::BGEU);
     bool tkn;
     if constexpr (kBranchOp == isa::BEQ) {
-        tkn = rrs1 == rrs2;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = rrs1 == rrs2;
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<uint32_t>(rrs1) == static_cast<uint32_t>(rrs2);
+        } else {
+            tkn = rrs1 == rrs2;
+        }
     } else if constexpr (kBranchOp == isa::BNE) {
-        tkn = rrs1 != rrs2;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = rrs1 != rrs2;
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<uint32_t>(rrs1) != static_cast<uint32_t>(rrs2);
+        } else {
+            tkn = rrs1 != rrs2;
+        }
     } else if constexpr (kBranchOp == isa::BLT) {
-        tkn =
-            static_cast<simrv::xlen::SignedWord>(rrs1) < static_cast<simrv::xlen::SignedWord>(rrs2);
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = static_cast<int32_t>(rrs1) < static_cast<int32_t>(rrs2);
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<int32_t>(rrs1) < static_cast<int32_t>(rrs2);
+        } else {
+            tkn = static_cast<simrv::xlen::SignedWord>(rrs1) <
+                  static_cast<simrv::xlen::SignedWord>(rrs2);
+        }
     } else if constexpr (kBranchOp == isa::BGE) {
-        tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
-              static_cast<simrv::xlen::SignedWord>(rrs2);
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = static_cast<int32_t>(rrs1) >= static_cast<int32_t>(rrs2);
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<int32_t>(rrs1) >= static_cast<int32_t>(rrs2);
+        } else {
+            tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
+                  static_cast<simrv::xlen::SignedWord>(rrs2);
+        }
     } else if constexpr (kBranchOp == isa::BLTU) {
         if constexpr (!simrv::xlen::kIsXLen64) {
             tkn = static_cast<uint32_t>(rrs1) < static_cast<uint32_t>(rrs2);
@@ -96,8 +111,11 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
             tkn = rrs1 >= rrs2;
         }
     }
-    simrv::xlen::VirtAddr const target_pc = tkn ? simrv::xlen::VirtAddr{state_.pc + op.imm}
-                                                : simrv::xlen::VirtAddr{state_.pc + op.len()};
+    simrv::xlen::VirtAddr target_pc = tkn ? state_.pc + op.imm : state_.pc + op.len();
+    if (state_.regs.xlen == 32) {
+        target_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(target_pc.raw())))};
+    }
     if constexpr (kCopyContext) {
         pipeline_context.tkn = tkn;
         pipeline_context.jmp_pc = target_pc;
@@ -113,10 +131,11 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
     commit_cached_branch_target(op, target_pc);
 }
 
-auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address mem_addr,
+auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::VirtAddr vaddr,
                         isa::Funct3 funct3, simrv::xlen::Register& out_val,
                         const simrv::memory::RamView& ram) -> bool {
-    if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
+    simrv::xlen::VirtAddr mem_addr = vaddr;
+    if (simrv::compiler::unlikely(!is_aligned_for_funct3(vaddr, funct3))) {
         return false;
     }
 
@@ -127,9 +146,10 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) mem_addr &= 0xFFFFFFFFULL;
         }
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes))) {
+        const simrv::xlen::PhysAddr paddr{mem_addr.raw()};
+        if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(
-                mem_addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
+                paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
             return true;
         }
         return false;
@@ -143,7 +163,7 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
     if (simrv::compiler::likely(eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(
                                                                 active_satp(), active_xlen))) {
         const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
-        const simrv::xlen::Address vpn = mem_addr >> 12;
+        const simrv::xlen::Address vpn = mem_addr.raw() >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_read[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
@@ -152,7 +172,7 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
                     entry.host_ptr(mem_addr), static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
-            const simrv::xlen::Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
+            const simrv::xlen::PhysAddr paddr = entry.paddr_base + (mem_addr.raw() & 0xFFF);
             if (simrv::compiler::unlikely(state_.num_active_pmp > 0 &&
                                           !core::pmp::check_access(state_, paddr, size_bytes,
                                                                    core::PmpAccessType::Read,
@@ -169,12 +189,12 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
         TLBEntry* tlb_e = tlb.lookup_data_r(mem_addr, current_asid, eff_priv);
         if (simrv::compiler::likely(tlb_e != nullptr &&
                                     tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-            simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
+            const simrv::xlen::PhysAddr paddr = tlb_e->p_addr + (mem_addr.raw() & 0xFFF);
             if (simrv::compiler::unlikely(!core::pmp::check_access(
                     state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
                 return false;
             }
-            simrv::xlen::Address const ppage = tlb_e->p_addr;
+            const simrv::xlen::PhysAddr ppage = tlb_e->p_addr;
             simrv::xlen::Byte* host_base =
                 (ram.contains(ppage, 4096) &&
                  (state_.num_active_pmp == 0 ||
@@ -185,8 +205,9 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
                                        host_base, tlb_e->global);
             if (host_base != nullptr) {
-                out_val = simrv::memory::host_read_fast(
-                    host_base + (mem_addr & 0xFFF), static_cast<simrv::xlen::Instruction>(funct3));
+                out_val =
+                    simrv::memory::host_read_fast(host_base + (mem_addr.raw() & 0xFFF),
+                                                  static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
             if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
@@ -196,20 +217,22 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             }
         }
     } else {
-        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes) &&
-                                    core::pmp::check_access(state_, mem_addr, size_bytes,
+        const simrv::xlen::PhysAddr paddr{mem_addr.raw()};
+        if (simrv::compiler::likely(ram.contains(paddr, size_bytes) &&
+                                    core::pmp::check_access(state_, paddr, size_bytes,
                                                             core::PmpAccessType::Read, eff_priv))) {
             out_val = simrv::memory::ram_read_fast(
-                mem_addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
+                paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
             return true;
         }
     }
     return false;
 }
 
-auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::Funct3 funct3,
+auto CPU::try_fast_store(Machine& machine, simrv::xlen::VirtAddr vaddr, isa::Funct3 funct3,
                          simrv::xlen::Register rrs2, const simrv::memory::RamView& ram) -> bool {
-    if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
+    simrv::xlen::VirtAddr mem_addr = vaddr;
+    if (simrv::compiler::unlikely(!is_aligned_for_funct3(vaddr, funct3))) {
         return false;
     }
 
@@ -220,11 +243,12 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) mem_addr &= 0xFFFFFFFFULL;
         }
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes) &&
-                                    !is_tohost_addr(machine, mem_addr))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2,
+        const simrv::xlen::PhysAddr paddr{mem_addr.raw()};
+        if (simrv::compiler::likely(ram.contains(paddr, size_bytes) &&
+                                    !is_tohost_addr(machine, paddr))) {
+            simrv::memory::ram_write_fast(paddr, rrs2,
                                           static_cast<simrv::xlen::Instruction>(funct3), ram);
-            pipeline_context.mem_paddr = mem_addr;
+            pipeline_context.mem_paddr = paddr;
             return true;
         }
         return false;
@@ -238,11 +262,11 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
     if (simrv::compiler::likely(eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(
                                                                 active_satp(), active_xlen))) {
         const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
-        const simrv::xlen::Address vpn = mem_addr >> 12;
+        const simrv::xlen::Address vpn = mem_addr.raw() >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_write[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-            simrv::xlen::PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            const simrv::xlen::PhysAddr paddr = entry.paddr_base + (mem_addr.raw() & 0xFFF);
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
             }
@@ -269,7 +293,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
         TLBEntry* tlb_e = tlb.lookup_data_w(mem_addr, current_asid, eff_priv);
         if (simrv::compiler::likely(tlb_e != nullptr &&
                                     tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-            simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
+            const simrv::xlen::PhysAddr paddr = tlb_e->p_addr + (mem_addr.raw() & 0xFFF);
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
             }
@@ -277,7 +301,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                     state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
                 return false;
             }
-            simrv::xlen::Address const ppage = tlb_e->p_addr;
+            const simrv::xlen::PhysAddr ppage = tlb_e->p_addr;
             simrv::xlen::Byte* host_base =
                 (ram.contains(ppage, 4096) &&
                  (state_.num_active_pmp == 0 ||
@@ -288,7 +312,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
                                         host_base, tlb_e->global);
             if (host_base != nullptr) {
-                simrv::memory::host_write_fast(host_base + (mem_addr & 0xFFF), rrs2,
+                simrv::memory::host_write_fast(host_base + (mem_addr.raw() & 0xFFF), rrs2,
                                                static_cast<simrv::xlen::Instruction>(funct3));
                 pipeline_context.mem_paddr = paddr;
                 return true;
@@ -301,13 +325,14 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             }
         }
     } else {
+        const simrv::xlen::PhysAddr paddr{mem_addr.raw()};
         if (simrv::compiler::likely(
-                ram.contains(mem_addr, size_bytes) && !is_tohost_addr(machine, mem_addr) &&
-                core::pmp::check_access(state_, mem_addr, size_bytes, core::PmpAccessType::Write,
+                ram.contains(paddr, size_bytes) && !is_tohost_addr(machine, paddr) &&
+                core::pmp::check_access(state_, paddr, size_bytes, core::PmpAccessType::Write,
                                         eff_priv))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2,
+            simrv::memory::ram_write_fast(paddr, rrs2,
                                           static_cast<simrv::xlen::Instruction>(funct3), ram);
-            pipeline_context.mem_paddr = mem_addr;
+            pipeline_context.mem_paddr = paddr;
             return true;
         }
     }
@@ -343,11 +368,12 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
             .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
-        pipeline_context.mem_addr = mem_addr;
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
     }
     simrv::xlen::Register mem_rdata = 0;
     constexpr unsigned size_bytes = kSizeBytes;
     constexpr simrv::xlen::Address align_mask = kSizeBytes - 1u;
+    bool skip_fast_load = false;
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & MstatusBit::Mprv) == 0 &&
                                 !state_.has_locked_pmp)) {
@@ -356,8 +382,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) phys_addr &= 0xFFFFFFFFULL;
         }
         if (simrv::compiler::likely((phys_addr & align_mask) == 0 &&
-                                    ram.contains(phys_addr, size_bytes))) {
-            mem_rdata = simrv::memory::ram_read_fast(phys_addr, kFunct3, ram);
+                                    ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes))) {
+            mem_rdata =
+                simrv::memory::ram_read_fast(simrv::xlen::PhysAddr{phys_addr}, kFunct3, ram);
             state_.regs.write(op.rd, mem_rdata);
             advance_cached_pc(op);
             return true;
@@ -370,6 +397,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
+                eff_priv != kPrivMachine &&
                 simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
             const simrv::xlen::Word current_asid =
                 simrv::xlen::satp_asid(active_satp(), active_xlen);
@@ -379,44 +407,56 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
                 if (simrv::compiler::likely(entry.has_host_ptr())) {
-                    mem_rdata = simrv::memory::host_read_fast(entry.host_ptr(lookup_addr), kFunct3);
+                    mem_rdata = simrv::memory::host_read_fast(
+                        entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}), kFunct3);
                     state_.regs.write(op.rd, mem_rdata);
                     advance_cached_pc(op);
                     return true;
                 }
-            } else if (TLBEntry* tlb_e = tlb.lookup_data_r(lookup_addr, current_asid, eff_priv);
-                       simrv::compiler::likely(tlb_e != nullptr &&
-                                               tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-                const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
-                if (simrv::compiler::likely(state_.num_active_pmp == 0 ||
-                                            core::pmp::check_access(state_, paddr, size_bytes,
-                                                                    core::PmpAccessType::Read,
-                                                                    eff_priv))) {
-                    const simrv::xlen::Address ppage = tlb_e->p_addr;
-                    simrv::xlen::Byte* const host_base =
-                        (ram.contains(ppage, 4096) &&
-                         (state_.num_active_pmp == 0 ||
-                          core::pmp::check_access(state_, ppage, 4096, core::PmpAccessType::Read,
-                                                  eff_priv)))
-                            ? ram.unchecked_ptr(ppage)
-                            : nullptr;
-                    soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
-                                               host_base, tlb_e->global);
-                    if (simrv::compiler::likely(host_base != nullptr)) {
-                        mem_rdata = simrv::memory::host_read_fast(host_base + page_offset, kFunct3);
-                        state_.regs.write(op.rd, mem_rdata);
-                        advance_cached_pc(op);
-                        return true;
+            } else if (TLBEntry* tlb_e = tlb.lookup_data_r(simrv::xlen::VirtAddr{lookup_addr},
+                                                           current_asid, eff_priv);
+                       simrv::compiler::likely(tlb_e != nullptr)) {
+                if (simrv::compiler::likely(tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
+                    const simrv::xlen::Address paddr = (tlb_e->p_addr + page_offset).raw();
+                    if (simrv::compiler::likely(
+                            state_.num_active_pmp == 0 ||
+                            core::pmp::check_access(state_, simrv::xlen::PhysAddr{paddr},
+                                                    size_bytes, core::PmpAccessType::Read,
+                                                    eff_priv))) {
+                        const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
+                        simrv::xlen::Byte* const host_base =
+                            (ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
+                             (state_.num_active_pmp == 0 ||
+                              core::pmp::check_access(state_, simrv::xlen::PhysAddr{ppage}, 4096,
+                                                      core::PmpAccessType::Read, eff_priv)))
+                                ? ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage})
+                                : nullptr;
+                        soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch,
+                                                   simrv::xlen::PhysAddr{ppage}, host_base,
+                                                   tlb_e->global);
+                        if (simrv::compiler::likely(host_base != nullptr)) {
+                            mem_rdata =
+                                simrv::memory::host_read_fast(host_base + page_offset, kFunct3);
+                            state_.regs.write(op.rd, mem_rdata);
+                            advance_cached_pc(op);
+                            return true;
+                        }
                     }
+                } else {
+                    skip_fast_load = true;
                 }
+            } else {
+                skip_fast_load = true;
             }
         }
     }
 
-    if (!try_fast_load(machine, mem_addr, kFunct3, mem_rdata, ram)) {
+    if (skip_fast_load ||
+        !try_fast_load(machine, simrv::xlen::VirtAddr{mem_addr}, kFunct3, mem_rdata, ram)) {
         op.copy_to(pipeline_context);
-        pipeline_context.mem_addr = mem_addr;
-        mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, kFunct3);
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+        mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                         simrv::xlen::VirtAddr{mem_addr}, kFunct3);
         if (pipeline_context.pending_exception.has_value()) {
             raise_exception(
                 static_cast<simrv::xlen::TrapCause>(*pipeline_context.pending_exception),
@@ -454,9 +494,10 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
             .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
-        pipeline_context.mem_addr = mem_addr;
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
     }
     constexpr unsigned size_bytes = kSizeBytes;
+    bool skip_fast_store = false;
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & MstatusBit::Mprv) == 0 &&
                                 !state_.has_locked_pmp)) {
@@ -465,15 +506,15 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) phys_addr &= 0xFFFFFFFFULL;
         }
         if (simrv::compiler::likely((phys_addr & kAlignMask) == 0 &&
-                                    ram.contains(phys_addr, size_bytes) &&
+                                    ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes) &&
                                     !is_tohost_addr(machine, phys_addr))) {
-            simrv::memory::ram_write_fast(phys_addr, rrs2, kFunct3, ram);
+            simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{phys_addr}, rrs2, kFunct3, ram);
             state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
                     machine.memory_.reservation_table().may_have_reservations() &&
                     machine.num_harts() > 1)) {
-                machine.memory_.reservation_table().invalidate_range(phys_addr, size_bytes,
-                                                                     hart_id());
+                machine.memory_.reservation_table().invalidate_range(
+                    simrv::xlen::PhysAddr{phys_addr}, size_bytes, hart_id());
             }
             advance_cached_pc(op);
             return true;
@@ -486,6 +527,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & kAlignMask) == 0 && page_offset + size_bytes <= 4096u &&
+                eff_priv != kPrivMachine &&
                 simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
             const simrv::xlen::Word current_asid =
                 simrv::xlen::satp_asid(active_satp(), active_xlen);
@@ -497,60 +539,71 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                 const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
                 if (simrv::compiler::likely(entry.has_host_ptr() &&
                                             !is_tohost_addr(machine, paddr))) {
-                    simrv::memory::host_write_fast(entry.host_ptr(lookup_addr), rrs2,
-                                                   static_cast<simrv::xlen::Instruction>(kFunct3));
+                    simrv::memory::host_write_fast(
+                        entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}), rrs2,
+                        static_cast<simrv::xlen::Instruction>(kFunct3));
                     state_.lr_reservation_active = false;
                     if (simrv::compiler::unlikely(
                             machine.memory_.reservation_table().may_have_reservations() &&
                             machine.num_harts() > 1)) {
-                        machine.memory_.reservation_table().invalidate_range(paddr, size_bytes,
-                                                                             hart_id());
+                        machine.memory_.reservation_table().invalidate_range(
+                            simrv::xlen::PhysAddr{paddr}, size_bytes, hart_id());
                     }
                     advance_cached_pc(op);
                     return true;
                 }
-            } else if (TLBEntry* tlb_e = tlb.lookup_data_w(lookup_addr, current_asid, eff_priv);
-                       simrv::compiler::likely(tlb_e != nullptr &&
-                                               tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-                const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
-                if (simrv::compiler::likely(
-                        (state_.num_active_pmp == 0 ||
-                         core::pmp::check_access(state_, paddr, size_bytes,
-                                                 core::PmpAccessType::Write, eff_priv)) &&
-                        !is_tohost_addr(machine, paddr))) {
-                    const simrv::xlen::Address ppage = tlb_e->p_addr;
-                    simrv::xlen::Byte* const host_base =
-                        (ram.contains(ppage, 4096) &&
-                         (state_.num_active_pmp == 0 ||
-                          core::pmp::check_access(state_, ppage, 4096, core::PmpAccessType::Write,
-                                                  eff_priv)))
-                            ? ram.unchecked_ptr(ppage)
-                            : nullptr;
-                    soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
-                                                host_base, tlb_e->global);
-                    if (simrv::compiler::likely(host_base != nullptr)) {
-                        simrv::memory::host_write_fast(
-                            host_base + page_offset, rrs2,
-                            static_cast<simrv::xlen::Instruction>(kFunct3));
-                        state_.lr_reservation_active = false;
-                        if (simrv::compiler::unlikely(
-                                machine.memory_.reservation_table().may_have_reservations() &&
-                                machine.num_harts() > 1)) {
-                            machine.memory_.reservation_table().invalidate_range(paddr, size_bytes,
-                                                                                 hart_id());
+            } else if (TLBEntry* tlb_e = tlb.lookup_data_w(simrv::xlen::VirtAddr{lookup_addr},
+                                                           current_asid, eff_priv);
+                       simrv::compiler::likely(tlb_e != nullptr)) {
+                if (simrv::compiler::likely(tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
+                    const simrv::xlen::Address paddr = (tlb_e->p_addr + page_offset).raw();
+                    if (simrv::compiler::likely(
+                            (state_.num_active_pmp == 0 ||
+                             core::pmp::check_access(state_, simrv::xlen::PhysAddr{paddr},
+                                                     size_bytes, core::PmpAccessType::Write,
+                                                     eff_priv)) &&
+                            !is_tohost_addr(machine, paddr))) {
+                        const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
+                        simrv::xlen::Byte* const host_base =
+                            (ram.contains(simrv::xlen::PhysAddr{ppage}, 4096) &&
+                             (state_.num_active_pmp == 0 ||
+                              core::pmp::check_access(state_, simrv::xlen::PhysAddr{ppage}, 4096,
+                                                      core::PmpAccessType::Write, eff_priv)))
+                                ? ram.unchecked_ptr(simrv::xlen::PhysAddr{ppage})
+                                : nullptr;
+                        soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch,
+                                                    simrv::xlen::PhysAddr{ppage}, host_base,
+                                                    tlb_e->global);
+                        if (simrv::compiler::likely(host_base != nullptr)) {
+                            simrv::memory::host_write_fast(
+                                host_base + page_offset, rrs2,
+                                static_cast<simrv::xlen::Instruction>(kFunct3));
+                            state_.lr_reservation_active = false;
+                            if (simrv::compiler::unlikely(
+                                    machine.memory_.reservation_table().may_have_reservations() &&
+                                    machine.num_harts() > 1)) {
+                                machine.memory_.reservation_table().invalidate_range(
+                                    simrv::xlen::PhysAddr{paddr}, size_bytes, hart_id());
+                            }
+                            advance_cached_pc(op);
+                            return true;
                         }
-                        advance_cached_pc(op);
-                        return true;
                     }
+                } else {
+                    skip_fast_store = true;
                 }
+            } else {
+                skip_fast_store = true;
             }
         }
     }
 
-    if (!try_fast_store(machine, mem_addr, kFunct3, rrs2, ram)) {
+    if (skip_fast_store ||
+        !try_fast_store(machine, simrv::xlen::VirtAddr{mem_addr}, kFunct3, rrs2, ram)) {
         op.copy_to(pipeline_context);
-        pipeline_context.mem_addr = mem_addr;
-        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, kFunct3);
+        pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this,
+                                              simrv::xlen::VirtAddr{mem_addr}, rrs2, kFunct3);
         if (pipeline_context.pending_exception.has_value()) {
             raise_exception(
                 static_cast<simrv::xlen::TrapCause>(*pipeline_context.pending_exception),
@@ -680,425 +733,6 @@ void CPU::dispatch_pending_interrupts() {
     }
 }
 
-template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
-SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op) -> bool {
-    return execute_cached_alu_fast_xlen<kGuestXlen64, kCopyContext, kInstMix, kDeferAluCommit>(
-        op, op.fast_op);
-}
-
-template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
-SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op, FastOp kind) -> bool {
-    simrv::xlen::Register wb_data = 0;
-    const simrv::xlen::Register rrs1 = state_.regs.read(op.rs1);
-
-    if (simrv::compiler::likely(kind <= FastOp::Srli)) {
-        if (kind <= FastOp::Addw) {
-#if SIMRV_XLEN == 64
-            if (kind == FastOp::Add) {
-                wb_data = rrs1 + state_.regs.read(op.rs2) + op.imm;
-            } else {
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(rrs1 + state_.regs.read(op.rs2) + op.imm)));
-            }
-#else
-            wb_data = rrs1 + state_.regs.read(op.rs2) + op.imm;
-#endif
-        } else {
-            if (kind == FastOp::Slli) {
-                constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
-                wb_data = rrs1 << (op.imm & shift_mask);
-            } else {
-                if constexpr (kGuestXlen64) {
-                    wb_data = rrs1 >> (op.imm & 0x3f);
-                } else {
-                    wb_data = static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f);
-                }
-            }
-        }
-    } else if (kind <= FastOp::Slliw) {
-        if (kind <= FastOp::Mulw) {
-            if (kind == FastOp::Andi) {
-                wb_data = rrs1 & op.imm;
-            } else {
-#if SIMRV_XLEN == 64
-                const uint32_t product =
-                    static_cast<uint32_t>(rrs1) * static_cast<uint32_t>(state_.regs.read(op.rs2));
-                wb_data = static_cast<simrv::xlen::Register>(
-                    static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(product)));
-#endif
-            }
-        } else {
-            if (kind == FastOp::Or) {
-                wb_data = rrs1 | state_.regs.read(op.rs2) | op.imm;
-            } else {
-#if SIMRV_XLEN == 64
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
-#endif
-            }
-        }
-    } else if (kind <= FastOp::Xor) {
-        if (kind <= FastOp::Srliw) {
-            if (kind == FastOp::And) {
-                wb_data = rrs1 & state_.regs.read(op.rs2);
-            } else {
-#if SIMRV_XLEN == 64
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
-#endif
-            }
-        } else {
-            if (kind == FastOp::Sub) {
-                wb_data = rrs1 - state_.regs.read(op.rs2);
-            } else {
-                wb_data = rrs1 ^ state_.regs.read(op.rs2) ^ op.imm;
-            }
-        }
-    } else {
-        switch (kind) {
-            case FastAluKind::Sll: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
-                wb_data = rrs1 << (rrs2 & shift_mask);
-                break;
-            }
-            case FastAluKind::Srl: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = rrs1 >> (rrs2 & 0x3f);
-                } else {
-                    wb_data = static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f);
-                }
-                break;
-            }
-            case FastAluKind::Sra: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
-                wb_data = static_cast<simrv::xlen::Register>(
-                    static_cast<simrv::xlen::SignedWord>(rrs1) >> (rrs2 & shift_mask));
-                break;
-            }
-            case FastAluKind::Slt: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data =
-                    static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                                       static_cast<simrv::xlen::SignedWord>(rrs2));
-                break;
-            }
-            case FastAluKind::Sltu: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = static_cast<simrv::xlen::Register>(rrs1 < rrs2);
-                } else {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<uint32_t>(rrs1) <
-                                                                 static_cast<uint32_t>(rrs2));
-                }
-                break;
-            }
-            case FastAluKind::Mul: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = simrv::xlen::mul_low(rrs1, rrs2);
-                break;
-            }
-            case FastAluKind::Mulh: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = simrv::xlen::mul_high_signed(rrs1, rrs2);
-                } else {
-                    const int64_t product = static_cast<int64_t>(static_cast<int32_t>(rrs1)) *
-                                            static_cast<int64_t>(static_cast<int32_t>(rrs2));
-                    wb_data = static_cast<uint32_t>(static_cast<uint64_t>(product) >> 32u);
-                }
-                break;
-            }
-            case FastAluKind::Mulhsu: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = simrv::xlen::mul_high_signed_unsigned(rrs1, rrs2);
-                } else {
-                    const int64_t product = static_cast<int64_t>(static_cast<int32_t>(rrs1)) *
-                                            static_cast<int64_t>(static_cast<uint32_t>(rrs2));
-                    wb_data = static_cast<uint32_t>(static_cast<uint64_t>(product) >> 32u);
-                }
-                break;
-            }
-            case FastAluKind::Mulhu: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = simrv::xlen::mul_high_unsigned(rrs1, rrs2);
-                } else {
-                    const uint64_t product = static_cast<uint64_t>(static_cast<uint32_t>(rrs1)) *
-                                             static_cast<uint64_t>(static_cast<uint32_t>(rrs2));
-                    wb_data = static_cast<uint32_t>(product >> 32u);
-                }
-                break;
-            }
-            case FastAluKind::Div: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    const auto lhs = static_cast<simrv::xlen::SignedWord>(rrs1);
-                    const auto rhs = static_cast<simrv::xlen::SignedWord>(rrs2);
-                    if (rhs == 0) {
-                        wb_data = simrv::xlen::kWordAllOnes;
-                    } else if (lhs == std::numeric_limits<simrv::xlen::SignedWord>::min() &&
-                               rhs == -1) {
-                        wb_data = static_cast<simrv::xlen::Register>(lhs);
-                    } else {
-                        wb_data = static_cast<simrv::xlen::Register>(lhs / rhs);
-                    }
-                } else {
-                    const auto lhs = static_cast<int32_t>(rrs1);
-                    const auto rhs = static_cast<int32_t>(rrs2);
-                    if (rhs == 0) {
-                        wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(-1));
-                    } else if (lhs == std::numeric_limits<int32_t>::min() && rhs == -1) {
-                        wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs));
-                    } else {
-                        wb_data =
-                            static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs / rhs));
-                    }
-                }
-                break;
-            }
-            case FastAluKind::Divu: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = (rrs2 == 0) ? simrv::xlen::kWordAllOnes : (rrs1 / rrs2);
-                } else {
-                    const auto lhs = static_cast<uint32_t>(rrs1);
-                    const auto rhs = static_cast<uint32_t>(rrs2);
-                    wb_data = (rhs == 0)
-                                  ? static_cast<simrv::xlen::Register>(static_cast<int64_t>(-1))
-                                  : static_cast<simrv::xlen::Register>(
-                                        static_cast<int64_t>(static_cast<int32_t>(lhs / rhs)));
-                }
-                break;
-            }
-            case FastAluKind::Rem: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    const auto lhs = static_cast<simrv::xlen::SignedWord>(rrs1);
-                    const auto rhs = static_cast<simrv::xlen::SignedWord>(rrs2);
-                    if (rhs == 0) {
-                        wb_data = rrs1;
-                    } else if (lhs == std::numeric_limits<simrv::xlen::SignedWord>::min() &&
-                               rhs == -1) {
-                        wb_data = 0;
-                    } else {
-                        wb_data = static_cast<simrv::xlen::Register>(lhs % rhs);
-                    }
-                } else {
-                    const auto lhs = static_cast<int32_t>(rrs1);
-                    const auto rhs = static_cast<int32_t>(rrs2);
-                    if (rhs == 0) {
-                        wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs));
-                    } else if (lhs == std::numeric_limits<int32_t>::min() && rhs == -1) {
-                        wb_data = 0;
-                    } else {
-                        wb_data =
-                            static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs % rhs));
-                    }
-                }
-                break;
-            }
-            case FastAluKind::Remu: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                if constexpr (kGuestXlen64) {
-                    wb_data = (rrs2 == 0) ? rrs1 : (rrs1 % rrs2);
-                } else {
-                    const auto lhs = static_cast<uint32_t>(rrs1);
-                    const auto rhs = static_cast<uint32_t>(rrs2);
-                    wb_data = (rhs == 0) ? static_cast<simrv::xlen::Register>(
-                                               static_cast<int64_t>(static_cast<int32_t>(lhs)))
-                                         : static_cast<simrv::xlen::Register>(static_cast<int64_t>(
-                                               static_cast<int32_t>(lhs % rhs)));
-                }
-                break;
-            }
-#if SIMRV_XLEN == 64
-            case FastAluKind::Subw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = static_cast<simrv::xlen::Register>(
-                    static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(rrs1 - rrs2)));
-                break;
-            }
-            case FastAluKind::Sllw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
-                break;
-            }
-            case FastAluKind::Srlw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f))));
-                break;
-            }
-            case FastAluKind::Sraw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f)));
-                break;
-            }
-            case FastAluKind::Mulw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                const uint32_t product = static_cast<uint32_t>(rrs1) * static_cast<uint32_t>(rrs2);
-                wb_data = static_cast<simrv::xlen::Register>(
-                    static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(product)));
-                break;
-            }
-            case FastAluKind::Divw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                const auto lhs = static_cast<int32_t>(rrs1);
-                const auto rhs = static_cast<int32_t>(rrs2);
-                if (rhs == 0) {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(-1));
-                } else if (lhs == std::numeric_limits<int32_t>::min() && rhs == -1) {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs));
-                } else {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs / rhs));
-                }
-                break;
-            }
-            case FastAluKind::Divuw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                const auto lhs = static_cast<uint32_t>(rrs1);
-                const auto rhs = static_cast<uint32_t>(rrs2);
-                wb_data = (rhs == 0) ? static_cast<simrv::xlen::Register>(static_cast<int64_t>(-1))
-                                     : static_cast<simrv::xlen::Register>(
-                                           static_cast<int64_t>(static_cast<int32_t>(lhs / rhs)));
-                break;
-            }
-            case FastAluKind::Remw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                const auto lhs = static_cast<int32_t>(rrs1);
-                const auto rhs = static_cast<int32_t>(rrs2);
-                if (rhs == 0) {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs));
-                } else if (lhs == std::numeric_limits<int32_t>::min() && rhs == -1) {
-                    wb_data = 0;
-                } else {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(lhs % rhs));
-                }
-                break;
-            }
-            case FastAluKind::Remuw: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                const auto lhs = static_cast<uint32_t>(rrs1);
-                const auto rhs = static_cast<uint32_t>(rrs2);
-                wb_data = (rhs == 0) ? static_cast<simrv::xlen::Register>(
-                                           static_cast<int64_t>(static_cast<int32_t>(lhs)))
-                                     : static_cast<simrv::xlen::Register>(
-                                           static_cast<int64_t>(static_cast<int32_t>(lhs % rhs)));
-                break;
-            }
-#endif
-            case FastAluKind::Ori:
-                wb_data = rrs1 | op.imm;
-                break;
-            case FastAluKind::Xori:
-                wb_data = rrs1 ^ op.imm;
-                break;
-            case FastAluKind::Srai:
-                if constexpr (kGuestXlen64) {
-                    wb_data = static_cast<simrv::xlen::Register>(
-                        static_cast<simrv::xlen::SignedWord>(rrs1) >> (op.imm & 0x3f));
-                } else {
-                    wb_data = static_cast<simrv::xlen::Register>(
-                        static_cast<simrv::xlen::SignedWord>(rrs1) >> (op.imm & 0x1f));
-                }
-                break;
-            case FastAluKind::Slti:
-                wb_data = static_cast<simrv::xlen::Register>(
-                    static_cast<simrv::xlen::SignedWord>(rrs1) <
-                    static_cast<simrv::xlen::SignedWord>(op.imm));
-                break;
-            case FastAluKind::Sltiu:
-                if constexpr (kGuestXlen64) {
-                    wb_data = static_cast<simrv::xlen::Register>(
-                        rrs1 < static_cast<simrv::xlen::Register>(op.imm));
-                } else {
-                    wb_data = static_cast<simrv::xlen::Register>(static_cast<uint32_t>(rrs1) <
-                                                                 static_cast<uint32_t>(op.imm));
-                }
-                break;
-#if SIMRV_XLEN == 64
-            case FastAluKind::Sraiw:
-                wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
-                    static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
-                break;
-#endif
-            case FastAluKind::Lui:
-                wb_data = op.imm;
-                break;
-            case FastAluKind::Auipc:
-                wb_data = op.cpc.raw() + op.imm;
-                break;
-            case FastAluKind::CzeroEqz: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = (rrs2 == 0) ? 0 : rrs1;
-                break;
-            }
-            case FastAluKind::CzeroNez: {
-                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-                wb_data = (rrs2 != 0) ? 0 : rrs1;
-                break;
-            }
-            default: {
-                if (kind != FastOp::Bitmanip) {
-                    __builtin_unreachable();
-                }
-                const auto opc = op.opcode();
-                const simrv::xlen::Register in2 =
-                    (opc == isa::Opcode::OpImm || opc == isa::Opcode::OpImm32)
-                        ? static_cast<simrv::xlen::Register>(op.imm)
-                        : state_.regs.read(op.rs2);
-#if SIMRV_XLEN == 64
-                if (opc == isa::Opcode::Op32 || opc == isa::Opcode::OpImm32) {
-                    wb_data = execute::ExecuteUnitZb::aluIntZbW(rrs1, in2, op.op_id);
-                    break;
-                }
-#endif
-                wb_data =
-                    execute::ExecuteUnitZb::aluIntZb(rrs1, in2, op.op_id, kGuestXlen64 ? 64 : 32);
-                break;
-            }
-        }
-    }
-    if constexpr (kCopyContext) {
-        op.copy_to(pipeline_context);
-        pipeline_context.tlb_miss = false;
-        pipeline_context.pending_tval = 0;
-    }
-    if constexpr (kInstMix) {
-        e_instmix[static_cast<std::size_t>(op.op_id)]++;
-        perf_counters.record_retire(op.op_id, 1);
-    }
-    if constexpr (simrv::xlen::kIsXLen64) {
-        if constexpr (kGuestXlen64) {
-            state_.regs.write_xlen64(op.rd, wb_data);
-        } else {
-            state_.regs.write_xlen32(op.rd, wb_data);
-        }
-    } else {
-        state_.regs.write_xlen32(op.rd, wb_data);
-    }
-    if constexpr (!kDeferAluCommit) {
-        advance_cached_pc_alu(op);
-    }
-    return true;
-}
-
-template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
-SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast(CachedOp& op) -> bool {
-    if constexpr (simrv::xlen::kIsXLen64) {
-        if (simrv::compiler::likely(state_.regs.xlen == 64)) {
-            return execute_cached_alu_fast_xlen<true, kCopyContext, kInstMix, kDeferAluCommit>(op);
-        }
-    }
-    return execute_cached_alu_fast_xlen<false, kCopyContext, kInstMix, kDeferAluCommit>(op);
-}
-
 template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
 void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                                  const simrv::memory::RamView& ram) {
@@ -1138,10 +772,11 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     const simrv::xlen::Register rrs1 = state_.regs.read(op.rs1);
     const auto cached_opcode = op.opcode();
     const bool uses_fp_state =
-        cached_opcode == isa::Opcode::LoadFp || cached_opcode == isa::Opcode::StoreFp ||
-        cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
-        cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
-        cached_opcode == isa::Opcode::NMAdd;
+        !simrv::isa::is_vector_op(op.op_id) &&
+        (cached_opcode == isa::Opcode::LoadFp || cached_opcode == isa::Opcode::StoreFp ||
+         cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
+         cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
+         cached_opcode == isa::Opcode::NMAdd);
     if (simrv::compiler::unlikely(uses_fp_state &&
                                   !state_.extension_state_enabled(MstatusBit::Fs))) {
         raise_exception(ExceptionCode::IllegalInstruction, op.ir);
@@ -1209,6 +844,15 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::SD:
             execute_cached_store<isa::SD>(machine, op, rrs1, state_.regs.read(op.rs2), ram);
             return;
+        // ---- Custom Function Unit (CFU) ----
+        case isa::OperationId::CFU: {
+            const auto rrs2 = state_.regs.read(op.rs2);
+            const auto res = cfu_unit.execute(static_cast<uint32_t>(op.funct7()),
+                                              static_cast<uint32_t>(op.funct3), rrs1, rrs2);
+            state_.regs.write(op.rd, res);
+            advance_cached_pc(op);
+            return;
+        }
         // ---- FP Loads ----
         case isa::FLW:
         case isa::FLD: {
@@ -1231,10 +875,12 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     if (simrv::compiler::unlikely(state_.regs.xlen == 32))
                         phys_addr &= 0xFFFFFFFFULL;
                 }
-                if (simrv::compiler::likely((phys_addr & align_mask) == 0 &&
-                                            ram.contains(phys_addr, size_bytes))) {
+                if (simrv::compiler::likely(
+                        (phys_addr & align_mask) == 0 &&
+                        ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes))) {
                     mem_rdata = simrv::memory::ram_read_fast(
-                        phys_addr, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
+                        simrv::xlen::PhysAddr{phys_addr},
+                        static_cast<simrv::xlen::Instruction>(op.funct3), ram);
                     loaded = true;
                 }
             } else if (fast_width_supported) {
@@ -1245,6 +891,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
+                        eff_priv != kPrivMachine &&
                         simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
                     const simrv::xlen::Word current_asid =
                         simrv::xlen::satp_asid(active_satp(), active_xlen);
@@ -1255,7 +902,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                             entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch) &&
                             entry.has_host_ptr())) {
                         mem_rdata = simrv::memory::host_read_fast(
-                            entry.host_ptr(lookup_addr),
+                            entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}),
                             static_cast<simrv::xlen::Instruction>(op.funct3));
                         loaded = true;
                     }
@@ -1263,14 +910,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             if (!loaded) {
                 simrv::xlen::Word raw_val = 0;
-                if (fast_width_supported &&
-                    try_fast_load(machine, mem_addr, op.funct3, raw_val, ram)) {
+                if (fast_width_supported && try_fast_load(machine, simrv::xlen::VirtAddr{mem_addr},
+                                                          op.funct3, raw_val, ram)) {
                     mem_rdata = raw_val;
                 } else {
                     op.copy_to(pipeline_context);
-                    pipeline_context.mem_addr = mem_addr;
-                    mem_rdata = simrv::memory::MemoryAccess::loadFp(machine.memory_, *this,
-                                                                    mem_addr, op.funct3);
+                    pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+                    mem_rdata = simrv::memory::MemoryAccess::loadFp(
+                        machine.memory_, *this, simrv::xlen::VirtAddr{mem_addr}, op.funct3);
                     if (pipeline_context.pending_exception.has_value()) {
                         raise_exception(static_cast<simrv::xlen::TrapCause>(
                                             *pipeline_context.pending_exception),
@@ -1312,12 +959,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     if (simrv::compiler::unlikely(state_.regs.xlen == 32))
                         phys_addr &= 0xFFFFFFFFULL;
                 }
-                if (simrv::compiler::likely((phys_addr & align_mask) == 0 &&
-                                            ram.contains(phys_addr, size_bytes) &&
-                                            !is_tohost_addr(machine, phys_addr))) {
-                    simrv::memory::ram_write_fast(
-                        phys_addr, fp_data, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
-                    pipeline_context.mem_paddr = phys_addr;
+                if (simrv::compiler::likely(
+                        (phys_addr & align_mask) == 0 &&
+                        ram.contains(simrv::xlen::PhysAddr{phys_addr}, size_bytes) &&
+                        !is_tohost_addr(machine, phys_addr))) {
+                    simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{phys_addr}, fp_data,
+                                                  static_cast<simrv::xlen::Instruction>(op.funct3),
+                                                  ram);
+                    pipeline_context.mem_paddr = simrv::xlen::PhysAddr{phys_addr};
                     stored = true;
                 }
             } else if (fast_width_supported) {
@@ -1328,6 +977,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
+                        eff_priv != kPrivMachine &&
                         simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
                     const simrv::xlen::Word current_asid =
                         simrv::xlen::satp_asid(active_satp(), active_xlen);
@@ -1340,9 +990,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                         const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
                         if (simrv::compiler::likely(!is_tohost_addr(machine, paddr))) {
                             simrv::memory::host_write_fast(
-                                entry.host_ptr(lookup_addr), fp_data,
+                                entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr}), fp_data,
                                 static_cast<simrv::xlen::Instruction>(op.funct3));
-                            pipeline_context.mem_paddr = paddr;
+                            pipeline_context.mem_paddr = simrv::xlen::PhysAddr{paddr};
                             stored = true;
                         }
                     }
@@ -1350,10 +1000,12 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             if (!stored) {
                 if (!fast_width_supported ||
-                    !try_fast_store(machine, mem_addr, op.funct3, fp_data, ram)) {
+                    !try_fast_store(machine, simrv::xlen::VirtAddr{mem_addr}, op.funct3, fp_data,
+                                    ram)) {
                     op.copy_to(pipeline_context);
-                    pipeline_context.mem_addr = mem_addr;
-                    simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
+                    pipeline_context.mem_addr = simrv::xlen::VirtAddr{mem_addr};
+                    simrv::memory::MemoryAccess::storeFp(machine.memory_, *this,
+                                                         simrv::xlen::VirtAddr{mem_addr}, fp_data,
                                                          op.funct3);
                     if (pipeline_context.pending_exception.has_value()) {
                         raise_exception(static_cast<simrv::xlen::TrapCause>(
@@ -1433,6 +1085,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- Everything else: fallback to full pipeline stages ----
         default:
             if (simrv::isa::is_vector_op(op.op_id)) {
+                if (simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Vs))) {
+                    raise_exception(ExceptionCode::IllegalInstruction, op.ir);
+                    return;
+                }
                 if constexpr (!kCopyContext) {
                     op.copy_to(pipeline_context);
                     pipeline_context.tlb_miss = false;
@@ -1459,1901 +1115,6 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     }
 }
 
-auto CPU::advance_sequential_miss_baremetal(CachedOp* chained,
-                                            simrv::xlen::Register next_pc) noexcept -> CachedOp* {
-    const auto* current_set = DecodeCache::set_of(chained);
-    const auto* candidate = ((next_pc & 2) != 0 && chained->op_len == 2)
-                                ? current_set
-                                : decode_cache.next_set(current_set);
-    auto* hit = decode_cache.lookup_sequential_baremetal(candidate, next_pc);
-    if (simrv::compiler::likely(hit != nullptr)) {
-        chained->next_seq_idx = decode_cache.index_of(hit);
-        return hit;
-    }
-    hit = decode_cache.lookup_baremetal_aligned(next_pc);
-    if (simrv::compiler::likely(hit != nullptr)) {
-        chained->next_seq_idx = decode_cache.index_of(hit);
-        return hit;
-    }
-    return nullptr;
-}
-
-auto CPU::resolve_branch_target_baremetal(CachedOp* chained,
-                                          simrv::xlen::Register target_pc) noexcept -> CachedOp* {
-    auto* hit = decode_cache.lookup_baremetal_aligned(target_pc);
-    if (simrv::compiler::likely(hit != nullptr)) {
-        chained->target_idx = decode_cache.index_of(hit);
-        return hit;
-    }
-    return nullptr;
-}
-
-template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
-SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
-                                                        const simrv::memory::RamView& ram)
-    -> uint32_t {
-    uint32_t cached_ops = 0;
-    uint32_t flushed_uart_ops = 0;
-    simrv::xlen::Counter last_flushed_icount = e_icount;
-    const auto tohost_addr = machine.isa_test_tohost();
-    uint32_t b = 0;
-    while (b < batch_size) {
-        auto* cached = decode_cache.lookup_aligned(state_.pc);
-        if (simrv::compiler::likely(cached != nullptr)) {
-            if constexpr (!kCopyContext && !kInstMix) {
-                const auto execute_fast_chain =
-                    [&]<bool kGuestXlen64, bool kFastMRam, bool kMultiHart>() __attribute__((
-                        always_inline)) {
-                        auto* const __restrict__ ram_data = ram.data();
-                        const simrv::xlen::Address ram_base = ram.base();
-                        const simrv::xlen::Address ram_size = ram.size();
-                        auto* chained = cached;
-                        CachedOp* fallback_op = nullptr;
-                        simrv::xlen::Register next_pc = state_.pc;
-                        const uint32_t start_b = b;
-                        simrv::xlen::Register seg_start_pc = next_pc;
-                        uint32_t seg_start_b = b;
-                        uint32_t compressed_count = 0;
-
-                        const auto commit_linear_segment =
-                            [&](simrv::xlen::Register end_pc) noexcept {
-                                const uint32_t seg_ops = b - seg_start_b;
-                                if (seg_ops != 0) {
-                                    compressed_count +=
-                                        (2 * seg_ops) -
-                                        static_cast<uint32_t>((end_pc - seg_start_pc) >> 1);
-                                }
-                            };
-
-                        const auto advance_sequential = [&]()
-                                                            __attribute__((always_inline)) -> bool {
-                            record_hpm_instruction_classes<kHpmClassMode>(
-                                chained->op_id, chained->opcode(), chained->cinsn != 0);
-                            next_pc += chained->op_len;
-                            ++b;
-                            if (simrv::compiler::unlikely(b >= batch_size)) {
-                                return false;
-                            }
-                            auto* next_op = decode_cache.op_by_index(chained->next_seq_idx);
-                            if (simrv::compiler::likely(next_op->cpc.raw() == next_pc)) {
-                                chained = next_op;
-                                return true;
-                            }
-                            auto* hit = advance_sequential_miss_baremetal(chained, next_pc);
-                            if (simrv::compiler::likely(hit != nullptr)) {
-                                chained = hit;
-                                return true;
-                            }
-                            return false;
-                        };
-
-                        auto op_tag = chained->fast_op;
-
-#define SIMRV_CHAIN_ADVANCE()                                   \
-    do {                                                        \
-        if (simrv::compiler::unlikely(!advance_sequential())) { \
-            goto chain_exit;                                    \
-        }                                                       \
-        op_tag = chained->fast_op;                              \
-        if (op_tag >= FastOp::kFirstNonAlu) {                   \
-            goto dispatch_switch;                               \
-        }                                                       \
-        goto dispatch_alu;                                      \
-    } while (0)
-
-#define SIMRV_CHAIN_BRANCH_TAKEN(target)          \
-    do {                                          \
-        if (commit_taken_branch(target)) {        \
-            if (op_tag >= FastOp::kFirstNonAlu) { \
-                goto dispatch_switch;             \
-            }                                     \
-            goto dispatch_alu;                    \
-        }                                         \
-        goto chain_exit;                          \
-    } while (0)
-
-                        const auto commit_taken_branch =
-                            [&](simrv::xlen::Register target_pc)
-                                __attribute__((always_inline)) -> bool {
-                            if (simrv::compiler::unlikely((target_pc & state_.fetch_align_mask) !=
-                                                          0)) {
-                                fallback_op = chained;
-                                return false;
-                            }
-                            if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                target_pc = static_cast<simrv::xlen::Register>(
-                                    static_cast<int64_t>(static_cast<int32_t>(target_pc)));
-                            }
-                            record_hpm_instruction_classes<kHpmClassMode>(
-                                chained->op_id, chained->opcode(), chained->cinsn != 0);
-                            ++b;
-                            commit_linear_segment(chained->cpc.raw() + chained->op_len);
-                            next_pc = target_pc;
-                            seg_start_pc = next_pc;
-                            seg_start_b = b;
-                            if (simrv::compiler::unlikely(b >= batch_size)) {
-                                return false;
-                            }
-                            auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                            if (simrv::compiler::likely(next_op->cpc.raw() == next_pc)) {
-                                chained = next_op;
-                            } else {
-                                chained = resolve_branch_target_baremetal(chained, next_pc);
-                                if (simrv::compiler::unlikely(chained == nullptr)) {
-                                    return false;
-                                }
-                            }
-                            op_tag = chained->fast_op;
-                            return true;
-                        };
-
-                        if (op_tag >= FastOp::kFirstNonAlu) {
-                            goto dispatch_switch;
-                        }
-
-                    dispatch_alu:
-                        while (true) {
-                            execute_cached_alu_fast_xlen<kGuestXlen64, false, false, true>(*chained,
-                                                                                           op_tag);
-                            if (simrv::compiler::unlikely(!advance_sequential())) {
-                                goto chain_exit;
-                            }
-                            op_tag = chained->fast_op;
-                            if (op_tag >= FastOp::kFirstNonAlu) {
-                                goto dispatch_switch;
-                            }
-                        }
-                    dispatch_switch:
-                        if (op_tag >= FastOp::Jal && op_tag <= FastOp::Blt) {
-                            switch (op_tag) {
-                                case FastOp::Bne: {
-                                    if (state_.regs.read(chained->rs1) !=
-                                        state_.regs.read(chained->rs2)) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    SIMRV_CHAIN_ADVANCE();
-                                }
-                                case FastOp::Beq: {
-                                    if (state_.regs.read(chained->rs1) ==
-                                        state_.regs.read(chained->rs2)) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    SIMRV_CHAIN_ADVANCE();
-                                }
-                                case FastOp::Jal: {
-                                    const simrv::xlen::Register target_pc =
-                                        static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                           chained->imm);
-                                    const simrv::xlen::Register link_pc =
-                                        static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                           chained->op_len);
-                                    if constexpr (simrv::xlen::kIsXLen64) {
-                                        if constexpr (kGuestXlen64) {
-                                            state_.regs.write_xlen64(chained->rd, link_pc);
-                                        } else {
-                                            state_.regs.write_xlen32(chained->rd, link_pc);
-                                        }
-                                    } else {
-                                        state_.regs.write_xlen32(chained->rd, link_pc);
-                                    }
-                                    SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                }
-                                case FastOp::Bgeu: {
-                                    const simrv::xlen::Register rrs1 =
-                                        state_.regs.read(chained->rs1);
-                                    const simrv::xlen::Register rrs2 =
-                                        state_.regs.read(chained->rs2);
-                                    bool tkn = false;
-                                    if constexpr (kGuestXlen64) {
-                                        tkn = (rrs1 >= rrs2);
-                                    } else {
-                                        tkn = (static_cast<uint32_t>(rrs1) >=
-                                               static_cast<uint32_t>(rrs2));
-                                    }
-                                    if (tkn) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    SIMRV_CHAIN_ADVANCE();
-                                }
-                                case FastOp::Jalr: {
-                                    const simrv::xlen::Register rrs1 =
-                                        state_.regs.read(chained->rs1);
-                                    simrv::xlen::Register target_pc =
-                                        (rrs1 + chained->imm) &
-                                        ~static_cast<simrv::xlen::Register>(1);
-                                    const simrv::xlen::Register link_pc =
-                                        static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                           chained->op_len);
-                                    if constexpr (simrv::xlen::kIsXLen64) {
-                                        if constexpr (kGuestXlen64) {
-                                            state_.regs.write_xlen64(chained->rd, link_pc);
-                                        } else {
-                                            state_.regs.write_xlen32(chained->rd, link_pc);
-                                        }
-                                    } else {
-                                        state_.regs.write_xlen32(chained->rd, link_pc);
-                                    }
-                                    SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                }
-                                case FastOp::Bge: {
-                                    const simrv::xlen::Register rrs1 =
-                                        state_.regs.read(chained->rs1);
-                                    const simrv::xlen::Register rrs2 =
-                                        state_.regs.read(chained->rs2);
-                                    if (static_cast<simrv::xlen::SignedWord>(rrs1) >=
-                                        static_cast<simrv::xlen::SignedWord>(rrs2)) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    SIMRV_CHAIN_ADVANCE();
-                                }
-                                case FastOp::Bltu: {
-                                    const simrv::xlen::Register rrs1 =
-                                        state_.regs.read(chained->rs1);
-                                    const simrv::xlen::Register rrs2 =
-                                        state_.regs.read(chained->rs2);
-                                    bool tkn = false;
-                                    if constexpr (kGuestXlen64) {
-                                        tkn = (rrs1 < rrs2);
-                                    } else {
-                                        tkn = (static_cast<uint32_t>(rrs1) <
-                                               static_cast<uint32_t>(rrs2));
-                                    }
-                                    if (tkn) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    SIMRV_CHAIN_ADVANCE();
-                                }
-                                case FastOp::Blt: {
-                                    const simrv::xlen::Register rrs1 =
-                                        state_.regs.read(chained->rs1);
-                                    const simrv::xlen::Register rrs2 =
-                                        state_.regs.read(chained->rs2);
-                                    if (static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                        static_cast<simrv::xlen::SignedWord>(rrs2)) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    SIMRV_CHAIN_ADVANCE();
-                                }
-                                default:
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                            }
-                        } else if (op_tag <= FastOp::Lbu) {
-                            switch (op_tag) {
-                                case FastOp::Ld: {
-                                    if constexpr (kFastMRam && simrv::xlen::kIsXLen64) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (!kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 8) &&
-                                                                    (mem_addr & 7) == 0)) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const auto mem_rdata =
-                                                *reinterpret_cast<const uint64_t*>(host_ptr);
-                                            if constexpr (kGuestXlen64) {
-                                                state_.regs.write_xlen64(chained->rd, mem_rdata);
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Lh: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 2) &&
-                                                                    (mem_addr & 1) == 0)) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                static_cast<simrv::xlen::Register>(
-                                                    static_cast<simrv::xlen::SignedWord>(
-                                                        *reinterpret_cast<const int16_t*>(
-                                                            host_ptr)));
-                                            if constexpr (simrv::xlen::kIsXLen64) {
-                                                if constexpr (kGuestXlen64) {
-                                                    state_.regs.write_xlen64(chained->rd,
-                                                                             mem_rdata);
-                                                } else {
-                                                    state_.regs.write_xlen32(chained->rd,
-                                                                             mem_rdata);
-                                                }
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Lbu: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 1))) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                *reinterpret_cast<const uint8_t*>(host_ptr);
-                                            if constexpr (simrv::xlen::kIsXLen64) {
-                                                if constexpr (kGuestXlen64) {
-                                                    state_.regs.write_xlen64(chained->rd,
-                                                                             mem_rdata);
-                                                } else {
-                                                    state_.regs.write_xlen32(chained->rd,
-                                                                             mem_rdata);
-                                                }
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Lw: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 4) &&
-                                                                    (mem_addr & 3) == 0)) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                static_cast<simrv::xlen::Register>(
-                                                    static_cast<simrv::xlen::SignedWord>(
-                                                        *reinterpret_cast<const int32_t*>(
-                                                            host_ptr)));
-                                            if constexpr (simrv::xlen::kIsXLen64) {
-                                                if constexpr (kGuestXlen64) {
-                                                    state_.regs.write_xlen64(chained->rd,
-                                                                             mem_rdata);
-                                                } else {
-                                                    state_.regs.write_xlen32(chained->rd,
-                                                                             mem_rdata);
-                                                }
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Lwu: {
-                                    if constexpr (kFastMRam && simrv::xlen::kIsXLen64) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (!kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 4) &&
-                                                                    (mem_addr & 3) == 0)) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                *reinterpret_cast<const uint32_t*>(host_ptr);
-                                            if constexpr (kGuestXlen64) {
-                                                state_.regs.write_xlen64(chained->rd, mem_rdata);
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Lb: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 1))) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                static_cast<simrv::xlen::Register>(
-                                                    static_cast<simrv::xlen::SignedWord>(
-                                                        *reinterpret_cast<const int8_t*>(
-                                                            host_ptr)));
-                                            if constexpr (simrv::xlen::kIsXLen64) {
-                                                if constexpr (kGuestXlen64) {
-                                                    state_.regs.write_xlen64(chained->rd,
-                                                                             mem_rdata);
-                                                } else {
-                                                    state_.regs.write_xlen32(chained->rd,
-                                                                             mem_rdata);
-                                                }
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Lhu: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(mem_offset <= (ram_size - 2) &&
-                                                                    (mem_addr & 1) == 0)) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                *reinterpret_cast<const uint16_t*>(host_ptr);
-                                            if constexpr (simrv::xlen::kIsXLen64) {
-                                                if constexpr (kGuestXlen64) {
-                                                    state_.regs.write_xlen64(chained->rd,
-                                                                             mem_rdata);
-                                                } else {
-                                                    state_.regs.write_xlen32(chained->rd,
-                                                                             mem_rdata);
-                                                }
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                default:
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                            }
-                        } else if (op_tag <= FastOp::Sb) {
-                            switch (op_tag) {
-                                case FastOp::Sd: {
-                                    if constexpr (kFastMRam && simrv::xlen::kIsXLen64) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (!kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(
-                                                mem_offset <= (ram_size - 8) &&
-                                                (mem_addr & 7) == 0 &&
-                                                !is_tohost_addr_fast(tohost_addr, mem_addr))) {
-                                            auto* const host_ptr = ram_data + mem_offset;
-                                            *reinterpret_cast<uint64_t*>(host_ptr) =
-                                                static_cast<uint64_t>(
-                                                    state_.regs.read(chained->rs2));
-                                            state_.lr_reservation_active = false;
-                                            if constexpr (kMultiHart) {
-                                                if (simrv::compiler::unlikely(
-                                                        machine.memory_.reservation_table()
-                                                            .may_have_reservations())) {
-                                                    machine.memory_.reservation_table()
-                                                        .invalidate_range(mem_addr, 8, hart_id());
-                                                }
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Sw: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(
-                                                mem_offset <= (ram_size - 4) &&
-                                                (mem_addr & 3) == 0 &&
-                                                !is_tohost_addr_fast(tohost_addr, mem_addr))) {
-                                            auto* const host_ptr = ram_data + mem_offset;
-                                            *reinterpret_cast<uint32_t*>(host_ptr) =
-                                                static_cast<uint32_t>(
-                                                    state_.regs.read(chained->rs2));
-                                            state_.lr_reservation_active = false;
-                                            if constexpr (kMultiHart) {
-                                                if (simrv::compiler::unlikely(
-                                                        machine.memory_.reservation_table()
-                                                            .may_have_reservations())) {
-                                                    machine.memory_.reservation_table()
-                                                        .invalidate_range(mem_addr, 4, hart_id());
-                                                }
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Sh: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(
-                                                mem_offset <= (ram_size - 2) &&
-                                                (mem_addr & 1) == 0 &&
-                                                !is_tohost_addr_fast(tohost_addr, mem_addr))) {
-                                            auto* const host_ptr = ram_data + mem_offset;
-                                            *reinterpret_cast<uint16_t*>(host_ptr) =
-                                                static_cast<uint16_t>(
-                                                    state_.regs.read(chained->rs2));
-                                            state_.lr_reservation_active = false;
-                                            if constexpr (kMultiHart) {
-                                                if (simrv::compiler::unlikely(
-                                                        machine.memory_.reservation_table()
-                                                            .may_have_reservations())) {
-                                                    machine.memory_.reservation_table()
-                                                        .invalidate_range(mem_addr, 2, hart_id());
-                                                }
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Sb: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(
-                                                mem_offset <= (ram_size - 1) &&
-                                                !is_tohost_addr_fast(tohost_addr, mem_addr))) {
-                                            auto* const host_ptr = ram_data + mem_offset;
-                                            *reinterpret_cast<uint8_t*>(host_ptr) =
-                                                static_cast<uint8_t>(
-                                                    state_.regs.read(chained->rs2));
-                                            state_.lr_reservation_active = false;
-                                            if constexpr (kMultiHart) {
-                                                if (simrv::compiler::unlikely(
-                                                        machine.memory_.reservation_table()
-                                                            .may_have_reservations())) {
-                                                    machine.memory_.reservation_table()
-                                                        .invalidate_range(mem_addr, 1, hart_id());
-                                                }
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                default:
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                            }
-                        } else {
-                            switch (op_tag) {
-                                case FastOp::IntLoad: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const unsigned size_bytes = chained->mem_size;
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(
-                                                mem_offset <= (ram_size - size_bytes) &&
-                                                (mem_addr & chained->align_mask()) == 0)) {
-                                            const auto* const host_ptr = ram_data + mem_offset;
-                                            const simrv::xlen::Register mem_rdata =
-                                                simrv::memory::host_read_fast_aligned(
-                                                    host_ptr, chained->funct3);
-                                            if constexpr (simrv::xlen::kIsXLen64) {
-                                                if constexpr (kGuestXlen64) {
-                                                    state_.regs.write_xlen64(chained->rd,
-                                                                             mem_rdata);
-                                                } else {
-                                                    state_.regs.write_xlen32(chained->rd,
-                                                                             mem_rdata);
-                                                }
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::IntStore: {
-                                    if constexpr (kFastMRam) {
-                                        simrv::xlen::Address mem_addr =
-                                            state_.regs.read(chained->rs1) + chained->imm;
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            mem_addr &= 0xFFFFFFFFULL;
-                                        }
-                                        const unsigned size_bytes = chained->mem_size;
-                                        const auto mem_offset = mem_addr - ram_base;
-                                        if (simrv::compiler::likely(
-                                                mem_offset <= (ram_size - size_bytes) &&
-                                                (mem_addr & chained->align_mask()) == 0 &&
-                                                !is_tohost_addr_fast(tohost_addr, mem_addr))) {
-                                            auto* const host_ptr = ram_data + mem_offset;
-                                            simrv::memory::host_write_fast_aligned(
-                                                host_ptr, state_.regs.read(chained->rs2),
-                                                chained->funct3);
-                                            state_.lr_reservation_active = false;
-                                            if constexpr (kMultiHart) {
-                                                if (simrv::compiler::unlikely(
-                                                        machine.memory_.reservation_table()
-                                                            .may_have_reservations())) {
-                                                    machine.memory_.reservation_table()
-                                                        .invalidate_range(mem_addr, size_bytes,
-                                                                          hart_id());
-                                                }
-                                            }
-                                            SIMRV_CHAIN_ADVANCE();
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                case FastOp::Branch: {
-                                    if (chained->branch_kind == BranchKind::Jal) {
-                                        const simrv::xlen::Register target_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->imm);
-                                        const simrv::xlen::Register link_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->op_len);
-                                        if constexpr (simrv::xlen::kIsXLen64) {
-                                            if constexpr (kGuestXlen64) {
-                                                state_.regs.write_xlen64(chained->rd, link_pc);
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, link_pc);
-                                            }
-                                        } else {
-                                            state_.regs.write_xlen32(chained->rd, link_pc);
-                                        }
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    if (chained->branch_kind == BranchKind::Jalr) {
-                                        const simrv::xlen::Register rrs1 =
-                                            state_.regs.read(chained->rs1);
-                                        simrv::xlen::Register target_pc =
-                                            (rrs1 + chained->imm) &
-                                            ~static_cast<simrv::xlen::Register>(1);
-                                        const simrv::xlen::Register link_pc =
-                                            static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                               chained->op_len);
-                                        if constexpr (simrv::xlen::kIsXLen64) {
-                                            if constexpr (kGuestXlen64) {
-                                                state_.regs.write_xlen64(chained->rd, link_pc);
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, link_pc);
-                                            }
-                                        } else {
-                                            state_.regs.write_xlen32(chained->rd, link_pc);
-                                        }
-                                        SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                    }
-                                    const simrv::xlen::Register rrs1 =
-                                        state_.regs.read(chained->rs1);
-                                    const simrv::xlen::Register rrs2 =
-                                        state_.regs.read(chained->rs2);
-                                    const bool is_eq = (rrs1 == rrs2);
-                                    bool tkn = false;
-                                    if (chained->branch_kind == BranchKind::Bne) {
-                                        tkn = !is_eq;
-                                    } else if (chained->branch_kind == BranchKind::Beq) {
-                                        tkn = is_eq;
-                                    } else if (chained->branch_kind == BranchKind::Bgeu) {
-                                        if constexpr (kGuestXlen64) {
-                                            tkn = (rrs1 >= rrs2);
-                                        } else {
-                                            tkn = (static_cast<uint32_t>(rrs1) >=
-                                                   static_cast<uint32_t>(rrs2));
-                                        }
-                                    } else if (chained->branch_kind == BranchKind::Bge) {
-                                        tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
-                                              static_cast<simrv::xlen::SignedWord>(rrs2);
-                                    } else if (chained->branch_kind == BranchKind::Bltu) {
-                                        if constexpr (kGuestXlen64) {
-                                            tkn = (rrs1 < rrs2);
-                                        } else {
-                                            tkn = (static_cast<uint32_t>(rrs1) <
-                                                   static_cast<uint32_t>(rrs2));
-                                        }
-                                    } else {
-                                        tkn = static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                              static_cast<simrv::xlen::SignedWord>(rrs2);
-                                    }
-                                    if (!tkn) {
-                                        SIMRV_CHAIN_ADVANCE();
-                                    }
-                                    const simrv::xlen::Register target_pc =
-                                        static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                           chained->imm);
-                                    SIMRV_CHAIN_BRANCH_TAKEN(target_pc);
-                                }
-                                case FastOp::FpMem: {
-                                    if constexpr (kFastMRam) {
-                                        if (chained->mem_class == FastMemClass::FpLoad) {
-                                            if (simrv::xlen::kIsXLen64 ||
-                                                chained->funct3 == isa::Funct3::Flw) {
-                                                simrv::xlen::Address mem_addr =
-                                                    state_.regs.read(chained->rs1) + chained->imm;
-                                                if constexpr (simrv::xlen::kIsXLen64 &&
-                                                              !kGuestXlen64) {
-                                                    mem_addr &= 0xFFFFFFFFULL;
-                                                }
-                                                const unsigned size_bytes = chained->mem_size;
-                                                const auto mem_offset = mem_addr - ram_base;
-                                                if (simrv::compiler::likely(
-                                                        mem_offset <= (ram_size - size_bytes) &&
-                                                        (mem_addr & chained->align_mask()) == 0)) {
-                                                    const auto* const host_ptr =
-                                                        ram_data + mem_offset;
-                                                    const simrv::xlen::Word mem_rdata =
-                                                        simrv::memory::host_read_fast(
-                                                            host_ptr,
-                                                            static_cast<simrv::xlen::Instruction>(
-                                                                chained->funct3));
-                                                    state_.regs.write_fp(
-                                                        simrv::xlen::to_fp_reg_id(chained->rd),
-                                                        (chained->funct3 == isa::Funct3::Flw)
-                                                            ? (static_cast<
-                                                                   simrv::xlen::FloatingRegister>(
-                                                                   simrv::xlen::kF32BoxerBits) |
-                                                               (static_cast<
-                                                                    simrv::xlen::FloatingRegister>(
-                                                                    mem_rdata) &
-                                                                0xFFFFFFFFULL))
-                                                            : static_cast<
-                                                                  simrv::xlen::FloatingRegister>(
-                                                                  mem_rdata));
-                                                    state_.mark_extension_dirty(MstatusBit::Fs);
-                                                    SIMRV_CHAIN_ADVANCE();
-                                                }
-                                            }
-                                            fallback_op = chained;
-                                            goto chain_exit;
-                                        }
-                                        if (chained->mem_class == FastMemClass::FpStore) {
-                                            if (simrv::xlen::kIsXLen64 ||
-                                                chained->funct3 == isa::Funct3::Fsw) {
-                                                simrv::xlen::Address mem_addr =
-                                                    state_.regs.read(chained->rs1) + chained->imm;
-                                                if constexpr (simrv::xlen::kIsXLen64 &&
-                                                              !kGuestXlen64) {
-                                                    mem_addr &= 0xFFFFFFFFULL;
-                                                }
-                                                const unsigned size_bytes = chained->mem_size;
-                                                const auto mem_offset = mem_addr - ram_base;
-                                                if (simrv::compiler::likely(
-                                                        mem_offset <= (ram_size - size_bytes) &&
-                                                        (mem_addr & chained->align_mask()) == 0 &&
-                                                        !is_tohost_addr_fast(tohost_addr,
-                                                                             mem_addr))) {
-                                                    auto* const host_ptr = ram_data + mem_offset;
-                                                    const simrv::xlen::FloatingRegister fp_data =
-                                                        state_.regs.read_fp(
-                                                            simrv::xlen::to_fp_reg_id(
-                                                                chained->rs2));
-                                                    simrv::memory::host_write_fast(
-                                                        host_ptr,
-                                                        static_cast<simrv::xlen::Word>(fp_data),
-                                                        static_cast<simrv::xlen::Instruction>(
-                                                            chained->funct3));
-                                                    state_.lr_reservation_active = false;
-                                                    if constexpr (kMultiHart) {
-                                                        if (simrv::compiler::unlikely(
-                                                                machine.memory_.reservation_table()
-                                                                    .may_have_reservations())) {
-                                                            machine.memory_.reservation_table()
-                                                                .invalidate_range(mem_addr,
-                                                                                  size_bytes,
-                                                                                  hart_id());
-                                                        }
-                                                    }
-                                                    SIMRV_CHAIN_ADVANCE();
-                                                }
-                                            }
-                                            fallback_op = chained;
-                                            goto chain_exit;
-                                        }
-                                    }
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                                default: {
-                                    fallback_op = chained;
-                                    goto chain_exit;
-                                }
-                            }
-                        }
-                    chain_exit:
-                        commit_linear_segment(next_pc);
-                        state_.pc = next_pc;
-                        const uint32_t ops_executed = b - start_b;
-                        cached_ops += ops_executed;
-                        account_retirement(ops_executed);
-                        record_hpm_event(HpmEvent::Instructions, ops_executed);
-                        record_hpm_event(HpmEvent::Cycles, ops_executed);
-                        e_ccount += compressed_count;
-                        if (fallback_op != nullptr) {
-                            if (state_.mhartid == 0) {
-                                if (auto* uart = machine.uart_device();
-                                    uart != nullptr && uart->has_active_transfer()) {
-                                    const uint32_t unushed = cached_ops - flushed_uart_ops;
-                                    if (unushed > 0) {
-                                        uart->advance_cycles(unushed);
-                                        flushed_uart_ops = cached_ops;
-                                    }
-                                }
-                            }
-                            const bool is_csr = is_csr_instruction(fallback_op->op_id);
-                            execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
-                            ++cached_ops;
-                            ++b;
-                            if constexpr (kHpmClassMode != 2) {
-                                if (is_csr && perf_counters.has_instruction_class_listeners() !=
-                                                  (kHpmClassMode == 1)) {
-                                    // End this batch so the next dispatch uses the new HPM mode.
-                                    b = batch_size;
-                                }
-                            }
-                        }
-                    };
-#undef SIMRV_CHAIN_ADVANCE
-#undef SIMRV_CHAIN_BRANCH_TAKEN
-                const bool fast_m_ram =
-                    (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
-                     !state_.has_locked_pmp && ram.data() != nullptr && ram.size() >= 8);
-                const bool multi_hart = machine.num_harts() > 1;
-                // Chain operations do not change MIP or MIE, and device interrupt lines are
-                // applied at the enclosing batch boundary. If one is already pending, execute
-                // a single instruction and return to the precise interrupt boundary instead of
-                // branching on the same pending bit after every operation in the chain.
-                if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
-                    const bool is_csr = is_csr_instruction(cached->op_id);
-                    execute_cached_op_fast<false, false>(machine, *cached, ram);
-                    ++cached_ops;
-                    ++b;
-                    if constexpr (kHpmClassMode != 2) {
-                        if (is_csr && perf_counters.has_instruction_class_listeners() !=
-                                          (kHpmClassMode == 1)) {
-                            b = batch_size;
-                        }
-                    }
-                } else if (simrv::compiler::unlikely(
-                               multi_hart && machine.runtime_profile.is_instruction_mode())) {
-                    // Fast chains execute memory operations inline. Keep SMP instruction-mode
-                    // operations on the individually synchronized path so stores cannot race
-                    // an instruction fetch of the same naturally aligned word.
-                    const bool is_csr = is_csr_instruction(cached->op_id);
-                    execute_cached_op_fast<false, false>(machine, *cached, ram);
-                    ++cached_ops;
-                    ++b;
-                    if constexpr (kHpmClassMode != 2) {
-                        if (is_csr && perf_counters.has_instruction_class_listeners() !=
-                                          (kHpmClassMode == 1)) {
-                            b = batch_size;
-                        }
-                    }
-                } else if constexpr (simrv::xlen::kIsXLen64) {
-                    if (simrv::compiler::likely(state_.regs.xlen == 64)) {
-                        if (simrv::compiler::likely(fast_m_ram)) {
-                            if (simrv::compiler::likely(!multi_hart)) {
-                                execute_fast_chain.template operator()<true, true, false>();
-                            } else {
-                                execute_fast_chain.template operator()<true, true, true>();
-                            }
-                        } else {
-                            if (simrv::compiler::likely(!multi_hart)) {
-                                execute_fast_chain.template operator()<true, false, false>();
-                            } else {
-                                execute_fast_chain.template operator()<true, false, true>();
-                            }
-                        }
-                    } else {
-                        if (simrv::compiler::likely(fast_m_ram)) {
-                            if (simrv::compiler::likely(!multi_hart)) {
-                                execute_fast_chain.template operator()<false, true, false>();
-                            } else {
-                                execute_fast_chain.template operator()<false, true, true>();
-                            }
-                        } else {
-                            if (simrv::compiler::likely(!multi_hart)) {
-                                execute_fast_chain.template operator()<false, false, false>();
-                            } else {
-                                execute_fast_chain.template operator()<false, false, true>();
-                            }
-                        }
-                    }
-                } else {
-                    if (simrv::compiler::likely(fast_m_ram)) {
-                        if (simrv::compiler::likely(!multi_hart)) {
-                            execute_fast_chain.template operator()<false, true, false>();
-                        } else {
-                            execute_fast_chain.template operator()<false, true, true>();
-                        }
-                    } else {
-                        if (simrv::compiler::likely(!multi_hart)) {
-                            execute_fast_chain.template operator()<false, false, false>();
-                        } else {
-                            execute_fast_chain.template operator()<false, false, true>();
-                        }
-                    }
-                }
-            } else {
-                if (state_.mhartid == 0) {
-                    if (auto* uart = machine.uart_device();
-                        uart != nullptr && uart->has_active_transfer()) {
-                        const uint32_t unushed = cached_ops - flushed_uart_ops;
-                        if (unushed > 0) {
-                            uart->advance_cycles(unushed);
-                            flushed_uart_ops = cached_ops;
-                        }
-                    }
-                }
-                if (cached->has_fast_alu()) {
-                    execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
-                } else {
-                    execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
-                }
-                ++cached_ops;
-                ++b;
-
-                // Preserve per-instruction commits when tracing or execution context is requested.
-                while (cached->has_fast_alu() && b < batch_size && ((b & 0x3Fu) != 0) &&
-                       simrv::compiler::likely((state_.mip & state_.mie) == 0u)) {
-                    auto* next_cached = decode_cache.lookup_next_aligned(*cached, state_.pc);
-                    if (simrv::compiler::unlikely(next_cached == nullptr ||
-                                                  !next_cached->has_fast_alu())) {
-                        break;
-                    }
-                    cached = next_cached;
-                    execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
-                    ++cached_ops;
-                    ++b;
-                }
-            }
-            if constexpr (simrv::xlen::kIsXLen64) {
-                if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-                    state_.canonicalize_pc();
-                }
-            }
-            handle_cached_interrupts();
-        } else {
-            if (state_.mhartid == 0) {
-                if (auto* uart = machine.uart_device();
-                    uart != nullptr && uart->has_active_transfer()) {
-                    const uint32_t unushed = cached_ops - flushed_uart_ops;
-                    if (unushed > 0) {
-                        uart->advance_cycles(unushed);
-                        flushed_uart_ops = cached_ops;
-                    }
-                }
-            }
-            const auto delta = e_icount - last_flushed_icount;
-            if (delta > 0) {
-                machine.record_retired_instructions(delta);
-            }
-            run_cycle_baremetal_miss(machine);
-            last_flushed_icount = e_icount;
-            if (simrv::compiler::unlikely(machine.tohost != 0)) {
-                break;
-            }
-            ++b;
-        }
-        if (simrv::compiler::unlikely((b & 0x3Fu) == 0)) {
-            if (machine.tohost != 0 || !machine.is_running() ||
-                (kPollPause && (machine.is_paused() || machine.debug_pause_requested()))) {
-                break;
-            }
-        }
-    }
-    const auto delta = e_icount - last_flushed_icount;
-    if (delta > 0) {
-        machine.record_retired_instructions(delta);
-    }
-    if constexpr (simrv::xlen::kIsXLen64) {
-        if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-            state_.canonicalize_pc();
-        }
-    }
-    handle_cached_interrupts();
-    if (state_.mhartid == 0 && cached_ops > flushed_uart_ops) {
-        if (auto* uart = machine.uart_device(); uart != nullptr) {
-            uart->advance_cycles(cached_ops - flushed_uart_ops);
-        }
-    }
-    return cached_ops;
-}
-
-void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
-                                   const FastBatchPolicy& policy) {
-    apply_hart_control_boundary();
-    apply_pending_interrupt_lines(machine);
-    sync_decode_context();
-    CPU* previous_active_cpu = active_execution_cpu_;
-    active_execution_cpu_ = this;
-    struct BoundaryCommit {
-        CPU& cpu;
-        CPU* previous;
-        ~BoundaryCommit() {
-            cpu.apply_hart_control_boundary();
-            active_execution_cpu_ = previous;
-        }
-    } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
-    const auto ram = machine.ram_view();
-    uint32_t cached_ops = 0;
-    if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
-        const auto run_kernel = [&]<int kHpmClassMode>() {
-            cached_ops = policy.poll_pause
-                             ? run_fast_baremetal_kernel<false, false, true, kHpmClassMode>(
-                                   machine, batch_size, ram)
-                             : run_fast_baremetal_kernel<false, false, false, kHpmClassMode>(
-                                   machine, batch_size, ram);
-        };
-        if (perf_counters.has_instruction_class_listeners()) {
-            run_kernel.template operator()<1>();
-        } else {
-            run_kernel.template operator()<0>();
-        }
-    } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
-        cached_ops =
-            policy.poll_pause
-                ? run_fast_baremetal_kernel<true, true, true, 2>(machine, batch_size, ram)
-                : run_fast_baremetal_kernel<true, true, false, 2>(machine, batch_size, ram);
-    } else if (policy.copy_pipeline_context) {
-        cached_ops =
-            policy.poll_pause
-                ? run_fast_baremetal_kernel<true, false, true, 2>(machine, batch_size, ram)
-                : run_fast_baremetal_kernel<true, false, false, 2>(machine, batch_size, ram);
-    } else {
-        cached_ops =
-            policy.poll_pause
-                ? run_fast_baremetal_kernel<false, true, true, 2>(machine, batch_size, ram)
-                : run_fast_baremetal_kernel<false, true, false, 2>(machine, batch_size, ram);
-    }
-
-    if (cached_ops > 0) {
-        account_arch_cycles(cached_ops);
-        if (state_.mhartid == 0) {
-            if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
-                                                            clint_mmio.mtime) > 0) {
-                evaluate_timer_interrupt();
-            }
-        } else {
-            clint_mmio.mtime.store(
-                machine.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
-                std::memory_order_relaxed);
-            evaluate_timer_interrupt();
-        }
-    }
-}
-
-template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
-SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batch_size,
-                                                 const simrv::memory::RamView& ram) -> uint32_t {
-    uint32_t cached_ops = 0;
-    simrv::xlen::Counter last_flushed_icount = e_icount;
-    uint32_t chunk_cycles = 0;
-    const auto tohost_addr = machine.isa_test_tohost();
-
-    auto flush_clint_and_retired = [&]() {
-        if (chunk_cycles > 0) {
-            account_arch_cycles(chunk_cycles);
-            if (state_.mhartid == 0) {
-                if (auto* uart = machine.uart_device(); uart != nullptr)
-                    uart->advance_cycles(chunk_cycles);
-                if (machine.clock_divider().advance_fast_cycles(
-                        chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) > 0) {
-                    evaluate_timer_interrupt();
-                    handle_cached_interrupts();
-                }
-            } else {
-                clint_mmio.mtime.store(
-                    machine.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
-                    std::memory_order_relaxed);
-                evaluate_timer_interrupt();
-                handle_cached_interrupts();
-            }
-            chunk_cycles = 0;
-        }
-        const auto delta = e_icount - last_flushed_icount;
-        if (delta > 0) {
-            machine.record_retired_instructions(delta);
-            last_flushed_icount = e_icount;
-        }
-    };
-
-    uint32_t b = 0;
-    while (b < batch_size) {
-        auto* cached = decode_cache.lookup_aligned(state_.pc);
-        if (simrv::compiler::likely(cached != nullptr)) {
-            if constexpr (!kCopyContext && !kInstMix) {
-                const auto execute_os_chain = [&]<bool kGuestXlen64>() __attribute__((
-                                                  always_inline)) {
-                    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
-                    const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
-                    const bool satp_en =
-                        (eff_priv != kPrivMachine) &&
-                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen);
-                    const simrv::xlen::Word current_asid =
-                        satp_en ? simrv::xlen::satp_asid(active_satp(), active_xlen) : 0;
-                    const bool fast_m_ram =
-                        (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
-                         !state_.has_locked_pmp);
-                    const bool check_reservations =
-                        machine.memory_.reservation_table().may_have_reservations() &&
-                        machine.num_harts() > 1;
-                    auto* chained = cached;
-                    CachedOp* fallback_op = nullptr;
-                    simrv::xlen::Register next_pc = state_.pc;
-                    uint32_t chain_size = 0;
-                    uint32_t compressed_count = 0;
-
-                    const auto should_break_chain = [&]() __attribute__((always_inline)) -> bool {
-                        if (b >= batch_size ||
-                            simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
-                            return true;
-                        }
-                        const bool uart_transfer_pending =
-                            state_.mhartid == 0 && (chunk_cycles + chain_size) >= 4 &&
-                            machine.uart_device() != nullptr &&
-                            machine.uart_device()->has_active_transfer();
-                        if (simrv::compiler::unlikely((chunk_cycles + chain_size) >= 64 ||
-                                                      uart_transfer_pending)) {
-                            cached_ops += chain_size;
-                            chunk_cycles += chain_size;
-                            account_retirement(chain_size);
-                            record_hpm_event(HpmEvent::Instructions, chain_size);
-                            record_hpm_event(HpmEvent::Cycles, chain_size);
-                            e_ccount += compressed_count;
-                            chain_size = 0;
-                            compressed_count = 0;
-                            account_arch_cycles(chunk_cycles);
-                            if (state_.mhartid == 0) {
-                                if (auto* uart = machine.uart_device(); uart != nullptr)
-                                    uart->advance_cycles(chunk_cycles);
-                                if (simrv::compiler::unlikely(
-                                        machine.clock_divider().advance_fast_cycles(
-                                            chunk_cycles, clint_mmio.rtc_divider,
-                                            clint_mmio.mtime) > 0)) {
-                                    evaluate_timer_interrupt();
-                                }
-                            } else {
-                                clint_mmio.mtime.store(machine.primary_hart().clint_mmio.mtime.load(
-                                                           std::memory_order_relaxed),
-                                                       std::memory_order_relaxed);
-                                evaluate_timer_interrupt();
-                            }
-                            chunk_cycles = 0;
-                            const auto delta = e_icount - last_flushed_icount;
-                            if (delta > 0) {
-                                machine.record_retired_instructions(delta);
-                                last_flushed_icount = e_icount;
-                            }
-                            if (simrv::compiler::unlikely(
-                                    (state_.mip & state_.mie) != 0u || machine.tohost != 0 ||
-                                    !machine.is_running() ||
-                                    (kPollPause &&
-                                     (machine.is_paused() || machine.debug_pause_requested())))) {
-                                return true;
-                            }
-                        }
-                        return false;
-                    };
-
-                    const auto advance_sequential = [&]() __attribute__((always_inline)) -> bool {
-                        record_hpm_instruction_classes<kHpmClassMode>(
-                            chained->op_id, chained->opcode(), chained->cinsn != 0);
-                        next_pc += chained->op_len;
-                        ++chain_size;
-                        compressed_count += (chained->op_len == 2);
-                        ++b;
-                        if (should_break_chain()) {
-                            return false;
-                        }
-                        auto* next_op = decode_cache.op_by_index(chained->next_seq_idx);
-                        if (simrv::compiler::likely(next_op->cpc.raw() == next_pc)) {
-                            chained = next_op;
-                            return true;
-                        }
-                        const auto* current_set = DecodeCache::set_of(chained);
-                        const auto* candidate = ((next_pc & 2) != 0 && chained->op_len == 2)
-                                                    ? current_set
-                                                    : decode_cache.next_set(current_set);
-                        auto* hit = decode_cache.lookup_sequential_aligned(candidate, next_pc);
-                        if (simrv::compiler::likely(hit != nullptr)) {
-                            chained->next_seq_idx = decode_cache.index_of(hit);
-                            chained = hit;
-                            return true;
-                        }
-                        hit = decode_cache.lookup_next_aligned(*chained, next_pc);
-                        if (simrv::compiler::unlikely(hit == nullptr)) {
-                            return false;
-                        }
-                        chained->next_seq_idx = decode_cache.index_of(hit);
-                        chained = hit;
-                        return true;
-                    };
-
-                    while (true) {
-                        const auto op_tag = chained->fast_op;
-                        if (simrv::compiler::likely(op_tag < FastOp::kFirstNonAlu)) {
-                            execute_cached_alu_fast_xlen<kGuestXlen64, false, false, true>(*chained,
-                                                                                           op_tag);
-                            if (advance_sequential()) {
-                                continue;
-                            }
-                            break;
-                        }
-                        if (is_int_load_fast_op(op_tag)) {
-                            simrv::xlen::Address lookup_addr =
-                                state_.regs.read(chained->rs1) + chained->imm;
-                            if constexpr (simrv::xlen::kIsXLen64) {
-                                if (simrv::compiler::unlikely(active_xlen == 32)) {
-                                    lookup_addr &= 0xFFFFFFFFULL;
-                                }
-                            }
-                            const unsigned size_bytes = chained->mem_size;
-                            if (simrv::compiler::likely((lookup_addr & chained->align_mask()) ==
-                                                        0)) {
-                                const unsigned page_offset = lookup_addr & 0xFFFu;
-                                if (simrv::compiler::likely(satp_en &&
-                                                            page_offset + size_bytes <= 4096u)) {
-                                    const simrv::xlen::Address vpn = lookup_addr >> 12;
-                                    const auto& entry = soft_tlb_read[soft_tlb_index(vpn)];
-                                    if (simrv::compiler::likely(entry.matches(vpn, current_asid,
-                                                                              eff_priv,
-                                                                              soft_tlb_epoch) &&
-                                                                entry.has_host_ptr())) {
-                                        const simrv::xlen::Register mem_rdata =
-                                            simrv::memory::host_read_fast_aligned(
-                                                entry.host_ptr(lookup_addr), chained->funct3);
-                                        if constexpr (simrv::xlen::kIsXLen64) {
-                                            if constexpr (kGuestXlen64) {
-                                                state_.regs.write_xlen64(chained->rd, mem_rdata);
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                        } else {
-                                            state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                        }
-                                        if (advance_sequential()) {
-                                            continue;
-                                        }
-                                        break;
-                                    }
-                                } else if (fast_m_ram) {
-                                    auto* host_ptr = ram.try_get_ptr_fast(lookup_addr, size_bytes);
-                                    if (host_ptr != nullptr) {
-                                        const simrv::xlen::Register mem_rdata =
-                                            simrv::memory::host_read_fast_aligned(host_ptr,
-                                                                                  chained->funct3);
-                                        if constexpr (simrv::xlen::kIsXLen64) {
-                                            if constexpr (kGuestXlen64) {
-                                                state_.regs.write_xlen64(chained->rd, mem_rdata);
-                                            } else {
-                                                state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                            }
-                                        } else {
-                                            state_.regs.write_xlen32(chained->rd, mem_rdata);
-                                        }
-                                        if (advance_sequential()) {
-                                            continue;
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                            fallback_op = chained;
-                            break;
-                        }
-                        if (is_branch_fast_op(op_tag)) {
-                            if (chained->branch_kind == BranchKind::Jal) {
-                                const simrv::xlen::Register target_pc =
-                                    static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                       chained->imm);
-                                if (simrv::compiler::unlikely(
-                                        (target_pc & state_.fetch_align_mask) != 0)) {
-                                    fallback_op = chained;
-                                    break;
-                                }
-                                const simrv::xlen::Register link_pc =
-                                    static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                       chained->op_len);
-                                if constexpr (simrv::xlen::kIsXLen64) {
-                                    if constexpr (kGuestXlen64) {
-                                        state_.regs.write_xlen64(chained->rd, link_pc);
-                                    } else {
-                                        state_.regs.write_xlen32(chained->rd, link_pc);
-                                    }
-                                } else {
-                                    state_.regs.write_xlen32(chained->rd, link_pc);
-                                }
-                                next_pc = target_pc;
-                                record_hpm_instruction_classes<kHpmClassMode>(
-                                    chained->op_id, chained->opcode(), chained->cinsn != 0);
-                                if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                    next_pc = static_cast<simrv::xlen::Register>(
-                                        static_cast<int64_t>(static_cast<int32_t>(next_pc)));
-                                }
-                                ++chain_size;
-                                compressed_count += (chained->op_len == 2);
-                                ++b;
-                                if (should_break_chain()) {
-                                    break;
-                                }
-                                auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                                if (simrv::compiler::likely(next_op->cpc.raw() == next_pc)) {
-                                    chained = next_op;
-                                    continue;
-                                }
-                                auto* hit = decode_cache.lookup_target_aligned(*chained, next_pc);
-                                if (simrv::compiler::unlikely(hit == nullptr)) {
-                                    break;
-                                }
-                                chained->target_idx = decode_cache.index_of(hit);
-                                chained = hit;
-                                continue;
-                            }
-                            if (chained->branch_kind == BranchKind::Jalr) {
-                                const simrv::xlen::Register rrs1 = state_.regs.read(chained->rs1);
-                                simrv::xlen::Register target_pc =
-                                    (rrs1 + chained->imm) & ~static_cast<simrv::xlen::Register>(1);
-                                if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                    target_pc = static_cast<simrv::xlen::Register>(
-                                        static_cast<int64_t>(static_cast<int32_t>(target_pc)));
-                                }
-                                if (simrv::compiler::unlikely(
-                                        (target_pc & state_.fetch_align_mask) != 0)) {
-                                    fallback_op = chained;
-                                    break;
-                                }
-                                const simrv::xlen::Register link_pc =
-                                    static_cast<simrv::xlen::Register>(chained->cpc.raw() +
-                                                                       chained->op_len);
-                                if constexpr (simrv::xlen::kIsXLen64) {
-                                    if constexpr (kGuestXlen64) {
-                                        state_.regs.write_xlen64(chained->rd, link_pc);
-                                    } else {
-                                        state_.regs.write_xlen32(chained->rd, link_pc);
-                                    }
-                                } else {
-                                    state_.regs.write_xlen32(chained->rd, link_pc);
-                                }
-                                next_pc = target_pc;
-                                record_hpm_instruction_classes<kHpmClassMode>(
-                                    chained->op_id, chained->opcode(), chained->cinsn != 0);
-                                ++chain_size;
-                                compressed_count += (chained->op_len == 2);
-                                ++b;
-                                if (should_break_chain()) {
-                                    break;
-                                }
-                                auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                                if (simrv::compiler::likely(next_op->cpc.raw() == next_pc)) {
-                                    chained = next_op;
-                                    continue;
-                                }
-                                auto* hit = decode_cache.lookup_aligned(next_pc);
-                                if (simrv::compiler::unlikely(hit == nullptr)) {
-                                    break;
-                                }
-                                chained->target_idx = decode_cache.index_of(hit);
-                                chained = hit;
-                                continue;
-                            }
-                            const simrv::xlen::Register rrs1 = state_.regs.read(chained->rs1);
-                            const simrv::xlen::Register rrs2 = state_.regs.read(chained->rs2);
-                            const bool is_eq = (rrs1 == rrs2);
-                            bool tkn = false;
-                            if (chained->branch_kind == BranchKind::Bne) {
-                                tkn = !is_eq;
-                            } else if (chained->branch_kind == BranchKind::Beq) {
-                                tkn = is_eq;
-                            } else if (chained->branch_kind == BranchKind::Bgeu) {
-                                if constexpr (kGuestXlen64) {
-                                    tkn = (rrs1 >= rrs2);
-                                } else {
-                                    tkn = (static_cast<uint32_t>(rrs1) >=
-                                           static_cast<uint32_t>(rrs2));
-                                }
-                            } else if (chained->branch_kind == BranchKind::Bge) {
-                                tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
-                                      static_cast<simrv::xlen::SignedWord>(rrs2);
-                            } else if (chained->branch_kind == BranchKind::Bltu) {
-                                if constexpr (kGuestXlen64) {
-                                    tkn = (rrs1 < rrs2);
-                                } else {
-                                    tkn =
-                                        (static_cast<uint32_t>(rrs1) < static_cast<uint32_t>(rrs2));
-                                }
-                            } else {
-                                tkn = static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                      static_cast<simrv::xlen::SignedWord>(rrs2);
-                            }
-                            if (!tkn) {
-                                if (advance_sequential()) {
-                                    continue;
-                                }
-                                break;
-                            }
-                            simrv::xlen::Register target_pc = static_cast<simrv::xlen::Register>(
-                                chained->cpc.raw() + chained->imm);
-                            if (simrv::compiler::unlikely((target_pc & state_.fetch_align_mask) !=
-                                                          0)) {
-                                fallback_op = chained;
-                                break;
-                            }
-                            if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                target_pc = static_cast<simrv::xlen::Register>(
-                                    static_cast<int64_t>(static_cast<int32_t>(target_pc)));
-                            }
-                            next_pc = target_pc;
-                            record_hpm_instruction_classes<kHpmClassMode>(
-                                chained->op_id, chained->opcode(), chained->cinsn != 0);
-                            ++chain_size;
-                            compressed_count += (chained->op_len == 2);
-                            ++b;
-                            if (should_break_chain()) {
-                                break;
-                            }
-                            auto* next_op = decode_cache.op_by_index(chained->target_idx);
-                            if (simrv::compiler::likely(next_op->cpc.raw() == next_pc)) {
-                                chained = next_op;
-                                continue;
-                            }
-                            auto* hit = decode_cache.lookup_target_aligned(*chained, next_pc);
-                            if (simrv::compiler::unlikely(hit == nullptr)) {
-                                break;
-                            }
-                            chained->target_idx = decode_cache.index_of(hit);
-                            chained = hit;
-                            continue;
-                        }
-                        if (is_int_store_fast_op(op_tag)) {
-                            simrv::xlen::Address lookup_addr =
-                                state_.regs.read(chained->rs1) + chained->imm;
-                            if constexpr (simrv::xlen::kIsXLen64) {
-                                if (simrv::compiler::unlikely(active_xlen == 32)) {
-                                    lookup_addr &= 0xFFFFFFFFULL;
-                                }
-                            }
-                            const unsigned size_bytes = chained->mem_size;
-                            if (simrv::compiler::likely((lookup_addr & chained->align_mask()) ==
-                                                        0)) {
-                                const unsigned page_offset = lookup_addr & 0xFFFu;
-                                if (simrv::compiler::likely(satp_en &&
-                                                            page_offset + size_bytes <= 4096u)) {
-                                    const simrv::xlen::Address vpn = lookup_addr >> 12;
-                                    const auto& entry = soft_tlb_write[soft_tlb_index(vpn)];
-                                    if (simrv::compiler::likely(entry.matches(vpn, current_asid,
-                                                                              eff_priv,
-                                                                              soft_tlb_epoch) &&
-                                                                entry.has_host_ptr())) {
-                                        const simrv::xlen::Address paddr =
-                                            (entry.paddr_base + page_offset).raw();
-                                        if (simrv::compiler::likely(
-                                                !is_tohost_addr_fast(tohost_addr, paddr))) {
-                                            simrv::memory::host_write_fast_aligned(
-                                                entry.host_ptr(lookup_addr),
-                                                state_.regs.read(chained->rs2), chained->funct3);
-                                            state_.lr_reservation_active = false;
-                                            if (simrv::compiler::unlikely(check_reservations)) {
-                                                machine.memory_.reservation_table()
-                                                    .invalidate_range(paddr, size_bytes, hart_id());
-                                            }
-                                            if (advance_sequential()) {
-                                                continue;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                } else if (fast_m_ram &&
-                                           !is_tohost_addr_fast(tohost_addr, lookup_addr)) {
-                                    auto* host_ptr = ram.try_get_ptr_fast(lookup_addr, size_bytes);
-                                    if (host_ptr != nullptr) {
-                                        simrv::memory::host_write_fast_aligned(
-                                            host_ptr, state_.regs.read(chained->rs2),
-                                            chained->funct3);
-                                        state_.lr_reservation_active = false;
-                                        if (simrv::compiler::unlikely(check_reservations)) {
-                                            machine.memory_.reservation_table().invalidate_range(
-                                                lookup_addr, size_bytes, hart_id());
-                                        }
-                                        if (advance_sequential()) {
-                                            continue;
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                            fallback_op = chained;
-                            break;
-                        }
-                        if (op_tag == FastOp::FpMem) {
-                            if (chained->mem_class == FastMemClass::FpLoad) {
-                                if (simrv::xlen::kIsXLen64 || chained->funct3 == isa::Funct3::Flw) {
-                                    simrv::xlen::Address lookup_addr =
-                                        state_.regs.read(chained->rs1) + chained->imm;
-                                    if constexpr (simrv::xlen::kIsXLen64) {
-                                        if (simrv::compiler::unlikely(active_xlen == 32)) {
-                                            lookup_addr &= 0xFFFFFFFFULL;
-                                        }
-                                    }
-                                    const unsigned size_bytes = chained->mem_size;
-                                    if (simrv::compiler::likely(
-                                            (lookup_addr & chained->align_mask()) == 0)) {
-                                        const unsigned page_offset = lookup_addr & 0xFFFu;
-                                        if (simrv::compiler::likely(
-                                                satp_en && page_offset + size_bytes <= 4096u)) {
-                                            const simrv::xlen::Address vpn = lookup_addr >> 12;
-                                            const auto& entry = soft_tlb_read[soft_tlb_index(vpn)];
-                                            if (simrv::compiler::likely(
-                                                    entry.matches(vpn, current_asid, eff_priv,
-                                                                  soft_tlb_epoch) &&
-                                                    entry.has_host_ptr())) {
-                                                const simrv::xlen::Word mem_rdata =
-                                                    simrv::memory::host_read_fast(
-                                                        entry.host_ptr(lookup_addr),
-                                                        static_cast<simrv::xlen::Instruction>(
-                                                            chained->funct3));
-                                                state_.regs.write_fp(
-                                                    simrv::xlen::to_fp_reg_id(chained->rd),
-                                                    (chained->funct3 == isa::Funct3::Flw)
-                                                        ? (static_cast<
-                                                               simrv::xlen::FloatingRegister>(
-                                                               simrv::xlen::kF32BoxerBits) |
-                                                           (static_cast<
-                                                                simrv::xlen::FloatingRegister>(
-                                                                mem_rdata) &
-                                                            0xFFFFFFFFULL))
-                                                        : static_cast<
-                                                              simrv::xlen::FloatingRegister>(
-                                                              mem_rdata));
-                                                state_.mark_extension_dirty(MstatusBit::Fs);
-                                                if (advance_sequential()) {
-                                                    continue;
-                                                }
-                                                break;
-                                            }
-                                        } else if (fast_m_ram) {
-                                            auto* host_ptr =
-                                                ram.try_get_ptr_fast(lookup_addr, size_bytes);
-                                            if (host_ptr != nullptr) {
-                                                const simrv::xlen::Word mem_rdata =
-                                                    simrv::memory::host_read_fast(
-                                                        host_ptr,
-                                                        static_cast<simrv::xlen::Instruction>(
-                                                            chained->funct3));
-                                                state_.regs.write_fp(
-                                                    simrv::xlen::to_fp_reg_id(chained->rd),
-                                                    (chained->funct3 == isa::Funct3::Flw)
-                                                        ? (static_cast<
-                                                               simrv::xlen::FloatingRegister>(
-                                                               simrv::xlen::kF32BoxerBits) |
-                                                           (static_cast<
-                                                                simrv::xlen::FloatingRegister>(
-                                                                mem_rdata) &
-                                                            0xFFFFFFFFULL))
-                                                        : static_cast<
-                                                              simrv::xlen::FloatingRegister>(
-                                                              mem_rdata));
-                                                state_.mark_extension_dirty(MstatusBit::Fs);
-                                                if (advance_sequential()) {
-                                                    continue;
-                                                }
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                fallback_op = chained;
-                                break;
-                            }
-                            if (chained->mem_class == FastMemClass::FpStore) {
-                                if (simrv::xlen::kIsXLen64 || chained->funct3 == isa::Funct3::Fsw) {
-                                    simrv::xlen::Address lookup_addr =
-                                        state_.regs.read(chained->rs1) + chained->imm;
-                                    if constexpr (simrv::xlen::kIsXLen64) {
-                                        if (simrv::compiler::unlikely(active_xlen == 32)) {
-                                            lookup_addr &= 0xFFFFFFFFULL;
-                                        }
-                                    }
-                                    const unsigned size_bytes = chained->mem_size;
-                                    if (simrv::compiler::likely(
-                                            (lookup_addr & chained->align_mask()) == 0)) {
-                                        const unsigned page_offset = lookup_addr & 0xFFFu;
-                                        if (simrv::compiler::likely(
-                                                satp_en && page_offset + size_bytes <= 4096u)) {
-                                            const simrv::xlen::Address vpn = lookup_addr >> 12;
-                                            const auto& entry = soft_tlb_write[soft_tlb_index(vpn)];
-                                            if (simrv::compiler::likely(
-                                                    entry.matches(vpn, current_asid, eff_priv,
-                                                                  soft_tlb_epoch) &&
-                                                    entry.has_host_ptr())) {
-                                                const simrv::xlen::Address paddr =
-                                                    (entry.paddr_base + page_offset).raw();
-                                                if (simrv::compiler::likely(
-                                                        !is_tohost_addr_fast(tohost_addr, paddr))) {
-                                                    const simrv::xlen::FloatingRegister fp_data =
-                                                        state_.regs.read_fp(
-                                                            simrv::xlen::to_fp_reg_id(
-                                                                chained->rs2));
-                                                    simrv::memory::host_write_fast(
-                                                        entry.host_ptr(lookup_addr),
-                                                        static_cast<simrv::xlen::Word>(fp_data),
-                                                        static_cast<simrv::xlen::Instruction>(
-                                                            chained->funct3));
-                                                    state_.lr_reservation_active = false;
-                                                    if (simrv::compiler::unlikely(
-                                                            check_reservations)) {
-                                                        machine.memory_.reservation_table()
-                                                            .invalidate_range(paddr, size_bytes,
-                                                                              hart_id());
-                                                    }
-                                                    if (advance_sequential()) {
-                                                        continue;
-                                                    }
-                                                    break;
-                                                }
-                                            }
-                                        } else if (fast_m_ram &&
-                                                   !is_tohost_addr_fast(tohost_addr, lookup_addr)) {
-                                            auto* host_ptr =
-                                                ram.try_get_ptr_fast(lookup_addr, size_bytes);
-                                            if (host_ptr != nullptr) {
-                                                const simrv::xlen::FloatingRegister fp_data =
-                                                    state_.regs.read_fp(
-                                                        simrv::xlen::to_fp_reg_id(chained->rs2));
-                                                simrv::memory::host_write_fast(
-                                                    host_ptr,
-                                                    static_cast<simrv::xlen::Word>(fp_data),
-                                                    static_cast<simrv::xlen::Instruction>(
-                                                        chained->funct3));
-                                                state_.lr_reservation_active = false;
-                                                if (simrv::compiler::unlikely(check_reservations)) {
-                                                    machine.memory_.reservation_table()
-                                                        .invalidate_range(lookup_addr, size_bytes,
-                                                                          hart_id());
-                                                }
-                                                if (advance_sequential()) {
-                                                    continue;
-                                                }
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                fallback_op = chained;
-                                break;
-                            }
-                            fallback_op = chained;
-                            break;
-                        }
-                        fallback_op = chained;
-                        break;
-                    }
-
-                    state_.pc = next_pc;
-                    cached_ops += chain_size;
-                    chunk_cycles += chain_size;
-                    account_retirement(chain_size);
-                    record_hpm_event(HpmEvent::Instructions, chain_size);
-                    record_hpm_event(HpmEvent::Cycles, chain_size);
-                    e_ccount += compressed_count;
-                    if (fallback_op != nullptr) {
-                        if (chunk_cycles > 0) {
-                            flush_clint_and_retired();
-                        }
-                        const bool is_csr = is_csr_instruction(fallback_op->op_id);
-                        execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
-                        ++cached_ops;
-                        ++chunk_cycles;
-                        ++b;
-                        if constexpr (kHpmClassMode != 2) {
-                            if (is_csr && perf_counters.has_instruction_class_listeners() !=
-                                              (kHpmClassMode == 1)) {
-                                b = batch_size;
-                            }
-                        }
-                    }
-                };
-                if constexpr (simrv::xlen::kIsXLen64) {
-                    if (simrv::compiler::likely(state_.regs.xlen == 64)) {
-                        execute_os_chain.template operator()<true>();
-                    } else {
-                        execute_os_chain.template operator()<false>();
-                    }
-                } else {
-                    execute_os_chain.template operator()<false>();
-                }
-            } else {
-                if (cached->has_fast_alu()) {
-                    execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
-                } else {
-                    execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
-                }
-                ++cached_ops;
-                ++chunk_cycles;
-                ++b;
-
-                // Straight-line instruction chaining: execute consecutive non-trapping,
-                // non-control ALU operations until next 64-cycle chunk or control flow/miss.
-                while (cached->has_fast_alu() && b < batch_size && chunk_cycles < 64 &&
-                       simrv::compiler::likely((state_.mip & state_.mie) == 0u)) {
-                    auto* next_cached = decode_cache.lookup_next_aligned(*cached, state_.pc);
-                    if (simrv::compiler::unlikely(next_cached == nullptr ||
-                                                  !next_cached->has_fast_alu())) {
-                        break;
-                    }
-                    cached = next_cached;
-                    execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
-                    ++cached_ops;
-                    ++chunk_cycles;
-                    ++b;
-                }
-            }
-            if constexpr (simrv::xlen::kIsXLen64) {
-                if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-                    state_.canonicalize_pc();
-                }
-            }
-            handle_cached_interrupts();
-
-            const bool uart_transfer_pending = state_.mhartid == 0 && chunk_cycles >= 4 &&
-                                               machine.uart_device() != nullptr &&
-                                               machine.uart_device()->has_active_transfer();
-            if (simrv::compiler::unlikely(chunk_cycles >= 64 || uart_transfer_pending)) {
-                flush_clint_and_retired();
-            }
-        } else {
-            flush_clint_and_retired();
-            run_fast_cycle_miss(machine);
-            last_flushed_icount = e_icount;
-            if (simrv::compiler::unlikely(machine.tohost != 0)) {
-                break;
-            }
-            ++b;
-        }
-        if (simrv::compiler::unlikely((b & 0x3Fu) == 0)) {
-            if (machine.tohost != 0 || !machine.is_running() ||
-                (kPollPause && (machine.is_paused() || machine.debug_pause_requested()))) {
-                break;
-            }
-        }
-    }
-    flush_clint_and_retired();
-    if constexpr (simrv::xlen::kIsXLen64) {
-        if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-            state_.canonicalize_pc();
-        }
-    }
-    return cached_ops;
-}
-
-void CPU::run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBatchPolicy& policy) {
-    apply_hart_control_boundary();
-    apply_pending_interrupt_lines(machine);
-    sync_decode_context();
-    CPU* previous_active_cpu = active_execution_cpu_;
-    active_execution_cpu_ = this;
-    struct BoundaryCommit {
-        CPU& cpu;
-        CPU* previous;
-        ~BoundaryCommit() {
-            cpu.apply_hart_control_boundary();
-            active_execution_cpu_ = previous;
-        }
-    } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
-
-    const auto ram = machine.ram_view();
-    if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
-        const auto run_kernel = [&]<int kHpmClassMode>() {
-            if (policy.poll_pause) {
-                run_fast_os_kernel<false, false, true, kHpmClassMode>(machine, batch_size, ram);
-            } else {
-                run_fast_os_kernel<false, false, false, kHpmClassMode>(machine, batch_size, ram);
-            }
-        };
-        if (perf_counters.has_instruction_class_listeners()) {
-            run_kernel.template operator()<1>();
-        } else {
-            run_kernel.template operator()<0>();
-        }
-    } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<true, true, true, 2>(machine, batch_size, ram);
-        } else {
-            run_fast_os_kernel<true, true, false, 2>(machine, batch_size, ram);
-        }
-    } else if (policy.copy_pipeline_context) {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<true, false, true, 2>(machine, batch_size, ram);
-        } else {
-            run_fast_os_kernel<true, false, false, 2>(machine, batch_size, ram);
-        }
-    } else {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<false, true, true, 2>(machine, batch_size, ram);
-        } else {
-            run_fast_os_kernel<false, true, false, 2>(machine, batch_size, ram);
-        }
-    }
-}
-
 template void CPU::execute_cached_op_fast<false, false>(Machine&, CachedOp&,
                                                         const simrv::memory::RamView&);
 template void CPU::execute_cached_op_fast<true, false>(Machine&, CachedOp&,
@@ -3362,4 +1123,5 @@ template void CPU::execute_cached_op_fast<false, true>(Machine&, CachedOp&,
                                                        const simrv::memory::RamView&);
 template void CPU::execute_cached_op_fast<true, true>(Machine&, CachedOp&,
                                                       const simrv::memory::RamView&);
+
 }  // namespace simrv::core

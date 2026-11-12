@@ -17,8 +17,8 @@ using TlData = uint64_t;
 using TlMask = uint8_t;
 using TlSourceId = uint16_t;
 using TlSinkId = uint16_t;
-using LineAddress = simrv::xlen::Address;
-using CacheTag = simrv::xlen::Address;
+using LineAddress = simrv::xlen::PhysAddr;
+using CacheTag = simrv::xlen::PhysAddr;
 using CacheSetIndex = uint32_t;
 using CacheOffset = uint32_t;
 using CoherenceSharersMask = uint64_t;
@@ -280,7 +280,7 @@ inline constexpr TlManagerCapabilities kMmioCapabilities{
 }
 
 [[nodiscard]] constexpr auto make_tl_source(simrv::xlen::HartId hart, TlPort port) -> TlSourceId {
-    return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.val) << 1u) |
+    return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.raw()) << 1u) |
                                    static_cast<TlSourceId>(port));
 }
 

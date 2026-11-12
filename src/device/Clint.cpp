@@ -59,7 +59,7 @@ void Clint::reset() {
 }
 
 auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const simrv::xlen::Address off = offset(req.address.raw());
+    const simrv::memory::MmioOffset off = offset(req.address);
     const int req_bytes = 1 << (req.size & 3);
 
     if (req.opcode == memory::TlOpcodeA::Get) {
@@ -131,7 +131,7 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
     return true;
 }
 
-auto Clint::mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word {
+auto Clint::mmio_read(simrv::memory::MmioOffset offset) const -> simrv::xlen::Word {
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
         if (cpu_ != nullptr && cpu_->machine_ != nullptr && hart_id < cpu_->machine_->num_harts()) {
@@ -161,7 +161,7 @@ auto Clint::mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word {
     return 0;
 }
 
-void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
+void Clint::mmio_write(simrv::memory::MmioOffset offset, simrv::xlen::Word wdata) {
     const simrv::xlen::Counter wdata_64 = static_cast<simrv::xlen::Counter>(wdata) & kWord32Mask;
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);

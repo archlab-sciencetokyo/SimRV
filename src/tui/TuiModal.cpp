@@ -103,7 +103,7 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
             active_modal_impl_ = std::make_unique<modals::HelpModal>(help_scroll_);
             break;
         case ModalType::MemoryDump:
-            open_memory_dump(0, inspector_pane);
+            open_memory_dump(simrv::xlen::VirtAddr{}, inspector_pane);
             break;
         case ModalType::SwitchHart:
             open_switch_hart(0);
@@ -419,7 +419,7 @@ auto TuiModal::get_selected_tool_page() const -> TuiRegPage {
     return page.value_or(TuiRegPage::GPR);
 }
 
-void TuiModal::open_memory_dump(simrv::xlen::Address addr, InspectorPane* inspector_pane) {
+void TuiModal::open_memory_dump(simrv::xlen::VirtAddr addr, InspectorPane* inspector_pane) {
     active_modal_ = ModalType::MemoryDump;
     rendered_box_width_ = 0;
     input_.clear();

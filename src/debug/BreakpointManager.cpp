@@ -112,7 +112,7 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
     return std::nullopt;
 }
 
-void BreakpointManager::add_pc_breakpoint(simrv::xlen::Address addr, BreakpointOwner owner) {
+void BreakpointManager::add_pc_breakpoint(simrv::xlen::VirtAddr addr, BreakpointOwner owner) {
     const auto exists = std::ranges::any_of(pc_breakpoint_records_, [addr, owner](const auto& bp) {
         return bp.addr == addr && bp.owner == owner;
     });
@@ -123,7 +123,7 @@ void BreakpointManager::add_pc_breakpoint(simrv::xlen::Address addr, BreakpointO
     update_active();
 }
 
-void BreakpointManager::remove_pc_breakpoint(simrv::xlen::Address addr, BreakpointOwner owner) {
+void BreakpointManager::remove_pc_breakpoint(simrv::xlen::VirtAddr addr, BreakpointOwner owner) {
     std::erase_if(pc_breakpoint_records_,
                   [addr, owner](const auto& bp) { return bp.addr == addr && bp.owner == owner; });
     if (std::ranges::none_of(pc_breakpoint_records_,
@@ -139,11 +139,11 @@ void BreakpointManager::clear_pc_breakpoints() {
     update_active();
 }
 
-auto BreakpointManager::has_pc_breakpoint(simrv::xlen::Address addr) const -> bool {
+auto BreakpointManager::has_pc_breakpoint(simrv::xlen::VirtAddr addr) const -> bool {
     return pc_breakpoints_.contains(addr);
 }
 
-void BreakpointManager::add_watchpoint(simrv::xlen::Address addr, size_t size, WatchType type,
+void BreakpointManager::add_watchpoint(simrv::xlen::VirtAddr addr, size_t size, WatchType type,
                                        const std::string& label, BreakpointOwner owner) {
     if (std::ranges::any_of(watchpoints_, [=](const auto& wp) {
             return wp.target == WatchTarget::Memory && wp.addr == addr && wp.size == size &&
@@ -169,7 +169,7 @@ void BreakpointManager::add_reg_watchpoint(RegType reg_type, simrv::xlen::RegId 
     watchpoints_.push_back(Watchpoint{.id = next_watchpoint_id_++,
                                       .owner = BreakpointOwner::Tui,
                                       .target = WatchTarget::Register,
-                                      .addr = 0,
+                                      .addr = simrv::xlen::VirtAddr{},
                                       .reg_type = reg_type,
                                       .reg_index = reg_index,
                                       .reg_name = reg_name,
@@ -179,14 +179,14 @@ void BreakpointManager::add_reg_watchpoint(RegType reg_type, simrv::xlen::RegId 
     update_active();
 }
 
-void BreakpointManager::remove_watchpoint(simrv::xlen::Address addr) {
+void BreakpointManager::remove_watchpoint(simrv::xlen::VirtAddr addr) {
     std::erase_if(watchpoints_, [addr](const Watchpoint& wp) -> bool {
         return wp.target == WatchTarget::Memory && wp.addr == addr;
     });
     update_active();
 }
 
-void BreakpointManager::remove_watchpoint(simrv::xlen::Address addr, BreakpointOwner owner) {
+void BreakpointManager::remove_watchpoint(simrv::xlen::VirtAddr addr, BreakpointOwner owner) {
     std::erase_if(watchpoints_, [addr, owner](const Watchpoint& wp) -> bool {
         return wp.target == WatchTarget::Memory && wp.addr == addr && wp.owner == owner;
     });
@@ -200,7 +200,7 @@ void BreakpointManager::remove_watchpoint_by_index(size_t index) {
     }
 }
 
-void BreakpointManager::remove_watchpoint(simrv::xlen::Address addr, size_t size, WatchType type,
+void BreakpointManager::remove_watchpoint(simrv::xlen::VirtAddr addr, size_t size, WatchType type,
                                           BreakpointOwner owner) {
     std::erase_if(watchpoints_, [=](const auto& wp) {
         return wp.target == WatchTarget::Memory && wp.addr == addr && wp.size == size &&
@@ -233,7 +233,7 @@ void BreakpointManager::clear_owner(BreakpointOwner owner) {
     update_active();
 }
 
-auto BreakpointManager::check_pc(simrv::xlen::Address pc, simrv::xlen::HartId hart,
+auto BreakpointManager::check_pc(simrv::xlen::VirtAddr pc, simrv::xlen::HartId hart,
                                  simrv::xlen::Counter retired) const
     -> std::optional<BreakpointHit> {
     if (auto it = skipped_instructions_.find(hart.raw()); it != skipped_instructions_.end()) {
@@ -248,8 +248,8 @@ auto BreakpointManager::check_pc(simrv::xlen::Address pc, simrv::xlen::HartId ha
         return BreakpointHit{
             .reason = BreakpointHit::Reason::Breakpoint,
             .breakpoint_id = record != pc_breakpoint_records_.end() ? record->id : 0,
-            .addr = pc,
-            .description = std::format("Breakpoint hit at 0x{:08x}", pc)};
+            .location = pc,
+            .description = std::format("Breakpoint hit at 0x{:08x}", pc.raw())};
     }
     return std::nullopt;
 }
@@ -261,38 +261,39 @@ static auto ranges_overlap(simrv::xlen::Address a_start, size_t a_size,
     return a_start < b_end && b_start < a_end;
 }
 
-auto BreakpointManager::check_mem_write(simrv::xlen::Address paddr, size_t size) const
+namespace {
+
+auto check_memory_watchpoints(const std::vector<Watchpoint>& watchpoints,
+                              simrv::xlen::VirtAddr vaddr, size_t size, WatchType access)
     -> std::optional<BreakpointHit> {
-    for (const auto& wp : watchpoints_) {
-        if (wp.target != WatchTarget::Memory) continue;
-        if ((wp.type == WatchType::Write || wp.type == WatchType::Access) &&
-            ranges_overlap(paddr, size, wp.addr, wp.size)) {
-            return BreakpointHit{
-                .reason = BreakpointHit::Reason::Watchpoint,
-                .addr = paddr,
-                .description = std::format("Watchpoint (Write) hit at 0x{:08x} ({})", paddr,
-                                           wp.label.empty() ? "write" : wp.label),
-                .watch_type = wp.type};
+    for (const auto& wp : watchpoints) {
+        if (wp.target != WatchTarget::Memory ||
+            (wp.type != access && wp.type != WatchType::Access) ||
+            !ranges_overlap(vaddr.raw(), size, wp.addr.raw(), wp.size)) {
+            continue;
         }
+        const bool write = access == WatchType::Write;
+        return BreakpointHit{
+            .reason = BreakpointHit::Reason::Watchpoint,
+            .location = vaddr,
+            .description =
+                std::format("Watchpoint ({}) hit at 0x{:08x} ({})", write ? "Write" : "Read",
+                            vaddr.raw(), wp.label.empty() ? (write ? "write" : "read") : wp.label),
+            .watch_type = wp.type};
     }
     return std::nullopt;
 }
 
-auto BreakpointManager::check_mem_read(simrv::xlen::Address paddr, size_t size) const
+}  // namespace
+
+auto BreakpointManager::check_mem_write(simrv::xlen::VirtAddr vaddr, size_t size) const
     -> std::optional<BreakpointHit> {
-    for (const auto& wp : watchpoints_) {
-        if (wp.target != WatchTarget::Memory) continue;
-        if ((wp.type == WatchType::Read || wp.type == WatchType::Access) &&
-            ranges_overlap(paddr, size, wp.addr, wp.size)) {
-            return BreakpointHit{
-                .reason = BreakpointHit::Reason::Watchpoint,
-                .addr = paddr,
-                .description = std::format("Watchpoint (Read) hit at 0x{:08x} ({})", paddr,
-                                           wp.label.empty() ? "read" : wp.label),
-                .watch_type = wp.type};
-        }
-    }
-    return std::nullopt;
+    return check_memory_watchpoints(watchpoints_, vaddr, size, WatchType::Write);
+}
+
+auto BreakpointManager::check_mem_read(simrv::xlen::VirtAddr vaddr, size_t size) const
+    -> std::optional<BreakpointHit> {
+    return check_memory_watchpoints(watchpoints_, vaddr, size, WatchType::Read);
 }
 
 auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
@@ -308,7 +309,8 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (old_val != new_val) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = static_cast<simrv::xlen::Address>(wp.reg_index),
+                        .location =
+                            RegisterWatchLocation{.type = wp.reg_type, .index = wp.reg_index},
                         .description =
                             std::format("Register Watchpoint hit: {} changed from 0x{:x} to 0x{:x}",
                                         wp.reg_name.empty()
@@ -324,7 +326,8 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (old_val != new_val) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = static_cast<simrv::xlen::Address>(wp.reg_index),
+                        .location =
+                            RegisterWatchLocation{.type = wp.reg_type, .index = wp.reg_index},
                         .description = std::format(
                             "Register Watchpoint hit: {} changed from 0x{:016x} to 0x{:016x}",
                             wp.reg_name.empty()
@@ -347,7 +350,8 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (vec_changed) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = static_cast<simrv::xlen::Address>(wp.reg_index),
+                        .location =
+                            RegisterWatchLocation{.type = wp.reg_type, .index = wp.reg_index},
                         .description =
                             std::format("Register Watchpoint hit: {} (Vector) value modified",
                                         wp.reg_name.empty()
@@ -360,10 +364,10 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (prev_state.pc != state.pc) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = state.pc,
+                        .location = state.pc,
                         .description = std::format(
                             "Register Watchpoint hit: PC changed from 0x{:08x} to 0x{:08x}",
-                            prev_state.pc, state.pc)};
+                            prev_state.pc.raw(), state.pc.raw())};
                 }
                 break;
             }

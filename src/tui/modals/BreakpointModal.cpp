@@ -5,6 +5,7 @@
 #include "simrv/tui/modals/BreakpointModal.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <format>
 
@@ -18,6 +19,22 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
+
+namespace {
+
+auto parse_virtual_address(const std::string& input, const simrv::core::Machine& machine)
+    -> std::optional<simrv::xlen::VirtAddr> {
+    simrv::xlen::Word raw_address{};
+    auto first = input.data();
+    auto last = first + input.size();
+    int base = 16;
+    if (input.starts_with("0x") || input.starts_with("0X")) first += 2;
+    const auto parsed = std::from_chars(first, last, raw_address, base);
+    if (parsed.ec == std::errc{} && parsed.ptr == last) return simrv::xlen::VirtAddr{raw_address};
+    return machine.symbol_table().lookup_name(input);
+}
+
+}  // namespace
 
 auto BreakpointModal::title() const -> std::string {
     if (type_ == ModalType::SetBreakpoint) return "Set PC Breakpoint";
@@ -154,9 +171,10 @@ void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Mach
                            InspectorPane* inspector_pane) {
     input.clear();
     if (type == ModalType::SetBreakpoint) {
-        input = std::format("0x{:08x}", machine.primary_hart().state().pc);
+        input = std::format("0x{:08x}", machine.primary_hart().state().pc.raw());
     } else if (type == ModalType::SetWatchpoint) {
-        input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
+        input =
+            std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr().raw() : 0);
     }
 }
 
@@ -167,29 +185,14 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     if (input.empty()) return false;
 
     if (type == ModalType::SetBreakpoint) {
-        simrv::xlen::Address addr = 0;
-        bool ok = false;
-        if (input.starts_with("0x") || input.starts_with("0X")) {
-            auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else if (std::ranges::all_of(input, ::isxdigit)) {
-            auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else {
-            auto sym_opt = machine.symbol_table().lookup_name(input);
-            if (sym_opt.has_value()) {
-                addr = *sym_opt;
-                ok = true;
-            }
-        }
-
-        if (!ok) {
+        const auto address = parse_virtual_address(input, machine);
+        if (!address.has_value()) {
             set_status_override_cb(std::format("Symbol/address not found: {}", input));
             return false;
         }
 
-        machine.breakpoint_manager().add_pc_breakpoint(addr);
-        set_status_override_cb(std::format("Breakpoint set at 0x{:08x}", addr));
+        machine.breakpoint_manager().add_pc_breakpoint(*address);
+        set_status_override_cb(std::format("Breakpoint set at 0x{:08x}", address->raw()));
         return true;
 
     } else if (type == ModalType::SetWatchpoint) {
@@ -202,29 +205,16 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return true;
         }
 
-        simrv::xlen::Address addr = 0;
-        bool ok = false;
-        if (input.starts_with("0x") || input.starts_with("0X")) {
-            auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else if (std::ranges::all_of(input, ::isxdigit)) {
-            auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else {
-            auto sym_opt = machine.symbol_table().lookup_name(input);
-            if (sym_opt.has_value()) {
-                addr = *sym_opt;
-                ok = true;
-            }
-        }
-
-        if (!ok) {
+        const auto address = parse_virtual_address(input, machine);
+        if (!address.has_value()) {
             set_status_override_cb(std::format("Register, symbol or address not found: {}", input));
             return false;
         }
 
-        machine.breakpoint_manager().add_watchpoint(addr, 4, simrv::debug::WatchType::Write, "");
-        set_status_override_cb(std::format("Memory Write Watchpoint set at 0x{:08x}", addr));
+        machine.breakpoint_manager().add_watchpoint(*address, 4, simrv::debug::WatchType::Write,
+                                                    "");
+        set_status_override_cb(
+            std::format("Memory Write Watchpoint set at 0x{:08x}", address->raw()));
         return true;
     }
     return false;
@@ -235,7 +225,7 @@ struct ActiveTriggerInfo {
     bool is_execute{};
     bool is_load{};
     bool is_store{};
-    simrv::xlen::Address addr{};
+    simrv::xlen::VirtAddr addr{};
 };
 
 auto get_active_triggers(const simrv::core::Machine& machine) -> std::vector<ActiveTriggerInfo> {
@@ -253,7 +243,7 @@ auto get_active_triggers(const simrv::core::Machine& machine) -> std::vector<Act
         info.is_execute = (t1 & (1U << 2U)) != 0;
         info.is_store = (t1 & (1U << 1U)) != 0;
         info.is_load = (t1 & (1U << 0U)) != 0;
-        info.addr = state.tdata2[i];
+        info.addr = simrv::xlen::VirtAddr{state.tdata2[i]};
         trigs.push_back(info);
     }
     return trigs;
@@ -282,7 +272,7 @@ auto BreakpointModal::remove_at_cursor(
 
     if (cursor < static_cast<int>(pc_bps.size())) {
         auto it = std::next(pc_bps.begin(), cursor);
-        simrv::xlen::Address pc = *it;
+        simrv::xlen::VirtAddr pc = *it;
         const auto& records = machine.breakpoint_manager().get_pc_breakpoint_records();
         const bool has_tui = std::ranges::any_of(records, [pc](const auto& record) {
             return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Tui;
@@ -296,19 +286,19 @@ auto BreakpointModal::remove_at_cursor(
                     "Lesson checkpoint is managed by the mission; dismiss it with z to remove it.");
             return true;
         }
-        machine.breakpoint_manager().remove_pc_breakpoint(pc);
+        machine.breakpoint_manager().remove_pc_breakpoint(simrv::xlen::VirtAddr{pc});
         if (set_status_override_cb) {
             set_status_override_cb(
                 has_mission
                     ? std::format("Removed user breakpoint at 0x{:08x}; lesson checkpoint remains",
-                                  pc)
-                    : std::format("Removed breakpoint at 0x{:08x}", pc));
+                                  pc.raw())
+                    : std::format("Removed breakpoint at 0x{:08x}", pc.raw()));
         }
     } else if (cursor < static_cast<int>(pc_bps.size() + wps.size())) {
         auto wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
         const auto& wp = wps[wp_idx];
         std::string name = (wp.target == simrv::debug::WatchTarget::Memory)
-                               ? std::format("0x{:08x}", wp.addr)
+                               ? std::format("0x{:08x}", wp.addr.raw())
                                : wp.reg_name;
         machine.breakpoint_manager().remove_watchpoint_by_index(wp_idx);
         if (set_status_override_cb) {
@@ -389,8 +379,8 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                 const auto kind = mission_owned && !user_owned ? "Mission checkpoint at"
                                   : mission_owned              ? "Breakpoint + checkpoint at"
                                                                : "PC Breakpoint at";
-                content_rows.push_back(
-                    std::format("{}{} \033[1;33m0x{:08x}\033[0m{}", prefix, kind, pc, sym_str));
+                content_rows.push_back(std::format("{}{} \033[1;33m0x{:08x}\033[0m{}", prefix, kind,
+                                                   pc.raw(), sym_str));
                 item_idx++;
                 if (item_idx >= 9) break;
             }
@@ -400,7 +390,7 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 if (wp.target == simrv::debug::WatchTarget::Memory) {
                     content_rows.push_back(std::format(
-                        "{}Memory Watchpoint at \033[1;33m0x{:08x}\033[0m", prefix, wp.addr));
+                        "{}Memory Watchpoint at \033[1;33m0x{:08x}\033[0m", prefix, wp.addr.raw()));
                 } else {
                     content_rows.push_back(std::format(
                         "{}Register Watchpoint on \033[1;35m{}\033[0m", prefix, wp.reg_name));
@@ -416,7 +406,7 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                                        ? "RW Watch"
                                        : (trig.is_store ? "Write Watch" : "Read Watch");
                 content_rows.push_back(std::format("{}Sdtrig #{} [{}]: \033[1;36m0x{:08x}\033[0m",
-                                                   prefix, trig.index, kind, trig.addr));
+                                                   prefix, trig.index, kind, trig.addr.raw()));
                 item_idx++;
             }
         }

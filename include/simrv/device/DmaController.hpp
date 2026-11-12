@@ -39,19 +39,19 @@ namespace simrv::device {
  */
 class DmaController : public memory::MmioDevice {
    public:
-    static constexpr simrv::xlen::Address kDefaultBaseAddress = mmio::kDmaControllerBaseAddress;
+    static constexpr simrv::xlen::PhysAddr kDefaultBaseAddress = mmio::kDmaControllerBaseAddress;
     static constexpr simrv::xlen::Address kDefaultSize = mmio::kDmaControllerSize;
     static constexpr uint32_t kDefaultIrq = mmio::kDmaControllerIrq;
 
     // Register Offsets
-    static constexpr simrv::xlen::Address kRegControl = 0x00U;
-    static constexpr simrv::xlen::Address kRegStatus = 0x04U;
-    static constexpr simrv::xlen::Address kRegSrcAddrLo = 0x08U;
-    static constexpr simrv::xlen::Address kRegSrcAddrHi = 0x0CU;
-    static constexpr simrv::xlen::Address kRegDstAddrLo = 0x10U;
-    static constexpr simrv::xlen::Address kRegDstAddrHi = 0x14U;
-    static constexpr simrv::xlen::Address kRegByteCount = 0x18U;
-    static constexpr simrv::xlen::Address kRegInterruptAck = 0x1CU;
+    static constexpr simrv::memory::MmioOffset kRegControl{0x00U};
+    static constexpr simrv::memory::MmioOffset kRegStatus{0x04U};
+    static constexpr simrv::memory::MmioOffset kRegSrcAddrLo{0x08U};
+    static constexpr simrv::memory::MmioOffset kRegSrcAddrHi{0x0CU};
+    static constexpr simrv::memory::MmioOffset kRegDstAddrLo{0x10U};
+    static constexpr simrv::memory::MmioOffset kRegDstAddrHi{0x14U};
+    static constexpr simrv::memory::MmioOffset kRegByteCount{0x18U};
+    static constexpr simrv::memory::MmioOffset kRegInterruptAck{0x1CU};
 
     // Control Bitmasks
     static constexpr uint32_t kControlStart = 1U << 0;
@@ -63,19 +63,19 @@ class DmaController : public memory::MmioDevice {
     static constexpr uint32_t kStatusError = 1U << 1;
 
     explicit DmaController(core::Machine* machine = nullptr,
-                           simrv::xlen::Address base_address = kDefaultBaseAddress,
+                           simrv::xlen::PhysAddr base_address = kDefaultBaseAddress,
                            simrv::xlen::Address size = kDefaultSize,
                            uint32_t irq_num = kDefaultIrq);
     ~DmaController() override = default;
 
     [[nodiscard]] auto name() const -> const char* override { return "dma-controller"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
         return base_address_;
     }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
-    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
-    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override;
+    void write32(simrv::memory::MmioOffset offset, uint32_t val) override;
 
     [[nodiscard]] auto is_busy() const noexcept -> bool { return busy_; }
     [[nodiscard]] auto is_done() const noexcept -> bool { return (status_ & kStatusDone) != 0; }
@@ -100,7 +100,7 @@ class DmaController : public memory::MmioDevice {
     void start_transfer();
     void execute_transfer(simrv::xlen::PhysAddr src, simrv::xlen::PhysAddr dst, uint32_t count);
 
-    simrv::xlen::Address base_address_;
+    simrv::xlen::PhysAddr base_address_;
     simrv::xlen::Address size_;
     uint32_t irq_num_;
 

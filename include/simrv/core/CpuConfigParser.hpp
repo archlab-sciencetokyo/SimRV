@@ -306,7 +306,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         MemoryMetadata,
         BootMetadata,
         DeviceMetadata,
-        SmpMetadata
+        SmpMetadata,
+        PluginsMetadata
     };
     Section current_section = Section::Global;
 
@@ -372,8 +373,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 current_section = Section::DeviceMetadata;
             } else if (sec_name.starts_with("smp")) {
                 current_section = Section::SmpMetadata;
+            } else if (detail::iequals(sec_name, "plugins")) {
+                current_section = Section::PluginsMetadata;
             } else {
-                simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
+                simrv::log::warn("Unknown config section: [{}]", sec_name);
             }
             continue;
         }
@@ -390,7 +393,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         // combined preset file valid when it is consumed as a CPU model.
         if (current_section == Section::SocMetadata || current_section == Section::MemoryMetadata ||
             current_section == Section::BootMetadata ||
-            current_section == Section::DeviceMetadata || current_section == Section::SmpMetadata) {
+            current_section == Section::DeviceMetadata || current_section == Section::SmpMetadata ||
+            current_section == Section::PluginsMetadata) {
             continue;
         }
 
@@ -522,7 +526,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             if (key == "pipeline_type" || (current_section == Section::Pipeline && key == "type")) {
                 const auto parsed = simrv::pipeline::parse_pipeline_type(val_str);
                 if (!parsed) {
-                    simrv::log::warn("Unsupported pipeline '{}' in CPU config", val_str);
+                    simrv::log::warn("Unsupported pipeline '{}' in configuration", val_str);
                     return false;
                 }
                 config.pipeline.pipeline_type = *parsed;
@@ -596,7 +600,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 (current_section == Section::BranchPredictor && key == "type")) {
                 const auto parsed = simrv::pipeline::parse_branch_predictor_type(val_str);
                 if (!parsed) {
-                    simrv::log::warn("Unsupported branch predictor '{}' in CPU config", val_str);
+                    simrv::log::warn("Unsupported branch predictor '{}' in configuration", val_str);
                     return false;
                 }
                 config.pipeline.branch_predictor.type = *parsed;
@@ -881,7 +885,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     config.bram_prewarm = *b;
                 }
             } else {
-                simrv::log::warn("Unknown CPU config key: {}", key);
+                simrv::log::warn("Unknown config key: {}", key);
             }
         } catch (const std::exception& e) {
             simrv::log::warn("Failed to parse value '{}' for key '{}': {}", val_str, key, e.what());
@@ -1041,7 +1045,7 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 while (std::getline(hart_stream, hart_text, ',')) {
                     const auto parsed = detail::parse_scaled_u64(detail::trim(hart_text));
                     if (!parsed || *parsed > std::numeric_limits<uint32_t>::max()) return false;
-                    cluster->harts.push_back(static_cast<uint32_t>(*parsed));
+                    cluster->harts.push_back(simrv::xlen::HartId{static_cast<uint32_t>(*parsed)});
                 }
             } else if (key == "l2_enabled") {
                 if (const auto parsed = detail::parse_bool(value)) cluster->l2.enabled = *parsed;
@@ -1107,11 +1111,19 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         } else if (section == Section::Pcie) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
                 if (key == "ecam_base")
-                    config.pcie.ecam_base = *parsed;
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max())
+                        return false;
+                    else
+                        config.pcie.ecam_base =
+                            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
                 else if (key == "ecam_size")
                     config.pcie.ecam_size = *parsed;
                 else if (key == "mmio_base")
-                    config.pcie.mmio_base = *parsed;
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max())
+                        return false;
+                    else
+                        config.pcie.mmio_base =
+                            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
                 else if (key == "mmio_size")
                     config.pcie.mmio_size = *parsed;
                 else if (key == "first_bus" || key == "last_bus") {
@@ -1122,9 +1134,11 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             }
         } else if (section == Section::Memory) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "dram_base" || key == "base")
-                    config.dram_base = *parsed;
-                else if (key == "dram_size" || key == "size")
+                if (key == "dram_base" || key == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.dram_base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "dram_size" || key == "size")
                     config.dram_size = *parsed;
             } else if (key == "bram_prewarm") {
                 if (const auto parsed = detail::parse_bool(value)) {
@@ -1133,10 +1147,15 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             }
         } else if (section == Section::Boot) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "reset_pc" || key == "start_pc")
-                    config.reset_pc = *parsed;
-                else if (key == "tohost")
-                    config.tohost = *parsed;
+                if (key == "reset_pc" || key == "start_pc") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.reset_pc =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "tohost") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.tohost =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                }
             }
         } else if (section == Section::Device && device != nullptr) {
             if (key.starts_with("region.")) {
@@ -1152,16 +1171,23 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     device->regions,
                     [region_name](const auto& item) { return item.name == region_name; });
                 if (region == device->regions.end()) {
-                    device->regions.push_back(
-                        {.name = std::string(region_name), .base = 0, .size = 0});
+                    device->regions.push_back({.name = std::string(region_name),
+                                               .base = simrv::xlen::PhysAddr{},
+                                               .size = 0});
                     region = std::prev(device->regions.end());
                 }
-                if (field == "base") region->base = *parsed;
+                if (field == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    region->base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                }
                 if (field == "size") region->size = *parsed;
             } else if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "base")
-                    device->base = *parsed;
-                else if (key == "size")
+                if (key == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    device->base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "size")
                     device->size = *parsed;
                 else if (key == "irq" && *parsed <= std::numeric_limits<uint32_t>::max())
                     device->irq = static_cast<uint32_t>(*parsed);
@@ -1202,6 +1228,12 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             std::string plugin_spec;
             if (value.empty() || value == "\"\"" || value == "true") {
                 plugin_spec = std::string(key);
+            } else if (key == "device" || key == "plugin") {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                plugin_spec = clean_val;
             } else {
                 std::string clean_val = std::string(value);
                 if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
@@ -1302,7 +1334,7 @@ inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMod
     }
     const auto valid = config.validate();
     if (!valid) {
-        simrv::log::warn("Invalid CPU configuration: {}", valid.error());
+        simrv::log::warn("Invalid configuration: {}", valid.error());
         return false;
     }
     return true;

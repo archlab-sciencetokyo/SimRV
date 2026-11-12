@@ -98,15 +98,144 @@ In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal ap
 
 - **Batched Retirement & Telemetry**: Eliminates per-instruction atomic operations on machine-wide retirement
   counters, synchronizing only at chunk, decode miss, or batch boundaries.
-- **CLINT Chunking**: Virtual counters (`mcycle`, `mtime`, and timer interrupt evaluations) update in
-  64-instruction chunks during tight loops, preventing timer evaluation overhead on every single instruction.
+- **Clock Accounting**: The OS engine flushes virtual clock and retirement accounting at bounded
+  chunk and fallback boundaries; the bare-metal engine accounts cached cycles at its batch boundary.
 - **Inlined Cached Helpers**: Load, store, branch, and jump operations inline directly into the opcode dispatcher
   without function call frames.
-- **Automatic Debug Fallback**: Fast batching is governed by `Machine::fast_batch_policy()`. The moment any
-  breakpoint or watchpoint is registered (`breakpoints.has_any()`), lockstep testing is engaged, instruction tracing
-  is active, or the user is single-stepping (`is_stepping()` or `step_delay_us != 0`), fast-batching immediately
-  disengages. Execution automatically reverts to the cycle-by-cycle engine (`CPU::run_cycle`), guaranteeing
-  100% single-instruction hit precision, accurate watchpoint diffing, and fine-grained TUI animation.
+- **Batch Eligibility**: `Machine::fast_batch_policy()` declines batching for SMP, stepping,
+  lockstep, branch tracing, breakpoints or watchpoints, architectural triggers, and an active TUI
+  trace or step delay, the CFU console redirect model, and registered extension devices that
+  require cycle ticks, including serial plugins with device-level tick callbacks. The latter use
+  the per-instruction path to observe instruction boundaries.
+  The scheduler otherwise services controls and publishes batch-level state at its boundaries.
+
+Fast shortcuts must preserve the effects of their general paths. Cached execution must stop or
+fall back at control, trap, and observation boundaries. Direct RAM access requires a valid range
+and the applicable translation and protection checks; stores must preserve `tohost`, triggers,
+and reservation effects. Vector bulk access falls back when an element needs individual checks.
+Fetch shortcuts still check execute permission before decoding. Cache MRU lookup verifies the tag,
+valid bit, and coherence state before returning a line. Typed device accesses retain their device
+and bus side effects. MMIO routing checks device ownership even for MRU hits and rejects a transfer
+if any addressed byte falls outside the selected device. Device registration and range queries
+scan ambiguous sparse overlaps up to 4096 bytes and conservatively report larger ambiguous overlaps
+as occupied. The decode cache uses 64-byte-aligned sets; this is a layout choice, not a claim that
+every supported host has a 64-byte cache line.
+
+Checked RAM lookups reject addresses below the mapping and accesses that wrap the physical address
+space. The unchecked fast lookup is used only with non-null, nonwrapping RAM and an access size no
+larger than the mapping; other configurations take the checked fallback.
+
+#### Fast-path contract inventory
+
+| Shortcut | Eligibility and required state | Observable contract and fallback |
+| --- | --- | --- |
+| Instruction batches | `Machine::fast_batch_policy()` requires a single hart and disables batching for stepping, lockstep, branch tracing, breakpoints/watchpoints, active triggers, redirecting consoles, and extension devices that need instruction ticks. | Retire and account at batch boundaries; poll controls there. Ineligible runs use the ordinary runner. Cached execution exits on control, trap, and observation boundaries. |
+| Bare-metal block chains | The direct chain requires machine-mode flat, valid nonwrapping RAM without locked PMP, active reservations, or SMP; only supported compact operations are admitted. | It preserves guest-width register/PC behavior and checks taken-target alignment. Unsupported operations, misses, and misaligned taken branches return to the precise cached/scalar path. |
+| OS cached memory | A host pointer requires a matching soft-TLB context/epoch and page range, with PMP checked for the full access; direct physical RAM also requires a valid RAM range. | Translation, privilege, faults, `tohost`, triggers, and reservation behavior are retained. TLB misses and accesses needing per-element checks use `MemoryAccess`; address-space changes invalidate the TLB. |
+| Instruction fetch | The bare-metal physical-RAM shortcut is enabled only before the MMU has ever been used. | Execute PMP checks run before decode; translated, page-walk, and bus fetch remain the fallback. Fetch faults report the guest PC. |
+| Vector bulk copies | Direct copies require machine effective privilege, canonical pointers, a valid page-bounded range, suitable PMP permissions, no breakpoints/triggers, and no store-side reservation checks. | Stores retain `tohost` and reservation effects. Unit-stride/whole-register operations split at page boundaries; chunks that fail eligibility, masked/strided accesses needing individual checks, and fault-only-first loads use element-wise memory operations and preserve `vstart`/fault ordering. |
+| Cache lookup | The MRU hint is only a candidate way; the line is rechecked for tag, validity, and non-invalid coherence state. | A failed hint scans the set, preserving normal replacement and coherence handling. |
+| MMIO, DMA, and device polling | MMIO MRU hits recheck ownership and every addressed byte; DMA validates the physical range and wire-width conversion. Network polling retains libslirp callbacks for the stack lifetime and supplies no-op poll-registration hooks because SimRV polls synchronously. | Invalid or ambiguous mappings are rejected through normal routing. Device and bus side effects remain in their ordinary handlers; network frames are delivered through the backend queue. |
+
+#### Audit evidence and remaining coverage
+
+The following findings describe guest correctness, rather than security severity:
+
+| Finding | Severity | Evidence and resolution |
+| --- | --- | --- |
+| A reservation invalidation range could truncate on native RV32. | High | The reservation table now accepts a host-sized length and saturates at the physical address limit. `CoreSemanticsTests` covers ranges exceeding the guest address width. |
+| A wrapping RAM mapping could make an unchecked host pointer lookup invalid. | High | Fast lookup now requires a nonwrapping mapping; checked lookups reject wrapped accesses. `CoreSemanticsTests` covers the boundary. |
+| VirtIO DMA addresses could be truncated to native RV32 width and alias low RAM. | High | MMIO and PCI transports reject unrepresentable addresses before conversion; platform integration tests cover direct DMA and queue-ring accesses. |
+| Cycle-mode workers could fail to acknowledge an in-flight cycle during a pause or engine change. | High | Workers complete the cycle barrier before parking, and engine changes restart workers. The multi-hart regression tests exercise pause and switching. |
+| The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `MicroarchitectureTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
+| A compact block could bypass misaligned taken-branch exceptions when compressed instructions were disabled. | High | Bare-metal fast execution falls back to scalar execution for IALIGN=32; `CoreSemanticsTests` checks jumps and branches on RV64, hosted RV32, and native RV32. |
+| A UART receive overrun in a later device tick could leave the line interrupt unpublished. | Medium | Overrun transitions now schedule an interrupt update; `PlatformIntegrationTests` exercises an overrun after a full FIFO was established in an earlier tick. |
+| DHCP could advertise a working-looking DNS proxy while guest DNS requests timed out. | Medium | The libslirp callback table must outlive its stack, and its poll-registration callbacks must be present even when SimRV polls synchronously. `PlatformIntegrationTests::test_user_network_external_dns` verifies an upstream response when explicitly enabled. |
+
+This inventory records the major first-party execution, memory, cache, and device shortcuts; it is
+not a machine-checked proof or an exhaustive review of every optimization. Full architecture-suite
+and performance comparisons against the original starting tree remain incomplete. ARM hardware and
+usable host performance counters were unavailable. See
+[strong typing and performance](../development/strong-typing-performance.md) for measurements and
+their limitations.
+
+Address-domain types protect the architectural and platform interfaces where the distinction affects
+correctness. Architectural PCs, decode and block cache keys, pipeline stage records and fetch
+cursors, branch prediction, traces, symbols, breakpoints, and instruction-explainer PCs use
+`VirtAddr`. Physical SoC regions, device bases, PCIe windows and BARs, DRAM and `tohost`
+configuration, DMA, MMIO routing, cache tags, coherence, and reservation tracking use `PhysAddr`.
+The instruction timing cache keys virtual PCs rather than memory bus addresses. The TUI backend
+request carries an explicit virtual or physical address alternative for its command. C plugin ABI
+and serialized formats retain scalar representations, with explicit typed adapters at those
+boundaries. Scalar range arithmetic remains in widened RAM and PMP helpers, AXI message records,
+protocol register fields, and parsers until they validate the input width and establish its domain.
+First-party MMIO register accessors use `MmioOffset`, distinct from `PhysAddr`; routing constructs the
+offset after it establishes the device-relative address. Explicit `.raw()` extraction is used at scalar
+decoding, host-indexing, and external-interface boundaries.
+The explainer distinguishes effective virtual addresses from translated physical addresses; its
+register base and offsets remain scalar arithmetic values. Its public explanation and disassembly
+entry points accept virtual PCs. Branch prediction feedback, BTB targets, and return-address stack
+entries also use `VirtAddr`. Trace PC filter bounds use `VirtAddr` after command-line parsing; their
+serialized values are unchanged.
+Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their
+separate cause-dependent representation.
+Breakpoint hits report `location` as either a virtual address or a register type and identifier;
+C++ callers should inspect the variant instead of interpreting a scalar as both domains.
+These are remaining C++ interface boundaries to review; their presence does not by itself establish
+a guest-visible bug.
+
+The trace regression exercises lockstep parsing and comparison with a native commit-log fixture.
+The ISA tests labelled `lockstep` use bare-metal mode, while the comparison hook currently runs
+only in OS mode; a passing labelled ISA test therefore does not establish instruction comparison.
+
+Symbol and function lookups take `VirtAddr`; callers interpreting a raw address as an ELF virtual
+address must construct it explicitly. Symbol storage, function bases, symbol-name results, and ELF
+entry points also use `VirtAddr`, while symbol offsets remain scalar displacements. Legacy boot and
+signature paths explicitly extract raw values where they interpret ELF addresses as physical locations.
+
+MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
+physical addresses from platform configuration or translate virtual addresses before routing or
+DMA. Loaded segment records used for cache prewarming also require `PhysAddr`.
+VirtIO descriptor and ring addresses remain 64-bit through the transport adapter; an address
+that does not fit the simulator's physical-address type is rejected before DMA.
+Queue processing requires a nonzero supported queue size, nonwrapping split-ring ranges, and
+descriptor indices within the configured table.
+Deferred block and network completions are valid only for the queue configuration that scheduled
+them; resetting or reconfiguring that queue invalidates older completions.
+PMP access checks require `PhysAddr`; callers must translate virtual addresses before protection
+checks, including page-table accesses.
+`TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device
+implementations must update their overrides. An override of `contains()` should also declare
+`using TileLinkNode::contains;` so the base class's deleted raw-integer overload stays visible. The C
+plugin ABI retains its existing scalar fields; the plugin adapter constructs a physical address
+when importing a base address. TLB lookup, inspection, and selective flush filters require
+`VirtAddr`, while insertion requires both `VirtAddr` and `PhysAddr`. Full TLB entries keep virtual
+and physical pages in their respective types.
+
+Reservation-range invalidation takes a physical address and a host-sized byte count. An empty
+range changes nothing; a range extending beyond the guest physical-address representation saturates
+at its maximum address without wrapping or truncating the count.
+
+Instruction-cache reads, data-cache accesses, cache-line insertion and probes, shared-cache line
+operations, and the coherence directory use `PhysAddr`. Cache tags and eviction addresses represent
+aligned physical line bases. Data-cache accesses also use the typed `Funct3` operation; callers
+must convert raw decoded fields explicitly. Coherence inputs are aligned to the cache line before
+lookup or invalidation. A data-cache access wider than native `Word` misses;
+RV32 floating-point and vector paths split wider accesses into word operations. Cache-block zero
+discards the initiating cached copy when removing its directory entry and invalidates reservations
+throughout the block. DMA writes invalidate reservations over their actual byte range.
+Reservation-table LR, SC, and invalidation operations also require `PhysAddr`; translation must
+be complete before recording or checking a reservation.
+When execution engines change, multi-hart workers stop before per-hart state is reset and restart
+after the new engine is installed, so no worker remains parked on the previous engine's barrier.
+The G-stage page-table walker accepts `GuestPhysAddr`, which denotes a VS-stage result. It returns
+a host `PhysAddr`; guest fault addresses retain the guest-physical type until conversion to an
+architectural scalar value for trap reporting.
+VS-stage table roots and next-level pointers also remain `GuestPhysAddr` until the G-stage walk
+returns; the page-directory cache holds host-physical table addresses only for non-virtualized walks.
+
+Compact execution keeps integer register operands as `RegId` until indexing the register file;
+its on-disk and plugin interfaces are not affected by that internal representation.
 
 ## Multi-Hart SMP & TileLink-C Coherence
 
@@ -121,6 +250,10 @@ deterministic instruction mode, harts advance in round-robin order within each s
 MT-SMP may retire a small number of additional instructions while workers observe the stop request.
 
 ## Debugger ownership and synchronization
+
+Debugger instruction breakpoints and memory watchpoints use virtual addresses; memory watchpoints
+match effective addresses before translation. Their C++ interfaces require `VirtAddr`; GDB and TUI
+adapters explicitly convert the addresses they parse.
 
 The TUI and GDB are mutually exclusive frontends over machine-owned debug primitives. TUI debug
 actions are always available; GDB runs its blocking TCP accept/read loop on one `std::jthread` and

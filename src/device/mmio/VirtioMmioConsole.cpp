@@ -10,7 +10,7 @@
 
 namespace simrv::device {
 
-VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                                      core::Machine* machine)
     : VirtioMmioDevice("virtio-console-mmio", base_address, 0x1000, virtio::kDevIdConsole, irq_num,
                        machine) {
@@ -18,7 +18,7 @@ VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::Address base_address, uint32_t
     add_queue(64);  // tx
 }
 
-auto VirtioMmioConsole::read_device_config(simrv::xlen::Address offset, std::size_t size)
+auto VirtioMmioConsole::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
     -> uint64_t {
     (void)size;
     if (offset == 0) return 80 | (24 << 16);  // cols=80, rows=24
@@ -34,11 +34,11 @@ void VirtioMmioConsole::on_queue_notify(uint32_t q_idx) {
     if (q_idx >= queues_.size()) return;
     virtio::process_console_queue(
         q_idx, queues_[q_idx], backend_,
-        [this](simrv::xlen::Address addr, void* buf, size_t len) {
-            return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), len);
+        [this](uint64_t addr, void* buf, size_t len) {
+            return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(buf), len);
         },
-        [this](simrv::xlen::Address addr, const void* buf, size_t len) {
-            return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), len);
+        [this](uint64_t addr, const void* buf, size_t len) {
+            return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(buf), len);
         },
         [this]() { trigger_irq(); });
 }

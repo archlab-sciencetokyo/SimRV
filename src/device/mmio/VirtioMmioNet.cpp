@@ -13,7 +13,7 @@
 
 namespace simrv::device {
 
-VirtioMmioNet::VirtioMmioNet(simrv::xlen::Address base_address, uint32_t irq_num,
+VirtioMmioNet::VirtioMmioNet(simrv::xlen::PhysAddr base_address, uint32_t irq_num,
                              core::Machine* machine, virtio::NetBackend::Mode mode)
     : VirtioMmioDevice("virtio-net-mmio", base_address, 0x1000, virtio::kDevIdNet, irq_num,
                        machine),
@@ -26,14 +26,15 @@ void VirtioMmioNet::poll_backend() {
     if (backend_.poll_host_rx() != 0) on_queue_notify(0);
 }
 
-auto VirtioMmioNet::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioNet::read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+    -> uint64_t {
     const auto& mac = backend_.get_mac();
     uint64_t value = 0;
     for (std::size_t byte = 0; byte < size && byte < sizeof(value); ++byte) {
         const auto config_offset = offset + byte;
         uint8_t value_byte = 0;
         if (config_offset < mac.size()) {
-            value_byte = mac[config_offset];
+            value_byte = mac[config_offset.raw()];
         } else if (config_offset == 6) {
             value_byte = 1;  // VIRTIO_NET_S_LINK_UP
         }
@@ -49,26 +50,31 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
                                   machine_->runtime_profile.is_cycle_mode() &&
                                   machine_->dma_engine().is_enabled();
 
-    auto dma_read = [this](simrv::xlen::Address addr, void* buf, size_t size) {
-        return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), size);
+    auto dma_read = [this](uint64_t addr, void* buf, size_t size) {
+        return dma_read_wire_address(addr, reinterpret_cast<std::byte*>(buf), size);
     };
-    auto dma_write = [this](simrv::xlen::Address addr, const void* buf, size_t size) {
-        return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), size);
+    auto dma_write = [this](uint64_t addr, const void* buf, size_t size) {
+        return dma_write_wire_address(addr, reinterpret_cast<const std::byte*>(buf), size);
     };
     auto schedule_deferred = [this, q_idx](size_t transfer_bytes, uint16_t head_desc_idx,
                                            uint32_t len) {
         const auto current_cycle = machine_->memory().system_bus().cycle();
+        const auto generation = queues_[q_idx].generation;
         machine_->dma_engine().schedule_transfer(
             transfer_bytes, current_cycle,
-            [this, q_idx, head_desc_idx, len]() {
+            [this, q_idx, head_desc_idx, len, generation]() {
                 auto& q = queues_[q_idx];
+                if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                if (!dma_read_wire_address(q.device_addr + 2,
+                                           reinterpret_cast<std::byte*>(&used_idx), 2))
+                    return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = len};
-                dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
-                                reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                dma_write_wire_address(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                       reinterpret_cast<std::byte*>(&elem), sizeof(elem));
                 used_idx++;
-                dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                dma_write_wire_address(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                       2);
                 trigger_irq();
             },
             "virtio-mmio-net");

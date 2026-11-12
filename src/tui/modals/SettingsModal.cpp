@@ -321,14 +321,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     break;
                 }
                 case GeneralSetting::NetworkMode:
-                    if (draft.net_mode == "user")
-                        draft.net_mode = (dir > 0) ? "tap" : "none";
-                    else if (draft.net_mode == "tap")
-                        draft.net_mode = (dir > 0) ? "socket" : "user";
-                    else if (draft.net_mode == "socket")
-                        draft.net_mode = (dir > 0) ? "none" : "tap";
-                    else
-                        draft.net_mode = (dir > 0) ? "user" : "socket";
+                    draft.net_mode = (draft.net_mode == "user") ? "none" : "user";
                     break;
                 case GeneralSetting::SpikeLockstep:
                     if (machine && machine->spike_binary().empty()) break;
@@ -517,15 +510,11 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
 
         std::string net_str;
         if (draft.net_mode == "user")
-            net_str = "\033[1;32m[User Mode (Echo/Loopback)]\033[0m";
-        else if (draft.net_mode == "tap")
-            net_str = "\033[1;36m[Linux TAP Bridge]\033[0m";
-        else if (draft.net_mode == "socket")
-            net_str = "\033[1;33m[Socket Tunnel]\033[0m";
+            net_str = "\033[1;32m[User Mode NAT (libslirp)]\033[0m";
         else
             net_str = "\033[90m[Disabled]\033[0m";
 
-        constexpr simrv::xlen::Address dram_base = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address dram_base = simrv::memory::kDramBaseAddress.raw();
         std::string ram_str =
             std::format("\033[1;36m[{} MB (0x{:08x}–0x{:08x})]\033[0m", draft.dram_size_mb,
                         dram_base, dram_base + (draft.dram_size_mb * 1024ULL * 1024ULL) - 1);

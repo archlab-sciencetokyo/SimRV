@@ -15,11 +15,12 @@ namespace simrv::device {
  */
 class VirtioMmioGpu : public VirtioMmioDevice {
    public:
-    VirtioMmioGpu(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioGpu(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine);
 
    protected:
     void on_queue_notify(uint32_t q_idx) override;
-    auto read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t override;
+    auto read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
+        -> uint64_t override;
 };
 
 }  // namespace simrv::device

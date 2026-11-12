@@ -4,7 +4,9 @@
 namespace simrv::device {
 
 VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)
-    : VirtioPciDevice(virtio::kDevIdFs, 0x010000, 2), backend_(std::move(tag)) {
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdFs)},
+                      PciClassCode{0x010000}, 2),
+      backend_(std::move(tag)) {
     (void)backend_.set_shared_directory(shared_directory);
     queues_[0].num_max = queues_[0].num = 8;    // HIPRIO
     queues_[1].num_max = queues_[1].num = 128;  // REQUEST
@@ -13,7 +15,7 @@ VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)
 auto VirtioPciFs::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     PciMmioData value = 0;
     for (uint8_t i = 0; i < size && i < sizeof(PciMmioData); ++i) {
-        const auto index = static_cast<size_t>(offset + i);
+        const auto index = static_cast<size_t>((offset + i).raw());
         const uint8_t byte = index < backend_.tag().size() ? backend_.tag()[index]
                              : index == 36                 ? 1
                                                            : 0;
@@ -26,9 +28,11 @@ void VirtioPciFs::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     backend_.process_queue(
         queues_[queue_index],
-        [this](uint64_t address, void* data, size_t size) { return dma_read(address, data, size); },
+        [this](uint64_t address, void* data, size_t size) {
+            return dma_read_wire_address(address, data, size);
+        },
         [this](uint64_t address, const void* data, size_t size) {
-            return dma_write(address, data, size);
+            return dma_write_wire_address(address, data, size);
         },
         [this]() {
             isr_status_ |= 1;

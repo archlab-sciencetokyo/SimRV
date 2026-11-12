@@ -33,7 +33,9 @@
 #include "simrv/tui/TuiPreferences.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/DirtyDiffEngine.hpp"
 #include "simrv/tui/framework/PointerRouter.hpp"
+#include "simrv/tui/framework/ScreenBuffer.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/tui/framework/Workbench.hpp"
 #include "simrv/util/WakeupFd.hpp"
@@ -264,11 +266,13 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void cycle_tool_page(bool reverse = false);
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
-    void record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+    using simrv::core::ITelemetrySink::record_flight_instruction;
+    using simrv::core::ITelemetrySink::record_instruction;
+    void record_instruction(simrv::xlen::VirtAddr pc, simrv::isa::Opcode opcode,
                             simrv::isa::OperationId op_id, uint8_t rd, simrv::xlen::Register rd_val,
                             uint8_t rs1, simrv::xlen::Register rs1_val, uint8_t rs2,
                             simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) override;
-    void record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+    void record_flight_instruction(simrv::xlen::VirtAddr pc, simrv::isa::Opcode opcode,
                                    simrv::isa::OperationId op_id, uint8_t hart) override;
     /// Export the selected hart's paused architectural state and recent trace as JSON.
     void export_inspection_report();
@@ -315,7 +319,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void sync_workbench_slots();
     [[nodiscard]] auto total_snapshot_instruction_count() const -> uint64_t;
     struct TraceRecord {
-        simrv::xlen::Register pc = 0;
+        simrv::xlen::VirtAddr pc{};
         simrv::isa::Opcode opcode{};
         simrv::isa::OperationId op_id{};
         uint8_t rd = 0;
@@ -394,12 +398,15 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int terminal_rows_count_ = 0;
     int terminal_rows_start_ = 0;
     std::vector<std::string> last_screen_lines_;
+    framework::ScreenBuffer front_buffer_{};
+    framework::ScreenBuffer back_buffer_{};
+    framework::DirtyDiffEngine diff_engine_{};
     std::atomic<bool> paused_{true};
     MissionProgress mission_;
     bool mission_execution_stopped_{false};
     uint64_t mission_revision_seen_ = 0;
     std::optional<bool> mission_layout_fits_;
-    std::optional<simrv::xlen::Address> mission_breakpoint_addr_;
+    std::optional<simrv::xlen::VirtAddr> mission_breakpoint_addr_;
     bool inspection_overwrite_armed_{false};
     framework::PointerRouter pointer_router_{};
     framework::Workbench<WorkbenchSlot, 4> workbench_{

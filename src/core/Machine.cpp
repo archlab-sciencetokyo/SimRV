@@ -109,7 +109,6 @@ void RunnerBase::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_c
 
 void RunnerBase::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
-    workers_sleeping_.store(0, std::memory_order_relaxed);
     cycle_generation_.fetch_add(1, std::memory_order_release);
     cycle_completed_.fetch_add(1, std::memory_order_release);
     cycle_generation_.notify_all();
@@ -141,9 +140,7 @@ void RunnerBase::synchronize_multithreaded_workers(Machine& machine) {
     const auto target = machine.runtime_->secondary_hart_count;
     cycle_completed_.store(0, std::memory_order_relaxed);
     cycle_generation_.fetch_add(1, std::memory_order_release);
-    if (simrv::compiler::unlikely(workers_sleeping_.load(std::memory_order_relaxed) > 0)) {
-        cycle_generation_.notify_all();
-    }
+    cycle_generation_.notify_all();
 
     constexpr uint32_t kSpinLimit = 1000;
     for (uint32_t spin = 0; spin < kSpinLimit; ++spin) {
@@ -184,6 +181,7 @@ Machine::Machine(MachineConfig machine_config)
                     : transfer.complete ? MachineEventKind::DmaCompleted
                                         : MachineEventKind::DmaStarted,
             .cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle,
+            .hart = std::nullopt,
             .transfer_id = transfer.id,
             .byte_count = transfer.byte_count,
             .request_cycle = transfer.request_cycle,
@@ -223,7 +221,7 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     }
 }
 
-void Machine::set_resolved_boot_state(simrv::xlen::Address start_pc,
+void Machine::set_resolved_boot_state(simrv::xlen::VirtAddr start_pc,
                                       std::optional<simrv::xlen::Address> tohost_address) noexcept {
     resolved_start_pc_ = start_pc;
     if (tohost_address.has_value()) resolved_isatest_tohost_ = *tohost_address;
@@ -269,7 +267,7 @@ auto Machine::test_secondary_harts() noexcept -> std::vector<std::unique_ptr<sim
     return runtime_->secondary_harts;
 }
 
-auto Machine::mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::Uart>& {
+auto Machine::mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::SerialDevice>& {
     return runtime_->uart;
 }
 
@@ -296,15 +294,49 @@ auto Machine::ram_data() noexcept -> simrv::xlen::Byte* { return runtime_->ram.d
 auto Machine::ram_data() const noexcept -> const simrv::xlen::Byte* { return runtime_->ram.data(); }
 
 auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
-    return {runtime_->ram.data(), config.memory.dram_base, config.memory.dram_size};
+    return {runtime_->ram.data(), simrv::xlen::PhysAddr{config.memory.dram_base},
+            config.memory.dram_size};
 }
 
 auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
+    if (runtime_ && runtime_->framebuffer) {
+        const auto data = runtime_->framebuffer->framebuffer_data();
+        const auto geom = runtime_->framebuffer->framebuffer_geometry();
+        const uint64_t row_bytes = uint64_t{geom.width} * geom.bpp;
+        const uint64_t stride = geom.stride != 0 ? geom.stride : row_bytes;
+        if (geom.width == 0 || geom.height == 0 ||
+            geom.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+            geom.height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+            !((geom.bpp == 2 && geom.format == FramebufferFormat::R5G6B5) ||
+              (geom.bpp == 4 && geom.format == FramebufferFormat::A8R8G8B8)) ||
+            stride < row_bytes || stride * geom.height > data.size() ||
+            data.size() > std::numeric_limits<simrv::xlen::Address>::max())
+            return {};
+        return {
+            const_cast<simrv::xlen::Byte*>(reinterpret_cast<const simrv::xlen::Byte*>(data.data())),
+            simrv::xlen::PhysAddr{geom.base}, static_cast<simrv::xlen::Address>(data.size())};
+    }
     const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
     const auto base = framebuffer_geometry_.base;
     const auto ram = ram_view();
-    if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
-    return {ram.unchecked_ptr(base), base, size};
+    const simrv::xlen::PhysAddr physical_base{base};
+    if (!ram.contains(physical_base, static_cast<std::size_t>(size))) return {};
+    return {ram.unchecked_ptr(physical_base), physical_base, size};
+}
+
+auto Machine::framebuffer_geometry() const noexcept -> FramebufferConfig {
+    if (runtime_ && runtime_->framebuffer) {
+        return runtime_->framebuffer->framebuffer_geometry();
+    }
+    return framebuffer_geometry_;
+}
+
+auto Machine::framebuffer_width() const noexcept -> uint32_t {
+    return framebuffer_geometry().width;
+}
+
+auto Machine::framebuffer_height() const noexcept -> uint32_t {
+    return framebuffer_geometry().height;
 }
 
 auto Machine::dump_signature(const std::string& filepath) const -> bool {
@@ -324,8 +356,8 @@ auto Machine::dump_signature(const std::string& filepath) const -> bool {
         return false;
     }
     if (*begin_opt >= *end_opt) {
-        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}", *begin_opt,
-                         *end_opt);
+        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}",
+                         begin_opt->raw(), end_opt->raw());
         return false;
     }
 
@@ -335,12 +367,12 @@ auto Machine::dump_signature(const std::string& filepath) const -> bool {
         return false;
     }
 
-    const auto len = static_cast<size_t>(*end_opt - *begin_opt);
+    const auto len = static_cast<size_t>(end_opt->raw() - begin_opt->raw());
     std::vector<uint8_t> buffer(len, 0);
     auto& mem = const_cast<Machine*>(this)->memory();
-    if (!mem.dma_read(*begin_opt, buffer.data(), len)) {
-        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}", *begin_opt,
-                          *end_opt);
+    if (!mem.dma_read(simrv::xlen::PhysAddr{begin_opt->raw()}, buffer.data(), len)) {
+        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}",
+                          begin_opt->raw(), end_opt->raw());
         return false;
     }
 
@@ -372,7 +404,7 @@ auto Machine::save_checkpoint(const std::string& filepath) const
                                   .xlen = simrv::xlen::kXLenBits,
                                   .vlen = config.isa.vlen,
                                   .harts = static_cast<uint32_t>(num_harts()),
-                                  .ram_base = config.memory.dram_base,
+                                  .ram_base = config.memory.dram_base.raw(),
                                   .ram_size = config.memory.dram_size};
     out.write(reinterpret_cast<const char*>(&header), sizeof(header));
     for (size_t i = 0; i < num_harts(); ++i) {
@@ -485,7 +517,7 @@ void Machine::maybe_save_periodic_checkpoint() {
                 metadata << std::format(
                     "{{\"hart\":{},\"pc\":\"0x{:x}\","
                     "\"privilege\":\"{}\",\"pending_interrupts\":\"0x{:x}\"}}",
-                    h, static_cast<uint64_t>(hart(h).state().pc),
+                    h, static_cast<uint64_t>(hart(h).state().pc.raw()),
                     hart(h).state().priv == simrv::xlen::PrivilegeLevel::User         ? "U"
                     : hart(h).state().priv == simrv::xlen::PrivilegeLevel::Supervisor ? "S"
                                                                                       : "M",
@@ -534,6 +566,7 @@ void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
             .kind = asserted ? MachineEventKind::InterruptAsserted
                              : MachineEventKind::InterruptDeasserted,
             .cycle = runtime_->primary_cpu.clint_mmio.mcycle,
+            .hart = std::nullopt,
             .interrupt_source = irq,
             .component = "platform_irq",
         });
@@ -542,7 +575,7 @@ void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
 
 void Machine::set_hart_irq(simrv::xlen::HartId hart_id, InterruptType type,
                            simrv::xlen::PrivilegeLevel priv, bool asserted) {
-    if (hart_id.val >= num_harts()) {
+    if (hart_id.raw() >= num_harts()) {
         return;
     }
     MipBit pending_bit = MipBit::Msip;
@@ -568,10 +601,30 @@ auto Machine::rtc_device() noexcept -> simrv::Rtc* { return runtime_->rtc.get();
 
 auto Machine::rtc_device() const noexcept -> const simrv::Rtc* { return runtime_->rtc.get(); }
 
-auto Machine::uart_device() noexcept -> simrv::device::Uart* { return runtime_->uart.get(); }
-
-auto Machine::uart_device() const noexcept -> const simrv::device::Uart* {
+auto Machine::uart_device() noexcept -> simrv::device::SerialDevice* {
     return runtime_->uart.get();
+}
+
+auto Machine::uart_device() const noexcept -> const simrv::device::SerialDevice* {
+    return runtime_->uart.get();
+}
+
+void Machine::advance_device_cycles(uint64_t cycles) {
+    if (cycles == 0 || runtime_ == nullptr) return;
+    if (auto* uart = runtime_->uart.get(); uart != nullptr) {
+        uart->advance_cycles(cycles);
+    }
+    for (auto* dev : runtime_->ticked_extension_mmios) {
+        dev->advance_cycles(cycles);
+    }
+}
+
+auto Machine::framebuffer_device() noexcept -> simrv::device::FramebufferDevice* {
+    return runtime_->framebuffer;
+}
+
+auto Machine::framebuffer_device() const noexcept -> const simrv::device::FramebufferDevice* {
+    return runtime_->framebuffer;
 }
 
 auto Machine::dma_controller() noexcept -> simrv::device::DmaController* {
@@ -732,6 +785,11 @@ void Machine::service_pending_input() {
                     break;
             }
         }
+        if (event.type == PendingInputEvent::Type::Key) {
+            for (auto* input : runtime_->input_devices) {
+                input->send_key(event.code, event.pressed);
+            }
+        }
     }
 }
 
@@ -792,6 +850,26 @@ void Machine::publish_tui_execution_snapshot() noexcept {
     }
 }
 
+void Machine::sample_throughput() noexcept {
+    const auto current_instructions = retired_instruction_count();
+    if (simrv::compiler::likely(current_instructions - last_sample_instructions_ < 1'000'000)) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_sample_time_).count();
+    if (elapsed_ns >= 1'000'000 && current_instructions > last_sample_instructions_) {
+        const auto d_inst = current_instructions - last_sample_instructions_;
+        const double mips =
+            (static_cast<double>(d_inst) * 1000.0) / static_cast<double>(elapsed_ns);
+        if (mips > peak_mips_) {
+            peak_mips_ = mips;
+        }
+        last_sample_time_ = now;
+        last_sample_instructions_ = current_instructions;
+    }
+}
+
 void Machine::publish_requested_tui_sample(size_t hart_index) noexcept {
     const auto requested = tui_sample_requested_.load(std::memory_order_acquire);
     if (hart_index >= num_harts() || hart_index >= tui_sample_published_.size() ||
@@ -808,7 +886,8 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     snapshot->hart = hart_index;
     snapshot->pc = source.state().pc;
     snapshot->cycle_count = source.clint_mmio.mcycle;
-    snapshot->instruction_count = source.e_icount;
+    snapshot->instruction_count =
+        source.state().minstret != 0 ? source.state().minstret : source.e_icount;
     snapshot->timer_ticks = primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
     snapshot->privilege = source.state().priv;
     snapshot->ca_stats = source.pipeline_sim.get_stats();
@@ -864,9 +943,18 @@ void Machine::finalize_runner_cycle() {
 }
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
-    if (!runtime_profile.allows_fast_batch() || is_stepping() || lockstep_enabled() ||
-        branch_trace_enabled() || breakpoint_manager().has_any() || is_smp_enabled()) {
+    // Ticking extension devices must observe each instruction boundary. The bare-metal
+    // batch engine only advances the built-in UART, so use the general runner for them.
+    if (!runtime_profile.allows_fast_batch() || !runtime_->ticked_extension_mmios.empty() ||
+        (runtime_->uart && runtime_->uart->requires_instruction_ticks()) || is_stepping() ||
+        lockstep_enabled() || branch_trace_enabled() || breakpoint_manager().has_any() ||
+        is_smp_enabled() || primary_hart().state().has_active_triggers ||
+        primary_hart().cpu_model_config.mmio_console_redirect) {
         return std::nullopt;
+    }
+    for (const auto& hart : runtime_->secondary_harts) {
+        if (hart->state().has_active_triggers || hart->cpu_model_config.mmio_console_redirect)
+            return std::nullopt;
     }
     if (tui_enabled() && (!telemetry_sink_ || telemetry_sink_->is_trace_active() ||
                           telemetry_sink_->step_delay_us() != 0)) {
@@ -910,7 +998,6 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
     stop_threads();
     machine_ = &machine;
     cycle_generation_.store(0, std::memory_order_relaxed);
-    workers_sleeping_.store(0, std::memory_order_relaxed);
     cycle_completed_.store(0, std::memory_order_relaxed);
     workers_running_.store(true, std::memory_order_release);
     const bool poll_debug_pause = machine.debugger_enabled() || machine.tui_enabled();
@@ -918,21 +1005,27 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
         worker_threads_.emplace_back([&machine, this, i, baremetal,
                                       poll_debug_pause](const std::stop_token& stop_token) {
             auto& hart = *machine.runtime_->secondary_harts[i];
-            uint64_t observed_cycle_generation = 0;
+            uint32_t observed_cycle_generation = 0;
             const uint32_t worker_batch = std::max(1U, machine.config.execution.smp_quantum);
             while (!stop_token.stop_requested() && machine.is_running() &&
                    workers_running_.load(std::memory_order_relaxed)) {
-                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
-                    machine.execution_state() != ExecutionState::Running ||
-                    machine.breakpoint_manager().has_any() || machine.debug_pause_requested()) {
+                const auto should_park = [&] {
+                    // Cycle-mode workers must always wait for the next generation: a cycle
+                    // already in flight still needs an acknowledgement after pause or stop.
+                    return !machine.runtime_profile.is_cycle_mode() &&
+                           (hart.hart_status.load(std::memory_order_relaxed) !=
+                                HartStatus::Started ||
+                            machine.execution_state() != ExecutionState::Running ||
+                            machine.breakpoint_manager().has_any() ||
+                            machine.debug_pause_requested());
+                };
+                if (should_park()) {
                     const auto generation =
                         machine.control_event_generation_.load(std::memory_order_acquire);
                     if (!workers_running_.load(std::memory_order_acquire) ||
                         stop_token.stop_requested() || !machine.is_running())
                         break;
-                    if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
-                        machine.execution_state() != ExecutionState::Running ||
-                        machine.breakpoint_manager().has_any() || machine.debug_pause_requested()) {
+                    if (should_park()) {
                         machine.control_event_generation_.wait(generation,
                                                                std::memory_order_relaxed);
                     }
@@ -940,23 +1033,21 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
                 }
                 if (machine.runtime_profile.is_cycle_mode()) {
                     auto generation = cycle_generation_.load(std::memory_order_acquire);
-                    if (generation <= observed_cycle_generation) {
+                    if (generation == observed_cycle_generation) {
                         constexpr uint32_t kWorkerSpinLimit = 800;
                         for (uint32_t spin = 0; spin < kWorkerSpinLimit; ++spin) {
                             simrv::compiler::cpu_relax();
                             generation = cycle_generation_.load(std::memory_order_acquire);
-                            if (generation > observed_cycle_generation) break;
+                            if (generation != observed_cycle_generation) break;
                         }
                     }
-                    if (generation <= observed_cycle_generation) {
-                        workers_sleeping_.fetch_add(1, std::memory_order_relaxed);
-                        while (generation <= observed_cycle_generation &&
+                    if (generation == observed_cycle_generation) {
+                        while (generation == observed_cycle_generation &&
                                workers_running_.load(std::memory_order_acquire) &&
                                !stop_token.stop_requested()) {
                             cycle_generation_.wait(generation, std::memory_order_acquire);
                             generation = cycle_generation_.load(std::memory_order_acquire);
                         }
-                        workers_sleeping_.fetch_sub(1, std::memory_order_relaxed);
                     }
                     if (!workers_running_.load(std::memory_order_acquire) ||
                         stop_token.stop_requested()) {
@@ -1179,7 +1270,6 @@ void BaremetalRunner::finalize(Machine& machine) {
     if (simrv::compiler::unlikely(
             machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
-        simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
     if (auto* uart = machine.uart_device(); uart) {
@@ -1227,10 +1317,10 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
             ? batch_size
             : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
     cpu.run_fast_os_batch(machine, quantum, *policy);
-    // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
-    // the same explicit boundary that publishes the sampled UI snapshot.
-    if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
+    // Surface pending UART RX at the batch boundary.
+    if (auto* uart = machine.uart_device(); uart) {
         uart->service_interrupts();
+        uart->flush_tx_buffer();
     }
     return true;
 }
@@ -1248,15 +1338,13 @@ void OsRunner::finalize(Machine& machine) {
         if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
         if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
             machine.trace().emit_branch_prediction_trace(
-                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc.raw(),
-                cpu.pipeline_context.jmp_pc.raw(), cpu.pipeline_context.opcode,
-                cpu.pipeline_context.tkn);
+                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
+                cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
     if (simrv::compiler::unlikely(
             machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
-        simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
     if (auto* uart = machine.uart_device();
@@ -1294,6 +1382,7 @@ void Machine::reset_state() {
         publish_machine_event(MachineEvent{
             .kind = MachineEventKind::InterruptDeasserted,
             .cycle = primary_hart().clint_mmio.mcycle,
+            .hart = std::nullopt,
             .interrupt_source = irq,
             .component = "platform_irq",
         });
@@ -1334,6 +1423,11 @@ void Machine::switch_execution_engine(ExecutionEngine engine) {
 void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
     if (runtime_profile.engine == engine) return;
 
+    // Workers can be waiting on different synchronization primitives in each engine.
+    // Stop them before resetting per-hart state, then start them with the new policy.
+    const bool restart_runner = runner_started_.load(std::memory_order_acquire);
+    if (restart_runner) stop_runner();
+
     const bool to_cycle = is_cycle_engine(engine);
     for (size_t i = 0; i < num_harts(); ++i) {
         auto& cpu = hart(i);
@@ -1356,6 +1450,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
         } else {
             cpu.pipeline_sim.config.record_snapshots = false;
             cpu.decode_cache.flush();
+            cpu.block_cache.flush();
         }
     }
 
@@ -1368,6 +1463,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
 
     runtime_profile.engine = engine;
     publish_tui_execution_snapshot();
+    if (restart_runner) start_runner();
 
     simrv::log::info("Switched execution mode to {}", runtime_profile.execution_name());
 }
@@ -1378,70 +1474,43 @@ void Machine::prewarm_bram_caches() {
 
     for (size_t h = 0; h < num_harts(); ++h) {
         auto& cpu = hart(h);
+        const auto prewarm = [&]<typename Cache>(Cache& cache, simrv::xlen::PhysAddr address,
+                                                 size_t size, bool align_segment) {
+            constexpr simrv::xlen::Address kLineBytes = Cache::kLineBytes;
+            const simrv::xlen::Address start =
+                align_segment ? address.raw() & ~(kLineBytes - 1u) : address.raw();
+            const size_t capacity = cache.capacity_bytes();
+            const size_t offset = align_segment ? address.raw() - start : 0;
+            const size_t bytes = !align_segment || offset >= capacity || size >= capacity - offset
+                                     ? capacity
+                                     : offset + size;
+            const size_t lines = bytes / kLineBytes + (bytes % kLineBytes != 0);
+            auto addr = start;
+            for (size_t line = 0; line < lines; ++line) {
+                const simrv::xlen::PhysAddr physical{addr};
+                if (ram.contains(physical, kLineBytes)) {
+                    cache.insert(physical, ram.unchecked_ptr(physical),
+                                 simrv::memory::MesiState::Shared);
+                    memory().system_bus().coherence_hub().register_preloaded_line(physical,
+                                                                                  cpu.hart_id());
+                }
+                if (addr > std::numeric_limits<simrv::xlen::Address>::max() - kLineBytes) break;
+                addr += kLineBytes;
+            }
+        };
 
         if (!loaded_segments_.empty()) {
             for (const auto& seg : loaded_segments_) {
                 if (seg.is_executable) {
-                    constexpr simrv::xlen::Address kLineBytes = simrv::cache::ICache::kLineBytes;
-                    const simrv::xlen::Address start = seg.paddr & ~(kLineBytes - 1u);
-                    simrv::xlen::Address end =
-                        (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
-                    const size_t max_bytes = cpu.icache.capacity_bytes();
-                    if (end > start + max_bytes) {
-                        end = start + max_bytes;
-                    }
-                    for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
-                        if (ram.contains(addr, kLineBytes)) {
-                            cpu.icache.insert(addr, ram.unchecked_ptr(addr),
-                                              simrv::memory::MesiState::Shared);
-                            memory().system_bus().coherence_hub().register_preloaded_line(
-                                addr, cpu.hart_id());
-                        }
-                    }
+                    prewarm(cpu.icache, seg.paddr, seg.size, true);
                 } else {
-                    constexpr simrv::xlen::Address kLineBytes = simrv::cache::DCache::kLineBytes;
-                    const simrv::xlen::Address start = seg.paddr & ~(kLineBytes - 1u);
-                    simrv::xlen::Address end =
-                        (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
-                    const size_t max_bytes = cpu.dcache.capacity_bytes();
-                    if (end > start + max_bytes) {
-                        end = start + max_bytes;
-                    }
-                    for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
-                        if (ram.contains(addr, kLineBytes)) {
-                            cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
-                                              simrv::memory::MesiState::Shared);
-                            memory().system_bus().coherence_hub().register_preloaded_line(
-                                addr, cpu.hart_id());
-                        }
-                    }
+                    prewarm(cpu.dcache, seg.paddr, seg.size, true);
                 }
             }
         } else {
             // Fallback: pre-warm IMEM range into ICache and DMEM range into DCache
-            const simrv::xlen::Address dram_base = ram.base();
-            constexpr simrv::xlen::Address kILineBytes = simrv::cache::ICache::kLineBytes;
-            const simrv::xlen::Address i_end = dram_base + cpu.icache.capacity_bytes();
-            for (simrv::xlen::Address addr = dram_base; addr < i_end; addr += kILineBytes) {
-                if (ram.contains(addr, kILineBytes)) {
-                    cpu.icache.insert(addr, ram.unchecked_ptr(addr),
-                                      simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(addr,
-                                                                                  cpu.hart_id());
-                }
-            }
-
-            constexpr simrv::xlen::Address kDLineBytes = simrv::cache::DCache::kLineBytes;
-            const simrv::xlen::Address dmem_base = dram_base;
-            const simrv::xlen::Address d_end = dmem_base + cpu.dcache.capacity_bytes();
-            for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
-                if (ram.contains(addr, kDLineBytes)) {
-                    cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
-                                      simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(addr,
-                                                                                  cpu.hart_id());
-                }
-            }
+            prewarm(cpu.icache, simrv::xlen::PhysAddr{ram.base()}, 0, false);
+            prewarm(cpu.dcache, simrv::xlen::PhysAddr{ram.base()}, 0, false);
         }
     }
 }
@@ -1508,7 +1577,7 @@ void Machine::notify_interrupt_transition(simrv::xlen::HartId hart_id, uint32_t 
         .kind =
             asserted ? MachineEventKind::InterruptAsserted : MachineEventKind::InterruptDeasserted,
         .cycle = cycle,
-        .hart = hart_id.val,
+        .hart = hart_id,
         .interrupt_cause = cause,
         .component = std::string(source),
     });
@@ -1683,6 +1752,8 @@ auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
             return "lockstep divergence";
         case StopReason::UnhandledTrap:
             return "unhandled trap";
+        case StopReason::TrapLoop:
+            return "trap loop";
         case StopReason::ExternalStop:
             return "external/user stop";
     }
@@ -1781,6 +1852,7 @@ void Machine::run() {
     simrv::util::benchmark_event("ready", retired_instruction_count());
     if (!is_paused()) simrv::util::benchmark_event("resumed", retired_instruction_count());
     reset_realtime_anchor();
+    set_start_time(std::chrono::steady_clock::now());
     bool was_paused = false;
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
@@ -1837,15 +1909,14 @@ void Machine::run() {
             if (simrv::compiler::unlikely(config.execution.fincnt !=
                                               std::numeric_limits<simrv::xlen::Counter>::max() &&
                                           retired_instruction_count() >= config.execution.fincnt)) {
-                simrv::log::info("finished by -e option");
                 stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
             }
-            if (auto* uart = uart_device();
-                !tui_enabled() && uart && !uart->is_input_thread_running()) {
+            if (auto* uart = uart_device(); !tui_enabled() && uart) {
                 uart->service_interrupts();
             }
             if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
+            sample_throughput();
             pace_realtime();
             continue;
         }
@@ -1853,6 +1924,9 @@ void Machine::run() {
         prepare_runner_cycle();
         execute_runner_cycle();
         finalize_runner_cycle();
+        if ((primary_hart().clint_mmio.mcycle & 0x3FF) == 0) {
+            sample_throughput();
+        }
 
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
@@ -1861,7 +1935,6 @@ void Machine::run() {
         if (simrv::compiler::unlikely(config.execution.fincnt !=
                                           std::numeric_limits<simrv::xlen::Counter>::max() &&
                                       retired_instruction_count() >= config.execution.fincnt)) {
-            simrv::log::info("finished by -e option");
             stop_reason_ = StopReason::InstructionLimit;
             is_running_ = false;
         }
@@ -1903,7 +1976,7 @@ void Machine::run() {
         if (!appmode_enabled() && runtime_->spike_lockstep &&
             runtime_->spike_lockstep->is_running()) {
             runtime_->spike_lockstep->compare_and_report(primary_hart().state(),
-                                                         primary_hart().pipeline_context.cpc.raw(),
+                                                         primary_hart().pipeline_context.cpc,
                                                          primary_hart().e_icount);
             if (runtime_->spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
@@ -2038,13 +2111,19 @@ void Machine::finalize_cycle_tohost() {
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
             const auto ram = ram_view();
-            if (ram.contains(payload, 4 * sizeof(uint64_t))) {
+            if (payload > std::numeric_limits<simrv::xlen::Address>::max()) {
+                simrv::log::warn("HTIF syscall block address exceeds the guest address width");
+                tohost = 0;
+                return;
+            }
+            const simrv::xlen::PhysAddr syscall_address{static_cast<simrv::xlen::Address>(payload)};
+            if (ram.contains(syscall_address, 4 * sizeof(uint64_t))) {
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;
                 uint64_t arg1 = 0;
                 uint64_t arg2 = 0;
 
-                const auto* syscall_block = ram.unchecked_ptr(payload);
+                const auto* syscall_block = ram.unchecked_ptr(syscall_address);
                 std::memcpy(&syscall_num, syscall_block + 0, sizeof(syscall_num));
                 std::memcpy(&arg0, syscall_block + 8, sizeof(arg0));
                 std::memcpy(&arg1, syscall_block + 16, sizeof(arg1));
@@ -2053,9 +2132,16 @@ void Machine::finalize_cycle_tohost() {
                 if (syscall_num == 64) {  // SYS_write
                     const simrv::xlen::Address fromhost_addr =
                         (isa_test_tohost() != 0 ? isa_test_tohost() : 0x80001000) + 8;
-                    const auto buf_addr = is_guest_xlen32 ? (arg1 & 0xFFFFFFFFULL) : arg1;
+                    const uint64_t raw_buf_addr = is_guest_xlen32 ? (arg1 & 0xFFFFFFFFULL) : arg1;
+                    if (raw_buf_addr > std::numeric_limits<simrv::xlen::Address>::max()) {
+                        simrv::log::warn("HTIF SYS_write buffer address exceeds the guest width");
+                        tohost = 0;
+                        return;
+                    }
+                    const simrv::xlen::PhysAddr buf_addr{
+                        static_cast<simrv::xlen::Address>(raw_buf_addr)};
                     if (!ram.contains(buf_addr, static_cast<size_t>(arg2)) ||
-                        !ram.contains(fromhost_addr, sizeof(uint64_t))) {
+                        !ram.contains(simrv::xlen::PhysAddr{fromhost_addr}, sizeof(uint64_t))) {
                         simrv::log::warn(
                             "HTIF SYS_write references RAM outside the configured DRAM");
                         tohost = 0;
@@ -2069,11 +2155,14 @@ void Machine::finalize_cycle_tohost() {
 
                     // Write success response (bytes written) to fromhost
                     uint64_t resp = arg2;
-                    std::memcpy(ram.unchecked_ptr(fromhost_addr), &resp, sizeof(resp));
+                    std::memcpy(ram.unchecked_ptr(simrv::xlen::PhysAddr{fromhost_addr}), &resp,
+                                sizeof(resp));
                     for (size_t i = 0; i < num_harts(); ++i) {
-                        hart(i).dcache.probe_line(fromhost_addr, simrv::memory::MesiState::Invalid);
+                        hart(i).dcache.probe_line(simrv::xlen::PhysAddr{fromhost_addr},
+                                                  simrv::memory::MesiState::Invalid);
                     }
-                    memory_.system_bus().coherence_hub().invalidate_line_external(fromhost_addr);
+                    memory_.system_bus().coherence_hub().invalidate_line_external(
+                        simrv::xlen::PhysAddr{fromhost_addr});
                     tohost = 0;
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit

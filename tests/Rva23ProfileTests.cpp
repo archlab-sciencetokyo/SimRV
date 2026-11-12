@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "TestHelper.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/cache/L2Cache.hpp"
@@ -38,14 +39,7 @@
 
 namespace {
 
-#define TEST_ASSERT(cond)                                                                    \
-    do {                                                                                     \
-        if (!(cond)) {                                                                       \
-            std::cerr << "Assertion failed at " << __FILE__ << ":" << __LINE__ << ": " #cond \
-                      << std::endl;                                                          \
-            std::exit(1);                                                                    \
-        }                                                                                    \
-    } while (false)
+#define TEST_ASSERT(cond) TEST_CHECK(cond)
 
 void test_zicond_semantics() {
     using namespace simrv::isa;
@@ -97,7 +91,7 @@ void test_zicclsm_unaligned_main_memory() {
         auto& cpu = machine.primary_hart();
         cpu.reset();
 
-        constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Register kValue = 0x0123456789ABCDEFULL;
         const auto check_unaligned = [&](simrv::xlen::Address offset) {
             cpu.active_context().pending_exception.reset();
@@ -128,14 +122,18 @@ void test_za64rs_reservation_set() {
 
     ReservationTable table;
     constexpr simrv::xlen::Address kAddress = 0x8000103FULL;
-    table.set_reservation(0, kAddress);
-    TEST_ASSERT(table.check_reservation(0, 0x80001038ULL));
-    TEST_ASSERT(!table.check_reservation(0, 0x80001030ULL));
-    TEST_ASSERT(table.check_reservation(0, 0x8000103FULL));
-    TEST_ASSERT(!table.check_reservation(0, 0x80001040ULL));
+    table.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kAddress});
+    TEST_ASSERT(
+        table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001038ULL}));
+    TEST_ASSERT(
+        !table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001030ULL}));
+    TEST_ASSERT(
+        table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x8000103FULL}));
+    TEST_ASSERT(
+        !table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{0x80001040ULL}));
 
-    table.invalidate_matching(0x80001038ULL, 1);
-    TEST_ASSERT(!table.check_reservation(0, kAddress));
+    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001038ULL}, simrv::xlen::HartId{1});
+    TEST_ASSERT(!table.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{kAddress}));
 }
 
 void test_ziccrse_eventual_lr_sc_success() {
@@ -147,7 +145,7 @@ void test_ziccrse_eventual_lr_sc_success() {
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.memory().initialize_mmu();
-    constexpr simrv::xlen::Address kAddress = simrv::memory::kDramBaseAddress + 0x200;
+    constexpr simrv::xlen::Address kAddress = (simrv::memory::kDramBaseAddress + 0x200).raw();
 
     const auto lr = [&](simrv::core::CPU& cpu) {
         auto& ctx = cpu.active_context();
@@ -155,7 +153,7 @@ void test_ziccrse_eventual_lr_sc_success() {
         ctx.opcode = simrv::isa::Opcode::Amo;
         ctx.funct5 = simrv::isa::Funct5Amo::Lr;
         ctx.funct3 = simrv::isa::Funct3::Sw;
-        ctx.mem_addr = kAddress;
+        ctx.mem_addr = simrv::xlen::VirtAddr{kAddress};
         ctx.rrs1 = kAddress;
         cpu.run_memory_stage(machine);
         TEST_ASSERT(!ctx.pending_exception.has_value());
@@ -167,7 +165,7 @@ void test_ziccrse_eventual_lr_sc_success() {
         ctx.opcode = simrv::isa::Opcode::Amo;
         ctx.funct5 = simrv::isa::Funct5Amo::Sc;
         ctx.funct3 = simrv::isa::Funct3::Sw;
-        ctx.mem_addr = kAddress;
+        ctx.mem_addr = simrv::xlen::VirtAddr{kAddress};
         ctx.rrs1 = kAddress;
         ctx.rrs2 = value;
         cpu.run_memory_stage(machine);
@@ -198,7 +196,7 @@ void test_ziccrse_eventual_lr_sc_success() {
 
     // Run a real constrained loop (LR, ADDI, SC, BNE) on two interleaved harts. Neither loop
     // performs an unconditional write, so both must eventually leave the retry branch.
-    constexpr simrv::xlen::Address kCode = simrv::memory::kDramBaseAddress + 0x100;
+    constexpr simrv::xlen::Address kCode = (simrv::memory::kDramBaseAddress + 0x100).raw();
     const auto amo = [](uint32_t funct5, uint32_t rs2, uint32_t rd) {
         return (funct5 << 27U) | (rs2 << 20U) | (10U << 15U) | (2U << 12U) | (rd << 7U) | 0x2FU;
     };
@@ -209,8 +207,8 @@ void test_ziccrse_eventual_lr_sc_success() {
     std::memcpy(ram.data() + 0x100, loop.data(), sizeof(loop));
     constexpr uint32_t kLoopInitial = 0;
     std::memcpy(ram.data() + 0x204, &kLoopInitial, sizeof(kLoopInitial));
-    hart0.state().pc = kCode;
-    hart1.state().pc = kCode;
+    hart0.state().pc = simrv::xlen::VirtAddr{kCode};
+    hart1.state().pc = simrv::xlen::VirtAddr{kCode};
     hart0.state().regs.write(simrv::xlen::RegId::A0, kAddress + 4);
     hart1.state().regs.write(simrv::xlen::RegId::A0, kAddress + 4);
     const auto done = [](const simrv::core::CPU& cpu) { return cpu.state().pc == kCode + 16; };
@@ -237,8 +235,8 @@ void test_ziccif_atomic_instruction_fetch_under_smp_store() {
     secondary->state().mhartid = 1;
     machine.add_hart_for_testing(std::move(secondary));
 
-    constexpr simrv::xlen::Address kTarget = simrv::memory::kDramBaseAddress + 0x100;
-    constexpr simrv::xlen::Address kWriter = simrv::memory::kDramBaseAddress + 0x300;
+    constexpr simrv::xlen::Address kTarget = (simrv::memory::kDramBaseAddress + 0x100).raw();
+    constexpr simrv::xlen::Address kWriter = (simrv::memory::kDramBaseAddress + 0x300).raw();
     constexpr uint32_t kInstructionA = 0x00100193U;  // addi gp, zero, 1
     constexpr uint32_t kInstructionB = 0x00200193U;  // addi gp, zero, 2
     constexpr std::array<uint32_t, 6> kWriterProgram = {
@@ -254,7 +252,7 @@ void test_ziccif_atomic_instruction_fetch_under_smp_store() {
 
     auto& writer = machine.hart(1);
     writer.state().priv = simrv::xlen::PrivilegeLevel::Machine;
-    writer.state().pc = kWriter;
+    writer.state().pc = simrv::xlen::VirtAddr{kWriter};
     writer.state().regs.write(simrv::xlen::RegId::A0, kTarget);
 
     auto& fetcher = machine.primary_hart();
@@ -270,8 +268,9 @@ void test_ziccif_atomic_instruction_fetch_under_smp_store() {
 
     bool saw_a = false;
     bool saw_b = false;
-    for (unsigned i = 0; i < 100'000 && !writer_done.load(std::memory_order_acquire); ++i) {
-        TEST_ASSERT(fetcher.fetch_stage(machine, kTarget));
+    for (unsigned i = 0;
+         i < 500'000 && (!writer_done.load(std::memory_order_acquire) || !saw_b || !saw_a); ++i) {
+        TEST_ASSERT(fetcher.fetch_stage(machine, simrv::xlen::VirtAddr{kTarget}));
         const auto fetched = fetcher.active_context().ir_org;
         TEST_ASSERT(fetched == kInstructionA || fetched == kInstructionB);
         saw_a |= fetched == kInstructionA;
@@ -289,7 +288,7 @@ void test_ziccamoa_main_memory_atomics() {
     using simrv::isa::Opcode;
 
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
-    constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress.raw();
     constexpr std::array<Funct5Amo, 9> kOps = {Funct5Amo::Swap, Funct5Amo::Add,  Funct5Amo::Xor,
                                                Funct5Amo::And,  Funct5Amo::Or,   Funct5Amo::Min,
                                                Funct5Amo::Max,  Funct5Amo::Minu, Funct5Amo::Maxu};
@@ -310,7 +309,7 @@ void test_ziccamoa_main_memory_atomics() {
             ctx.opcode = Opcode::Amo;
             ctx.funct5 = kOps[i];
             ctx.funct3 = funct3;
-            ctx.mem_addr = address;
+            ctx.mem_addr = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(address)};
             ctx.rrs1 = address;
             ctx.rrs2 = operand;
             cpu.run_memory_stage(machine);
@@ -506,7 +505,7 @@ void test_zfhmin_scalar_instructions() {
     machine.memory().initialize_mmu();
     auto& cpu = machine.primary_hart();
     cpu.reset();
-    const auto address = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress + 0x200};
+    const auto address = simrv::xlen::VirtAddr{(simrv::memory::kDramBaseAddress + 0x200).raw()};
     simrv::memory::MemoryAccess::storeFp(machine.memory(), cpu, address, fp[2], Funct3::Fsh);
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
     const auto loaded =
@@ -689,9 +688,9 @@ void test_zifencei_flushes_local_instruction_state() {
     auto& cpu = machine.primary_hart();
     constexpr simrv::xlen::Address kLineAddress = 0x1000;
     std::array<simrv::xlen::Byte, 64> line{};
-    cpu.icache.insert(kLineAddress, line.data());
+    cpu.icache.insert(simrv::xlen::PhysAddr{kLineAddress}, line.data());
     uint32_t cached_word = 0;
-    TEST_ASSERT(cpu.icache.read(kLineAddress, cached_word));
+    TEST_ASSERT(cpu.icache.read(simrv::xlen::PhysAddr{kLineAddress}, cached_word));
 
     simrv::pipeline::DecodedInstruction decoded{};
     decoded.cpc = simrv::xlen::VirtAddr{kLineAddress};
@@ -710,7 +709,7 @@ void test_zifencei_flushes_local_instruction_state() {
     TEST_ASSERT(cpu.execute_stage(machine));
 
     uint32_t instruction = 0;
-    TEST_ASSERT(!cpu.icache.read(kLineAddress, instruction));
+    TEST_ASSERT(!cpu.icache.read(simrv::xlen::PhysAddr{kLineAddress}, instruction));
     TEST_ASSERT(cpu.decode_cache.lookup(decoded.cpc) == nullptr);
 }
 
@@ -722,21 +721,23 @@ void test_svade_faults_on_clear_accessed_and_dirty_bits() {
         machine.memory().initialize_mmu();
         auto& cpu = machine.primary_hart();
         const auto memory = machine.memory().memory_geometry();
-        const simrv::xlen::Address root = memory.dram_base + 0x1000;
-        const simrv::xlen::Address level1 = memory.dram_base + 0x2000;
-        const simrv::xlen::Address level0 = memory.dram_base + 0x3000;
-        const simrv::xlen::Address physical = memory.dram_base + 0x5000;
+        const simrv::xlen::Address root = (memory.dram_base + 0x1000).raw();
+        const simrv::xlen::Address level1 = (memory.dram_base + 0x2000).raw();
+        const simrv::xlen::Address level0 = (memory.dram_base + 0x3000).raw();
+        const simrv::xlen::Address physical = (memory.dram_base + 0x5000).raw();
         constexpr simrv::xlen::Address kVirtual = 0x4000;
         constexpr uint64_t kValid = std::to_underlying(simrv::PteFlag::V);
         constexpr uint64_t kPermissions = std::to_underlying(simrv::PteFlag::R) |
                                           std::to_underlying(simrv::PteFlag::W) |
                                           std::to_underlying(simrv::PteFlag::X);
         const auto write_pte = [&](simrv::xlen::Address address, uint64_t pte) {
-            TEST_ASSERT(machine.memory().dma_write(address, &pte, sizeof(pte)));
+            TEST_ASSERT(
+                machine.memory().dma_write(simrv::xlen::PhysAddr{address}, &pte, sizeof(pte)));
         };
         const auto read_pte = [&](simrv::xlen::Address address) {
             uint64_t pte = 0;
-            TEST_ASSERT(machine.memory().dma_read(address, &pte, sizeof(pte)));
+            TEST_ASSERT(
+                machine.memory().dma_read(simrv::xlen::PhysAddr{address}, &pte, sizeof(pte)));
             return pte;
         };
 
@@ -813,7 +814,7 @@ void test_sstvecd_and_sstvala_supervisor_traps() {
     for (const auto cause : causes) {
         auto& state = cpu.state();
         state.priv = simrv::xlen::PrivilegeLevel::User;
-        state.pc = 0x2000;
+        state.pc = simrv::xlen::VirtAddr{0x2000};
         state.medeleg = delegation;
         state.stvec = kVectorBase;
         cpu.raise_exception(cause, kTrapValue);
@@ -986,7 +987,7 @@ void test_supm_user_data_pointer_masking() {
                       simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
         state.initialize_lower_xlen_fields();
 
-        constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress + 0x100;
+        constexpr simrv::xlen::Address kBase = (simrv::memory::kDramBaseAddress + 0x100).raw();
         constexpr simrv::xlen::Register kValue = 0x0123456789ABCDEFULL;
         constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
         constexpr uint64_t kPmmSeven = uint64_t{2} << 32U;
@@ -1501,7 +1502,7 @@ void test_sha_hypervisor_virtual_load_store() {
         auto& cpu = machine.primary_hart();
         cpu.reset();
 
-        const Address base = machine.memory_geometry().dram_base;
+        const Address base = machine.memory_geometry().dram_base.raw();
         constexpr Address root = 0x1000;
         constexpr Address middle = 0x2000;
         constexpr Address leaf = 0x3000;
@@ -1595,7 +1596,7 @@ void test_sha_hypervisor_virtual_load_store() {
         const uint32_t hsv_w = (0x35U << 25U) | (7U << 20U) | (6U << 15U) | (4U << 12U) | 0x73U;
         std::memcpy(ram.data() + 0x8000, &hlv_w, sizeof(hlv_w));
         std::memcpy(ram.data() + 0x8004, &hsv_w, sizeof(hsv_w));
-        cpu.state().pc = base + 0x8000;
+        cpu.state().pc = simrv::xlen::VirtAddr{base + 0x8000};
         cpu.state().regs.write(simrv::xlen::RegId::T1, virtual_address);
         cpu.state().regs.write(simrv::xlen::RegId::T2, 0x2468ACE0U);
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
@@ -1666,7 +1667,7 @@ void test_sha_guest_exception_routing() {
         state.misa |= h_bit;
         state.virt = true;
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
-        state.pc = 0x4000;
+        state.pc = simrv::xlen::VirtAddr{0x4000};
         state.medeleg = simrv::xlen::CsrValue{1}
                         << std::to_underlying(simrv::isa::ExceptionCode::Breakpoint);
         state.hedeleg = state.medeleg;
@@ -1685,7 +1686,7 @@ void test_sha_guest_exception_routing() {
         state.misa |= h_bit;
         state.virt = true;
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
-        state.pc = 0x5000;
+        state.pc = simrv::xlen::VirtAddr{0x5000};
         state.stvec = 0x3000;
         simrv::core::TrapController::raise_exception(
             cpu, simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::VirtualInstruction),
@@ -1704,7 +1705,7 @@ void test_sha_guest_exception_routing() {
         state.misa |= h_bit;
         state.virt = true;
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
-        state.pc = 0x6000;
+        state.pc = simrv::xlen::VirtAddr{0x6000};
         state.mideleg |= simrv::xlen::CsrValue{1} << 2U;
         state.hideleg |= simrv::xlen::CsrValue{1} << 2U;
         state.vsstatus |= simrv::core::MstatusBit::Sie;
@@ -1722,7 +1723,7 @@ void test_sha_guest_exception_routing() {
         state.misa |= h_bit;
         state.virt = true;
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
-        state.pc = 0x8000;
+        state.pc = simrv::xlen::VirtAddr{0x8000};
         state.medeleg = simrv::xlen::CsrValue{1} << 21U;
         state.stvec = 0x9000;
         cpu.active_context().pending_htval = 0x12345678U >> 2U;
@@ -1748,6 +1749,22 @@ void test_sha_shtvala_guest_physical_fault_value() {
         constexpr simrv::xlen::Address kRoot = 0x1000;
         constexpr simrv::xlen::Address kGuestPhysical = 0x4000;
         cpu.state().hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
+
+        simrv::memory::PageTableWalker walker(machine.ram_view());
+        const auto bare_walk = walker.begin_walk(
+            simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 0, 0, 64, true, &cpu.state());
+        TEST_ASSERT(bare_walk.status == simrv::memory::PageWalkStatus::Fault);
+        TEST_ASSERT(bare_walk.physical_address == simrv::xlen::PhysAddr{});
+        TEST_ASSERT(bare_walk.guest_fault_address.raw() == kGuestPhysical);
+
+        const auto vs_satp = static_cast<simrv::xlen::Word>((uint64_t{8} << 60U) | 2U);
+        const auto vs_walk = walker.begin_walk(
+            simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 0, vs_satp, 64, true, &cpu.state());
+        TEST_ASSERT(vs_walk.status == simrv::memory::PageWalkStatus::Fault);
+        TEST_ASSERT(vs_walk.pte_guest_address.raw() == 0x2000);
+        TEST_ASSERT(vs_walk.pte_address == simrv::xlen::PhysAddr{});
 
         auto translated = cpu.translate_stage_address(
             machine, simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
@@ -1778,7 +1795,7 @@ void test_sha_two_stage_cpu_translation_uses_vsatp() {
         constexpr simrv::xlen::Address kVsLeaf = 0x3000;
         constexpr simrv::xlen::Address kGuestVa = 0x1234;
         constexpr simrv::xlen::Address kGuestPa = 0x6000;
-        const simrv::xlen::Address kDramBase = machine.memory_geometry().dram_base;
+        const simrv::xlen::Address kDramBase = machine.memory_geometry().dram_base.raw();
         const simrv::xlen::Address kGRoot = kDramBase + 0x4000;
         const simrv::xlen::Address kGMiddle = kDramBase + 0x5000;
         const simrv::xlen::Address kHostBase = kDramBase + 0x200000;
@@ -1970,7 +1987,7 @@ void test_cbo_zero_execution() {
     cpu.reset();
 
     constexpr size_t kLineBytes = simrv::cache::DCache::kLineBytes;
-    constexpr simrv::xlen::Address target_paddr = simrv::memory::kDramBaseAddress + 0x1000;
+    constexpr simrv::xlen::PhysAddr target_paddr = simrv::memory::kDramBaseAddress + 0x1000;
     // Verify target buffer is filled with 0xAA
     const auto* ram_ptr = machine.ram_view().unchecked_ptr(target_paddr);
     for (size_t i = 0; i < kLineBytes; ++i) {
@@ -1978,8 +1995,9 @@ void test_cbo_zero_execution() {
     }
 
     // Execute cbo.zero on target_paddr
-    simrv::memory::MemoryAccess::execute_cmo(
-        machine.memory(), cpu, simrv::xlen::VirtAddr{target_paddr + 16}, OperationId::CBO_ZERO);
+    simrv::memory::MemoryAccess::execute_cmo(machine.memory(), cpu,
+                                             simrv::xlen::VirtAddr{(target_paddr + 16).raw()},
+                                             OperationId::CBO_ZERO);
 
     // Check no pending exception
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
@@ -2017,7 +2035,7 @@ void test_cbo_zero_execution() {
 #if SIMRV_XLEN == 64
     simrv::memory::MemoryAccess::execute_cmo(
         machine.memory(), cpu,
-        simrv::xlen::VirtAddr{target_paddr ^ (simrv::xlen::Address{1} << 63U)},
+        simrv::xlen::VirtAddr{(target_paddr ^ (simrv::xlen::Address{1} << 63U)).raw()},
         OperationId::CBO_ZERO);
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
     for (size_t i = 0; i < kLineBytes; ++i) {
@@ -2029,7 +2047,7 @@ void test_cbo_zero_execution() {
     cpu.state().priv = kPrivSupervisor;
     cpu.state().menvcfg &= ~(1ULL << 7);  // Clear CBZE
     simrv::memory::MemoryAccess::execute_cmo(
-        machine.memory(), cpu, simrv::xlen::VirtAddr{target_paddr}, OperationId::CBO_ZERO);
+        machine.memory(), cpu, simrv::xlen::VirtAddr{target_paddr.raw()}, OperationId::CBO_ZERO);
     TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction);
 }
 
@@ -2086,7 +2104,7 @@ void test_profile_engine() {
             machine.memory(), cpu, simrv::xlen::VirtAddr{UINT64_C(0xFFFFFFFFFFFFF000)}, Funct3::Ld);
         TEST_ASSERT(amo_ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
 
-        constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address kRoot = kDram + 0x1000;
         constexpr simrv::xlen::Address kLevel1 = kDram + 0x2000;
         constexpr simrv::xlen::Address kLevel0 = kDram + 0x3000;
@@ -2116,17 +2134,19 @@ void test_profile_engine() {
         acquire.grow = simrv::memory::TlGrow::NtoT;
         acquire.source = 1;
         acquire.hart = cpu.hart_id();
-        acquire.address = line_base;
+        acquire.address = simrv::xlen::PhysAddr{line_base};
         acquire.size = simrv::memory::kTlBlockSize;
         simrv::memory::TlChannelD grant{};
         std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> acquired_line{};
         TEST_ASSERT(bus.acquire_block(acquire, grant, acquired_line));
         bus.grant_ack(simrv::memory::TlChannelE{.sink = grant.sink});
-        cpu.dcache.insert(line_base, acquired_line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.dcache.insert(simrv::xlen::PhysAddr{line_base}, acquired_line.data(),
+                          simrv::memory::MesiState::Exclusive);
         for (size_t i = 0; i < dirty_line.size(); ++i) {
-            TEST_ASSERT(cpu.dcache.write(line_base + i, 0xA5U, Funct3::Sb));
+            TEST_ASSERT(cpu.dcache.write(simrv::xlen::PhysAddr{line_base + i}, 0xA5U, Funct3::Sb));
         }
-        machine.memory().system_bus().mark_modified(line_base, cpu.hart_id());
+        machine.memory().system_bus().mark_modified(simrv::xlen::PhysAddr{line_base},
+                                                    cpu.hart_id());
 
         auto& ctx = cpu.active_context();
         ctx = {};
@@ -2139,8 +2159,10 @@ void test_profile_engine() {
         TEST_ASSERT(loaded == kDirtyValue);
         TEST_ASSERT(machine.memory().system_bus().read_count() > reads_before);
         TEST_ASSERT(cpu.dcache.miss_count() == misses_before);
-        TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
-        const auto* read_entry = cpu.tlb.lookup_data_r(kVirtual, 0, PrivilegeLevel::Supervisor);
+        TEST_ASSERT(cpu.dcache.line_state(simrv::xlen::PhysAddr{line_base}) ==
+                    simrv::memory::MesiState::Invalid);
+        const auto* read_entry =
+            cpu.tlb.lookup_data_r(simrv::xlen::VirtAddr{kVirtual}, 0, PrivilegeLevel::Supervisor);
         TEST_ASSERT(read_entry != nullptr && read_entry->pbmt == simrv::PtePbmt::NonCacheable);
 
         ctx = {};
@@ -2151,7 +2173,8 @@ void test_profile_engine() {
             machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, kNcStore, Funct3::Sd);
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(machine.memory().system_bus().write_count() > writes_before);
-        TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
+        TEST_ASSERT(cpu.dcache.line_state(simrv::xlen::PhysAddr{line_base}) ==
+                    simrv::memory::MesiState::Invalid);
         uint64_t ram_value = 0;
         std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
         TEST_ASSERT(ram_value == kNcStore);
@@ -2175,7 +2198,8 @@ void test_profile_engine() {
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(io_loaded == kNcStore);
         TEST_ASSERT(machine.memory().system_bus().read_count() > io_reads_before);
-        read_entry = cpu.tlb.lookup_data_r(kVirtual, 0, PrivilegeLevel::Supervisor);
+        read_entry =
+            cpu.tlb.lookup_data_r(simrv::xlen::VirtAddr{kVirtual}, 0, PrivilegeLevel::Supervisor);
         TEST_ASSERT(read_entry != nullptr && read_entry->pbmt == simrv::PtePbmt::Io);
 
         ctx = {};
@@ -2228,14 +2252,14 @@ void test_profile_engine() {
         state.initialize_lower_xlen_fields();
         state.priv = PrivilegeLevel::Supervisor;
 
-        constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress.raw();
         constexpr simrv::xlen::Address kCodeVirtual = 0x10000;
         constexpr simrv::xlen::Address kIoVirtual = 0x40000;
         constexpr simrv::xlen::Address kPmaVirtual = 0x50000;
         constexpr simrv::xlen::Address kIoPhysical = kDram + 0x8000;
         constexpr simrv::xlen::Address kPmaPhysical = kDram + 0x9000;
         state.satp = uint64_t{8} << 60U;
-        state.pc = kCodeVirtual;
+        state.pc = simrv::xlen::VirtAddr{kCodeVirtual};
         cpu.state().regs.write(simrv::xlen::RegId::Ra, kIoVirtual);
         cpu.state().regs.write(simrv::xlen::RegId::Sp, UINT64_C(0x1122334455667788));
         cpu.state().regs.write(simrv::xlen::RegId::Gp, UINT64_C(0x8877665544332211));
@@ -2253,12 +2277,15 @@ void test_profile_engine() {
         std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), kProgram.data(), sizeof(kProgram));
-        cpu.icache.insert(kDram, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{kDram}, instruction_line.data(),
+                          simrv::memory::MesiState::Exclusive);
 
-        cpu.tlb.insert_inst_r(kCodeVirtual, kDram, 0, PrivilegeLevel::Supervisor);
-        cpu.tlb.insert_data_w(kIoVirtual, kIoPhysical, 0, PrivilegeLevel::Supervisor, false,
-                              simrv::memory::PtePbmt::Io);
-        cpu.tlb.insert_data_w(kPmaVirtual, kPmaPhysical, 0, PrivilegeLevel::Supervisor);
+        cpu.tlb.insert_inst_r(simrv::xlen::VirtAddr{kCodeVirtual}, simrv::xlen::PhysAddr{kDram}, 0,
+                              PrivilegeLevel::Supervisor);
+        cpu.tlb.insert_data_w(simrv::xlen::VirtAddr{kIoVirtual}, simrv::xlen::PhysAddr{kIoPhysical},
+                              0, PrivilegeLevel::Supervisor, false, simrv::memory::PtePbmt::Io);
+        cpu.tlb.insert_data_w(simrv::xlen::VirtAddr{kPmaVirtual},
+                              simrv::xlen::PhysAddr{kPmaPhysical}, 0, PrivilegeLevel::Supervisor);
 
         for (unsigned cycle = 0; cpu.e_icount < 5 && cycle < 256; ++cycle) {
             cpu.run_cycle(machine);
@@ -2286,8 +2313,9 @@ void test_profile_engine() {
         }
         TEST_ASSERT(first_io_store < pma_store);
         TEST_ASSERT(pma_store < second_io_store);
-        TEST_ASSERT(cpu.tlb.lookup_data_w(kIoVirtual, 0, PrivilegeLevel::Supervisor)->pbmt ==
-                    simrv::memory::PtePbmt::Io);
+        TEST_ASSERT(
+            cpu.tlb.lookup_data_w(simrv::xlen::VirtAddr{kIoVirtual}, 0, PrivilegeLevel::Supervisor)
+                ->pbmt == simrv::memory::PtePbmt::Io);
     }
 #endif
 }
@@ -2445,5 +2473,5 @@ int main() {
     std::cout << "[PASS] test_profile_engine" << std::endl;
 
     std::cout << "\nAll RVA23 Profile unit tests passed successfully!\n";
-    return 0;
+    return simrv::test::failures() == 0 ? 0 : 1;
 }

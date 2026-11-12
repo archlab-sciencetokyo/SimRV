@@ -12,13 +12,17 @@
 #include "simrv/core/Tracer.hpp"
 
 namespace simrv::memory {
+namespace {
+// Overlap checks conservatively reject larger ambiguous sparse windows.
+constexpr simrv::xlen::Address kMaxHoleScanBytes = 4096;
+}  // namespace
 
 auto MmioRouter::register_device(TileLinkNode* node) -> bool {
     if (node == nullptr) {
         return false;
     }
 
-    const simrv::xlen::Address base = node->base_address();
+    const simrv::xlen::Address base = node->base_address().raw();
     if (node->size() == 0 ||
         node->size() > std::numeric_limits<simrv::xlen::Address>::max() - base) {
         simrv::log::warn("Rejecting invalid MMIO range for '{}'", node->name());
@@ -31,7 +35,7 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
         if (existing == node) {
             return true;  // Already registered
         }
-        const simrv::xlen::Address ex_base = existing->base_address();
+        const simrv::xlen::Address ex_base = existing->base_address().raw();
         if (existing->size() > std::numeric_limits<simrv::xlen::Address>::max() - ex_base)
             return false;
         const simrv::xlen::Address ex_end = ex_base + existing->size();
@@ -39,8 +43,10 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
         const simrv::xlen::Address overlap_end = std::min(end, ex_end);
         if (overlap_begin < overlap_end) {
             // O(1) fast endpoint collision checks
-            if ((node->contains(overlap_begin) && existing->contains(overlap_begin)) ||
-                (node->contains(overlap_end - 1) && existing->contains(overlap_end - 1))) {
+            if ((node->contains(simrv::xlen::PhysAddr{overlap_begin}) &&
+                 existing->contains(simrv::xlen::PhysAddr{overlap_begin})) ||
+                (node->contains(simrv::xlen::PhysAddr{overlap_end - 1}) &&
+                 existing->contains(simrv::xlen::PhysAddr{overlap_end - 1}))) {
                 simrv::log::warn(
                     "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with "
                     "'{}' "
@@ -51,8 +57,7 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
                     static_cast<unsigned long long>(ex_end));
                 return false;
             }
-            // Bound scan limit to prevent latency/DoS hazard on large gigabyte windows
-            constexpr simrv::xlen::Address kMaxHoleScanBytes = 4096;
+            // Bound scan limit to prevent latency/DoS hazard on large gigabyte windows.
             if (overlap_end - overlap_begin > kMaxHoleScanBytes) {
                 simrv::log::warn(
                     "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with "
@@ -66,7 +71,8 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
             }
             bool collision = false;
             for (simrv::xlen::Address address = overlap_begin; address < overlap_end; ++address) {
-                if (node->contains(address) && existing->contains(address)) {
+                if (node->contains(simrv::xlen::PhysAddr{address}) &&
+                    existing->contains(simrv::xlen::PhysAddr{address})) {
                     collision = true;
                     break;
                 }
@@ -110,6 +116,30 @@ void MmioRouter::clear() {
     rebuild_entries();
 }
 
+auto MmioRouter::is_range_mapped(simrv::xlen::PhysAddr physical_base,
+                                 simrv::xlen::Address size) const -> bool {
+    const auto base = physical_base.raw();
+    if (size == 0) return false;
+    if (size > std::numeric_limits<simrv::xlen::Address>::max() - base) return true;
+    const simrv::xlen::Address end = base + size;
+    for (const auto* existing : nodes_) {
+        const simrv::xlen::Address ex_base = existing->base_address().raw();
+        if (existing->size() > std::numeric_limits<simrv::xlen::Address>::max() - ex_base) continue;
+        const simrv::xlen::Address ex_end = ex_base + existing->size();
+        const simrv::xlen::Address overlap_begin = std::max(base, ex_base);
+        const simrv::xlen::Address overlap_end = std::min(end, ex_end);
+        if (overlap_begin >= overlap_end) continue;
+        if (existing->contains(simrv::xlen::PhysAddr{overlap_begin}) ||
+            existing->contains(simrv::xlen::PhysAddr{overlap_end - 1}))
+            return true;
+        if (overlap_end - overlap_begin > kMaxHoleScanBytes) return true;
+        for (auto address = overlap_begin + 1; address < overlap_end - 1; ++address) {
+            if (existing->contains(simrv::xlen::PhysAddr{address})) return true;
+        }
+    }
+    return false;
+}
+
 void MmioRouter::rebuild_entries() {
     entries_.clear();
     entries_.reserve(nodes_.size());
@@ -118,11 +148,11 @@ void MmioRouter::rebuild_entries() {
     mru_count_ = 0;
     for (auto* node : nodes_) {
         if (node == nullptr) continue;
-        const simrv::xlen::Address base = node->base_address();
+        const simrv::xlen::Address base = node->base_address().raw();
         const simrv::xlen::Address end = base + node->size();
         entries_.push_back(DeviceEntry{
-            .base = base,
-            .end = end,
+            .base = simrv::xlen::PhysAddr{base},
+            .end = simrv::xlen::PhysAddr{end},
             .node = node,
             .alignment = node->alignment(),
             .is_read_only = node->is_read_only(),
@@ -133,7 +163,8 @@ void MmioRouter::rebuild_entries() {
     std::ranges::sort(entries_, [](const auto& a, const auto& b) { return a.base < b.base; });
 }
 
-auto MmioRouter::resolve_entry(simrv::xlen::Address addr) const -> const DeviceEntry* {
+auto MmioRouter::resolve_entry(simrv::xlen::PhysAddr physical_address) const -> const DeviceEntry* {
+    const auto addr = physical_address.raw();
     if (entries_.empty() || addr < min_base_ || addr >= max_end_) {
         return nullptr;
     }
@@ -141,7 +172,8 @@ auto MmioRouter::resolve_entry(simrv::xlen::Address addr) const -> const DeviceE
     // Check 4-entry MRU cache (covers high-frequency alternating UART, CLINT, PLIC, VirtIO)
     for (size_t i = 0; i < mru_count_; ++i) {
         const auto& entry = mru_entries_[i];
-        if (addr >= entry.base && addr < entry.end) {
+        if (addr >= entry.base.raw() && addr < entry.end.raw() &&
+            entry.node->contains(simrv::xlen::PhysAddr{addr})) {
             if (i > 0) {
                 const auto hit = entry;
                 for (size_t j = i; j > 0; --j) {
@@ -154,11 +186,11 @@ auto MmioRouter::resolve_entry(simrv::xlen::Address addr) const -> const DeviceE
     }
 
     // Binary search over sorted base addresses (scalar comparisons, zero virtual calls)
-    auto it = std::ranges::upper_bound(entries_, addr, {}, &DeviceEntry::base);
+    auto it = std::ranges::upper_bound(entries_, physical_address, {}, &DeviceEntry::base);
 
     while (it != entries_.begin()) {
         --it;
-        if (addr < it->end) {
+        if (addr < it->end.raw() && it->node->contains(simrv::xlen::PhysAddr{addr})) {
             const size_t shift_limit = std::min(mru_count_, kMruCapacity - 1);
             for (size_t j = shift_limit; j > 0; --j) {
                 mru_entries_[j] = mru_entries_[j - 1];
@@ -174,7 +206,7 @@ auto MmioRouter::resolve_entry(simrv::xlen::Address addr) const -> const DeviceE
     return nullptr;
 }
 
-auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode* {
+auto MmioRouter::resolve_device(simrv::xlen::PhysAddr addr) const -> TileLinkNode* {
     const auto* entry = resolve_entry(addr);
     return entry != nullptr ? entry->node : nullptr;
 }
@@ -189,7 +221,7 @@ auto MmioRouter::find_by_name(std::string_view name) const -> TileLinkNode* {
 }
 
 auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    const DeviceEntry* entry = resolve_entry(req.address.raw());
+    const DeviceEntry* entry = resolve_entry(req.address);
     if (entry == nullptr) {
         resp.denied = true;
         ++bus_error_count_;
@@ -201,7 +233,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
             const auto width = static_cast<uint32_t>(1u << (req.size & 0x3u));
             const simrv::xlen::Word data =
                 is_write ? static_cast<simrv::xlen::Word>(req.data) : simrv::xlen::Word{0};
-            tracer_->log_mmio(req.hart, "unmapped", req.address.raw(), width, data, is_write, true,
+            tracer_->log_mmio(req.hart, "unmapped", req.address, width, data, is_write, true,
                               false);
         }
         return false;
@@ -219,7 +251,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
             return;
         const simrv::xlen::Word data = is_write ? static_cast<simrv::xlen::Word>(req.data)
                                                 : static_cast<simrv::xlen::Word>(resp.data);
-        tracer_->log_mmio(req.hart, device->name(), req.address.raw(),
+        tracer_->log_mmio(req.hart, device->name(), req.address,
                           static_cast<uint32_t>(request_bytes), data, is_write, faulted);
     };
 
@@ -229,12 +261,23 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         return true;
     }
 
-    if (request_bytes - 1 > std::numeric_limits<simrv::xlen::Address>::max() - req.address.raw() ||
-        req.address.raw() + request_bytes > entry->end) {
+    // Resolution guarantees address < end, so subtraction checks the extent without overflow.
+    if (request_bytes > entry->end.raw() - req.address.raw()) {
         resp.denied = true;
         ++bus_error_count_;
         trace_access(true);
         return true;
+    }
+
+    // A device can have holes inside its advertised window. Check every addressed byte:
+    // an access spanning a hole or another device must not be delivered partially.
+    for (simrv::xlen::Address offset = 1; offset < request_bytes; ++offset) {
+        if (!device->contains(req.address + offset)) {
+            resp.denied = true;
+            ++bus_error_count_;
+            trace_access(true);
+            return true;
+        }
     }
 
     if (is_write && entry->is_read_only) {

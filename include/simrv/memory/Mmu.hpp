@@ -29,7 +29,7 @@ namespace simrv {
 class Mmu {
    public:
     explicit Mmu(memory::RamView ram = {}) noexcept : walker_(ram) {}
-    explicit Mmu(simrv::xlen::Byte* mmem, simrv::xlen::Address dram_base,
+    explicit Mmu(simrv::xlen::Byte* mmem, simrv::xlen::PhysAddr dram_base,
                  simrv::xlen::Address dram_size) noexcept
         : walker_(mmem, dram_base, dram_size) {}
 
@@ -42,6 +42,7 @@ class Mmu {
     [[nodiscard]] auto ram_view() const noexcept -> memory::RamView { return walker_.ram_view(); }
     void set_ram_view(memory::RamView ram) noexcept { walker_.set_ram_view(ram); }
     void flush_pdc() noexcept { walker_.flush_pdc(); }
+    void flush_pdc_vaddr(simrv::xlen::VirtAddr vaddr) noexcept { walker_.flush_pdc_vaddr(vaddr); }
 
     /**
      * @brief Perform a page walk using the active supported satp mode.
@@ -81,7 +82,7 @@ class Mmu {
         simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
         simrv::xlen::CsrValue mstatus, simrv::xlen::Word satp, unsigned xlen,
         bool update_access_bits = true, const core::ArchState* arch_state = nullptr,
-        simrv::xlen::Address* guest_fault_address = nullptr,
+        memory::GuestPhysAddr* guest_fault_address = nullptr,
         bool* implicit_vs_stage_page_table_fault = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.

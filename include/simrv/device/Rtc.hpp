@@ -4,7 +4,9 @@
  */
 #pragma once
 
+#include "simrv/memory/MmioTypes.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -23,17 +25,16 @@ namespace simrv {
 class Rtc : public memory::TileLinkNode {
    public:
     /// Construct an RTC device instance.
-    explicit Rtc(simrv::core::Machine& machine, simrv::xlen::Address base = kBaseAddress,
+    explicit Rtc(simrv::core::Machine& machine, simrv::xlen::PhysAddr base = kBaseAddress,
                  simrv::xlen::Address size = kSize, uint32_t irq = kRtcIrq);
 
-    static constexpr simrv::xlen::Address kBaseAddress =
-        static_cast<simrv::xlen::Address>(0x70000000u);
+    static constexpr simrv::xlen::PhysAddr kBaseAddress{0x70000000u};
     static constexpr simrv::xlen::Address kSize = static_cast<simrv::xlen::Address>(0x00001000u);
     static constexpr simrv::xlen::Address kRtcOffset = static_cast<simrv::xlen::Address>(0x0u);
     static constexpr uint32_t kRtcIrq = 11;
 
     [[nodiscard]] auto name() const -> const char* override { return "rtc"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
@@ -43,7 +44,7 @@ class Rtc : public memory::TileLinkNode {
 
    private:
     simrv::core::Machine& machine_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
     uint32_t irq_;
     uint64_t base_epoch_ns_{0};

@@ -279,7 +279,8 @@ auto InspectorPane::render_debug_state(int debug_row, int width) -> std::string 
         sym = compact_elf_symbol(std::move(sym), std::max(1, right_width - 11));
         return render_pair(
             "PC",
-            std::format("0x{:0{}x}", static_cast<uint64_t>(st.pc), simrv::xlen::kIsXLen64 ? 16 : 8),
+            std::format("0x{:0{}x}", static_cast<uint64_t>(st.pc.raw()),
+                        simrv::xlen::kIsXLen64 ? 16 : 8),
             kThemeMint, "ELF sym", sym, resolved ? kThemePeach : kThemeMuted, col_width,
             right_width, label_pad);
     }

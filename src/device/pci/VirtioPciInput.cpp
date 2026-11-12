@@ -8,7 +8,9 @@
 
 namespace simrv::device {
 
-VirtioPciInput::VirtioPciInput() : VirtioPciDevice(virtio::kDevIdInput, 0x090000, 2) {}
+VirtioPciInput::VirtioPciInput()
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdInput)},
+                      PciClassCode{0x090000}, 2) {}
 
 void VirtioPciInput::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index == 0) {
@@ -21,10 +23,10 @@ void VirtioPciInput::process_eventq() {
     virtio::process_input_event_queue(
         queues_[0], backend_,
         [this](uint64_t address, void* data, std::size_t size) {
-            return dma_read(address, data, size);
+            return dma_read_wire_address(address, data, size);
         },
         [this](uint64_t address, const void* data, std::size_t size) {
-            return dma_write(address, data, size);
+            return dma_write_wire_address(address, data, size);
         },
         [this]() {
             isr_status_ |= 0x1;
@@ -62,12 +64,12 @@ void VirtioPciInput::push_mouse_wheel(int32_t delta) {
 }
 
 auto VirtioPciInput::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
-    return backend_.read_config(offset, size);
+    return backend_.read_config(offset.raw(), size);
 }
 
 void VirtioPciInput::write_device_config(PciBarOffset offset, PciMmioData val,
                                          PciAccessBytes size) {
-    backend_.write_config(offset, static_cast<uint32_t>(val), size);
+    backend_.write_config(offset.raw(), static_cast<uint32_t>(val), size);
 }
 
 }  // namespace simrv::device

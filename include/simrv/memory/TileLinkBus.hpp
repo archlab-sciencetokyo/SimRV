@@ -51,7 +51,7 @@ class TileLinkBus : public Bus {
         std::string_view opcode;
         TlSourceId source = 0;
         TlSinkId sink = 0;
-        simrv::xlen::Address address = 0;
+        simrv::xlen::PhysAddr address{};
         std::string_view detail;
     };
 
@@ -106,7 +106,9 @@ class TileLinkBus : public Bus {
         -> bool;
 
     /// Publish a successful L1 store while holding the shared coherence lock in MT-SMP mode.
-    void mark_modified(simrv::xlen::Address line_base, simrv::xlen::HartId hart);
+    void mark_modified(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart);
+    template <std::integral I, typename... Args>
+    void mark_modified(I, Args&&...) = delete;
 
     void grant_ack(const TlChannelE& ack);
 
@@ -120,7 +122,7 @@ class TileLinkBus : public Bus {
     }
 
     void record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
-                            TlSinkId sink, simrv::xlen::Address address,
+                            TlSinkId sink, simrv::xlen::PhysAddr address,
                             std::string_view detail = {},
                             const simrv::core::BusTraceContext* trace_context = nullptr);
     [[nodiscard]] static constexpr auto ram_capabilities() -> TlManagerCapabilities {

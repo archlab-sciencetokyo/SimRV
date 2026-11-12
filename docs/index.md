@@ -48,8 +48,8 @@ Download the portable archive or native package bundle from
 ### 1. Build from Source
 
 Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
-on macOS 26 for Apple silicon and Intel, but macOS packages are not published yet. Host TAP
-networking and VirtIO-FS directory sharing remain Linux-only. On Windows, use WSL2 with a supported
+on macOS 26 for Apple silicon and Intel, but macOS packages are not published yet. VirtIO-FS
+directory sharing remains Linux-only. User-mode networking uses libslirp on Linux and macOS. On Windows, use WSL2 with a supported
 Linux distribution; native Windows builds are not currently supported.
 
 SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3.31+**, and **Ninja**.

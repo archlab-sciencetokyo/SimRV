@@ -32,6 +32,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -528,16 +529,56 @@ void Tui::initialize() {
         }
     }
 
-    // 2. Sixel support query (DA1 \033[?...c) and environment checks
+    // 2. Sixel & Kitty support query and environment checks
     bool env_sixel = false;
+    bool env_kitty = false;
     const char* term_env = std::getenv("TERM");
+    const char* color_env = std::getenv("COLORTERM");
     const char* term_prog = std::getenv("TERM_PROGRAM");
+    const char* wt_session = std::getenv("WT_SESSION");
+    const char* kitty_pid = std::getenv("KITTY_PID");
+    const char* simrv_graphics = std::getenv("SIMRV_GRAPHICS");
+    const char* simrv_display = std::getenv("SIMRV_ENABLE_DISPLAY");
+
     if (term_env && std::string_view(term_env).contains("sixel")) env_sixel = true;
-    if (term_prog &&
-        (std::string_view(term_prog) == "wezterm" || std::string_view(term_prog) == "foot" ||
-         std::string_view(term_prog) == "mlterm" || std::string_view(term_prog) == "yaft" ||
-         std::string_view(term_prog) == "contour")) {
-        env_sixel = true;
+    if (color_env && std::string_view(color_env).contains("sixel")) env_sixel = true;
+    if (wt_session != nullptr) env_sixel = true;  // Windows Terminal 1.22+ supports Sixel
+
+    if (kitty_pid != nullptr || std::getenv("KITTY_WINDOW_ID") != nullptr ||
+        (term_env && std::string_view(term_env) == "xterm-kitty")) {
+        env_kitty = true;
+    }
+
+    if (term_prog) {
+        std::string prog_lower;
+        prog_lower.reserve(std::string_view(term_prog).size());
+        for (char ch : std::string_view(term_prog)) {
+            prog_lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+        if (prog_lower.contains("wezterm") || prog_lower.contains("foot") ||
+            prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
+            prog_lower.contains("contour") || prog_lower.contains("ghostty")) {
+            env_sixel = true;
+        }
+        if (prog_lower.contains("ghostty") || prog_lower.contains("wezterm")) {
+            env_kitty = true;
+        }
+    }
+
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "sixel") {
+            env_sixel = true;
+        } else if (g == "kitty") {
+            env_kitty = true;
+        } else if (g == "all" || g == "both" || g == "1" || g == "true") {
+            env_sixel = true;
+            env_kitty = true;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "1" || d == "true") env_sixel = true;
     }
 
     bool da1_sixel = false;
@@ -568,9 +609,26 @@ void Tui::initialize() {
     const auto kitty_reply = resp.find("\033_Gi=31;");
     const auto kitty_reply_end =
         kitty_reply == std::string::npos ? std::string::npos : resp.find("\033\\", kitty_reply);
-    kitty_graphics_supported_ =
+    const bool query_kitty =
         kitty_reply_end != std::string::npos &&
         std::string_view(resp).substr(kitty_reply + 8, kitty_reply_end - kitty_reply - 8) == "OK";
+    kitty_graphics_supported_ = env_kitty || query_kitty;
+
+    // Explicit disable overrides all detection
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "none" || g == "0" || g == "false" || g == "off") {
+            sixel_supported_ = false;
+            kitty_graphics_supported_ = false;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "0" || d == "false") {
+            sixel_supported_ = false;
+            kitty_graphics_supported_ = false;
+        }
+    }
     kitty_image_id_ = static_cast<uint32_t>(::getpid());
     if (kitty_image_id_ == 0) kitty_image_id_ = 1;
     modal_.set_display_graphics_supported(is_display_graphics_supported());
@@ -1045,8 +1103,10 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     // glyphs seven times taller than their native framebuffer shape.
     // Use cursor-positioned sixel so the graphic can live in its assigned panel.
     // The dimensions above ensure it fits before the footer, avoiding scroll.
-    update_cmds += std::format("\033[5;{}r\033[?80l\033[{};{}H\033Pq\"1;1;{};{}", 4 + display_rows,
-                               5 + y_offset, display_x, width, height);
+    // Each palette color is emitted as a separate Sixel plane. Transparent zero
+    // bits prevent later planes from clearing pixels painted by earlier colors.
+    update_cmds += std::format("\033[5;{}r\033[?80l\033[{};{}H\033P0;1q\"1;1;{};{}",
+                               4 + display_rows, 5 + y_offset, display_x, width, height);
     update_cmds += kSixelPaletteHeader;
 
     const auto* fb_bytes = reinterpret_cast<const uint8_t*>(fb.data());
@@ -1096,20 +1156,29 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
         uint64_t strip_hash = 1469598103934665603ULL;
         if (same_dims) {
-            const auto* p64 =
-                reinterpret_cast<const uint64_t*>(fb_bytes + static_cast<size_t>(y) * stride);
-            const size_t num_words = static_cast<size_t>(max_bits * stride) / sizeof(uint64_t);
+            const auto* bytes = fb_bytes + static_cast<size_t>(y) * stride;
+            const size_t num_words = static_cast<size_t>(max_bits) * stride / sizeof(uint64_t);
             for (size_t w = 0; w < num_words; ++w) {
-                strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
+                uint64_t word;
+                std::memcpy(&word, bytes + w * sizeof(word), sizeof(word));
+                strip_hash = (strip_hash ^ word) * 1099511628211ULL;
+            }
+            const size_t byte_count = static_cast<size_t>(max_bits) * stride;
+            for (size_t i = num_words * sizeof(uint64_t); i < byte_count; ++i) {
+                strip_hash = (strip_hash ^ bytes[i]) * 1099511628211ULL;
             }
         } else {
             for (int bit = 0; bit < max_bits; ++bit) {
                 const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
-                const auto* p64 = reinterpret_cast<const uint64_t*>(
-                    fb_bytes + static_cast<size_t>(src_y) * stride);
+                const auto* bytes = fb_bytes + static_cast<size_t>(src_y) * stride;
                 const size_t words_per_row = static_cast<size_t>(stride) / sizeof(uint64_t);
                 for (size_t w = 0; w < words_per_row; ++w) {
-                    strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
+                    uint64_t word;
+                    std::memcpy(&word, bytes + w * sizeof(word), sizeof(word));
+                    strip_hash = (strip_hash ^ word) * 1099511628211ULL;
+                }
+                for (size_t i = words_per_row * sizeof(uint64_t); i < stride; ++i) {
+                    strip_hash = (strip_hash ^ bytes[i]) * 1099511628211ULL;
                 }
             }
         }
@@ -1631,19 +1700,32 @@ void Tui::render(bool force) {
         is_display_graphics_supported() && has_display && !display_too_small && !modal_.is_active();
     uint64_t framebuffer_signature = 0;
     if (draw_display_graphics) {
-        const auto fb = machine_.framebuffer_view();
-        if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
-            constexpr uint64_t fnv_offset = 1469598103934665603ULL;
-            constexpr uint64_t fnv_prime = 1099511628211ULL;
-            const auto* p64 = reinterpret_cast<const uint64_t*>(fb.data());
-            const size_t n64 = fb.size() / sizeof(uint64_t);
-            uint64_t h1 = fnv_offset;
-            uint64_t h2 = fnv_prime;
-            for (size_t i = 0; i < n64; i += 2) {
-                h1 = (h1 ^ p64[i]) * fnv_prime;
-                if (i + 1 < n64) h2 = (h2 ^ p64[i + 1]) * fnv_offset;
+        const auto* fb_dev = machine_.framebuffer_device();
+        const auto frame_id = fb_dev ? fb_dev->frame_id() : 0;
+        if (frame_id != 0) {
+            framebuffer_signature = frame_id;
+        } else {
+            const auto fb = machine_.framebuffer_view();
+            if (fb.data() != nullptr && fb.size() != 0) {
+                constexpr uint64_t fnv_offset = 1469598103934665603ULL;
+                constexpr uint64_t fnv_prime = 1099511628211ULL;
+                const size_t n64 = fb.size() / sizeof(uint64_t);
+                uint64_t h1 = fnv_offset;
+                uint64_t h2 = fnv_prime;
+                for (size_t i = 0; i < n64; i += 2) {
+                    uint64_t word = 0;
+                    std::memcpy(&word, fb.data() + i * sizeof(word), sizeof(word));
+                    h1 = (h1 ^ word) * fnv_prime;
+                    if (i + 1 < n64) {
+                        std::memcpy(&word, fb.data() + (i + 1) * sizeof(word), sizeof(word));
+                        h2 = (h2 ^ word) * fnv_offset;
+                    }
+                }
+                for (size_t i = n64 * sizeof(uint64_t); i < fb.size(); ++i) {
+                    h1 = (h1 ^ std::to_integer<uint8_t>(fb.data()[i])) * fnv_prime;
+                }
+                framebuffer_signature = h1 ^ (h2 * 31ULL);
             }
-            framebuffer_signature = h1 ^ (h2 * 31ULL);
         }
     }
     const bool display_graphics_geometry_changed =
@@ -1785,82 +1867,31 @@ void Tui::render(bool force) {
     std::string update_cmds;
     update_cmds.reserve(static_cast<std::size_t>(term_width) * new_lines.size() / 2);
 
+    back_buffer_.load_from_lines(new_lines, term_width, static_cast<int>(new_lines.size()));
+    const bool preserve_display_graphic = draw_display_graphics && sixel_rendered_ &&
+                                          !display_graphics_needs_draw && !modal_.is_active();
+    if (preserve_display_graphic && display_col < col_widths.count) {
+        back_buffer_.mark_graphic_passthrough(framework::ScreenRect{
+            .origin = {.x = display_panel_x - 1, .y = 4},
+            .size = {.width = col_widths.widths[display_col], .height = num_rows}});
+    }
+
     if (is_full_redraw) {
         update_cmds += "\033[H";
-        for (size_t i = 0; i < new_lines.size(); ++i) {
-            update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
-            render_stats_.lines_drawn++;
-        }
-        last_screen_lines_ = new_lines;
+        diff_engine_.emit_delta(back_buffer_, front_buffer_, update_cmds, true);
+        render_stats_.lines_drawn += new_lines.size();
         render_stats_.full_redraws++;
     } else {
-        bool any_line_changed = false;
-        auto ansi_slice = [](std::string_view line, int begin_col, int end_col) {
-            std::string result;
-            int column = 0;
-            for (size_t i = 0; i < line.size();) {
-                if (line[i] == '\033') {
-                    size_t end = i + 1;
-                    if (end < line.size() && line[end] == '[') {
-                        ++end;
-                        while (end < line.size() && !(line[end] >= '@' && line[end] <= '~')) ++end;
-                        if (end < line.size()) ++end;
-                    } else if (end < line.size()) {
-                        ++end;
-                    }
-                    if (column < end_col) result.append(line.substr(i, end - i));
-                    i = end;
-                    continue;
-                }
-
-                size_t bytes = 1;
-                const auto lead = static_cast<unsigned char>(line[i]);
-                if ((lead & 0xE0U) == 0xC0U)
-                    bytes = 2;
-                else if ((lead & 0xF0U) == 0xE0U)
-                    bytes = 3;
-                else if ((lead & 0xF8U) == 0xF0U)
-                    bytes = 4;
-                bytes = std::min(bytes, line.size() - i);
-                const int glyph_width = get_display_width(line.substr(i, bytes));
-                if (column >= begin_col && column < end_col) result.append(line.substr(i, bytes));
-                column += glyph_width;
-                i += bytes;
-                if (column >= end_col && begin_col == 0) break;
-            }
-            return result;
-        };
-
-        const int display_panel_begin = display_panel_x - 1;
-        const int display_panel_end = display_panel_begin + col_widths.widths[display_col];
-
-        for (size_t i = 0; i < new_lines.size(); ++i) {
-            if (new_lines[i] != last_screen_lines_[i]) {
-                any_line_changed = true;
-                const bool preserve_display_graphic =
-                    draw_display_graphics && sixel_rendered_ && !display_graphics_needs_draw &&
-                    !modal_.is_active() && i >= 4 && i < 4 + static_cast<size_t>(num_rows);
-                if (preserve_display_graphic) {
-                    // Keep the display column's image-bearing cells untouched, but continue
-                    // updating the inspector and neighboring columns on the same screen row.
-                    update_cmds +=
-                        std::format("\033[{};1H{}\033[{};{}H{}", i + 1,
-                                    ansi_slice(new_lines[i], 0, display_panel_begin), i + 1,
-                                    display_panel_end + 1,
-                                    ansi_slice(new_lines[i], display_panel_end, term_width));
-                } else {
-                    update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
-                }
-                last_screen_lines_[i] = new_lines[i];
-                render_stats_.lines_drawn++;
-            } else {
-                render_stats_.lines_skipped++;
-            }
-        }
-        if (any_line_changed) {
+        const auto diff_stats =
+            diff_engine_.emit_delta(back_buffer_, front_buffer_, update_cmds, false);
+        if (diff_stats.rows_dirty > 0) {
             render_stats_.differential_redraws++;
         }
+        render_stats_.lines_drawn += diff_stats.rows_dirty;
+        render_stats_.lines_skipped += diff_stats.rows_clean;
     }
+    front_buffer_ = back_buffer_;
+    last_screen_lines_ = new_lines;
 
     int target_cursor_x = -1;
     int target_cursor_y = -1;
@@ -2054,7 +2085,7 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
                     render(true);
                 }
             } else if (page == TuiRegPage::PIPELINE) {
-                simrv::xlen::Register clicked_pc =
+                simrv::xlen::VirtAddr clicked_pc =
                     inspector_pane_->get_pipeline_pc_at_row(logical_row);
                 if (clicked_pc != 0) {
                     inspector_pane_->set_previous_page(TuiRegPage::PIPELINE);
@@ -2070,7 +2101,7 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
                 auto reg_val =
                     inspector_pane_->get_register_value_at_row(logical_row, x, target_width);
                 if (reg_val.has_value()) {
-                    inspector_pane_->set_inspect_addr(*reg_val);
+                    inspector_pane_->set_inspect_addr(simrv::xlen::VirtAddr{*reg_val});
                     open_modal(ModalType::InspectAddress);
                 }
             } else if (page == TuiRegPage::STACK) {
@@ -2935,7 +2966,7 @@ void Tui::update_trace_active_cache() {
     pipeline_or_detail_visible_.store(detail_visible, std::memory_order_release);
 }
 
-void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+void Tui::record_instruction(simrv::xlen::VirtAddr pc, simrv::isa::Opcode opcode,
                              simrv::isa::OperationId op_id, uint8_t rd,
                              simrv::xlen::Register rd_val, uint8_t rs1,
                              simrv::xlen::Register rs1_val, uint8_t rs2,
@@ -2968,7 +2999,7 @@ void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode
     ring.write_sequence.store(slot + 1, std::memory_order_release);
 }
 
-void Tui::record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+void Tui::record_flight_instruction(simrv::xlen::VirtAddr pc, simrv::isa::Opcode opcode,
                                     simrv::isa::OperationId op_id, uint8_t hart) {
     auto& ring = flight_rings_.at(hart % kFlightRecorderHarts);
     const uint64_t slot = ring.write_sequence.load(std::memory_order_relaxed);
@@ -3036,10 +3067,10 @@ void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, 
         side_effect = std::format("{} = {:#x}", get_reg_name(rec.rd, rd_fp), rec.rd_val);
     } else if (is_jal) {
         if (rec.rd == 0)
-            inst_str = std::format("j {:#x}", rec.pc + rec.imm);
+            inst_str = std::format("j {:#x}", rec.pc.raw() + rec.imm);
         else {
-            inst_str =
-                std::format("{} {}, {:#x}", op_name, get_reg_name(rec.rd, rd_fp), rec.pc + rec.imm);
+            inst_str = std::format("{} {}, {:#x}", op_name, get_reg_name(rec.rd, rd_fp),
+                                   rec.pc.raw() + rec.imm);
             side_effect = std::format("{} = {:#x}", get_reg_name(rec.rd, rd_fp), rec.rd_val);
         }
     } else if (is_jalr || is_load) {
@@ -3048,7 +3079,7 @@ void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, 
         side_effect = std::format("{} = {:#x}", get_reg_name(rec.rd, rd_fp), rec.rd_val);
     } else if (is_branch) {
         inst_str = std::format("{} {}, {}, {:#x}", op_name, get_reg_name(rec.rs1, rs1_fp),
-                               get_reg_name(rec.rs2, rs2_fp), rec.pc + rec.imm);
+                               get_reg_name(rec.rs2, rs2_fp), rec.pc.raw() + rec.imm);
     } else if (is_store) {
         inst_str = std::format("{} {}, {}({})", op_name, get_reg_name(rec.rs2, rs2_fp), rec.imm,
                                get_reg_name(rec.rs1, rs1_fp));
@@ -3090,7 +3121,7 @@ auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
     }
 
     if (!rec.detailed) {
-        return std::format("{:#x} [H{}] {}", rec.pc, rec.hart, op_name);
+        return std::format("{:#x} [H{}] {}", rec.pc.raw(), rec.hart, op_name);
     }
 
     const bool rd_fp = isa::is_destination_fp(rec.opcode, rec.op_id);
@@ -3103,12 +3134,13 @@ auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
 
     std::string sym = machine_.symbol_table().lookup(rec.pc);
     if (sym.empty()) {
-        return side_effect.empty() ? std::format("{:#x}: {}", rec.pc, inst_str)
-                                   : std::format("{:#x}: {} [{}]", rec.pc, inst_str, side_effect);
+        return side_effect.empty()
+                   ? std::format("{:#x}: {}", rec.pc.raw(), inst_str)
+                   : std::format("{:#x}: {} [{}]", rec.pc.raw(), inst_str, side_effect);
     }
     return side_effect.empty()
-               ? std::format("{:#x} <{}>: {}", rec.pc, sym, inst_str)
-               : std::format("{:#x} <{}>: {} [{}]", rec.pc, sym, inst_str, side_effect);
+               ? std::format("{:#x} <{}>: {}", rec.pc.raw(), sym, inst_str)
+               : std::format("{:#x} <{}>: {} [{}]", rec.pc.raw(), sym, inst_str, side_effect);
 }
 
 void Tui::scroll(int lines) {
@@ -3653,11 +3685,11 @@ void Tui::observe_current_pc_symbol() {
     const auto pc = machine_.primary_hart().state().pc;
     // The address installed for the mission checkpoint is authoritative. Symbol lookup by
     // address can return a different alias at the same PC, which would otherwise lose evidence.
-    if (mission_breakpoint_addr_ && pc == *mission_breakpoint_addr_) {
+    if (mission_breakpoint_addr_ && simrv::xlen::VirtAddr{pc} == *mission_breakpoint_addr_) {
         if (const auto progress = mission_.checkpoint_progress())
             mission_.observe_symbol(progress->symbol);
     }
-    if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
+    if (const auto symbol = machine_.symbol_table().lookup_symbol(simrv::xlen::VirtAddr{pc});
         symbol && symbol->is_exact()) {
         mission_.observe_symbol(symbol->name);
     }
@@ -3898,15 +3930,16 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::SetWatchpoint);
             break;
         case TuiFooterAction::TogglePcBreakpoint: {
-            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
+            const simrv::xlen::VirtAddr pc{machine_.primary_hart().state().pc};
             if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
                 machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
-                                   std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
+                                   std::format("Removed PC breakpoint at 0x{:08x}", pc.raw()),
+                                   false);
             } else {
                 machine_.breakpoint_manager().add_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT CREATED",
-                                   std::format("PC breakpoint set at 0x{:08x}", pc), false);
+                                   std::format("PC breakpoint set at 0x{:08x}", pc.raw()), false);
             }
             render(true);
             break;

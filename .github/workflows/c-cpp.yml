@@ -68,7 +68,7 @@ jobs:
     - name: Install build tools
       run: |
         dnf update -y
-        dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
+        dnf install -y git cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
 
     - name: Cache RISC-V GCC toolchain
       id: cache-toolchain
@@ -173,7 +173,7 @@ jobs:
           SUITES+=(--suite vector --suite package)
           DEPENDENCIES+=(--dependency vector_tests="${RUNNER_TEMP}/riscv-vector-tests")
         fi
-        python3 scripts/release_evidence.py \
+        build/${{ matrix.arch }}-release/simrv-evidence \
           --build-dir build/${{ matrix.arch }}-release \
           --arch ${{ matrix.arch == 'rv32' && '32' || '64' }} \
           --compiler ${{ matrix.compiler }} \
@@ -194,16 +194,13 @@ jobs:
     timeout-minutes: 30
     container:
       image: fedora:44
+      options: --security-opt seccomp=unconfined
     steps:
     - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: Install quality tools
-      run: dnf install -y git cmake ninja-build gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra python3
-    - name: Check release metadata
-      run: python3 scripts/release_check.py
-    - name: Test release tooling
-      run: python3 tests/ReleaseToolTests.py
+      run: dnf install -y git cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra
     - name: Check formatting
       shell: bash
       run: |
@@ -240,7 +237,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Install build tools
-      run: dnf install -y cmake ninja-build gcc gcc-c++ libtsan python3 util-linux
+      run: dnf install -y cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ libtsan python3 util-linux
     - name: Configure TSan
       run: >-
         cmake -S . -B build/tsan -G Ninja

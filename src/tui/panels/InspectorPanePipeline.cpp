@@ -39,6 +39,37 @@ using simrv::isa::InstFormat;
 
 namespace {
 
+struct TimelineInstruction {
+    uint64_t inst_id = 0;
+    simrv::xlen::VirtAddr pc{};
+    isa::OperationId op_id = isa::OperationId::ILLEGAL;
+
+    auto operator==(const TimelineInstruction& other) const -> bool {
+        return inst_id != 0 && other.inst_id != 0 ? inst_id == other.inst_id : pc == other.pc;
+    }
+};
+
+auto timeline_instructions(simrv::pipeline::PipelineHistoryView history)
+    -> std::vector<TimelineInstruction> {
+    std::vector<TimelineInstruction> instructions;
+    const int history_size = static_cast<int>(history.size());
+    for (int i = std::max(0, history_size - 14); i < history_size; ++i) {
+        const auto& snap = history.at(i);
+        const std::array stages = {&snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+        for (const auto* stage : stages) {
+            if (stage->valid && stage->pc != 0) {
+                const TimelineInstruction ref{stage->inst_id, stage->pc, stage->op_id};
+                if (!std::ranges::contains(instructions, ref)) instructions.push_back(ref);
+            }
+        }
+    }
+    constexpr size_t kMaxRows = 5;
+    if (instructions.size() > kMaxRows) {
+        instructions.erase(instructions.begin(), instructions.end() - kMaxRows);
+    }
+    return instructions;
+}
+
 // -----------------------------------------------------------------------
 // Shared helpers
 // -----------------------------------------------------------------------
@@ -343,7 +374,7 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     }
 
     std::string desc = std::format("\033[1m{}{}\033[0m ({}{}{}){}", kThemeMint, op_name, kThemeSky,
-                                   compact_hex(reg.pc), "\033[0m", ops_info);
+                                   compact_hex(reg.pc.raw()), "\033[0m", ops_info);
     if (stall_rem > 0) {
         std::string tag = stall_type;
         if (tag == "I-Cache Miss")
@@ -363,19 +394,19 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     return desc;
 }
 
-auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::Register {
+auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::VirtAddr {
     const auto& execute = ps.stage_reg(PipelineStage::Execute);
     if (execute.valid && (execute.is_branch || execute.is_jump)) {
-        return execute.pc;
+        return simrv::xlen::VirtAddr{execute.pc};
     }
     const auto& decode = ps.stage_reg(PipelineStage::Decode);
     if (decode.valid && (decode.is_branch || decode.is_jump)) {
-        return decode.pc;
+        return simrv::xlen::VirtAddr{decode.pc};
     }
-    return 0;
+    return {};
 }
 
-auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Register pc)
+auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
     -> std::string {
     if (pc == 0) {
         return "No active branch";
@@ -383,7 +414,7 @@ auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Reg
     return "No prediction (resolved in execute)";
 }
 
-auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Register pc)
+auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
     -> std::string {
     if (pc == 0) {
         return "No active branch";
@@ -633,14 +664,14 @@ auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, 
         case 13:
             return section_line("Branch Prediction", width);
         case 14: {
-            simrv::xlen::Register pc = get_active_branch_pc(ps);
+            const auto pc = get_active_branch_pc(ps);
             std::string bht_str = get_bht_string(ps, pc);
             return format_to_width(std::format(" {}Branch History\033[0m : {}{}\033[0m", kThemeText,
                                                kThemeVal, bht_str),
                                    width);
         }
         case 15: {
-            simrv::xlen::Register pc = get_active_branch_pc(ps);
+            const auto pc = get_active_branch_pc(ps);
             std::string btb_str = get_btb_string(ps, pc);
             return format_to_width(std::format(" {}Target Buffer\033[0m  : {}{}\033[0m", kThemeText,
                                                kThemeVal, btb_str),
@@ -699,12 +730,12 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
         case 1: {
             // Resolve against the instruction being presented rather than the architectural PC,
             // which may already have advanced while the functional pipeline view is rendered.
-            std::string sym = machine_.symbol_table().lookup(ctx.cpc.raw());
+            std::string sym = machine_.symbol_table().lookup(ctx.cpc);
             std::string pc_str = sym.empty() ? hex_val(ctx.cpc.raw())
                                              : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 
             std::string asm_str = simrv::explain::format_instruction_assembly(
-                ctx.ir_org, ctx.cpc.raw(), cpu.state().current_xlen());
+                ctx.ir_org, ctx.cpc, cpu.state().current_xlen());
 
             return render_pair("PC", pc_str, kThemeMint, "Asm", asm_str, kThemePeach, col_width,
                                right_width, 10);
@@ -956,44 +987,12 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
 
     int const history_size = static_cast<int>(history.size());
 
-    // Collect unique instruction instances in this window chronologically.
-    struct InstRef {
-        uint64_t inst_id = 0;
-        simrv::xlen::Register pc = 0;
-        isa::OperationId op_id = isa::OperationId::ILLEGAL;
-
-        auto operator==(const InstRef& o) const -> bool {
-            return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
-        }
-    };
-    std::vector<InstRef> active_insts;
-    int const scan_start = std::max(0, history_size - 14);
-    for (int i = scan_start; i < history_size; ++i) {
-        auto const& snap = history.at(i);
-        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
-            &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
-        for (auto const* stage : stages) {
-            if (stage->valid && stage->pc != 0) {
-                InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
-                if (!std::ranges::contains(active_insts, ref)) {
-                    active_insts.push_back(ref);
-                }
-            }
-        }
-    }
-
-    // Keep only the 5 most-recently-seen instructions to avoid overflow
-    constexpr int kMaxInstRows = 5;
-    if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-        active_insts.erase(
-            active_insts.begin(),
-            active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
-    }
+    const auto active_insts = timeline_instructions(history);
 
     // Determine max PC width dynamically (10 for 8-digit hex e.g. 0x8000002a, 18 for full 64-bit)
     int max_pc_width = 10;
     for (auto const& ref : active_insts) {
-        if (hex_val(ref.pc).size() > 10) {
+        if (hex_val(ref.pc.raw()).size() > 10) {
             max_pc_width = 18;
         }
     }
@@ -1034,7 +1033,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
         const std::string_view op_mnem = simrv::pipeline::operation_name(inst.op_id);
         std::string mnem_5 =
             (op_mnem.size() > 5) ? std::string(op_mnem.substr(0, 5)) : std::string(op_mnem);
-        std::string pc_str = hex_val(inst.pc);
+        std::string pc_str = hex_val(inst.pc.raw());
         std::string line = std::format("  {:>{}} {:<5} |", pc_str, max_pc_width, mnem_5);
 
         const auto ptype = ps.config.pipeline_type;
@@ -1094,45 +1093,15 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     return format_to_width("", width);
 }
 
-auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register {
+auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::VirtAddr {
     auto const& cpu = current_cpu();
     auto const& ps = cpu.pipeline_sim;
 
     // Execution Timeline instruction rows (logical rows 2..6)
     if (logical_row >= 2 && logical_row <= 6) {
         auto const history = ps.cycle_history();
-        if (history.empty()) return 0;
-        int const history_size = static_cast<int>(history.size());
-
-        struct InstRef {
-            uint64_t inst_id = 0;
-            simrv::xlen::Register pc = 0;
-            isa::OperationId op_id = isa::OperationId::ILLEGAL;
-            auto operator==(const InstRef& o) const -> bool {
-                return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
-            }
-        };
-        std::vector<InstRef> active_insts;
-        int const scan_start = std::max(0, history_size - 14);
-        for (int i = scan_start; i < history_size; ++i) {
-            auto const& snap = history.at(i);
-            std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
-                &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
-            for (auto const* stage : stages) {
-                if (stage->valid && stage->pc != 0) {
-                    InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
-                    if (!std::ranges::contains(active_insts, ref)) {
-                        active_insts.push_back(ref);
-                    }
-                }
-            }
-        }
-        constexpr int kMaxInstRows = 5;
-        if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-            active_insts.erase(
-                active_insts.begin(),
-                active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
-        }
+        if (history.empty()) return {};
+        const auto active_insts = timeline_instructions(history);
 
         int const inst_row = logical_row - 2;
         if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size()) {
@@ -1144,7 +1113,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
     if (machine_.runtime_profile.is_cycle_mode()) {
         const auto stage_pc = [&ps](PipelineStage stage) {
             const auto& reg = ps.stage_reg(stage);
-            return reg.valid ? reg.pc : simrv::xlen::Register{0};
+            return reg.valid ? reg.pc : simrv::xlen::VirtAddr{};
         };
         switch (logical_row) {
             case 11:
@@ -1161,7 +1130,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
                 break;
         }
     }
-    return 0;
+    return {};
 }
 
 auto InspectorPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,

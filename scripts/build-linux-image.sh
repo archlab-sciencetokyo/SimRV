@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="${SIMRV_LINUX_BUILD_DIR:-$ROOT_DIR/linux-build}"
+BUILD_DIR="${SIMRV_GUEST_BUILD_DIR:-${SIMRV_GUEST_BUILDS_DIR:-${SIMRV_LINUX_BUILD_DIR:-${SIMRV_LINUX_BUILDS_DIR:-$ROOT_DIR/linux-build}}}}"
 ARCH="${ARCH:-rv64}"
 
 # Versions
@@ -232,23 +232,17 @@ if (( PRUNE_OLD_SOURCES && ! UPDATE_VERSIONS )); then
 fi
 
 check_upstream_versions() {
-    local output
-    UPSTREAM_STATUS=0
-    if output=$(python3 "$SCRIPT_DIR/check-linux-versions.py"); then
-        :
-    else
-        UPSTREAM_STATUS=$?
-        print_error "Unable to check upstream versions; check network access and retry."
-    fi
-    UPSTREAM_JSON="$output"
+    print_error "Online version update check is disabled. Update linux-versions.conf directly."
+    UPSTREAM_STATUS=1
+    UPSTREAM_JSON="{}"
 }
 version_is_newer() {
-    python3 - "$1" "$2" <<'PY'
-import re
-import sys
-parts = lambda value: tuple(int(part) for part in re.findall(r"\d+", value))
-sys.exit(0 if parts(sys.argv[1]) > parts(sys.argv[2]) else 1)
-PY
+    if [[ "$1" == "$2" ]]; then
+        return 1
+    fi
+    local lowest
+    lowest=$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)
+    [[ "$lowest" == "$2" ]]
 }
 
 if (( CHECK_UPDATES || UPDATE_VERSIONS )); then
@@ -478,7 +472,7 @@ else
     ROOTFS_LABEL="simrv-alpine"
 fi
 
-IMAGES_ROOT="${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}"
+IMAGES_ROOT="${SIMRV_GUEST_IMAGES_DIR:-${SIMRV_LINUX_IMAGES_DIR:-${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}}}"
 IMAGES_DIR="$IMAGES_ROOT/$ARCH/${ROOTFS_VARIANT}-${PROFILE}"
 case "$CLEAN_ACTION" in
     all)
@@ -832,8 +826,22 @@ nod /dev/random  0666 0 0 c 1 8
 nod /dev/mem     0600 0 0 c 1 1
 LISTEOF
 
-# Walk the initramfs dir and emit the rest of the manifest entries
-python3 "$SCRIPT_DIR/gen-initramfs-manifest.py" "$INITRAMFS_DIR" >> "$CPIO_LIST"
+# Walk the initramfs dir and emit the rest of the manifest entries in gen_init_cpio format
+(
+    cd "$INITRAMFS_DIR"
+    find . -mindepth 1 ! -path './dev*' | while IFS= read -r item; do
+        rel="${item#./}"
+        mode="$(stat -c %a "$item")"
+        if [[ -d "$item" ]]; then
+            echo "dir /$rel 0$mode 0 0"
+        elif [[ -L "$item" ]]; then
+            target="$(readlink "$item")"
+            echo "slink /$rel $target 0$mode 0 0"
+        elif [[ -f "$item" ]]; then
+            echo "file /$rel $INITRAMFS_DIR/$rel 0$mode 0 0"
+        fi
+    done
+) >> "$CPIO_LIST"
 
 if [[ -x "$GEN_INIT_CPIO_BIN" ]]; then
     print_step "Generating initramfs cpio via gen_init_cpio..."
@@ -1003,9 +1011,14 @@ KERNEL_CONFIG_SHA256=$(sha256sum "$KERNEL_CONFIG" | cut -d' ' -f1)
 INITRAMFS_SHA256=$(sha256sum "$BUILD_DIR/initramfs_${ARCH}.cpio" | cut -d' ' -f1)
 REUSE_KERNEL=0
 if [[ "$REUSE_KERNEL_ARTIFACT" == "1" ]]; then
-    if python3 "$SCRIPT_DIR/check-kernel-reuse.py" \
-        "$IMAGES_DIR/manifest.json" "$IMAGES_DIR/vmlinux" "$ARCH" "$LINUX_VER" \
-        "$PROFILE" "$ROOTFS_VARIANT" "$INITRAMFS_SHA256" "$KERNEL_CONFIG_SHA256"; then
+    if [[ -f "$IMAGES_DIR/manifest.json" && -f "$IMAGES_DIR/vmlinux" ]] && \
+       grep -q "\"architecture\": *\"$ARCH\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"linux_version\": *\"$LINUX_VER\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"profile\": *\"$PROFILE\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"rootfs\": *\"$ROOTFS_VARIANT\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"initramfs_sha256\": *\"$INITRAMFS_SHA256\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"kernel_config_sha256\": *\"$KERNEL_CONFIG_SHA256\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"vmlinux\": *\"$(sha256sum "$IMAGES_DIR/vmlinux" | cut -d' ' -f1)\"" "$IMAGES_DIR/manifest.json"; then
         cp "$IMAGES_DIR/vmlinux" "$LINUX_BUILD/vmlinux"
         REUSE_KERNEL=1
         print_info "Skipping kernel rebuild; the published kernel matches the current inputs."
@@ -1043,7 +1056,6 @@ rm -rf "$OPENSBI_BUILD/build"
 # Compile the virt-compatible DTB from the selected memory and rootfs
 # contract. Keep the checked-in templates readable while making the published
 # artifact match the simulator/FPGA memory map.
-python3 "$SCRIPT_DIR/generate_hpm_catalog.py" --check
 DRAM_BYTES=$((DRAM_SIZE_MB * 1024 * 1024))
 DRAM_HEX=$(printf '0x%x' "$DRAM_BYTES")
 GENERATED_DTS="$BUILD_DIR/virt-rv${XLEN}-${ROOTFS_VARIANT}-${PROFILE}.dts"
@@ -1134,12 +1146,8 @@ fi
 export SIMRV_LINUX_OPENSBI="\$IMAGES_DIR/opensbi-dynamic.bin"
 export SIMRV_LINUX_PROFILE="${PROFILE}"
 export SIMRV_LINUX_ROOTFS="${ROOTFS_VARIANT}"
-export SIMRV_LINUX_TAP_SETUP="${SCRIPT_DIR}/setup-simrv-tap.sh"
 export SIMRV_LINUX_TIMEOUT=60
 export SIMRV_LINUX_END=1200000
-simrv_linux_setup_network() {
-    sudo "\$SIMRV_LINUX_TAP_SETUP"
-}
 for _simrv_setup_file in "\$SIMRV_LINUX_MEM_IMG" "\$SIMRV_LINUX_DISK_IMG" \\
                          "\$SIMRV_LINUX_DTB" "\$SIMRV_LINUX_IMAGE" "\$SIMRV_LINUX_OPENSBI"; do
     if [ ! -f "\$_simrv_setup_file" ]; then
@@ -1155,7 +1163,7 @@ echo "├─ OpenSBI dynamic: \$SIMRV_LINUX_OPENSBI"
 echo "├─ Linux Image: \$SIMRV_LINUX_IMAGE"
 echo "├─ Disk image: \$SIMRV_LINUX_DISK_IMG"
 echo "└─ Device tree: \$SIMRV_LINUX_DTB"
-echo "Guest network: 10.0.2.2/24 via 10.0.2.1; run simrv_linux_setup_network for TAP/NAT access"
+echo "Guest networking: DHCP through SimRV user-mode NAT; no host network setup required"
 EOF
 chmod +x "$IMAGES_DIR/setup.sh"
 
@@ -1353,18 +1361,13 @@ EOF
 #!/bin/sh
 set -eu
 
-# The TAP helper on the host provides 10.0.2.1/24. Keep this quiet when the
-# guest is launched without a network device or with the deterministic user backend.
+# Keep this quiet when the guest is launched without a network device.
 if ! ip link show eth0 >/dev/null 2>&1; then
     exit 0
 fi
 ip link set eth0 up 2>/dev/null || true
-ip addr add 10.0.2.2/24 dev eth0 2>/dev/null || true
-ip route add default via 10.0.2.1 dev eth0 2>/dev/null || true
-# The TAP helper relays DNS from the host at the guest gateway. Keep public
-# fallbacks for native hosts where the relay is unavailable.
-printf '%s\n' 'nameserver 10.0.2.1' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
-echo '[NET] eth0 configured as 10.0.2.2/24' > /dev/ttyS0
+udhcpc -i eth0 -q -n -t 3 -T 1 >/dev/null 2>&1 || true
+echo '[NET] DHCP configuration requested for eth0' > /dev/ttyS0
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network"
     cat > "$ROOTFS_DISK_DIR/usr/local/bin/simrv-early-boot" <<'EOF'
@@ -1583,8 +1586,12 @@ if [[ "$PROFILE" == "uefi" ]]; then
         print_error "Unable to locate the extracted EDK2 source tree."
         exit 1
     fi
-    python3 "$SCRIPT_DIR/patch_buildroot_edk2_hostflags.py" \
-        "$BUILDROOT_SOURCE" "$EDK2_SOURCE_DIR"
+    # Patch host flags for GCC compatibility
+    sed -i 's/EXTRA_OPTFLAGS="$(HOST_CPPFLAGS)"/EXTRA_OPTFLAGS="$(HOST_CPPFLAGS) -std=gnu17 -Wno-unused-but-set-variable"/' \
+        "$BUILDROOT_SOURCE/boot/edk2/edk2.mk"
+    find "$EDK2_SOURCE_DIR/BaseTools/Source/C/VfrCompile/Pccts" -name makefile \
+        -exec sed -i '/^CFLAGS[[:space:]]*=/ { /-std=gnu17/! s/$/ -std=gnu17/ }' {} +
+
     make -C "$BUILDROOT_SOURCE" O="$EDK2_OUTPUT" \
         BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" -j"$JOBS" edk2
     for firmware in RISCV_VIRT_CODE.fd RISCV_VIRT_VARS.fd; do
@@ -1599,10 +1606,19 @@ if [[ "$PROFILE" == "uefi" ]]; then
         cp "$EDK2_OUTPUT/images/$firmware" "$IMAGES_DIR/$firmware"
     done
     cmp -s "$EDK2_OUTPUT/images/RISCV_VIRT_VARS.fd" "$IMAGES_DIR/RISCV_VIRT_VARS.fd" || exit 1
-    python3 "$SCRIPT_DIR/create_uefi_disk.py" \
-        --kernel "$IMAGES_DIR/uefi-kernel.efi" \
-        --rootfs "$IMAGES_DIR/rootfs.img" \
-        --output "$IMAGES_DIR/uefi-disk.img"
+
+    SIMRV_CLI="${SIMRV_BIN:-$ROOT_DIR/build/rv64-release/simrv}"
+    if [[ ! -x "$SIMRV_CLI" && -x "$ROOT_DIR/build/rv32-release/simrv" ]]; then
+        SIMRV_CLI="$ROOT_DIR/build/rv32-release/simrv"
+    fi
+    if [[ -x "$SIMRV_CLI" ]]; then
+        "$SIMRV_CLI" --create-disk "$IMAGES_DIR/uefi-disk.img" \
+            -m "$IMAGES_DIR/uefi-kernel.efi" \
+            -D "$IMAGES_DIR/rootfs.img"
+    else
+        print_error "simrv binary not found (looked for $SIMRV_CLI) to generate UEFI disk image."
+        exit 1
+    fi
 fi
 
 BOOTARGS=$(sed -n 's/.*bootargs = "\([^"]*\)".*/\1/p' "$GENERATED_DTS")

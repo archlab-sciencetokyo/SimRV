@@ -140,10 +140,9 @@ source ./linux-images/rv32/alpine-gui/setup.sh
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.
 It also exports `SIMRV_LINUX_IMAGE`, `SIMRV_LINUX_OPENSBI`, `SIMRV_LINUX_ROOTFS`, and
-`SIMRV_LINUX_PROFILE` for bootloaders and test harnesses. It defines
-`simrv_linux_setup_network`, which runs the host TAP/NAT setup helper with `sudo`. The Alpine
-guest configures `eth0` as `10.0.2.2/24` and uses `10.0.2.1` as its gateway; call the helper before
-launching the guest when using the TAP backend.
+`SIMRV_LINUX_PROFILE` for bootloaders and test harnesses. The Alpine guest configures `eth0` with
+DHCP; SimRV's default user-mode network provides DHCP, DNS, and outbound NAT without host-side
+network setup or elevated permissions.
 
 ### FPGA baseline profile
 
@@ -272,13 +271,12 @@ system setup tools for image administration. The SimRV image is already configur
 hardware, so these tools are available on demand and are not run automatically during image build or
 guest startup.
 
-For TAP networking, run `simrv_linux_setup_network` after sourcing the generated `setup.sh`, or run
-`sudo scripts/setup-simrv-tap.sh` before launching the guest. It configures the
-gateway/NAT path and, when `socat` is available, relays UDP and TCP DNS on `10.0.2.1:53` to the
-host's first non-loopback resolver. The guest network service uses that gateway resolver first, which
-avoids depending on a WSL-specific resolver address.
-The emulator process itself must also have permission to open `/dev/net/tun`; grant that device
-access to the launching user or run the TAP-backed emulator with the host's appropriate privilege.
+The default `user` network mode provides an isolated IPv4 subnet with DHCP, DNS, and outbound NAT
+through libslirp. Guest connections use the launching user's host network permissions, so no TAP
+device, firewall changes, or `sudo` setup is needed. It does not accept unsolicited inbound
+connections; use host-side port forwarding when that capability is added. User-mode NAT does not
+reliably support ICMP echo, so `ping` timeouts do not establish that TCP, UDP, or DNS forwarding
+is broken.
 
 SimRV opens the selected disk image read-only and stores guest writes in a sparse temporary overlay.
 The original `rootfs.img` therefore remains unchanged, and test runs can use it directly without

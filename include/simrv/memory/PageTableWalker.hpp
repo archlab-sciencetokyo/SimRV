@@ -16,6 +16,15 @@ struct ArchState;
 
 namespace simrv::memory {
 
+/// Address produced by VS-stage translation and consumed by G-stage translation.
+struct GuestPhysAddr {
+    explicit constexpr GuestPhysAddr(simrv::xlen::Address value = 0) noexcept : value_(value) {}
+    [[nodiscard]] constexpr auto raw() const noexcept -> simrv::xlen::Address { return value_; }
+
+   private:
+    simrv::xlen::Address value_;
+};
+
 using PteFlags = uint8_t;
 
 enum class PteFlag : PteFlags {
@@ -162,8 +171,8 @@ struct PageWalkState {
     simrv::xlen::PageTableLevel level = -1;
     simrv::xlen::Word satp_root{0};
     simrv::xlen::Word hgatp{0};
-    simrv::xlen::Address pte_guest_address{0};
-    simrv::xlen::Address guest_fault_address{0};
+    GuestPhysAddr pte_guest_address{};
+    GuestPhysAddr guest_fault_address{};
     bool implicit_vs_stage_page_table_fault{false};
     bool guest_stage_enabled{false};
     bool update_access_bits = true;
@@ -199,9 +208,9 @@ class PageTableWalker {
    public:
     constexpr PageTableWalker() noexcept = default;
     explicit constexpr PageTableWalker(RamView ram) noexcept : ram_(ram) {}
-    explicit constexpr PageTableWalker(simrv::xlen::Byte* mmem, simrv::xlen::Address dram_base,
+    explicit constexpr PageTableWalker(simrv::xlen::Byte* mmem, simrv::xlen::PhysAddr dram_base,
                                        simrv::xlen::Address dram_size) noexcept
-        : ram_(mmem, dram_base, dram_size) {}
+        : ram_(mmem, simrv::xlen::PhysAddr{dram_base}, dram_size) {}
 
     [[nodiscard]] constexpr auto ram_view() const noexcept -> RamView { return ram_; }
     constexpr void set_ram_view(RamView ram) noexcept { ram_ = ram; }
@@ -249,15 +258,14 @@ class PageTableWalker {
                             simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                             simrv::xlen::Word satp, unsigned xlen, bool update_access_bits = true,
                             const core::ArchState* arch_state = nullptr,
-                            simrv::xlen::Address* guest_fault_address = nullptr,
+                            GuestPhysAddr* guest_fault_address = nullptr,
                             bool* implicit_vs_stage_page_table_fault = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
     /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */
-    [[nodiscard]] auto walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
+    [[nodiscard]] auto walk_guest_physical(GuestPhysAddr guest_address, PteAccess access,
                                            simrv::xlen::Word hgatp, unsigned xlen,
-                                           simrv::xlen::Address* fault_address = nullptr,
-                                           bool mxr = false,
+                                           GuestPhysAddr* fault_address = nullptr, bool mxr = false,
                                            const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
@@ -268,12 +276,20 @@ class PageTableWalker {
         }
     }
 
+    void flush_pdc_vaddr(simrv::xlen::VirtAddr vaddr) noexcept {
+        const auto raw_vaddr = vaddr.raw();
+        const simrv::xlen::Word vpn_prefix = (raw_vaddr >> 21) & 0x3FFFFU;
+        const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
+        pdc_[pdc_idx].epoch = 0;
+    }
+
    private:
     struct PdcEntry {
         simrv::xlen::Word satp_root{0};
         simrv::xlen::Word vpn_prefix{0};
         simrv::xlen::PhysAddr table_address{0};
         uint32_t epoch{0};
+        uint8_t target_level{0};
     };
 
     static constexpr size_t kPdcSize = 256;
@@ -288,7 +304,7 @@ class PageTableWalker {
                                                 simrv::xlen::PrivilegeLevel priv,
                                                 simrv::xlen::CsrValue mstatus) const noexcept
         -> bool;
-    void select_next_pte(PageWalkState& state, simrv::xlen::PhysAddr table_address) const;
+    void select_next_pte(PageWalkState& state, GuestPhysAddr table_address) const;
 
     static constexpr simrv::xlen::Word kPteShift = 10;
 };

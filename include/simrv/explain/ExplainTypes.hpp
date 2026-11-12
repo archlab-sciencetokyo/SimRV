@@ -21,6 +21,7 @@
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -106,8 +107,8 @@ struct OperandState {
 struct MemoryDataflow {
     simrv::xlen::Address base_address{0};
     simrv::xlen::ImmValue offset{0};
-    simrv::xlen::Address effective_vaddr{0};
-    std::optional<simrv::xlen::Address> effective_paddr;
+    simrv::xlen::VirtAddr effective_vaddr{};
+    std::optional<simrv::xlen::PhysAddr> effective_paddr;
     unsigned access_bytes = 0;
     simrv::pipeline::operation::MemoryAccessKind kind{
         simrv::pipeline::operation::MemoryAccessKind::None};
@@ -122,9 +123,9 @@ struct MemoryDataflow {
  * @brief Control-flow resolution grounded in current register state and PC.
  */
 struct ControlDataflow {
-    simrv::xlen::Address target_pc{0};
-    simrv::xlen::Address fallthrough_pc{0};
-    simrv::xlen::Address link_pc{0};
+    simrv::xlen::VirtAddr target_pc{};
+    simrv::xlen::VirtAddr fallthrough_pc{};
+    simrv::xlen::VirtAddr link_pc{};
     bool is_conditional = false;
     bool condition_met = true;
     std::string condition_relation;
@@ -162,7 +163,7 @@ struct VectorDataflow {
  * @brief Predicted architectural post-state delta (next PC, destination writeback, or trap).
  */
 struct PredictedStateEffect {
-    simrv::xlen::Address next_pc{0};
+    simrv::xlen::VirtAddr next_pc{};
     std::optional<simrv::xlen::PrivilegeLevel> next_privilege;
     std::optional<bool> next_virtualization;
     std::optional<simrv::xlen::RegId> written_reg;
@@ -189,7 +190,7 @@ struct MicroarchProfile {
  * @brief Formalized semantic breakdown of an instruction evaluated against architectural state.
  */
 struct InstructionExplanation {
-    simrv::xlen::Address pc{0};
+    simrv::xlen::VirtAddr pc{};
     std::string symbol;
     uint32_t raw_bits = 0;
     bool is_compressed = false;

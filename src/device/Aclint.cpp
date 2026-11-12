@@ -16,14 +16,14 @@ namespace simrv::device {
 // AclintMtimer Implementation
 // =========================================================================
 
-AclintMtimer::AclintMtimer(simrv::core::Machine* machine, simrv::xlen::Address base,
+AclintMtimer::AclintMtimer(simrv::core::Machine* machine, simrv::xlen::PhysAddr base,
                            simrv::xlen::Address size)
     : memory::MmioDevice(machine), base_(base), size_(size) {
     reset();
 }
 
 AclintMtimer::AclintMtimer(simrv::core::IInterruptController* sink, simrv::core::Machine* machine,
-                           simrv::xlen::Address base, simrv::xlen::Address size)
+                           simrv::xlen::PhysAddr base, simrv::xlen::Address size)
     : memory::MmioDevice(machine), sink_(sink), base_(base), size_(size) {
     reset();
 }
@@ -35,7 +35,7 @@ void AclintMtimer::reset() {
     }
 }
 
-auto AclintMtimer::read32(simrv::xlen::Address offset) -> uint32_t {
+auto AclintMtimer::read32(simrv::memory::MmioOffset offset) -> uint32_t {
     if (offset >= 0x4000U && offset < 0x4000U + (kMaxHarts * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         const uint64_t cmp = mtimecmp_[hart_idx].load(std::memory_order_relaxed);
@@ -53,7 +53,7 @@ auto AclintMtimer::read32(simrv::xlen::Address offset) -> uint32_t {
     return 0;
 }
 
-auto AclintMtimer::read64(simrv::xlen::Address offset) -> uint64_t {
+auto AclintMtimer::read64(simrv::memory::MmioOffset offset) -> uint64_t {
     if (offset >= 0x4000U && offset <= 0x4000U + ((kMaxHarts - 1U) * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         return mtimecmp_[hart_idx].load(std::memory_order_relaxed);
@@ -66,7 +66,7 @@ auto AclintMtimer::read64(simrv::xlen::Address offset) -> uint64_t {
     return lo | (hi << 32);
 }
 
-void AclintMtimer::write32(simrv::xlen::Address offset, uint32_t val) {
+void AclintMtimer::write32(simrv::memory::MmioOffset offset, uint32_t val) {
     if (offset >= 0x4000U && offset < 0x4000U + (kMaxHarts * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         uint64_t cur = mtimecmp_[hart_idx].load(std::memory_order_relaxed);
@@ -92,7 +92,7 @@ void AclintMtimer::write32(simrv::xlen::Address offset, uint32_t val) {
     }
 }
 
-void AclintMtimer::write64(simrv::xlen::Address offset, uint64_t val) {
+void AclintMtimer::write64(simrv::memory::MmioOffset offset, uint64_t val) {
     if (offset >= 0x4000U && offset <= 0x4000U + ((kMaxHarts - 1U) * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         mtimecmp_[hart_idx].store(val, std::memory_order_relaxed);
@@ -131,14 +131,14 @@ void AclintMtimer::tick() {
 // AclintMswi Implementation
 // =========================================================================
 
-AclintMswi::AclintMswi(simrv::core::Machine* machine, simrv::xlen::Address base,
+AclintMswi::AclintMswi(simrv::core::Machine* machine, simrv::xlen::PhysAddr base,
                        simrv::xlen::Address size)
     : memory::MmioDevice(machine), base_(base), size_(size) {
     reset();
 }
 
 AclintMswi::AclintMswi(simrv::core::IInterruptController* sink, simrv::core::Machine* machine,
-                       simrv::xlen::Address base, simrv::xlen::Address size)
+                       simrv::xlen::PhysAddr base, simrv::xlen::Address size)
     : memory::MmioDevice(machine), sink_(sink), base_(base), size_(size) {
     reset();
 }
@@ -149,7 +149,7 @@ void AclintMswi::reset() {
     }
 }
 
-auto AclintMswi::read32(simrv::xlen::Address offset) -> uint32_t {
+auto AclintMswi::read32(simrv::memory::MmioOffset offset) -> uint32_t {
     if (offset < (kMaxHarts * 4U)) {
         const size_t hart_idx = offset / 4U;
         return msip_[hart_idx].load(std::memory_order_relaxed);
@@ -157,7 +157,7 @@ auto AclintMswi::read32(simrv::xlen::Address offset) -> uint32_t {
     return 0;
 }
 
-void AclintMswi::write32(simrv::xlen::Address offset, uint32_t val) {
+void AclintMswi::write32(simrv::memory::MmioOffset offset, uint32_t val) {
     if (offset < (kMaxHarts * 4U)) {
         const size_t hart_idx = offset / 4U;
         const uint32_t bit = val & 1U;

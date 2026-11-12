@@ -20,6 +20,7 @@
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -106,14 +107,14 @@ class InspectorPane : public TuiWidget {
     void scroll_log(int lines);
     void reset_log_scroll();
     [[nodiscard]] auto get_log_scroll_offset() const -> int;
-    void set_inspect_addr(simrv::xlen::Register addr) { inspect_addr_ = addr; }
-    [[nodiscard]] auto get_inspect_addr() const -> simrv::xlen::Register { return inspect_addr_; }
-    void reset_inspect_addr() noexcept { inspect_addr_ = 0; }
+    void set_inspect_addr(simrv::xlen::VirtAddr addr) { inspect_addr_ = addr; }
+    [[nodiscard]] auto get_inspect_addr() const -> simrv::xlen::VirtAddr { return inspect_addr_; }
+    void reset_inspect_addr() noexcept { inspect_addr_ = simrv::xlen::VirtAddr{}; }
     [[nodiscard]] auto is_custom_memory_inspect() const noexcept -> bool {
         return inspect_addr_ != 0;
     }
-    void set_explain_pc(simrv::xlen::Register pc) { explain_pc_ = pc; }
-    [[nodiscard]] auto get_explain_pc() const -> simrv::xlen::Register { return explain_pc_; }
+    void set_explain_pc(simrv::xlen::VirtAddr pc) { explain_pc_ = pc; }
+    [[nodiscard]] auto get_explain_pc() const -> simrv::xlen::VirtAddr { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) {
         log_lines_ = std::move(log_lines);
@@ -137,11 +138,11 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;
     }
-    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register;
+    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::VirtAddr;
     [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const
         -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const
-        -> std::optional<simrv::xlen::Register>;
+        -> std::optional<simrv::xlen::VirtAddr>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
@@ -210,9 +211,6 @@ class InspectorPane : public TuiWidget {
                                        int right_width) -> std::string;
     [[nodiscard]] auto render_stack_frame(const simrv::core::CPU& cpu, int logical_row,
                                           int col_width, int right_width) -> std::string;
-    [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu,
-                                      simrv::xlen::Register vaddr) const
-        -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
                                                 int width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
@@ -293,8 +291,8 @@ class InspectorPane : public TuiWidget {
     }
 
     double active_runtime_ = 0.0;
-    simrv::xlen::Register inspect_addr_ = 0;
-    simrv::xlen::Register explain_pc_ = 0;
+    simrv::xlen::VirtAddr inspect_addr_{};
+    simrv::xlen::VirtAddr explain_pc_{};
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache

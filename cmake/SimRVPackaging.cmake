@@ -4,7 +4,7 @@ include(CMakePackageConfigHelpers)
 set_target_properties(SimRV PROPERTIES EXPORT_NAME cli OUTPUT_NAME simrv)
 
 install(
-  TARGETS SimRV simrv-runtime
+  TARGETS SimRV simrv-runtime simrv-devel
   EXPORT SimRVTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development
@@ -38,36 +38,22 @@ install(
   COMPONENT Runtime)
 
 install(
-  PROGRAMS scripts/cpu_model_wizard.py
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-cpu-wizard
+  TARGETS simrv-cpu-wizard simrv-parity simrv-benchmark
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
 install(
-  PROGRAMS scripts/tune_cpu_model.py
+  PROGRAMS $<TARGET_FILE:simrv-parity>
   DESTINATION ${CMAKE_INSTALL_BINDIR}
   RENAME simrv-tune
   COMPONENT Tools)
 install(
-  PROGRAMS scripts/evaluate_rtl_parity.py
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-parity
-  COMPONENT Tools)
+  TARGETS simrv-act simrv-vector
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT Tests)
 install(
-  PROGRAMS scripts/benchmark.py
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-benchmark
-  COMPONENT Benchmark)
-
-install(
-  DIRECTORY scripts/rtl_parity/
-  DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts/rtl_parity
-  COMPONENT Tools
-  FILES_MATCHING
-  PATTERN "*.py"
-  PATTERN "__pycache__" EXCLUDE)
-install(FILES scripts/experiment_metadata.py
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts
-        COMPONENT Benchmark)
+  FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl
+  COMPONENT Development)
 
 install(
   DIRECTORY configs/models/
@@ -104,15 +90,6 @@ install(
   PATTERN "*.o" EXCLUDE)
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
-        COMPONENT Runtime)
-install(FILES completions/bash/simrv
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
-        COMPONENT Runtime)
-install(FILES completions/zsh/_simrv
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions
-        COMPONENT Runtime)
-install(FILES completions/fish/simrv.fish
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/fish/vendor_completions.d
         COMPONENT Runtime)
 
 configure_package_config_file(
@@ -162,20 +139,20 @@ set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${PROJECT_SOURCE_DIR}/README.md")
 set(CPACK_GENERATOR "TGZ" CACHE STRING
     "Semicolon-separated CPack generators (for example TGZ;RPM;DEB)")
-set(CPACK_COMPONENTS_ALL Runtime Tools Benchmark Development)
+set(CPACK_COMPONENTS_ALL Runtime Tools Tests Development)
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_COMPONENT_TOOLS_DEPENDS Runtime)
-set(CPACK_COMPONENT_BENCHMARK_DEPENDS Runtime)
+set(CPACK_COMPONENT_TESTS_DEPENDS Runtime)
 set(CPACK_COMPONENT_DEVELOPMENT_DEPENDS Runtime)
 set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "SimRV")
 set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
     "Explainable RISC-V simulator runtime for RV64 and RV32 guests.")
-set(CPACK_COMPONENT_TOOLS_DISPLAY_NAME "SimRV architecture tools")
+set(CPACK_COMPONENT_TOOLS_DISPLAY_NAME "SimRV architecture and benchmarking tools")
 set(CPACK_COMPONENT_TOOLS_DESCRIPTION
-    "Optional CPU model, RTL parity, and architecture configuration tools.")
-set(CPACK_COMPONENT_BENCHMARK_DISPLAY_NAME "SimRV benchmark tools")
-set(CPACK_COMPONENT_BENCHMARK_DESCRIPTION
-    "Optional benchmark and reproducibility measurement tools.")
+    "Optional CPU model, RTL parity, tuning, and benchmark measurement tools.")
+set(CPACK_COMPONENT_TESTS_DISPLAY_NAME "SimRV compliance test runners")
+set(CPACK_COMPONENT_TESTS_DESCRIPTION
+    "Optional RISC-V architectural compliance test drivers (ACT4 and Vector).")
 set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "SimRV C++ development files")
 set(CPACK_COMPONENT_DEVELOPMENT_DESCRIPTION
     "C++23 headers, static runtime library, and CMake package for downstream projects.")
@@ -201,20 +178,20 @@ set(CPACK_DEBIAN_RUNTIME_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "simrv")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "libc6, libgcc-s1, libstdc++6")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_NAME "simrv-tools")
-set(CPACK_DEBIAN_BENCHMARK_PACKAGE_NAME "simrv-benchmark")
+set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_NAME "simrv-devel")
 set(CPACK_DEBIAN_RUNTIME_FILE_NAME
     "simrv_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_TOOLS_FILE_NAME
     "simrv-tools_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
-set(CPACK_DEBIAN_BENCHMARK_FILE_NAME
-    "simrv-benchmark_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
+set(CPACK_DEBIAN_TESTS_FILE_NAME
+    "simrv-tests_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_DEVELOPMENT_FILE_NAME
     "simrv-devel_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS
-    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
-set(CPACK_DEBIAN_BENCHMARK_PACKAGE_DEPENDS
-    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
+set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 
@@ -243,20 +220,20 @@ else()
 endif()
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "simrv")
 set(CPACK_RPM_TOOLS_PACKAGE_NAME "simrv-tools")
-set(CPACK_RPM_BENCHMARK_PACKAGE_NAME "simrv-benchmark")
+set(CPACK_RPM_TESTS_PACKAGE_NAME "simrv-tests")
 set(CPACK_RPM_DEVELOPMENT_PACKAGE_NAME "simrv-devel")
 set(CPACK_RPM_RUNTIME_FILE_NAME
     "simrv-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
 set(CPACK_RPM_TOOLS_FILE_NAME
     "simrv-tools-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
-set(CPACK_RPM_BENCHMARK_FILE_NAME
-    "simrv-benchmark-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+set(CPACK_RPM_TESTS_FILE_NAME
+    "simrv-tests-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
 set(CPACK_RPM_DEVELOPMENT_FILE_NAME
     "simrv-devel-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
 set(CPACK_RPM_TOOLS_PACKAGE_REQUIRES
     "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
-set(CPACK_RPM_BENCHMARK_PACKAGE_REQUIRES
-    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}, python3")
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES
+    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_DEVELOPMENT_PACKAGE_REQUIRES
     "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 # Reproducible archive metadata (CMP0206 in CMake 4.3+)

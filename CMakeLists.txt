@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.31...4.3)
 # Keep the release version authoritative here. The project() version is derived
 # from it so CMake, BuildInfo, CPack, release tooling, and citation checks use
 # the same source value.
-set(SIMRV_VERSION "3.0.0-rc.18")
+set(SIMRV_VERSION "3.0.0-rc.19")
 string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
 
 project(
@@ -26,13 +26,6 @@ option(SIMRV_ENABLE_TOOLING
        "Enable release validation helpers" OFF)
 option(SIMRV_ENABLE_LINUX_TOOLS
        "Enable Linux image build and launch helper targets" OFF)
-if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
-  find_package(
-    Python3
-    COMPONENTS Interpreter
-    REQUIRED)
-  set(PYTHON_BIN "${Python3_EXECUTABLE}")
-endif()
 
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
@@ -132,8 +125,17 @@ option(
 option(SIMRV_X86_64_V3_BASELINE
        "Use the x86-64-v3 ISA baseline for non-native x86-64 Release builds" ON)
 option(SIMRV_USE_LIBCXX "Use LLVM libc++ standard library with Clang" OFF)
+if(NOT DEFINED SIMRV_VECTOR_TESTS_DIR OR "${SIMRV_VECTOR_TESTS_DIR}" STREQUAL "")
+  if(DEFINED ENV{RISCV_VECTOR_TESTS_DIR} AND NOT "$ENV{RISCV_VECTOR_TESTS_DIR}" STREQUAL "")
+    set(SIMRV_VECTOR_TESTS_DIR "$ENV{RISCV_VECTOR_TESTS_DIR}")
+  elseif(DEFINED ENV{SIMRV_VECTOR_TESTS_DIR} AND NOT "$ENV{SIMRV_VECTOR_TESTS_DIR}" STREQUAL "")
+    set(SIMRV_VECTOR_TESTS_DIR "$ENV{SIMRV_VECTOR_TESTS_DIR}")
+  elseif(EXISTS "${CMAKE_SOURCE_DIR}/../../tests/riscv-vector-tests" AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/../../tests/riscv-vector-tests")
+    set(SIMRV_VECTOR_TESTS_DIR "${CMAKE_SOURCE_DIR}/../../tests/riscv-vector-tests")
+  endif()
+endif()
 set(SIMRV_VECTOR_TESTS_DIR
-    ""
+    "${SIMRV_VECTOR_TESTS_DIR}"
     CACHE PATH "Path to a built chipsalliance/riscv-vector-tests checkout")
 
 if(SIMRV_ENABLE_TSAN AND (SIMRV_ENABLE_ASAN OR SIMRV_ENABLE_UBSAN))
@@ -230,6 +232,22 @@ else()
       CACHE PATH "Path to reproducible Linux test images")
 endif()
 
+if(DEFINED ENV{SIMRV_GUEST_BUILD_DIR})
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "$ENV{SIMRV_GUEST_BUILD_DIR}")
+elseif(DEFINED ENV{SIMRV_LINUX_BUILD_DIR})
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "$ENV{SIMRV_LINUX_BUILD_DIR}")
+elseif(DEFINED ENV{SIMRV_LINUX_BUILDS_DIR})
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "$ENV{SIMRV_LINUX_BUILDS_DIR}")
+else()
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "${PROJECT_SOURCE_DIR}/linux-build")
+endif()
+set(SIMRV_LINUX_BUILD_DIR
+    "${_SIMRV_DEFAULT_LINUX_BUILD_DIR}"
+    CACHE PATH "Path to Linux and guest build artifacts")
+set(SIMRV_GUEST_BUILD_DIR
+    "${SIMRV_LINUX_BUILD_DIR}"
+    CACHE PATH "Alias path to guest build artifacts")
+
 set(SIMRV_DRAM_SIZE_MB
     "256"
     CACHE STRING "DRAM size in megabytes (must be power of 2)")
@@ -251,6 +269,8 @@ configure_file(
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(SimRVOptions)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBSLIRP REQUIRED IMPORTED_TARGET slirp)
 
 add_subdirectory(src/pipeline)
 add_subdirectory(src/execute)
@@ -272,6 +292,38 @@ target_include_directories(SimRV PRIVATE ${PROJECT_SOURCE_DIR}/include
                                          ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(SimRV PRIVATE simrv-runtime)
 simrv_apply_options(SimRV)
+
+function(simrv_add_tool target source)
+  add_executable(${target} ${source})
+  target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/include
+                                              ${PROJECT_BINARY_DIR}/generated)
+  target_link_libraries(${target} PRIVATE simrv-runtime)
+  simrv_apply_options(${target})
+endfunction()
+
+simrv_add_tool(simrv-cpu-wizard src/tools/CpuWizard.cpp)
+simrv_add_tool(simrv-smoke src/tools/GaSmoke.cpp)
+simrv_add_tool(simrv-release-check src/tools/ReleaseCheck.cpp)
+simrv_add_tool(simrv-evidence src/tools/ReleaseEvidence.cpp)
+simrv_add_tool(simrv-check-artifacts src/tools/CheckLinuxArtifacts.cpp)
+simrv_add_tool(simrv-benchmark src/tools/BenchmarkTool.cpp)
+simrv_add_tool(simrv-act src/tools/ActRunner.cpp)
+simrv_add_tool(simrv-vector src/tools/VectorRunner.cpp)
+
+add_executable(simrv-parity
+  src/tools/RtlParity.cpp
+  src/rtl/ParityRegistry.cpp
+  src/rtl/targets/RvcompTarget.cpp
+  src/rtl/targets/CfuPgTarget.cpp)
+target_include_directories(simrv-parity PRIVATE ${PROJECT_SOURCE_DIR}/include
+                                                ${PROJECT_BINARY_DIR}/generated)
+target_link_libraries(simrv-parity PRIVATE simrv-runtime ${CMAKE_DL_LIBS})
+simrv_apply_options(simrv-parity)
+add_executable(simrv-rtl-parity ALIAS simrv-parity)
+add_custom_target(simrv-tune ALL
+  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:simrv-parity>
+          "${CMAKE_CURRENT_BINARY_DIR}/simrv-tune"
+  DEPENDS simrv-parity)
 
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
 if(COMPILER_SUPPORTS_FROUNDING_MATH)

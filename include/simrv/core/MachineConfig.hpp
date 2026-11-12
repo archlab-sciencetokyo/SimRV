@@ -22,6 +22,8 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 
@@ -32,16 +34,12 @@ enum class PlatformProfile : uint8_t {
 };
 
 struct MemoryGeometry {
-    simrv::xlen::Address dram_base = memory::kDramBaseAddress;
+    simrv::xlen::PhysAddr dram_base = memory::kDramBaseAddress;
     simrv::xlen::Address dram_size = memory::kDramSize;
 
-    [[nodiscard]] constexpr auto contains(simrv::xlen::Address address, size_t size = 1) const
-        -> bool {
-        return memory::address_range_contains(dram_base, dram_size, address, size);
-    }
     [[nodiscard]] constexpr auto contains(simrv::xlen::PhysAddr address, size_t size = 1) const
         -> bool {
-        return memory::address_range_contains(dram_base, dram_size, address.raw(), size);
+        return memory::address_range_contains(dram_base, dram_size, address, size);
     }
 };
 
@@ -57,7 +55,7 @@ struct ExecutionConfig {
     uint32_t smp_quantum = 100;
     std::optional<SmpMode> smp_mode{};
     simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
-    simrv::xlen::Address start_pc = 0;
+    simrv::xlen::VirtAddr start_pc{};
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
@@ -65,6 +63,7 @@ struct ExecutionConfig {
     bool realtime_pacing = false;
     uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz;
     uint64_t timebase_hz = simrv::core::timing::kTimebaseHz;
+    uint32_t max_consecutive_traps = 3;  ///< Maximum recursive traps before halting as a trap loop
     simrv::isa::ArchitectureProfile profile = simrv::isa::kDefaultArchitectureProfile;
 };
 
@@ -95,9 +94,9 @@ struct DebugConfig {
     std::string trace_events;
     std::string trace_function;
     std::string trace_device;
-    std::optional<uint32_t> trace_hart;
-    std::optional<simrv::xlen::Address> trace_pc_start;
-    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::HartId> trace_hart;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_start;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_end;
     std::optional<simrv::xlen::Counter> trace_after_cycle;
     std::optional<simrv::xlen::Counter> trace_before_cycle;
     simrv::xlen::Counter checkpoint_every = 0;
@@ -140,7 +139,7 @@ enum class FramebufferFormat : uint8_t {
 struct FramebufferConfig {
     uint32_t width = 800;
     uint32_t height = 600;
-    simrv::xlen::Address base = 0x84000000ULL;
+    simrv::xlen::PhysAddr base{0x84000000ULL};
     uint32_t stride = 0;
     uint32_t bpp = 4;
     FramebufferFormat format = FramebufferFormat::A8R8G8B8;
@@ -183,7 +182,7 @@ struct MachineConfig {
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
             return std::unexpected("DRAM size must be a non-zero power of two");
         }
-        if (memory.dram_base > ~simrv::xlen::Address{0} - memory.dram_size) {
+        if (memory.dram_base.raw() > ~simrv::xlen::Address{0} - memory.dram_size) {
             return std::unexpected("DRAM address range overflows address space");
         }
         for (const auto& dev : SoCDeviceRegistry::resolve(soc)) {
@@ -282,7 +281,8 @@ struct MachineConfig {
 
     template <typename Self>
     constexpr auto&& with_framebuffer(this Self&& self, uint32_t width, uint32_t height,
-                                      simrv::xlen::Address base = 0x84000000ULL) noexcept {
+                                      simrv::xlen::PhysAddr base = simrv::xlen::PhysAddr{
+                                          0x84000000ULL}) noexcept {
         self.framebuffer.width = width;
         self.framebuffer.height = height;
         self.framebuffer.base = base;
@@ -290,7 +290,7 @@ struct MachineConfig {
     }
 
     template <typename Self>
-    constexpr auto&& with_dram_base(this Self&& self, simrv::xlen::Address base) noexcept {
+    constexpr auto&& with_dram_base(this Self&& self, simrv::xlen::PhysAddr base) noexcept {
         self.memory.dram_base = base;
         return std::forward<Self>(self);
     }
@@ -326,7 +326,7 @@ struct MachineConfig {
     }
 
     template <typename Self>
-    constexpr auto&& with_start_pc(this Self&& self, simrv::xlen::Address pc) noexcept {
+    constexpr auto&& with_start_pc(this Self&& self, simrv::xlen::VirtAddr pc) noexcept {
         self.execution.start_pc = pc;
         return std::forward<Self>(self);
     }

@@ -89,6 +89,23 @@ class MissionProgress {
     [[nodiscard]] auto checkpoint_count() const noexcept -> size_t { return checkpoints_.size(); }
     [[nodiscard]] auto reached_checkpoint_count() const -> size_t;
 
+    [[nodiscard]] auto load(std::string_view mission_path) -> bool;
+    [[nodiscard]] auto expected_program() const noexcept -> std::string_view {
+        return expected_program_;
+    }
+    [[nodiscard]] auto step_id(size_t index) const noexcept -> std::string_view {
+        if (index < steps_.size()) return steps_[index].id;
+        return {};
+    }
+    [[nodiscard]] auto step_guidance(size_t index) const -> std::optional<MissionGuidance> {
+        if (index < steps_.size()) return steps_[index].guidance;
+        return std::nullopt;
+    }
+    [[nodiscard]] auto step_speed(size_t index) const -> uint64_t {
+        if (index < steps_.size() && steps_[index].speed_hz) return *steps_[index].speed_hz;
+        return speed_hz_;
+    }
+
    private:
     struct MissionStep {
         std::string id;
@@ -101,7 +118,6 @@ class MissionProgress {
         size_t after_step = 0;
     };
 
-    [[nodiscard]] auto load(std::string_view mission_path) -> bool;
     std::string mission_path_;
     std::string lesson_id_;
     std::string expected_program_;

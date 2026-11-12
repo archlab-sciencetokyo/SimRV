@@ -36,6 +36,7 @@
 #include <format>
 #include <limits>
 #include <string_view>
+#include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
@@ -222,7 +223,8 @@ auto SpikeLockstep::parse_commit_line(const std::string& line, SpikeCommitRecord
     if (ec_pc != std::errc{}) {
         return std::nullopt;
     }
-    rec.pc = static_cast<simrv::xlen::Address>(pc_val);
+    if (!std::in_range<simrv::xlen::Word>(pc_val)) return std::nullopt;
+    rec.pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(pc_val)};
 
     // Parse register write after the closing parenthesis of the instruction
     const auto close_paren_pos = sv.find(')', paren_pos);
@@ -272,11 +274,10 @@ auto SpikeLockstep::parse_commit_line(const std::string& line, SpikeCommitRecord
             i += 2;
             uint64_t val = 0;
             const auto [pv, ecv] = std::from_chars(sv.data() + i, sv.data() + sv.size(), val, 16);
-            if (ecv == std::errc{}) {
-                rec.gpr.at(static_cast<std::size_t>(reg_idx)) =
-                    static_cast<simrv::xlen::Register>(val);
-                rec.gpr_valid.at(static_cast<std::size_t>(reg_idx)) = true;
-            }
+            if (ecv != std::errc{} || !std::in_range<simrv::xlen::Register>(val))
+                return std::nullopt;
+            rec.gpr.at(static_cast<std::size_t>(reg_idx)) = static_cast<simrv::xlen::Register>(val);
+            rec.gpr_valid.at(static_cast<std::size_t>(reg_idx)) = true;
         }
     }
 
@@ -352,8 +353,8 @@ auto SpikeLockstep::determine_sc_success() -> std::optional<bool> {
 // Divergence reporting
 // ---------------------------------------------------------------------------
 
-void SpikeLockstep::print_divergence(uint64_t icount, simrv::xlen::Address simrv_pc,
-                                     simrv::xlen::Address spike_pc,
+void SpikeLockstep::print_divergence(uint64_t icount, simrv::xlen::VirtAddr simrv_pc,
+                                     simrv::xlen::VirtAddr spike_pc,
                                      const simrv::core::ArchState& simrv_state,
                                      const SpikeCommitRecord& spike_rec) {
     simrv::log::error("[LOCKSTEP] Divergence at instruction #{}", icount);
@@ -364,10 +365,11 @@ void SpikeLockstep::print_divergence(uint64_t icount, simrv::xlen::Address simrv
     }
 
     if (simrv_pc != spike_pc) {
-        simrv::log::error("  PC:   SimRV=0x{:08x}  Spike=0x{:08x}", static_cast<uint32_t>(simrv_pc),
-                          static_cast<uint32_t>(spike_pc));
+        simrv::log::error("  PC:   SimRV=0x{:08x}  Spike=0x{:08x}",
+                          static_cast<uint32_t>(simrv_pc.raw()),
+                          static_cast<uint32_t>(spike_pc.raw()));
     } else {
-        simrv::log::error("  PC:   0x{:08x}  (match)", static_cast<uint32_t>(simrv_pc));
+        simrv::log::error("  PC:   0x{:08x}  (match)", static_cast<uint32_t>(simrv_pc.raw()));
     }
 
     // Show mismatched GPRs that Spike reported as written
@@ -388,11 +390,11 @@ void SpikeLockstep::print_divergence(uint64_t icount, simrv::xlen::Address simrv
 // ---------------------------------------------------------------------------
 
 auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state,
-                                       simrv::xlen::Address current_pc, uint64_t icount) -> bool {
+                                       simrv::xlen::VirtAddr current_pc, uint64_t icount) -> bool {
     if (!is_running()) return true;
 
     constexpr simrv::xlen::Address pc_mask = std::numeric_limits<simrv::xlen::Address>::max();
-    const simrv::xlen::Address masked_current_pc = current_pc & pc_mask;
+    const simrv::xlen::VirtAddr masked_current_pc = current_pc & pc_mask;
 
     SpikeCommitRecord spike_rec{};
     if (icount == 1) {

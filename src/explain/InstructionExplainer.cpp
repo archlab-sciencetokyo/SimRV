@@ -370,12 +370,15 @@ auto build_microarch_profile(OperationId op_id) -> MicroarchProfile {
 }
 
 auto translate_for_inspection(const simrv::core::ArchState& st, const simrv::core::CPU* cpu,
-                              simrv::xlen::Address vaddr, bool is_fetch, bool is_write)
-    -> std::optional<simrv::xlen::Address> {
+                              simrv::xlen::VirtAddr vaddr, bool is_fetch, bool is_write)
+    -> std::optional<simrv::xlen::PhysAddr> {
     const auto active_xlen = st.current_xlen();
     if (st.priv == simrv::xlen::PrivilegeLevel::Machine ||
         !simrv::xlen::satp_translation_enabled(st.satp, active_xlen)) {
-        return active_xlen == 32 ? (vaddr & 0xFFFFFFFFULL) : vaddr;
+        if constexpr (sizeof(simrv::xlen::Word) > sizeof(uint32_t)) {
+            if (active_xlen == 32) vaddr &= 0xFFFFFFFFULL;
+        }
+        return simrv::xlen::PhysAddr{vaddr.raw()};
     }
     if (cpu == nullptr) return std::nullopt;
     const simrv::xlen::Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
@@ -384,7 +387,7 @@ auto translate_for_inspection(const simrv::core::ArchState& st, const simrv::cor
                  : (is_write ? cpu->tlb.peek_data_w(vaddr, asid, st.priv)
                              : cpu->tlb.peek_data_r(vaddr, asid, st.priv));
     if (entry == nullptr) return std::nullopt;
-    return entry->p_addr | (vaddr & simrv::memory::kPageMask);
+    return entry->p_addr | (vaddr.raw() & simrv::memory::kPageMask);
 }
 
 auto get_abi_reg_name(simrv::xlen::RegId reg, simrv::pipeline::operation::RegBank bank)
@@ -455,7 +458,7 @@ auto vlmul_name(Vlmul lmul) -> std::string {
     }
 }
 
-auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned active_xlen,
+auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned active_xlen,
                             const simrv::core::ArchState* st, const simrv::core::CPU* cpu,
                             const simrv::core::Machine* machine) -> InstructionExplanation {
     using namespace simrv::pipeline::operation;
@@ -546,7 +549,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         format_canonical_assembly(expl, expl.rd.name, expl.rs1.name, expl.rs2.name, expl.rs3.name);
 
     const simrv::xlen::Address step_bytes = expl.is_compressed ? 2U : 4U;
-    expl.predicted_effect.next_pc = pc + step_bytes;
+    expl.predicted_effect.next_pc = simrv::xlen::VirtAddr{pc + step_bytes};
     if (rdb != RegBank::None) {
         expl.predicted_effect.written_reg = expl.rd.reg_id;
         expl.predicted_effect.written_bank = rdb;
@@ -570,7 +573,8 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                                      simrv::isa::is_hypervisor_memory_op(expl.op_id) ||
                                      simrv::isa::is_cmo_op(expl.op_id);
         mem.offset = zero_offset_mem ? 0 : expl.imm;
-        mem.effective_vaddr = mem.base_address + static_cast<simrv::xlen::Address>(mem.offset);
+        mem.effective_vaddr =
+            simrv::xlen::VirtAddr{mem.base_address + static_cast<simrv::xlen::Address>(mem.offset)};
         if (active_xlen == 32) {
             mem.effective_vaddr &= 0xFFFFFFFFULL;
         }
@@ -605,21 +609,24 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     // 2. Evaluate Control Flow
     if (is_control(expl.op_id) || expl.op_id == SRET || expl.op_id == MRET || expl.op_id == URET) {
         ControlDataflow ctrl{};
-        ctrl.fallthrough_pc = pc + step_bytes;
-        ctrl.link_pc = pc + step_bytes;
+        ctrl.fallthrough_pc = simrv::xlen::VirtAddr{pc + step_bytes};
+        ctrl.link_pc = simrv::xlen::VirtAddr{pc + step_bytes};
         if (expl.op_id == JALR) {
-            ctrl.target_pc = (expl.rs1.raw_value + static_cast<simrv::xlen::Address>(expl.imm)) &
-                             ~simrv::xlen::Address{1};
+            ctrl.target_pc = simrv::xlen::VirtAddr{
+                (expl.rs1.raw_value + static_cast<simrv::xlen::Address>(expl.imm)) &
+                ~simrv::xlen::Address{1}};
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "unconditional indirect jump";
         } else if (expl.op_id == JAL) {
-            ctrl.target_pc = pc + static_cast<simrv::xlen::Address>(expl.imm);
+            ctrl.target_pc =
+                simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "unconditional relative jump";
         } else if (is_branch(expl.op_id)) {
-            ctrl.target_pc = pc + static_cast<simrv::xlen::Address>(expl.imm);
+            ctrl.target_pc =
+                simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
             ctrl.is_conditional = true;
             ctrl.condition_met = simrv::execute::ExecuteUnitInt::branchTaken(
                 expl.rs1.raw_value, expl.rs2.raw_value, expl.funct3, active_xlen);
@@ -763,7 +770,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     } else if (expl.op_id == EBREAK) {
         expl.predicted_effect.predicted_trap =
             simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::Breakpoint);
-        expl.predicted_effect.predicted_tval = pc;
+        expl.predicted_effect.predicted_tval = pc.raw();
     } else if (expl.csr.has_value() &&
                (expl.csr->access_exception.has_value() || !expl.csr->privilege_permitted ||
                 !expl.csr->write_permitted)) {
@@ -777,20 +784,20 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         if ((expl.control->target_pc & align_mask) != 0) {
             expl.predicted_effect.predicted_trap =
                 simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::MisalignedFetch);
-            expl.predicted_effect.predicted_tval = expl.control->target_pc;
+            expl.predicted_effect.predicted_tval = expl.control->target_pc.raw();
         }
     } else if (expl.memory.has_value() && is_atomic(expl.op_id) && !expl.memory->is_aligned) {
         const auto code = (expl.op_id == LR_W || expl.op_id == LR_D)
                               ? simrv::isa::ExceptionCode::FaultLoad
                               : simrv::isa::ExceptionCode::FaultStore;
         expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(code);
-        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr;
+        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr.raw();
     } else if (expl.memory.has_value() && !expl.memory->pmp_permitted) {
         const auto code = (expl.memory->kind == MemoryAccessKind::Load)
                               ? simrv::isa::ExceptionCode::FaultLoad
                               : simrv::isa::ExceptionCode::FaultStore;
         expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(code);
-        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr;
+        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr.raw();
     }
 
     if (!expl.predicted_effect.predicted_trap.has_value() && rdb == RegBank::Integer) {
@@ -801,9 +808,9 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                 static_cast<simrv::xlen::Register>(expl.imm);
         } else if (expl.op_id == AUIPC) {
             expl.predicted_effect.predicted_reg_value =
-                pc + static_cast<simrv::xlen::Register>(expl.imm);
+                pc.raw() + static_cast<simrv::xlen::Register>(expl.imm);
         } else if (expl.op_id == JAL || expl.op_id == JALR) {
-            expl.predicted_effect.predicted_reg_value = pc + step_bytes;
+            expl.predicted_effect.predicted_reg_value = pc.raw() + step_bytes;
         } else if (expl.csr.has_value() && expl.csr->current_value.has_value()) {
             expl.predicted_effect.predicted_reg_value = *expl.csr->current_value;
         } else if (is_pure_int_alu(expl.op_id)) {
@@ -869,36 +876,36 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
 
 }  // namespace
 
-auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::Address pc, unsigned xlen)
+auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned xlen)
     -> std::string {
     return explain_static(raw_inst, pc, xlen).assembly;
 }
 
-auto explain_static(uint32_t raw_inst, simrv::xlen::Address pc, unsigned xlen)
+auto explain_static(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned xlen)
     -> InstructionExplanation {
     return build_explanation_impl(raw_inst, pc, xlen, nullptr, nullptr, nullptr);
 }
 
-auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::Address pc,
+auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::VirtAddr pc,
                       uint32_t raw_inst, const simrv::core::CPU* cpu,
                       const simrv::core::Machine* machine) -> InstructionExplanation {
     return build_explanation_impl(raw_inst, pc, state.current_xlen(), &state, cpu, machine);
 }
 
 auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
-                   std::optional<simrv::xlen::Address> override_pc)
+                   std::optional<simrv::xlen::VirtAddr> override_pc)
     -> std::optional<InstructionExplanation> {
     if (hart_index >= machine.num_harts()) {
         return std::nullopt;
     }
     const auto& cpu = machine.hart(hart_index);
     const auto& st = cpu.state();
-    const simrv::xlen::Address target_pc = override_pc.value_or(st.pc);
+    const simrv::xlen::VirtAddr target_pc = override_pc.value_or(st.pc);
     if (target_pc == 0) {
         return std::nullopt;
     }
 
-    auto read_halfword = [&](simrv::xlen::Address vaddr) -> std::optional<uint16_t> {
+    auto read_halfword = [&](simrv::xlen::VirtAddr vaddr) -> std::optional<uint16_t> {
         const auto paddr = translate_for_inspection(st, &cpu, vaddr, true, false);
         if (!paddr.has_value()) {
             return std::nullopt;

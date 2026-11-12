@@ -1,0 +1,152 @@
+/**
+ * @file BlockCache.hpp
+ * @brief Basic block execution cache for accelerating straight-line instruction sequences.
+ */
+#pragma once
+
+#include <array>
+#include <cstdint>
+
+#include "simrv/CompilerHints.hpp"
+#include "simrv/core/DecodeCache.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
+
+namespace simrv::core {
+
+static constexpr size_t kMaxBlockOps = 32;
+static constexpr size_t kNumBlockSets = 4096;
+static constexpr size_t kBlockSetMask = kNumBlockSets - 1;
+
+/**
+ * @struct CompactOp
+ * @brief High-density 16-byte micro-op structure for maximum L1 data cache locality.
+ */
+struct alignas(8) CompactOp {
+    simrv::xlen::Register imm{0};   ///< 64-bit immediate or precomputed AUIPC / branch target
+    FastOp fast_op{FastOp::Other};  ///< FastOp tag
+    simrv::xlen::RegId rd{simrv::xlen::RegId::Zero};   ///< Destination or discard register
+    simrv::xlen::RegId rs1{simrv::xlen::RegId::Zero};  ///< Integer source 1
+    simrv::xlen::RegId rs2{simrv::xlen::RegId::Zero};  ///< Integer source 2
+    uint8_t op_len{4};         ///< Guest instruction length in bytes (2 or 4)
+    uint8_t is_compressed{0};  ///< 1 if compressed 16-bit instruction, else 0
+    uint16_t pad{0};
+};
+static_assert(sizeof(CompactOp) == 16);
+
+/**
+ * @struct BasicBlock
+ * @brief Pre-coalesced straight-line instruction sequence ending in a branch, jump, or fallback.
+ */
+struct alignas(64) BasicBlock {
+    simrv::xlen::VirtAddr pc{~simrv::xlen::Register{0}};  ///< Tag: start virtual PC of block
+    BasicBlock* target_bb = nullptr;             ///< Direct pointer to taken branch target block
+    BasicBlock* fallthrough_bb = nullptr;        ///< Direct pointer to fallthrough block
+    BasicBlock* cached_jalr_bb = nullptr;        ///< 1-entry cached JALR return/jump block
+    simrv::xlen::VirtAddr target_pc{};           ///< Precomputed taken target PC
+    simrv::xlen::VirtAddr fallthrough_pc{};      ///< Precomputed fallthrough PC
+    simrv::xlen::VirtAddr cached_jalr_target{};  ///< Last target PC for JALR terminal
+    uint16_t num_guest_ops = 0;                  ///< Architectural guest instruction count
+    uint16_t num_ops = 0;                        ///< Number of instructions (1..16)
+    uint16_t non_branch_ops = 0;                 ///< Precomputed number of non-branch ops
+    uint16_t num_compressed = 0;                 ///< Number of 16-bit compressed instructions
+    uint16_t total_bytes = 0;                    ///< Total guest instruction bytes spanned by block
+    FastOp term_op = FastOp::Other;              ///< FastOp tag of the terminal instruction
+    BranchKind branch_kind = BranchKind::None;   ///< Branch kind for FastOp::Branch
+    bool ends_with_branch = false;               ///< True if block ends with a branch or jump
+    bool has_mem_op = false;                     ///< True if block contains any load or store
+    bool is_self_loop = false;                   ///< True if block branches directly to itself
+    uint8_t generation = 0;                      ///< Generation counter for fast invalidation
+    uint8_t pad = 0;
+
+    std::array<CompactOp, kMaxBlockOps> ops{};  ///< Contiguous compact micro-ops
+
+    [[nodiscard]] constexpr auto valid() const noexcept -> bool {
+        return pc.raw() != ~simrv::xlen::Register{0} && num_ops > 0;
+    }
+
+    constexpr void invalidate() noexcept {
+        pc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
+        target_bb = nullptr;
+        fallthrough_bb = nullptr;
+        cached_jalr_bb = nullptr;
+        target_pc = simrv::xlen::VirtAddr{};
+        fallthrough_pc = simrv::xlen::VirtAddr{};
+        cached_jalr_target = simrv::xlen::VirtAddr{};
+        num_guest_ops = 0;
+        num_ops = 0;
+        non_branch_ops = 0;
+        num_compressed = 0;
+        total_bytes = 0;
+        ends_with_branch = false;
+        has_mem_op = false;
+        is_self_loop = false;
+        term_op = FastOp::Other;
+        branch_kind = BranchKind::None;
+    }
+};
+static_assert(sizeof(BasicBlock) <= 640);
+
+/**
+ * @class BlockCache
+ * @brief Cache for compiled basic blocks to eliminate per-instruction dispatch overhead.
+ */
+class BlockCache {
+   public:
+    BlockCache() noexcept = default;
+
+    void flush() noexcept {
+        if (!dirty_) {
+            return;
+        }
+        flush_all();
+    }
+
+    void flush_all() noexcept {
+        for (auto& bb : blocks_) {
+            bb.invalidate();
+        }
+        ++generation_;
+        dirty_ = false;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto calc_set(
+        simrv::xlen::VirtAddr pc) noexcept -> size_t {
+        const auto raw_pc = pc.raw();
+        return ((raw_pc >> 1) ^ (raw_pc >> 13)) & kBlockSetMask;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::VirtAddr pc) noexcept
+        -> BasicBlock* {
+        auto& bb = blocks_[calc_set(pc)];
+        if (simrv::compiler::likely(bb.pc == pc && bb.valid())) {
+            return &bb;
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] auto build_block(simrv::xlen::VirtAddr pc, DecodeCache& decode_cache) noexcept
+        -> BasicBlock*;
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto block_by_index(uint16_t idx) noexcept -> BasicBlock* {
+        if (simrv::compiler::likely(idx < kNumBlockSets)) {
+            auto& bb = blocks_[idx];
+            if (simrv::compiler::likely(bb.valid())) {
+                return &bb;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto index_of(const BasicBlock* bb) const noexcept
+        -> uint16_t {
+        return static_cast<uint16_t>(bb - blocks_.data());
+    }
+
+   private:
+    alignas(64) std::array<BasicBlock, kNumBlockSets> blocks_{};
+    uint8_t generation_{0};
+    bool dirty_{false};
+};
+
+}  // namespace simrv::core

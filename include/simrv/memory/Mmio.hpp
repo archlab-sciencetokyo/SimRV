@@ -8,77 +8,63 @@
 #include <cstdint>
 
 #include "simrv/core/PlatformMap.h"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::mmio {
 
 // Historical interrupt-controller address map used by the standalone devices.
-inline constexpr simrv::xlen::Address kPlicBaseAddress =
-    static_cast<simrv::xlen::Address>(0x50000000u);
+inline constexpr simrv::xlen::PhysAddr kPlicBaseAddress{0x50000000u};
 inline constexpr simrv::xlen::Address kPlicSize = static_cast<simrv::xlen::Address>(0x04000000u);
-inline constexpr simrv::xlen::Address kClintBaseAddress =
-    static_cast<simrv::xlen::Address>(0x60000000u);
+inline constexpr simrv::xlen::PhysAddr kClintBaseAddress{0x60000000u};
 inline constexpr simrv::xlen::Address kClintSize = static_cast<simrv::xlen::Address>(0x000c0000u);
 
 // RISC-V AIA (APLIC / IMSIC) and ACLINT addresses
-inline constexpr simrv::xlen::Address kAclintMtimerBaseAddress =
-    static_cast<simrv::xlen::Address>(0x02000000u);
+inline constexpr simrv::xlen::PhysAddr kAclintMtimerBaseAddress{0x02000000u};
 inline constexpr simrv::xlen::Address kAclintMtimerSize =
     static_cast<simrv::xlen::Address>(0x00010000u);
-inline constexpr simrv::xlen::Address kAclintMswiBaseAddress =
-    static_cast<simrv::xlen::Address>(0x02010000u);
+inline constexpr simrv::xlen::PhysAddr kAclintMswiBaseAddress{0x02010000u};
 inline constexpr simrv::xlen::Address kAclintMswiSize =
     static_cast<simrv::xlen::Address>(0x00010000u);
 
-inline constexpr simrv::xlen::Address kAplicMBaseAddress =
-    static_cast<simrv::xlen::Address>(0x0c000000u);
+inline constexpr simrv::xlen::PhysAddr kAplicMBaseAddress{0x0c000000u};
 inline constexpr simrv::xlen::Address kAplicMSize = static_cast<simrv::xlen::Address>(0x00004000u);
-inline constexpr simrv::xlen::Address kAplicSBaseAddress =
-    static_cast<simrv::xlen::Address>(0x0d000000u);
+inline constexpr simrv::xlen::PhysAddr kAplicSBaseAddress{0x0d000000u};
 inline constexpr simrv::xlen::Address kAplicSSize = static_cast<simrv::xlen::Address>(0x00004000u);
 
-inline constexpr simrv::xlen::Address kImsicMBaseAddress =
-    static_cast<simrv::xlen::Address>(0x24000000u);
+inline constexpr simrv::xlen::PhysAddr kImsicMBaseAddress{0x24000000u};
 inline constexpr simrv::xlen::Address kImsicMSize = static_cast<simrv::xlen::Address>(0x00010000u);
-inline constexpr simrv::xlen::Address kImsicSBaseAddress =
-    static_cast<simrv::xlen::Address>(0x28000000u);
+inline constexpr simrv::xlen::PhysAddr kImsicSBaseAddress{0x28000000u};
 inline constexpr simrv::xlen::Address kImsicSSize = static_cast<simrv::xlen::Address>(0x00010000u);
 
 // Parallel NOR Flash (PFlash)
-inline constexpr simrv::xlen::Address kPflash0BaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH0_BASE);
+inline constexpr simrv::xlen::PhysAddr kPflash0BaseAddress{SIMRV_PLATFORM_PFLASH0_BASE};
 inline constexpr simrv::xlen::Address kPflash0Size =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH0_SIZE);
-inline constexpr simrv::xlen::Address kPflash1BaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH1_BASE);
+inline constexpr simrv::xlen::PhysAddr kPflash1BaseAddress{SIMRV_PLATFORM_PFLASH1_BASE};
 inline constexpr simrv::xlen::Address kPflash1Size =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH1_SIZE);
 
 // PCIe ECAM hierarchy and MMIO 32-bit window
-inline constexpr simrv::xlen::Address kPcieEcamBaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_BASE);
+inline constexpr simrv::xlen::PhysAddr kPcieEcamBaseAddress{SIMRV_PLATFORM_PCIE_ECAM_BASE};
 inline constexpr simrv::xlen::Address kPcieEcamSize =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_SIZE);
-inline constexpr simrv::xlen::Address kPcieMmioBaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_BASE);
+inline constexpr simrv::xlen::PhysAddr kPcieMmioBaseAddress{SIMRV_PLATFORM_PCIE_WINDOW_BASE};
 inline constexpr simrv::xlen::Address kPcieMmioSize =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_SIZE);
 
 // Standard VirtIO-MMIO v2 base address range (0x10001000..0x10008000)
-inline constexpr simrv::xlen::Address kVirtioMmioBaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_VIRTIO_BLOCK_BASE);
+inline constexpr simrv::xlen::PhysAddr kVirtioMmioBaseAddress{SIMRV_PLATFORM_VIRTIO_BLOCK_BASE};
 inline constexpr simrv::xlen::Address kVirtioMmioSlotSize =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_VIRTIO_SLOT_SIZE);
 
 // Standalone DMA Controller (0x10009000..0x1000A000)
-inline constexpr simrv::xlen::Address kDmaControllerBaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_DMA_BASE);
+inline constexpr simrv::xlen::PhysAddr kDmaControllerBaseAddress{SIMRV_PLATFORM_DMA_BASE};
 inline constexpr simrv::xlen::Address kDmaControllerSize =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_DMA_SIZE);
 inline constexpr uint32_t kDmaControllerIrq = SIMRV_PLATFORM_DMA_IRQ;
 
-inline constexpr simrv::xlen::Address kUartBaseAddress =
-    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_UART_BASE);
+inline constexpr simrv::xlen::PhysAddr kUartBaseAddress{SIMRV_PLATFORM_UART_BASE};
 inline constexpr simrv::xlen::Address kUartSize =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_UART_SIZE);
 
@@ -148,9 +134,9 @@ inline constexpr auto uart_reg_word(simrv::xlen::Address raw) -> simrv::xlen::Ad
     }
 }
 
-inline auto uart_reg(simrv::xlen::Address p_addr, int8_t& reg_shift_mode,
-                     simrv::xlen::Address base = kUartBaseAddress) -> simrv::xlen::Address {
-    const simrv::xlen::Address raw = p_addr - base;
+inline auto uart_reg(simrv::xlen::PhysAddr p_addr, int8_t& reg_shift_mode,
+                     simrv::xlen::PhysAddr base = kUartBaseAddress) -> simrv::xlen::Address {
+    const simrv::xlen::Address raw = p_addr.raw() - base.raw();
     if (reg_shift_mode < 0) {
         if (raw == static_cast<simrv::xlen::Address>(0x01U) ||
             raw == static_cast<simrv::xlen::Address>(0x02U) ||

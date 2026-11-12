@@ -1,23 +1,36 @@
 # RVA23 ACT4 tests
 
 This directory contains SimRV's DUT configuration for the upstream RISC-V
-Architecture Certification Tests (ACT4) RVA23S64 suite. The upstream ACT4
-repository is kept at `tests/riscv-arch-test`.
+Architecture Certification Tests (ACT4) RVA23S64 suite.
 
-## Generate and run the suite
+## Configuration & Prerequisites
+
+The test runner resolves the ACT4 repository path via the `RISCV_ARCH_TEST_DIR`
+environment variable.
+
+To configure an external checkout:
+
+```sh
+export RISCV_ARCH_TEST_DIR="/path/to/riscv-arch-test"
+```
 
 Install the ACT4 prerequisites documented by the upstream project, including
 its Python dependencies, a RISC-V GCC toolchain, and the Sail RISC-V simulator.
-Make those executables available on `PATH`, then build SimRV. From the project
-root, generate the RVA23 suite and run the resulting ELFs with:
+Make those executables available on `PATH`, then build SimRV.
+
+## Generate and run the suite
+
+From the project root:
 
 ```sh
-make -C tests/riscv-arch-test \
+ACT_DIR="${RISCV_ARCH_TEST_DIR:?Set RISCV_ARCH_TEST_DIR to the riscv-arch-test checkout}"
+
+make -C "$ACT_DIR" \
   CONFIG_FILES="$PWD/tests/act4/simrv-rva23s64/test_config.yaml" \
   CERTIFICATE=RVA23 JOBS=12 \
   WORKDIR="$PWD/build/act4-rva23s64"
 
-python3 scripts/run_act4_tests.py \
+simrv-act \
   --simrv build/rv64-debug/simrv \
   --elf-dir build/act4-rva23s64/simrv-rva23s64/elfs \
   --report build/act4-rva23s64/simrv-rva23s64/simrv-report.json \

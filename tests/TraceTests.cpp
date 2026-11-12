@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -11,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -22,19 +25,74 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/core/TrapController.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/rtl/ParityTarget.hpp"
 #include "simrv/util/Sha256.hpp"
 
 namespace {
 using simrv::core::ExecutionEngine;
 using simrv::core::Machine;
 
-constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress;
+template <typename T>
+concept SymbolLookupAddress = requires(const simrv::debug::SymbolTable& table, T address) {
+    table.lookup_symbol(address);
+    table.lookup_function(address);
+    table.lookup(address);
+};
+static_assert(SymbolLookupAddress<simrv::xlen::VirtAddr>);
+static_assert(!SymbolLookupAddress<simrv::xlen::PhysAddr>);
+static_assert(!SymbolLookupAddress<simrv::xlen::Address>);
+template <typename T>
+concept SymbolInsertionAddress = requires(simrv::debug::SymbolTable& table, T address) {
+    table.add_symbol_for_testing(address, "symbol");
+};
+static_assert(SymbolInsertionAddress<simrv::xlen::VirtAddr>);
+static_assert(!SymbolInsertionAddress<simrv::xlen::PhysAddr>);
+static_assert(!SymbolInsertionAddress<simrv::xlen::Address>);
+template <typename T>
+concept LockstepPc =
+    requires(simrv::debug::SpikeLockstep& lockstep, const simrv::core::ArchState& state, T pc) {
+        lockstep.compare_and_report(state, pc, uint64_t{1});
+    };
+static_assert(LockstepPc<simrv::xlen::VirtAddr>);
+static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
+static_assert(!LockstepPc<simrv::xlen::Address>);
+static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::RetirementEvent::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::TimingDivergence::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::core::PipelineStallRecord::pc), simrv::xlen::VirtAddr>);
+template <typename T>
+concept TrapTracePc =
+    requires(simrv::core::Tracer& tracer, const simrv::core::CPU& cpu, simrv::xlen::TrapCause cause,
+             simrv::xlen::PrivilegeLevel privilege, simrv::xlen::CsrValue tval,
+             T pc) { tracer.log_architectural_trap_entry(cpu, cause, pc, privilege, tval); };
+static_assert(TrapTracePc<simrv::xlen::VirtAddr>);
+static_assert(!TrapTracePc<simrv::xlen::PhysAddr>);
+static_assert(!TrapTracePc<simrv::xlen::Address>);
+template <typename T>
+concept MmioTraceAddress = requires(simrv::core::Tracer& tracer, T address) {
+    tracer.log_mmio(simrv::xlen::HartId{0}, "device", address, 4, simrv::xlen::Word{0}, true);
+};
+static_assert(MmioTraceAddress<simrv::xlen::PhysAddr>);
+static_assert(!MmioTraceAddress<simrv::xlen::VirtAddr>);
+static_assert(!MmioTraceAddress<simrv::xlen::Address>);
+static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
+                               std::declval<const std::string&>())),
+                           std::optional<simrv::xlen::VirtAddr>>);
+static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().entry_point()),
+                           std::optional<simrv::xlen::VirtAddr>>);
+static_assert(
+    std::same_as<decltype(simrv::debug::SymbolLookupResult::base_addr), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::debug::FunctionLookupResult::base_addr), simrv::xlen::VirtAddr>);
+
+constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress.raw();
 constexpr std::array<simrv::xlen::Instruction, 10> kProgram = {
     0x010000ef,  // jal  ra, 0x10 (direct call)
     0x0000006f,  // jal  x0, 0 (ordinary jump, not a call)
@@ -70,7 +128,9 @@ auto read_trace(const std::filesystem::path& path) -> std::vector<std::string> {
 class TraceTestNode final : public simrv::memory::TileLinkNode {
    public:
     [[nodiscard]] auto name() const -> const char* override { return "trace-test-device"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x50000000; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x50000000};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x1000; }
     auto handle_request(const simrv::memory::TlChannelA&, simrv::memory::TlChannelD& response)
         -> bool override {
@@ -105,7 +165,7 @@ void test_retirement_context_and_call_trace() {
         machine.set_ram_for_testing(ram.data(), ram.size());
         machine.primary_hart().machine_ = &machine;
         machine.primary_hart().reset();
-        machine.primary_hart().state().pc = kPc;
+        machine.primary_hart().state().pc = simrv::xlen::VirtAddr{kPc};
         machine.runtime_profile.engine = engines[i];
         const auto path = trace_path(std::to_string(i));
         machine.trace().set_command_line(
@@ -198,12 +258,12 @@ void test_optional_fp_register_write_trace() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
     cpu.state().regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(1)),
                               0x40400000);
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext retiring{};
-    retiring.cpc = kPc;
+    retiring.cpc = simrv::xlen::VirtAddr{kPc};
     retiring.ir = 0x003100d3;
     retiring.rd = static_cast<simrv::xlen::RegId>(1);
     retiring.op_id = simrv::isa::FADD_S;
@@ -241,7 +301,7 @@ void test_retirement_index_offsets() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
 
     const auto path = trace_path("index");
     const auto index_path = g_retirement_indexes.back();
@@ -311,7 +371,7 @@ void test_gzip_retirement_preserves_schema_one_records() {
         auto& cpu = machine.primary_hart();
         cpu.machine_ = &machine;
         cpu.reset();
-        cpu.state().pc = kPc;
+        cpu.state().pc = simrv::xlen::VirtAddr{kPc};
         machine.trace().init_architecture_trace(path.string());
         if (!machine.trace().is_architecture_trace_enabled()) std::abort();
         while (cpu.e_icount < 1) cpu.run_cycle(machine);
@@ -357,7 +417,7 @@ void test_branches_are_not_calls() {
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
     machine.primary_hart().machine_ = &machine;
-    machine.primary_hart().state().pc = kPc;
+    machine.primary_hart().state().pc = simrv::xlen::VirtAddr{kPc};
     machine.primary_hart().state().regs.write(simrv::xlen::RegId::T1, kPc + 16);
     machine.primary_hart().state().regs.write(simrv::xlen::RegId::Ra, kPc + 24);
     const auto path = trace_path("branch");
@@ -387,7 +447,7 @@ void test_trace_level_filters_streams() {
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().machine_ = &machine;
     machine.primary_hart().reset();
-    machine.primary_hart().state().pc = kPc;
+    machine.primary_hart().state().pc = simrv::xlen::VirtAddr{kPc};
     const auto path = trace_path("level");
     machine.trace().init_architecture_trace(path.string());
     if (!machine.trace().needs_retiring_context()) std::abort();
@@ -464,7 +524,7 @@ void test_trace_hart_identity() {
         machine.hart(hart).machine_ = &machine;
         machine.hart(hart).reset();
         machine.hart(hart).state().mhartid = hart;
-        machine.hart(hart).state().pc = kPc;
+        machine.hart(hart).state().pc = simrv::xlen::VirtAddr{kPc};
     }
     const auto path = trace_path("smp");
     machine.trace().init_architecture_trace(path.string());
@@ -494,9 +554,9 @@ void test_trace_hart_identity() {
 void test_arch_trace_event_hart_and_cycle_filters() {
     simrv::core::MachineConfig config;
     config.debug.trace_events = "ignored, call";
-    config.debug.trace_hart = 1;
-    config.debug.trace_pc_start = kPc;
-    config.debug.trace_pc_end = kPc + 0x10;
+    config.debug.trace_hart = simrv::xlen::HartId{1};
+    config.debug.trace_pc_start = simrv::xlen::VirtAddr{kPc};
+    config.debug.trace_pc_end = simrv::xlen::VirtAddr{kPc + 0x10};
     config.debug.trace_after_cycle = 0;
     config.debug.trace_before_cycle = 100;
     Machine machine(config);
@@ -508,7 +568,7 @@ void test_arch_trace_event_hart_and_cycle_filters() {
         machine.hart(hart).machine_ = &machine;
         machine.hart(hart).reset();
         machine.hart(hart).state().mhartid = hart;
-        machine.hart(hart).state().pc = kPc;
+        machine.hart(hart).state().pc = simrv::xlen::VirtAddr{kPc};
     }
 
     const auto path = trace_path("event-filters");
@@ -570,8 +630,10 @@ void test_arch_trace_device_filter() {
     machine.primary_hart().reset();
     const auto path = trace_path("device-filter");
     machine.trace().init_architecture_trace(path.string());
-    machine.trace().log_mmio(0, "other-device", 0x1000, 4, 1, true);
-    machine.trace().log_mmio(0, "trace-test-device", 0x2000, 4, 2, true);
+    machine.trace().log_mmio(simrv::xlen::HartId{0}, "other-device", simrv::xlen::PhysAddr{0x1000},
+                             4, 1, true);
+    machine.trace().log_mmio(simrv::xlen::HartId{0}, "trace-test-device",
+                             simrv::xlen::PhysAddr{0x2000}, 4, 2, true);
     machine.trace().flush_all();
     const auto devices = read_trace(sibling_path(path, "devices.jsonl"));
     if (devices.size() != 2 ||
@@ -587,6 +649,25 @@ void test_arch_trace_device_filter() {
     for (const auto name : {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
                             "bus.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
+}
+
+void test_sbi_trace_virtual_pc() {
+    Machine machine;
+    const auto path = trace_path("sbi-virtual-pc");
+    machine.trace().init_architecture_trace(path.string());
+    machine.trace().log_sbi(1, 2, 9, 3, 4, 5, 6, simrv::xlen::VirtAddr{0x1234},
+                            simrv::xlen::HartId{0});
+    machine.trace().flush_all();
+    const auto devices = read_trace(sibling_path(path, "devices.jsonl"));
+    if (std::none_of(devices.begin(), devices.end(), [](const auto& line) {
+            return line.find("\"event\":\"sbi\"") != std::string::npos &&
+                   line.find("\"pc\":\"0x1234\"") != std::string::npos;
+        }))
+        std::abort();
+    for (const auto name : {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
+                            "bus.jsonl", "memory.jsonl", "pipeline.jsonl", "metadata.json"})
+        std::filesystem::remove(sibling_path(path, name));
+    std::filesystem::remove(path);
 }
 
 void test_arch_trace_function_filter(std::string_view executable_path) {
@@ -618,7 +699,7 @@ void test_arch_trace_function_filter(std::string_view executable_path) {
     const auto calls = read_trace(sibling_path(path, "calls.jsonl"));
     if (calls.size() != 2 || calls.back().find("\"event\":\"call\"") == std::string::npos ||
         calls.back().find("\"function\":\"main\"") == std::string::npos ||
-        calls.back().find("\"source_pc\":\"0x" + std::format("{:x}", *main_pc) + "\"") ==
+        calls.back().find("\"source_pc\":\"0x" + std::format("{:x}", main_pc->raw()) + "\"") ==
             std::string::npos)
         std::abort();
 
@@ -646,7 +727,7 @@ void test_retired_memory_events_and_address_classification() {
     load.opcode = simrv::isa::Opcode::Load;
     load.op_id = simrv::isa::LW;
     load.funct3 = simrv::isa::Funct3::Lw;
-    load.mem_addr = kPc + 0x100;
+    load.mem_addr = simrv::xlen::VirtAddr{kPc + 0x100};
     load.mem_rdata = 0x12345678;
     machine.primary_hart().clint_mmio.mcycle = 10;
     machine.trace().log_architecture_retirement(machine.primary_hart(), load);
@@ -656,7 +737,7 @@ void test_retired_memory_events_and_address_classification() {
     store.opcode = simrv::isa::Opcode::Store;
     store.op_id = simrv::isa::SW;
     store.funct3 = simrv::isa::Funct3::Sw;
-    store.mem_addr = device.base_address();
+    store.mem_addr = simrv::xlen::VirtAddr{device.base_address().raw()};
     store.mem_wdata = 0x89abcdef;
     machine.primary_hart().clint_mmio.mcycle = 12;
     machine.trace().log_architecture_retirement(machine.primary_hart(), store);
@@ -689,21 +770,21 @@ void test_precise_memory_fault_event() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc + 0x80;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc + 0x80};
     cpu.state().mtvec = kPc + 0x200;
     auto& context = cpu.pipeline_context;
     context.cpc = simrv::xlen::VirtAddr{kPc + 0x80};
     context.opcode = simrv::isa::Opcode::Store;
     context.op_id = simrv::isa::SW;
     context.funct3 = simrv::isa::Funct3::Sw;
-    context.mem_addr = device.base_address();
+    context.mem_addr = simrv::xlen::VirtAddr{device.base_address().raw()};
     context.mem_wdata = 0xfeedcafe;
     if (!machine.memory().system_bus().router().register_device(&device)) std::abort();
 
     const auto path = trace_path("memory-fault");
     machine.trace().init_architecture_trace(path.string());
     cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::FaultStore),
-                        device.base_address());
+                        device.base_address().raw());
     machine.trace().flush_all();
 
     const auto events = read_trace(sibling_path(path, "memory.jsonl"));
@@ -729,8 +810,8 @@ void test_bus_trace_level_four() {
     Machine machine(config);
     const auto path = trace_path("bus-events");
     machine.trace().init_architecture_trace(path.string());
-    machine.memory().system_bus().record_transaction(TileLinkChannel::A, "Get", 3, 0, 0x1000,
-                                                     "read");
+    machine.memory().system_bus().record_transaction(TileLinkChannel::A, "Get", 3, 0,
+                                                     simrv::xlen::PhysAddr{0x1000}, "read");
     machine.trace().flush_all();
 
     const auto lines = read_trace(sibling_path(path, "bus.jsonl"));
@@ -772,13 +853,13 @@ void test_mmio_arch_trace_uses_requesting_hart_without_dlog() {
     request.opcode = simrv::memory::TlOpcodeA::Get;
     request.size = 2;
     request.hart = simrv::xlen::HartId{1};
-    request.address = 0x50000000;
+    request.address = simrv::xlen::PhysAddr{0x50000000};
     simrv::memory::TlChannelD response{};
     if (!router.route_request(request, response) || response.failed()) std::abort();
     device.set_fail(true);
     response = {};
     if (!router.route_request(request, response) || !response.failed()) std::abort();
-    request.address = 0x60000000;
+    request.address = simrv::xlen::PhysAddr{0x60000000};
     response = {};
     if (router.route_request(request, response) || !response.failed()) std::abort();
     machine.trace().flush_all();
@@ -811,7 +892,7 @@ void test_custom_extension_is_not_advertised() {
     Machine machine;
     auto& cpu = machine.primary_hart();
     if (simrv::isa::misa_has_extension(cpu.state().misa, simrv::isa::IsaExtension::X)) std::abort();
-    if (cpu.read_csr(0x800)) std::abort();
+    if (cpu.read_csr(simrv::xlen::CsrNumber{0x800})) std::abort();
 
     simrv::core::MachineConfig config;
     config.isa.misa_override = true;
@@ -828,7 +909,7 @@ void test_interrupt_entry_and_return_events() {
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
     cpu.reset();
-    cpu.state().pc = kPc + 0x40;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc + 0x40};
     cpu.state().mtvec = kPc + 0x100;
 
     const auto path = trace_path("interrupt");
@@ -840,8 +921,8 @@ void test_interrupt_entry_and_return_events() {
 
     simrv::pipeline::PipelineContext return_context{};
     return_context.funct12 = 0x302;
-    return_context.cpc = simrv::xlen::VirtAddr{cpu.state().pc};
-    cpu.state().pc = cpu.state().mepc;
+    return_context.cpc = cpu.state().pc;
+    cpu.state().pc = simrv::xlen::VirtAddr{cpu.state().mepc};
     machine.trace().log_architecture_retirement(cpu, return_context);
     machine.trace().flush_all();
 
@@ -896,11 +977,11 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().pc = kPc;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
     cpu.state().mtvec = kPc + 0x100;
     cpu.state().mie = std::to_underlying(simrv::core::MipBit::Msip);
     cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
-    cpu.state().regs.write(simrv::xlen::RegId::T0, simrv::mmio::kAclintMswiBaseAddress);
+    cpu.state().regs.write(simrv::xlen::RegId::T0, simrv::mmio::kAclintMswiBaseAddress.raw());
     cpu.state().regs.write(simrv::xlen::RegId::T1, 1);
     cpu.state().regs.write(simrv::xlen::RegId::T2, machine.isa_test_tohost());
     cpu.state().regs.write(simrv::xlen::RegId::S0, 1);
@@ -982,8 +1063,10 @@ void test_cycle_accurate_pipeline_stall_events() {
     machine.primary_hart().clint_mmio.mcycle = 17;
     machine.trace().init_architecture_trace(path.string());
     const std::array stalls = {
-        simrv::core::PipelineStallRecord{"fetch", kPc, 3, "instruction_fill"},
-        simrv::core::PipelineStallRecord{"execute", kPc + 4, 0, "data_hazard"},
+        simrv::core::PipelineStallRecord{"fetch", simrv::xlen::VirtAddr{kPc}, 3,
+                                         "instruction_fill"},
+        simrv::core::PipelineStallRecord{"execute", simrv::xlen::VirtAddr{kPc + 4}, 0,
+                                         "data_hazard"},
     };
     machine.trace().log_pipeline_stalls(machine.primary_hart(), stalls);
     machine.trace().flush_all();
@@ -1039,16 +1122,51 @@ void test_function_symbol_lookup(std::string_view executable_path) {
     if (!symbols.load_from_elf(path)) std::abort();
     const auto main_pc = symbols.lookup_name("main");
     if (!main_pc) std::abort();
-    const auto main_function = symbols.lookup_function(*main_pc);
-    if (!main_function || main_function->name != "main" || main_function->offset != 0) std::abort();
-    if (symbols.lookup_function(std::numeric_limits<simrv::xlen::Address>::max()).has_value())
+    const auto main_function = symbols.lookup_function(simrv::xlen::VirtAddr{*main_pc});
+    if (!main_function || main_function->name != "main" || main_function->offset != 0 ||
+        main_function->base_addr != *main_pc)
+        std::abort();
+    const auto main_symbol = symbols.lookup_symbol(*main_pc);
+    if (!main_symbol || main_symbol->base_addr != *main_pc || main_symbol->offset != 0)
+        std::abort();
+    if (symbols
+            .lookup_function(
+                simrv::xlen::VirtAddr{std::numeric_limits<simrv::xlen::Address>::max()})
+            .has_value())
+        std::abort();
+}
+
+void test_lockstep_virtual_pc(std::string_view executable_path) {
+    const auto path = std::filesystem::absolute(executable_path).string();
+    constexpr auto isa = simrv::xlen::kIsXLen64 ? "rv64gc" : "rv32gc";
+    simrv::debug::SpikeLockstep lockstep(path, "", "", "", isa);
+    if (!lockstep.start()) std::abort();
+    Machine machine;
+    machine.primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(5), 2);
+    if (!lockstep.compare_and_report(machine.primary_hart().state(), simrv::xlen::VirtAddr{0x1000},
+                                     1) ||
+        !lockstep.compare_and_report(machine.primary_hart().state(), simrv::xlen::VirtAddr{0x1004},
+                                     2))
         std::abort();
 }
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 1) std::abort();
+    constexpr auto isa_arg = simrv::xlen::kIsXLen64 ? "--isa=rv64gc" : "--isa=rv32gc";
+    if (argc > 1 && std::string_view(argv[1]) == isa_arg) {
+#if SIMRV_XLEN == 32
+        std::fputs("core   0: 3 0x0000000100001000 (0x00000013) x5 0xdead\n", stderr);
+        std::fputs("core   0: 3 0x00001000 (0x00000013) x5 0x100000000\n", stderr);
+#endif
+        std::fputs(
+            "core   0: 3 0x00001000 (0x00000293) x5 0x00000002\n"
+            "core   0: 3 0x00001004 (0x00000013)\n",
+            stderr);
+        return 0;
+    }
     test_function_symbol_lookup(argv[0]);
+    test_lockstep_virtual_pc(argv[0]);
     test_retirement_context_and_call_trace();
     test_optional_fp_register_write_trace();
     test_retirement_index_offsets();
@@ -1060,6 +1178,7 @@ int main(int argc, char** argv) {
     test_trace_hart_identity();
     test_arch_trace_event_hart_and_cycle_filters();
     test_arch_trace_device_filter();
+    test_sbi_trace_virtual_pc();
     test_arch_trace_function_filter(argv[0]);
     test_retired_memory_events_and_address_classification();
     test_precise_memory_fault_event();

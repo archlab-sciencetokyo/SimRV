@@ -102,4 +102,29 @@ auto scroll_indicator(int before, int after, int width) -> std::string {
         .text;
 }
 
+void draw_box(Canvas& canvas, ScreenRect rect, BoxBorderKind border_kind, Style style) {
+    canvas.draw_box(rect, border_kind, style);
+}
+
+void draw_table_header(Canvas& canvas, int y, std::span<const std::string_view> headers,
+                       std::span<const int> widths, Style style) {
+    int col_x = 0;
+    const std::size_t count = std::min(headers.size(), widths.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        canvas.draw_text(col_x, y, headers[i], style);
+        col_x += widths[i];
+    }
+}
+
+void draw_tab_bar(Canvas& canvas, int y, std::span<const Tab> tabs, std::size_t selected,
+                  Style active_style, Style inactive_style) {
+    int col_x = 0;
+    for (std::size_t i = 0; i < tabs.size(); ++i) {
+        const bool is_selected = (i == selected);
+        const std::string label = std::format(" [{}] {} ", i + 1, tabs[i].label);
+        canvas.draw_text(col_x, y, label, is_selected ? active_style : inactive_style);
+        col_x += static_cast<int>(label.size());
+    }
+}
+
 }  // namespace simrv::tui::framework

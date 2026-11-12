@@ -44,15 +44,17 @@ class MmioDevice : public TileLinkNode {
     // TileLink channel adaptation
     auto handle_request(const TlChannelA& req, TlChannelD& resp) -> bool override;
 
+    // Simulation cycle tick for periodic device state transitions
+    virtual void advance_cycles(uint64_t /*cycles*/) {}
+    [[nodiscard]] virtual auto has_cycle_ticking() const noexcept -> bool { return false; }
+
     // Guest physical memory DMA mastering
-    auto dma_read(simrv::xlen::Address paddr, std::span<uint8_t> dst) -> bool;
-    auto dma_write(simrv::xlen::Address paddr, std::span<const uint8_t> src) -> bool;
-    auto dma_read(simrv::xlen::PhysAddr paddr, std::span<uint8_t> dst) -> bool {
-        return dma_read(paddr.raw(), dst);
-    }
-    auto dma_write(simrv::xlen::PhysAddr paddr, std::span<const uint8_t> src) -> bool {
-        return dma_write(paddr.raw(), src);
-    }
+    auto dma_read(simrv::xlen::PhysAddr paddr, std::span<uint8_t> dst) -> bool;
+    auto dma_write(simrv::xlen::PhysAddr paddr, std::span<const uint8_t> src) -> bool;
+    template <std::integral I>
+    auto dma_read(I, std::span<uint8_t>) -> bool = delete;
+    template <std::integral I>
+    auto dma_write(I, std::span<const uint8_t>) -> bool = delete;
 
     void set_machine(simrv::core::Machine* machine) { machine_ = machine; }
     [[nodiscard]] auto machine() const -> simrv::core::Machine* { return machine_; }

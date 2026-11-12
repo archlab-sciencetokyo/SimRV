@@ -131,7 +131,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto cancel_port = [&](simrv::memory::TlPort port) {
         machine.memory_.system_bus().cancel_source(simrv::memory::make_tl_source(hart_id(), port));
     };
-    auto flush_to = [&](simrv::xlen::Address pc) {
+    auto flush_to = [&](simrv::xlen::VirtAddr pc) {
         pipe.flush_younger();
         pipe.control_flush = true;
         pipe.fetch_pc = pc;
@@ -150,7 +150,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto trap_at_retirement = [&](CycleInstructionSlot& slot) {
         const auto cause = slot.context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
         const auto tval = slot.context.pending_tval;
-        state_.pc = slot.context.cpc.raw();
+        state_.pc = slot.context.cpc;
         cancel_port(simrv::memory::TlPort::Instruction);
         cancel_port(simrv::memory::TlPort::Data);
         pipe.reset();
@@ -235,7 +235,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                                         !writeback->context.pending_exception.has_value() &&
                                         (state_.mip & state_.mie) == 0 &&
                                         !machine.instruction_mix_enabled())) {
-                ++e_icount;
+                account_retirement();
                 if (writeback->wb_valid) {
                     state_.regs.write_branchless(writeback->wb_dest, writeback->wb_val);
                 }
@@ -371,7 +371,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     case isa::Opcode::Load:
                     case isa::Opcode::Store:
                         ctx.tkn = false;
-                        ctx.mem_addr = ctx.rrs1 + ctx.imm;
+                        ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1 + ctx.imm};
                         executed_fast = true;
                         break;
                     case isa::Opcode::Branch:
@@ -405,8 +405,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         break;
                 }
                 if (!executed_fast) {
-                    const simrv::xlen::Register saved_pc = state_.pc;
-                    state_.pc = execute->context.cpc.raw();
+                    const auto saved_pc = state_.pc;
+                    state_.pc = execute->context.cpc;
                     (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                     state_.pc = saved_pc;
                 }
@@ -426,13 +426,14 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
 
                 if (simrv::compiler::unlikely(execute->context.traits.is_control ||
                                               execute->prediction.false_control_alias)) {
-                    const simrv::xlen::Address sequential =
-                        (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
-                    const simrv::xlen::Address target =
-                        execute->context.tkn ? execute->context.jmp_pc.raw() : sequential;
+                    const simrv::xlen::VirtAddr sequential =
+                        execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4);
+                    const simrv::xlen::VirtAddr target = execute->context.tkn
+                                                             ? execute->context.jmp_pc
+                                                             : simrv::xlen::VirtAddr{sequential};
 
                     const simrv::pipeline::BranchFeedback feedback{
-                        .pc = execute->context.cpc.raw(),
+                        .pc = execute->context.cpc,
                         .actual_taken = execute->context.tkn,
                         .actual_target = target,
                         .opcode = execute->context.opcode,
@@ -512,13 +513,13 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     }
                     if (decode->context.traits.is_control ||
                         decode->prediction.false_control_alias) {
-                        const simrv::xlen::Address sequential =
-                            (decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4)).raw();
-                        const simrv::xlen::Address target =
-                            decode->context.tkn ? decode->context.jmp_pc.raw() : sequential;
+                        const simrv::xlen::VirtAddr sequential =
+                            decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4);
+                        const simrv::xlen::VirtAddr target =
+                            decode->context.tkn ? decode->context.jmp_pc : sequential;
 
                         const simrv::pipeline::BranchFeedback feedback{
-                            .pc = decode->context.cpc.raw(),
+                            .pc = decode->context.cpc,
                             .actual_taken = decode->context.tkn,
                             .actual_target = target,
                             .opcode = decode->context.opcode,
@@ -633,7 +634,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (pipe.control_recovery_bubbles > 0) {
         --pipe.control_recovery_bubbles;
     } else if (!fetch->valid && !pipe.frontend_blocked) {
-        const simrv::xlen::Register committed_pc = state_.pc;
+        const auto committed_pc = state_.pc;
         state_.pc = pipe.fetch_pc;
         active_context_ = &fetch->context;
         const auto misses_before = icache.miss_count();
@@ -665,7 +666,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             fetch->wb_val = 0;
             if (instruction_cache_timing.enabled()) {
                 const auto access =
-                    instruction_cache_timing.access(fetch->context.cpc.raw(), ca_state.icache_miss);
+                    instruction_cache_timing.access(fetch->context.cpc, ca_state.icache_miss);
                 const auto refill_wait = access.latency > 0 ? access.latency - 1 : 0;
                 if (!access.hit &&
                     cpu_model_config.instruction_front_cache.freeze_pipeline_on_refill) {
@@ -686,12 +687,11 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 fetch->remaining_latency = cpu_model_config.instruction_cache.hit_latency - 1;
             }
             const simrv::xlen::Address width = fetch->context.cinsn != 0u ? 2 : 4;
-            const simrv::xlen::Address sequential = (fetch->context.cpc + width).raw();
+            const simrv::xlen::VirtAddr sequential = fetch->context.cpc + width;
 
             if (simrv::compiler::unlikely(fetch->context.traits.is_control ||
                                           branch_predictor.config().predict_non_control)) {
-                branch_predictor.predict(fetch->context.cpc.raw(), fetch->context,
-                                         fetch->prediction);
+                branch_predictor.predict(fetch->context.cpc, fetch->context, fetch->prediction);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {
                     pipe.fetch_pc = fetch->prediction.predicted_target;
                     pipe.frontend_blocked = fetch->serializing;

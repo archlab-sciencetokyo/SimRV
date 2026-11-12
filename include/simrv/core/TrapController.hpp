@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 
+#include "simrv/core/TrapDescriptor.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -22,7 +23,7 @@ struct ArchState;
  * @brief Architectural state transitions produced by an MRET or SRET instruction.
  */
 struct TrapReturnState {
-    simrv::xlen::Address target_pc{0};
+    simrv::xlen::VirtAddr target_pc{};
     simrv::xlen::PrivilegeLevel target_priv{simrv::xlen::PrivilegeLevel::Machine};
     bool target_virtualization{false};
     simrv::xlen::CsrValue next_mstatus{0};
@@ -73,6 +74,18 @@ class TrapController {
      * @param state Reference to architectural state.
      */
     static void sret(ArchState& state);
+
+    /**
+     * @brief Dispatches a structured architectural trap through the formal TrapController pipeline.
+     *
+     * Performs host interception filtering (SBI ecalls), unrecoverable trap and recursive loop
+     * detection, privilege delegation (M/S/VS/HS), context stacking, and vector target computation.
+     *
+     * @param cpu Reference to CPU instance.
+     * @param desc Structured trap descriptor.
+     * @return Final disposition of the trap.
+     */
+    static auto dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> TrapDisposition;
 
     /**
      * @brief Traps CPU execution to machine or supervisor handler for an exception or interrupt.

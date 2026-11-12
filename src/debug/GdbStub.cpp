@@ -447,7 +447,7 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::CPU& cpu)
         return GdbStub::reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(idx)));
     }
     if (idx == 32) {
-        return GdbStub::reg_to_hex(state.pc);
+        return GdbStub::reg_to_hex(state.pc.raw());
     }
     if (idx >= 33 && idx < 65) {
         // FP registers: 64-bit, little-endian
@@ -467,7 +467,7 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
         const simrv::xlen::Register val = GdbStub::hex_to_reg(hex, hex_off);
         state.regs.write(static_cast<simrv::xlen::RegId>(idx), val);
     } else if (idx == 32) {
-        state.pc = static_cast<simrv::xlen::Address>(GdbStub::hex_to_reg(hex, hex_off));
+        state.pc = simrv::xlen::VirtAddr{GdbStub::hex_to_reg(hex, hex_off)};
     } else if (idx >= 33 && idx < 65) {
         const uint64_t val = hex_to_fp(hex, hex_off);
         state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(idx - 33)),
@@ -489,7 +489,7 @@ auto GdbStub::cmd_read_registers(simrv::core::Machine& machine) -> std::string {
         resp += reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(i)));
     }
     // pc (XLEN bytes, little-endian)
-    resp += reg_to_hex(state.pc);
+    resp += reg_to_hex(state.pc.raw());
     // f0-f31 (8 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
         resp += fp_to_hex(
@@ -577,7 +577,9 @@ auto GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     const auto address = parse_hex(std::string_view(pkt).substr(1, comma - 1));
     const auto length = parse_hex(std::string_view(pkt).substr(comma + 1));
     if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
-        *length > 4096 || !machine.ram_view().contains(*address, *length)) {
+        *length > 4096 ||
+        !machine.ram_view().contains(
+            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*address)}, *length)) {
         return "E01";
     }
     const auto addr = static_cast<simrv::xlen::Address>(*address);
@@ -593,7 +595,8 @@ auto GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     const auto ram = machine.ram_view();
 
     for (size_t i = 0; i < safe_len; ++i) {
-        const auto phys = static_cast<uint64_t>(addr) + i;
+        const simrv::xlen::PhysAddr phys{
+            static_cast<simrv::xlen::Address>(static_cast<uint64_t>(addr) + i)};
         uint8_t byte_val = 0;
         if (ram.contains(phys)) {
             byte_val = static_cast<uint8_t>(*ram.unchecked_ptr(phys));
@@ -616,7 +619,8 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
         *length > 4096 || pkt.size() - colon - 1 != *length * 2 ||
         (*length != 0 && !valid_hex(std::string_view(pkt).substr(colon + 1))) ||
-        !machine.ram_view().contains(*address, *length)) {
+        !machine.ram_view().contains(
+            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*address)}, *length)) {
         return "E01";
     }
     const auto addr = static_cast<simrv::xlen::Address>(*address);
@@ -639,7 +643,8 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
         bytes.push_back(static_cast<simrv::xlen::Byte>(byte_val));
     }
-    if (bytes.size() != len || !machine.memory().dma_write(addr, bytes.data(), bytes.size()))
+    if (bytes.size() != len ||
+        !machine.memory().dma_write(simrv::xlen::PhysAddr{addr}, bytes.data(), bytes.size()))
         return "E01";
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         invalidate_debug_state(machine, machine.hart(hart));
@@ -666,9 +671,9 @@ auto GdbStub::cmd_breakpoint(const std::string& pkt, simrv::core::Machine& machi
     if (*type == std::to_underlying(GdbBreakpointType::Software) ||
         *type == std::to_underlying(GdbBreakpointType::Hardware)) {
         if (insert)
-            breakpoints.add_pc_breakpoint(addr, BreakpointOwner::Gdb);
+            breakpoints.add_pc_breakpoint(simrv::xlen::VirtAddr{addr}, BreakpointOwner::Gdb);
         else
-            breakpoints.remove_pc_breakpoint(addr, BreakpointOwner::Gdb);
+            breakpoints.remove_pc_breakpoint(simrv::xlen::VirtAddr{addr}, BreakpointOwner::Gdb);
         return "OK";
     }
 
@@ -687,9 +692,11 @@ auto GdbStub::cmd_breakpoint(const std::string& pkt, simrv::core::Machine& machi
             return "";
     }
     if (insert)
-        breakpoints.add_watchpoint(addr, *length, watch, "gdb", BreakpointOwner::Gdb);
+        breakpoints.add_watchpoint(simrv::xlen::VirtAddr{addr}, *length, watch, "gdb",
+                                   BreakpointOwner::Gdb);
     else
-        breakpoints.remove_watchpoint(addr, *length, watch, BreakpointOwner::Gdb);
+        breakpoints.remove_watchpoint(simrv::xlen::VirtAddr{addr}, *length, watch,
+                                      BreakpointOwner::Gdb);
     return "OK";
 }
 
@@ -836,7 +843,8 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
         for (size_t i = 0; i < machine.num_harts(); ++i) {
             const auto& hart = machine.hart(i);
             response += std::format(
-                "hart {}: pc=0x{:x} instructions={} status={}\n", i, hart.state().pc, hart.e_icount,
+                "hart {}: pc=0x{:x} instructions={} status={}\n", i, hart.state().pc.raw(),
+                hart.e_icount,
                 hart.hart_status.load(std::memory_order_relaxed) == simrv::core::HartStatus::Started
                     ? "started"
                     : "stopped");
@@ -848,7 +856,8 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
         if (records.empty()) return "No instruction breakpoints.\n";
         std::string response;
         for (const auto& breakpoint : records) {
-            response += std::format("breakpoint {}: 0x{:x}\n", breakpoint.id, breakpoint.addr);
+            response +=
+                std::format("breakpoint {}: 0x{:x}\n", breakpoint.id, breakpoint.addr.raw());
         }
         return response;
     }
@@ -861,7 +870,7 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
                               : watchpoint.type == WatchType::Access ? "access"
                                                                      : "write";
             response += std::format("watchpoint {}: 0x{:x}, {} byte(s), {}\n", watchpoint.id,
-                                    watchpoint.addr, watchpoint.size, type);
+                                    watchpoint.addr.raw(), watchpoint.size, type);
         }
         return response;
     }
@@ -899,7 +908,7 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
 
         auto history_stage = [](const auto& stage) {
             if (!stage.valid) return std::string{"bubble"};
-            return std::format("0x{:x} {}{}", stage.pc,
+            return std::format("0x{:x} {}{}", stage.pc.raw(),
                                simrv::pipeline::operation_name(stage.op_id),
                                stage.stalled ? " (stalled)" : "");
         };

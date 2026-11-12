@@ -36,9 +36,15 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/util/BenchmarkRunner.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/HostCache.hpp"
+#include "simrv/util/MissionTools.hpp"
+#include "simrv/util/Scaffolding.hpp"
 #include "simrv/util/SoCManifest.hpp"
+#include "simrv/util/ThirdPartyNotices.hpp"
+#include "simrv/util/UefiDiskGenerator.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 using namespace simrv::util;
@@ -142,11 +148,11 @@ auto write_machine_event(std::ofstream& out, const simrv::core::MachineEvent& ev
     if (!out) return;
     out << "{\"schema_version\":2,\"event\":\"" << event_name(event.kind) << "\",\"timestamp\":\""
         << lifecycle_timestamp() << "\",\"cycle\":" << event.cycle;
-    if (event.hart != UINT32_MAX) out << ",\"hart\":" << event.hart;
+    if (event.hart) out << ",\"hart\":" << event.hart->raw();
     out << ",\"component\":\"" << json_escape(event.component) << "\",\"payload\":{";
     if (event.kind == simrv::core::MachineEventKind::InterruptAsserted ||
         event.kind == simrv::core::MachineEventKind::InterruptDeasserted) {
-        if (event.hart == UINT32_MAX) {
+        if (!event.hart) {
             out << "\"source_id\":" << event.interrupt_source;
         } else {
             out << "\"cause\":" << event.interrupt_cause;
@@ -180,9 +186,10 @@ auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machi
     out << "{\"schema_version\":2,\"event\":\"" << lifecycle_event_name(kind)
         << "\",\"timestamp\":\"" << lifecycle_timestamp()
         << "\",\"cycle\":" << hart.clint_mmio.mcycle << ",\"hart\":0,\"pc\":\"0x" << std::hex
-        << hart.state().pc << std::dec << "\",\"mode\":\"" << privilege_mode(hart.state().priv)
-        << "\",\"payload\":{\"status\":\"" << (status == 0 ? "ok" : "failed")
-        << "\",\"stop_reason\":\"" << simrv::core::Machine::stop_reason_name(machine.stop_reason())
+        << hart.state().pc.raw() << std::dec << "\",\"mode\":\""
+        << privilege_mode(hart.state().priv) << "\",\"payload\":{\"status\":\""
+        << (status == 0 ? "ok" : "failed") << "\",\"stop_reason\":\""
+        << simrv::core::Machine::stop_reason_name(machine.stop_reason())
         << "\",\"retired_instructions\":" << hart.e_icount
         << ",\"cycles\":" << hart.clint_mmio.mcycle;
     if (status != 0) out << ",\"exit_status\":" << status;
@@ -212,32 +219,206 @@ auto print_doctor() -> int {
     const char* term = std::getenv("TERM");
     const char* colorterm = std::getenv("COLORTERM");
     const char* term_program = std::getenv("TERM_PROGRAM");
+    const char* wt_session = std::getenv("WT_SESSION");
+    const char* kitty_pid = std::getenv("KITTY_PID");
+    const char* kitty_window = std::getenv("KITTY_WINDOW_ID");
+    const char* simrv_graphics = std::getenv("SIMRV_GRAPHICS");
+    const char* simrv_display = std::getenv("SIMRV_ENABLE_DISPLAY");
     const bool tty = ::isatty(STDIN_FILENO) != 0 && ::isatty(STDOUT_FILENO) != 0;
+
     const std::string_view term_value = term != nullptr ? term : "";
     const std::string_view color_value = colorterm != nullptr ? colorterm : "";
     const std::string_view program_value = term_program != nullptr ? term_program : "";
+
+    std::string prog_lower;
+    prog_lower.reserve(program_value.size());
+    for (char c : program_value) {
+        prog_lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    std::string detected_term;
+    if (wt_session != nullptr) {
+        detected_term = "Windows Terminal (WT_SESSION)";
+    } else if (kitty_pid != nullptr || kitty_window != nullptr || term_value == "xterm-kitty") {
+        detected_term = "Kitty (environment)";
+    } else if (prog_lower.contains("ghostty")) {
+        detected_term = "Ghostty";
+    } else if (prog_lower.contains("wezterm")) {
+        detected_term = "WezTerm";
+    } else if (prog_lower.contains("foot")) {
+        detected_term = "foot";
+    } else if (prog_lower.contains("contour")) {
+        detected_term = "Contour";
+    } else if (prog_lower.contains("vscode")) {
+        detected_term = "VS Code Terminal";
+    } else if (std::getenv("TMUX") != nullptr) {
+        detected_term = "tmux multiplexer";
+    } else if (!program_value.empty()) {
+        detected_term = std::string(program_value);
+    } else if (!term_value.empty()) {
+        detected_term = std::string(term_value);
+    } else {
+        detected_term = "unknown";
+    }
+
     const bool sixel = term_value.contains("sixel") || color_value.contains("sixel") ||
-                       program_value.contains("foot") || program_value.contains("contour") ||
-                       program_value.contains("WezTerm");
+                       prog_lower.contains("foot") || prog_lower.contains("contour") ||
+                       prog_lower.contains("wezterm") || prog_lower.contains("ghostty") ||
+                       prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
+                       (wt_session != nullptr);
+
+    const bool kitty = kitty_pid != nullptr || kitty_window != nullptr ||
+                       term_value == "xterm-kitty" || prog_lower.contains("ghostty") ||
+                       prog_lower.contains("wezterm");
+    bool force_sixel = false;
+    bool force_kitty = false;
+    bool graphics_disabled = false;
+
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "sixel")
+            force_sixel = true;
+        else if (g == "kitty")
+            force_kitty = true;
+        else if (g == "all" || g == "both" || g == "1" || g == "true") {
+            force_sixel = true;
+            force_kitty = true;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "1" || d == "true")
+            force_sixel = true;
+        else if (d == "0" || d == "false")
+            graphics_disabled = true;
+    }
+    if (simrv_graphics != nullptr) {
+        const std::string_view g(simrv_graphics);
+        if (g == "none" || g == "0" || g == "false" || g == "off") {
+            graphics_disabled = true;
+        }
+    }
+
+    std::string sixel_status;
+    if (graphics_disabled) {
+        sixel_status = "disabled by override";
+    } else if (force_sixel) {
+        sixel_status = "enabled by override (terminal support not verified)";
+    } else if (sixel) {
+        if (wt_session != nullptr) {
+            sixel_status = "detected (Windows Terminal 1.22+ supports Sixel)";
+        } else if (term_value.contains("sixel") || color_value.contains("sixel")) {
+            sixel_status = "detected (advertised in TERM/COLORTERM)";
+        } else if (!detected_term.empty()) {
+            sixel_status = std::format("detected (supported by {})", detected_term);
+        } else {
+            sixel_status = "detected";
+        }
+    } else {
+        sixel_status = "not detected in environment (runtime probe queries terminal via DA1)";
+    }
+
+    std::string kitty_status;
+    if (graphics_disabled) {
+        kitty_status = "disabled by override";
+    } else if (force_kitty) {
+        kitty_status = "enabled by override (terminal support not verified)";
+    } else if (kitty) {
+        kitty_status = std::format("detected (supported by {})", detected_term);
+    } else {
+        kitty_status = "not detected in environment (runtime probe queries terminal via APC)";
+    }
+
+#if defined(__linux__)
+    constexpr std::string_view host_os = "Linux";
+#elif defined(__APPLE__)
+    constexpr std::string_view host_os = "macOS";
+#elif defined(_WIN32)
+    constexpr std::string_view host_os = "Windows";
+#elif defined(__FreeBSD__)
+    constexpr std::string_view host_os = "FreeBSD";
+#else
+    constexpr std::string_view host_os = "Unix";
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+    constexpr std::string_view host_arch = "x86-64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr std::string_view host_arch = "aarch64";
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    constexpr std::string_view host_arch = "riscv64";
+#elif defined(__riscv) && (__riscv_xlen == 32)
+    constexpr std::string_view host_arch = "riscv32";
+#elif defined(__i386__) || defined(_M_IX86)
+    constexpr std::string_view host_arch = "x86-32";
+#else
+    constexpr std::string_view host_arch = "unknown";
+#endif
 
     std::println("SimRV environment diagnostics");
-    std::println("  version          : {}", simrv::buildinfo::kVersion);
-#if defined(__APPLE__)
+    std::println("  version          : {} (RV{} build target)", simrv::buildinfo::kVersion,
+                 simrv::xlen::kXLenBits);
+    std::println("  host             : {} ({})", host_os, host_arch);
+    const auto cache_info = simrv::util::detect_host_cache_topology();
+    if (cache_info.detected) {
+        std::println(
+            "  host cache       : L1d {} KiB (line {} B), L1i {} KiB, L2 {} MiB, L3 {} MiB",
+            cache_info.l1d_bytes / 1024, cache_info.line_bytes, cache_info.l1i_bytes / 1024,
+            cache_info.l2_bytes / (1024 * 1024), cache_info.l3_bytes / (1024 * 1024));
+    }
+    std::println("  interactive TTY  : {}",
+                 tty ? "yes (stdin & stdout connected to a terminal)"
+                     : "no (piped or background; use --cli for headless runs)");
+    std::println("  terminal         : {} (TERM={}, COLORTERM={})", detected_term,
+                 term_value.empty() ? "(unset)" : term_value,
+                 color_value.empty() ? "(unset)" : color_value);
+    std::println("  Sixel graphics   : {}", sixel_status);
+    std::println("  Kitty graphics   : {}", kitty_status);
+    if (simrv_graphics != nullptr || simrv_display != nullptr) {
+        std::println("  graphics override: SIMRV_GRAPHICS={}, SIMRV_ENABLE_DISPLAY={}",
+                     simrv_graphics != nullptr ? simrv_graphics : "(unset)",
+                     simrv_display != nullptr ? simrv_display : "(unset)");
+    }
+    std::println("  mouse protocol   : SGR-pixel mode (1006/1016) requested by interactive TUI");
     std::println(
-        "  host             : macOS source-build target; release packages target Linux x86-64");
-#elif defined(__linux__)
-    std::println("  host             : Linux (release packages target x86-64)");
-#else
-    std::println("  host             : unsupported native host (use Linux or macOS)");
-#endif
-    std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli for pipes)");
-    std::println("  TERM             : {}", term_value.empty() ? "(unset)" : term_value);
-    std::println("  Sixel environment : {}",
-                 sixel ? "detected" : "not detected (text TUI remains available)");
-    std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
-    std::println(
-        "  package runtime  : use the static musl archive outside the tested native package "
-        "matrix");
+        "  framebuffer TUI  : streaming via Sixel or Kitty when detected; text TUI always "
+        "available");
+
+    const char* guest_build = std::getenv("SIMRV_GUEST_BUILD_DIR");
+    if (!guest_build) guest_build = std::getenv("SIMRV_LINUX_BUILD_DIR");
+    if (!guest_build) guest_build = std::getenv("SIMRV_LINUX_BUILDS_DIR");
+
+    const char* guest_images = std::getenv("SIMRV_GUEST_IMAGES_DIR");
+    if (!guest_images) guest_images = std::getenv("SIMRV_LINUX_IMAGES_DIR");
+
+    std::error_code ec;
+    std::string build_status;
+    if (guest_build) {
+        build_status = std::filesystem::is_directory(guest_build, ec)
+                           ? std::format("{} (active)", guest_build)
+                           : std::format("{} (not found)", guest_build);
+    } else if (std::filesystem::is_directory("linux-build", ec)) {
+        build_status = "linux-build (auto-detected)";
+    } else {
+        build_status = "(unset; defaults to linux-build)";
+    }
+
+    std::string images_status;
+    if (guest_images) {
+        images_status = std::filesystem::is_directory(guest_images, ec)
+                            ? std::format("{} (active)", guest_images)
+                            : std::format("{} (not found)", guest_images);
+    } else if (std::filesystem::is_directory(
+                   std::format("linux-images/rv{}/alpine-gui", simrv::xlen::kXLenBits), ec)) {
+        images_status =
+            std::format("linux-images/rv{}/alpine-gui (auto-detected)", simrv::xlen::kXLenBits);
+    } else {
+        images_status = std::format("(unset; defaults to linux-images/rv{}/alpine-gui)",
+                                    simrv::xlen::kXLenBits);
+    }
+
+    std::println("  guest build dir  : {}", build_status);
+    std::println("  guest image dir  : {}", images_status);
     return 0;
 }
 
@@ -272,7 +453,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-c") {
+        if (arg == "--cli" || arg == "-c" || arg == "run") {
             is_tui = false;
         } else if (arg == "--gdb") {
             is_tui = false;
@@ -280,7 +461,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
                    arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
-                   arg == "--dump-soc-manifest") {
+                   arg == "--notices" || arg == "--third-party" || arg == "--check-mission" ||
+                   arg == "--create-mission" || arg == "--create-disk" ||
+                   arg == "--dump-soc-manifest" || arg == "completion" || arg == "--completion") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
             skip_banner = true;
@@ -338,36 +521,57 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::println("SimRV {} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
                 std::println("Licensed under the MIT License.");
                 std::println("Copyright (c) 2024-2026 Lennart Trunk and ArchLab @ ScienceTokyo");
-                std::println("Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md");
+                std::println(
+                    "Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md (or run "
+                    "--notices)");
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::ShowThirdPartyNotices:
+                simrv::util::print_third_party_notices();
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::CheckMission: {
+                bool const ok =
+                    simrv::util::check_mission_file(parsed->options.fn_mission_check, true);
+                std::exit(
+                    simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                 : simrv::core::HostExitCode::ConfigurationError));
+            }
+            case CliAction::CreateMission: {
+                bool const ok =
+                    simrv::util::create_mission_scaffold(parsed->options.fn_mission_create);
+                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                       : simrv::core::HostExitCode::GeneralError));
+            }
+            case CliAction::CreateUefiDisk: {
+                std::string const kernel = !parsed->options.fn_uefi_disk_kernel.empty()
+                                               ? parsed->options.fn_uefi_disk_kernel
+                                               : parsed->options.fn_memimg;
+                std::string const rootfs = !parsed->options.fn_uefi_disk_rootfs.empty()
+                                               ? parsed->options.fn_uefi_disk_rootfs
+                                               : parsed->options.fn_dskimg;
+                if (parsed->options.fn_uefi_disk_out.empty() || kernel.empty()) {
+                    std::println(std::cerr,
+                                 "Error: --create-disk requires an output image and a kernel "
+                                 "payload (-m or --kernel)");
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::UsageError));
+                }
+                simrv::util::UefiDiskConfig disk_cfg{
+                    .output_image = parsed->options.fn_uefi_disk_out,
+                    .kernel_payload = kernel,
+                    .rootfs_payload = rootfs.empty() ? std::nullopt
+                                                     : std::optional{std::filesystem::path(rootfs)},
+                    .esp_size_mb = parsed->options.uefi_disk_size_mb,
+                };
+                bool const ok = simrv::util::generate_uefi_disk(disk_cfg);
+                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                       : simrv::core::HostExitCode::GeneralError));
+            }
             case CliAction::ExplainInstruction:
                 simrv::explain::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             case CliAction::DumpCpuModel: {
-                simrv::pipeline::CpuModelConfig cfg{};
-                std::string target = parsed->options.dump_cpu_model_preset;
-                if (target.empty()) target = "balanced";
-                if (auto resolved = simrv::core::resolve_cpu_model_path(target)) {
-                    (void)simrv::core::load_cpu_config(*resolved, cfg);
-                } else if (auto p = simrv::pipeline::parse_cpu_model_preset(target)) {
-                    cfg = simrv::pipeline::make_cpu_model_preset(*p);
-                } else {
-                    cfg = simrv::pipeline::make_cpu_model_preset(
-                        simrv::pipeline::CpuModelPreset::Balanced);
-                }
-                if (!parsed->options.dump_cpu_model_output.empty() &&
-                    parsed->options.dump_cpu_model_output != "-") {
-                    if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, cfg,
-                                                      target)) {
-                        simrv::log::error("Failed to write CPU model to {}",
-                                          parsed->options.dump_cpu_model_output);
-                        std::exit(
-                            simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
-                    }
-                    std::println("Wrote CPU model configuration to {}",
-                                 parsed->options.dump_cpu_model_output);
-                } else {
-                    simrv::core::serialize_cpu_config(cfg, std::cout, target);
+                if (!simrv::util::scaffold_cpu_model(parsed->options.dump_cpu_model_preset,
+                                                     parsed->options.dump_cpu_model_output)) {
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
                 }
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
@@ -501,8 +705,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     std::println("  Device Policy   : {}",
                                  soc.disable_unlisted_devices ? "explicit" : "implicit defaults");
                     if (soc.dram_base.has_value() && soc.dram_size.has_value()) {
-                        std::println("  SoC DRAM Base   : {:#x} (size: {:#x})", *soc.dram_base,
-                                     *soc.dram_size);
+                        std::println("  SoC DRAM Base   : {:#x} (size: {:#x})",
+                                     soc.dram_base->raw(), *soc.dram_size);
                     }
                     std::println("  SoC Devices     : {} configured", soc.devices.size());
 
@@ -519,6 +723,31 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     "{}[VALID]{} Configuration is fully valid and compatible with this simulator.",
                     terminal_style(STDOUT_FILENO, "\033[1;32m"),
                     terminal_style(STDOUT_FILENO, "\033[0m"));
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::ScaffoldDevicePlugin: {
+                if (!simrv::util::scaffold_device_plugin(
+                        parsed->options.scaffold_device_plugin_name,
+                        parsed->options.scaffold_device_plugin_output)) {
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
+                }
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::ScaffoldCfuPlugin: {
+                if (!simrv::util::scaffold_cfu_plugin(parsed->options.scaffold_cfu_plugin_name,
+                                                      parsed->options.scaffold_cfu_plugin_output)) {
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
+                }
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::RunBenchmark: {
+                const int code = simrv::util::run_benchmark(parsed->options);
+                std::exit(code);
+            }
+            case CliAction::GenerateCompletion: {
+                std::string const script =
+                    simrv::util::generate_shell_completion(parsed->options.completion_shell);
+                std::print("{}", script);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
             case CliAction::Run:
@@ -593,6 +822,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
 
         const auto init_result = sim_machine->initialize();
         if (!init_result) {
+            simrv::log::set_tui_mode(false);
             simrv::log::error("Machine initialization failed: {}", init_result.error());
             if (event_stream) {
                 event_stream << "{\"schema_version\":2,\"event\":\"failed\",\"timestamp\":\""
@@ -649,6 +879,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             if (sim_thread.joinable()) {
                 sim_thread.join();
             }
+            simrv::log::set_tui_mode(false);
         } else {
             g_active_cli_machine.store(sim_machine.get(), std::memory_order_release);
             sim_machine->run();
@@ -670,6 +901,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             if (final_exit_code == 0) {
                 switch (sim_machine->stop_reason()) {
                     case simrv::core::Machine::StopReason::UnhandledTrap:
+                    case simrv::core::Machine::StopReason::TrapLoop:
                     case simrv::core::Machine::StopReason::LockstepDivergence:
                     case simrv::core::Machine::StopReason::GuestCrash:
                     case simrv::core::Machine::StopReason::TohostFail:

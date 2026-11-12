@@ -12,6 +12,8 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::util {
 
@@ -25,7 +27,15 @@ enum class CliAction : uint8_t {
     ExplainInstruction,
     DumpCpuModel,
     ExportSoCManifest,
-    ValidateCpuModel
+    ValidateCpuModel,
+    ScaffoldDevicePlugin,
+    ScaffoldCfuPlugin,
+    ShowThirdPartyNotices,
+    CheckMission,
+    CreateMission,
+    CreateUefiDisk,
+    RunBenchmark,
+    GenerateCompletion
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 
@@ -52,9 +62,9 @@ struct RuntimeOptions {
     std::string trace_events;
     std::string trace_function;
     std::string trace_device;
-    std::optional<uint32_t> trace_hart;
-    std::optional<simrv::xlen::Address> trace_pc_start;
-    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::HartId> trace_hart;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_start;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_end;
     std::optional<simrv::xlen::Counter> trace_after_cycle;
     std::optional<simrv::xlen::Counter> trace_before_cycle;
     std::string fn_save_checkpoint;
@@ -63,7 +73,7 @@ struct RuntimeOptions {
     std::string checkpoint_dir;
     std::string inspection_output;
 
-    simrv::xlen::Address start_pc = simrv::boot::kStartPc;
+    simrv::xlen::VirtAddr start_pc{simrv::boot::kStartPc};
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
@@ -77,6 +87,7 @@ struct RuntimeOptions {
     unsigned int misa_xlen = 0;
 
     bool appmode = true;
+    bool explicit_appmode = false;
     bool tuimode = false;
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;
@@ -123,6 +134,25 @@ struct RuntimeOptions {
     std::string dump_cpu_model_output;
     std::string soc_manifest_preset;
     std::string soc_manifest_output;
+    std::string scaffold_device_plugin_name;
+    std::string scaffold_device_plugin_output;
+    std::string scaffold_cfu_plugin_name;
+    std::string scaffold_cfu_plugin_output;
+    std::string fn_mission_check;
+    std::string fn_mission_create;
+    std::string completion_shell;
+    std::string fn_benchmark_elf;
+    uint32_t benchmark_runs = 5;
+    uint32_t benchmark_warmups = 2;
+    std::string benchmark_json_out;
+    std::string benchmark_spike_bin;
+    bool benchmark_nanobench = false;
+    std::string benchmark_suite;
+    std::string benchmark_isa_str;
+    std::string fn_uefi_disk_kernel;
+    std::string fn_uefi_disk_out;
+    std::string fn_uefi_disk_rootfs;
+    uint32_t uefi_disk_size_mb = 64;
     std::string fn_cfu_plugin;
     std::vector<std::string> device_plugins;
     std::optional<bool> bram_prewarm;
@@ -159,5 +189,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     std::string_view msg, simrv::core::HostExitCode status = simrv::core::HostExitCode::UsageError)
     -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
+auto generate_shell_completion(std::string_view shell) -> std::string;
 
 }  // namespace simrv::util

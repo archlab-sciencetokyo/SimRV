@@ -8,6 +8,7 @@
 #include <format>
 #include <optional>
 
+#include "../InspectionTranslation.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
@@ -19,25 +20,6 @@
 
 namespace simrv::tui {
 
-auto InspectorPane::translate_safe(const simrv::core::CPU& cpu, simrv::xlen::Register vaddr) const
-    -> std::optional<simrv::xlen::Register> {
-    const auto eff_priv = cpu.effective_data_privilege();
-    const bool translation_enabled =
-        (eff_priv != simrv::xlen::PrivilegeLevel::Machine &&
-         simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen));
-    if (!translation_enabled) {
-        return (cpu.state().regs.xlen == 32) ? (vaddr & 0xFFFFFFFFULL) : vaddr;
-    }
-    auto* mmu = const_cast<Mmu*>(machine_.memory_.mmu());
-    auto res =
-        mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp,
-                       cpu.state().regs.xlen, /*update_access_bits=*/false);
-    if (res.has_value()) {
-        return res.value().raw();
-    }
-    return std::nullopt;
-}
-
 auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, int col_width,
                                        int right_width) -> std::string {
     int const width = col_width + right_width;
@@ -46,10 +28,11 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     const unsigned int xlen = cpu.state().regs.xlen;
     const int word_size = static_cast<int>(xlen) / 8;
     const simrv::xlen::Register sp = cpu.state().regs.read(simrv::xlen::RegId::Sp);
-    const simrv::xlen::Register base_addr = is_mem_watch ? inspect_addr_ : sp;
+    const simrv::xlen::VirtAddr base_addr =
+        is_mem_watch ? inspect_addr_ : simrv::xlen::VirtAddr{sp};
 
     // Check if the base address is valid and mapped in DRAM
-    auto base_phys = translate_safe(cpu, base_addr);
+    auto base_phys = translate_for_inspection(cpu, machine_, base_addr);
     const bool base_valid = (base_addr != 0 && base_phys.has_value() &&
                              machine_.memory_geometry().contains(*base_phys));
 
@@ -74,8 +57,8 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
                                   kThemeMuted));
         }
         if (logical_row == 4) {
-            std::string val_str = (xlen == 64) ? std::format("0x{:016x}", base_addr)
-                                               : std::format("0x{:08x}", base_addr);
+            std::string val_str = (xlen == 64) ? std::format("0x{:016x}", base_addr.raw())
+                                               : std::format("0x{:08x}", base_addr.raw());
             return inactive_row(is_mem_watch ? std::format("{}target addr\033[0m · {}{}\033[0m",
                                                            kThemeText, kThemeVal, val_str)
                                              : std::format("{}sp register\033[0m · {}{}\033[0m",
@@ -98,7 +81,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
         return format_to_width("", width);
     }
 
-    const simrv::xlen::Register aligned_base =
+    const simrv::xlen::VirtAddr aligned_base =
         base_addr & ~(static_cast<simrv::xlen::Register>(word_size) - 1);
     const bool is_16b_aligned = (base_addr % 16 == 0);
 
@@ -109,11 +92,11 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
             if (!sym.empty() && width >= 56 &&
                 framework::active_render_context().density != framework::Density::Compact) {
                 title = (xlen == 64)
-                            ? std::format("Memory Watch: <{}> [0x{:016x}]", sym, aligned_base)
-                            : std::format("Memory Watch: <{}> [0x{:08x}]", sym, aligned_base);
+                            ? std::format("Memory Watch: <{}> [0x{:016x}]", sym, aligned_base.raw())
+                            : std::format("Memory Watch: <{}> [0x{:08x}]", sym, aligned_base.raw());
             } else {
-                title = (xlen == 64) ? std::format("Memory Watch: 0x{:016x}", aligned_base)
-                                     : std::format("Memory Watch: 0x{:08x}", aligned_base);
+                title = (xlen == 64) ? std::format("Memory Watch: 0x{:016x}", aligned_base.raw())
+                                     : std::format("Memory Watch: 0x{:08x}", aligned_base.raw());
             }
             return section_line(title, width);
         }
@@ -150,14 +133,14 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     // Center it around base_addr (word_offset = 0 at logical_row = 7).
     // Note: logical_row already incorporates vertical scroll offset from ScrollView.
     const int word_offset = logical_row - 7;
-    simrv::xlen::Register target_vaddr =
+    simrv::xlen::VirtAddr target_vaddr =
         aligned_base + static_cast<simrv::xlen::Register>(word_offset * word_size);
     if (xlen == 32) {
         target_vaddr &= 0xFFFFFFFFULL;
     }
 
-    std::string addr_str = (xlen == 64) ? std::format("0x{:016x}", target_vaddr)
-                                        : std::format("0x{:08x}", target_vaddr);
+    std::string addr_str = (xlen == 64) ? std::format("0x{:016x}", target_vaddr.raw())
+                                        : std::format("0x{:08x}", target_vaddr.raw());
 
     const simrv::xlen::Register fp = cpu.state().regs.read(simrv::xlen::RegId::S0);
     const simrv::xlen::Register ra = cpu.state().regs.read(simrv::xlen::RegId::Ra);
@@ -179,9 +162,9 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     std::string ascii_str = "";
     std::string sym_str = "";
 
-    auto paddr_opt = translate_safe(cpu, target_vaddr);
+    auto paddr_opt = translate_for_inspection(cpu, machine_, target_vaddr);
     if (paddr_opt) {
-        simrv::xlen::Register paddr = *paddr_opt;
+        simrv::xlen::PhysAddr paddr = *paddr_opt;
         if (machine_.memory_geometry().contains(paddr)) {
             simrv::xlen::Register raw_val = 0;
             std::array<uint8_t, 8> bytes{};
@@ -210,7 +193,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
             }
 
             if (raw_val != 0) {
-                std::string sym = machine_.symbol_table().lookup(raw_val);
+                std::string sym = machine_.symbol_table().lookup(simrv::xlen::VirtAddr{raw_val});
                 if (!sym.empty()) {
                     sym_str = std::format(" <{}>", sym);
                 } else if (!is_mem_watch) {
@@ -266,11 +249,12 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
 }
 
 auto InspectorPane::get_stack_addr_at_row(int logical_row) const
-    -> std::optional<simrv::xlen::Register> {
+    -> std::optional<simrv::xlen::VirtAddr> {
     if (page_ != TuiRegPage::STACK) return std::nullopt;
     const auto& st = current_cpu().state();
-    const simrv::xlen::Register base =
-        is_custom_memory_inspect() ? inspect_addr_ : st.regs.read(simrv::xlen::RegId::Sp);
+    const simrv::xlen::VirtAddr base =
+        is_custom_memory_inspect() ? inspect_addr_
+                                   : simrv::xlen::VirtAddr{st.regs.read(simrv::xlen::RegId::Sp)};
     if (base == 0) return std::nullopt;
     const int word_size = static_cast<int>(st.regs.xlen) / 8;
     if (logical_row >= 1 && logical_row <= 13) {

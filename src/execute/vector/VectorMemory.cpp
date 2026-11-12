@@ -13,17 +13,19 @@ namespace simrv::execute::vector {
 
 namespace {
 
-[[nodiscard]] inline auto is_tohost_addr_range(core::CPU& cpu, simrv::xlen::Address paddr,
+[[nodiscard]] inline auto is_tohost_addr_range(core::CPU& cpu, simrv::xlen::PhysAddr paddr,
                                                uint32_t size) noexcept -> bool {
-    const simrv::xlen::Address th = (cpu.machine_ != nullptr) ? cpu.machine_->isa_test_tohost() : 0;
+    const simrv::xlen::PhysAddr th = (cpu.machine_ != nullptr)
+                                         ? simrv::xlen::PhysAddr{cpu.machine_->isa_test_tohost()}
+                                         : simrv::xlen::PhysAddr{};
     return (th != 0 && paddr < th + 8 && paddr + size > th) ||
            (paddr < 0x80001008ULL && paddr + size > 0x80001000ULL) ||
            (paddr < 0x40008008ULL && paddr + size > 0x40008000ULL);
 }
 
 [[nodiscard]] auto get_direct_host_memory_for_range(
-    core::CPU& cpu, simrv::xlen::Address base_addr, uint32_t total_bytes, bool is_write,
-    simrv::xlen::Address* physical_address = nullptr) -> simrv::xlen::Byte* {
+    core::CPU& cpu, simrv::xlen::VirtAddr base_addr, uint32_t total_bytes, bool is_write,
+    simrv::xlen::PhysAddr* physical_address = nullptr) -> simrv::xlen::Byte* {
     if (total_bytes == 0 || cpu.machine_ == nullptr) return nullptr;
     // The contiguous host-pointer path cannot preserve per-element translation
     // and privilege checks for vector accesses. Lower-privilege accesses must
@@ -34,12 +36,17 @@ namespace {
     // would bypass that transform, and masking only the base is not equivalent
     // when address arithmetic crosses the PMLEN boundary. Keep the fast path
     // for already-canonical pointers and fall back for tagged pointers.
-    if (simrv::memory::MemoryAccess::mask_user_pointer(cpu, simrv::xlen::VirtAddr{base_addr})
-            .raw() != base_addr) {
+    if (simrv::memory::MemoryAccess::mask_user_pointer(cpu, base_addr) != base_addr) {
         return nullptr;
     }
     auto& machine = *cpu.machine_;
-    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+    // Direct copies must not bypass per-element triggers or store reservation effects.
+    const bool store_needs_checks =
+        is_write &&
+        (cpu.cpu_model_config.mmio_console_redirect || cpu.state().lr_reservation_active ||
+         (machine.num_harts() > 1 && machine.memory().reservation_table().may_have_reservations()));
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any() ||
+                                  cpu.state().has_active_triggers || store_needs_checks)) {
         return nullptr;
     }
     const bool single_page = ((base_addr >> 12) == ((base_addr + total_bytes - 1) >> 12));
@@ -48,34 +55,30 @@ namespace {
     const bool m_mode_flat =
         (cpu.state().priv == kPrivMachine && (cpu.state().mstatus & core::MstatusBit::Mprv) == 0);
     if (m_mode_flat) {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(base_addr, total_bytes) &&
-                                    machine.ram_view().contains(base_addr, total_bytes))) {
+        if (simrv::compiler::likely(
+                machine.memory_geometry().contains(simrv::xlen::PhysAddr{base_addr.raw()},
+                                                   total_bytes) &&
+                machine.ram_view().contains(simrv::xlen::PhysAddr{base_addr.raw()}, total_bytes))) {
             const auto acc_type = is_write ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-            if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), base_addr, total_bytes,
-                                                                acc_type, kPrivMachine))) {
-                if (is_write &&
-                    simrv::compiler::unlikely(is_tohost_addr_range(cpu, base_addr, total_bytes))) {
+            if (simrv::compiler::likely(
+                    core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{base_addr.raw()},
+                                            total_bytes, acc_type, kPrivMachine))) {
+                if (is_write && simrv::compiler::unlikely(is_tohost_addr_range(
+                                    cpu, simrv::xlen::PhysAddr{base_addr.raw()}, total_bytes))) {
                     return nullptr;
                 }
-                if (physical_address != nullptr) *physical_address = base_addr;
-                return machine.ram_view().unchecked_ptr(base_addr);
+                if (physical_address != nullptr)
+                    *physical_address = simrv::xlen::PhysAddr{base_addr.raw()};
+                return machine.ram_view().unchecked_ptr(simrv::xlen::PhysAddr{base_addr.raw()});
             }
         }
         return nullptr;
     }
 
-    // Pointer masking transforms each effective address after vector address
-    // generation. Bypass this range fast path for tagged addresses so the
-    // ordinary memory path can mask every element independently.
-    if (simrv::memory::MemoryAccess::mask_user_pointer(cpu, simrv::xlen::VirtAddr{base_addr})
-            .raw() != base_addr) {
-        return nullptr;
-    }
-
     const unsigned active_xlen = cpu.effective_data_xlen();
-    simrv::xlen::Address lookup_addr = base_addr;
+    simrv::xlen::VirtAddr lookup_addr = base_addr;
     if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
-    const unsigned page_offset = lookup_addr & 0xFFFu;
+    const unsigned page_offset = static_cast<unsigned>(lookup_addr.raw() & 0xFFFu);
     if (page_offset + total_bytes > 4096u) return nullptr;
 
     if (simrv::compiler::likely(
@@ -83,54 +86,59 @@ namespace {
         const simrv::xlen::PrivilegeLevel eff_priv = cpu.effective_data_privilege();
         const simrv::xlen::Word current_asid =
             simrv::xlen::satp_asid(cpu.state().satp, active_xlen);
-        const simrv::xlen::Address vpn = lookup_addr >> 12;
+        const simrv::xlen::Address vpn = lookup_addr.raw() >> 12;
         const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
         if (is_write) {
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
-                const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
+                const simrv::xlen::PhysAddr physical = entry.paddr_base + page_offset;
                 if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
-                    simrv::compiler::unlikely(!core::pmp::check_access(
-                        cpu.state(), paddr, total_bytes, core::PmpAccessType::Write, eff_priv))) {
+                    simrv::compiler::unlikely(
+                        !core::pmp::check_access(cpu.state(), physical, total_bytes,
+                                                 core::PmpAccessType::Write, eff_priv))) {
                     return nullptr;
                 }
                 if (simrv::compiler::likely(entry.has_host_ptr())) {
-                    if (simrv::compiler::unlikely(is_tohost_addr_range(cpu, paddr, total_bytes))) {
+                    if (simrv::compiler::unlikely(
+                            is_tohost_addr_range(cpu, physical, total_bytes))) {
                         return nullptr;
                     }
-                    if (physical_address != nullptr) *physical_address = paddr;
-                    return entry.host_ptr(lookup_addr);
+                    if (physical_address != nullptr) *physical_address = physical;
+                    return entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr});
                 }
             }
         } else {
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
-                const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
+                const simrv::xlen::PhysAddr paddr = entry.paddr_base + page_offset;
                 if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
                     simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), paddr, total_bytes, core::PmpAccessType::Read, eff_priv))) {
                     return nullptr;
                 }
                 if (simrv::compiler::likely(entry.has_host_ptr())) {
-                    return entry.host_ptr(lookup_addr);
+                    return entry.host_ptr(simrv::xlen::VirtAddr{lookup_addr});
                 }
             }
         }
     } else {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(lookup_addr, total_bytes) &&
-                                    machine.ram_view().contains(lookup_addr, total_bytes))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(
+                                        simrv::xlen::PhysAddr{lookup_addr.raw()}, total_bytes) &&
+                                    machine.ram_view().contains(
+                                        simrv::xlen::PhysAddr{lookup_addr.raw()}, total_bytes))) {
             const auto acc_type = is_write ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-            if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), lookup_addr,
-                                                                total_bytes, acc_type,
-                                                                cpu.effective_data_privilege()))) {
-                if (is_write && simrv::compiler::unlikely(
-                                    is_tohost_addr_range(cpu, lookup_addr, total_bytes))) {
+            if (simrv::compiler::likely(core::pmp::check_access(
+                    cpu.state(), simrv::xlen::PhysAddr{lookup_addr.raw()}, total_bytes, acc_type,
+                    cpu.effective_data_privilege()))) {
+                if (is_write && simrv::compiler::unlikely(is_tohost_addr_range(
+                                    cpu, simrv::xlen::PhysAddr{lookup_addr.raw()}, total_bytes))) {
                     return nullptr;
                 }
-                if (physical_address != nullptr) *physical_address = lookup_addr;
-                return machine.ram_view().unchecked_ptr(lookup_addr);
+                if (physical_address != nullptr)
+                    *physical_address = simrv::xlen::PhysAddr{lookup_addr.raw()};
+                return machine.ram_view().unchecked_ptr(simrv::xlen::PhysAddr{lookup_addr.raw()});
             }
         }
     }
@@ -158,8 +166,8 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             const uint32_t page_offset = cur_addr & 0xFFFu;
             const uint32_t page_remain_bytes = 4096u - page_offset;
             const uint32_t chunk_bytes = std::min(total_bytes - byte_idx, page_remain_bytes);
-            simrv::xlen::Byte* host_src =
-                get_direct_host_memory_for_range(cpu, cur_addr, chunk_bytes, false);
+            simrv::xlen::Byte* host_src = get_direct_host_memory_for_range(
+                cpu, simrv::xlen::VirtAddr{cur_addr}, chunk_bytes, false);
             if (host_src == nullptr) {
                 break;
             }
@@ -187,12 +195,12 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
 
     const uint32_t elements = nr * vlen_bytes / element_bytes;
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < elements; ++i) {
-        const simrv::xlen::Address addr = base_addr + i * element_bytes;
+        const simrv::xlen::VirtAddr addr{base_addr + i * element_bytes};
         uint64_t val = 0;
         if (element_bytes == 8 && !simrv::xlen::kIsXLen64) {
             if ((addr & 7) != 0) {
                 cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
-                cpu.active_context().pending_tval = addr;
+                cpu.active_context().pending_tval = addr.raw();
                 cpu.state().vstart = i;
                 return;
             }
@@ -239,9 +247,9 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             const uint32_t page_offset = cur_addr & 0xFFFu;
             const uint32_t page_remain_bytes = 4096u - page_offset;
             const uint32_t chunk_bytes = std::min(total_bytes - byte_idx, page_remain_bytes);
-            simrv::xlen::Address physical_address = 0;
+            simrv::xlen::PhysAddr physical_address{};
             simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
-                cpu, cur_addr, chunk_bytes, true, &physical_address);
+                cpu, simrv::xlen::VirtAddr{cur_addr}, chunk_bytes, true, &physical_address);
             if (host_dst == nullptr) {
                 break;
             }
@@ -275,7 +283,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
     }
 
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < total_bytes; i++) {
-        simrv::xlen::Address addr = base_addr + i;
+        simrv::xlen::VirtAddr addr{base_addr + i};
         uint32_t reg_idx = (static_cast<uint32_t>(vs3) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint8_t val =
             cpu.state()
@@ -317,8 +325,8 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             }
             const uint32_t chunk_elems = std::min(vl - elem_idx, page_remain_elems);
             const uint32_t chunk_bytes = chunk_elems * sizeof(T);
-            simrv::xlen::Byte* host_src =
-                get_direct_host_memory_for_range(cpu, cur_addr, chunk_bytes, false);
+            simrv::xlen::Byte* host_src = get_direct_host_memory_for_range(
+                cpu, simrv::xlen::VirtAddr{cur_addr}, chunk_bytes, false);
             if (host_src == nullptr) {
                 break;
             }
@@ -351,7 +359,8 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
-            simrv::xlen::Address addr = base_addr + (i * nfields + f) * sizeof(T);
+            simrv::xlen::VirtAddr addr{
+                static_cast<simrv::xlen::Word>(base_addr + (i * nfields + f) * sizeof(T))};
             uint64_t val = 0;
             if constexpr (sizeof(T) == 8) {
                 if constexpr (simrv::xlen::kIsXLen64) {
@@ -359,7 +368,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
-                        cpu.active_context().pending_tval = addr;
+                        cpu.active_context().pending_tval = addr.raw();
                         cpu.state().vstart = i;
                         return;
                     }
@@ -403,7 +412,8 @@ void execute_vlm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                  simrv::xlen::Register base_addr, uint32_t vl) {
     const uint32_t evl = (vl + 7) / 8;
     if (cpu.state().vstart == 0 && evl > 0) {
-        simrv::xlen::Byte* host_src = get_direct_host_memory_for_range(cpu, base_addr, evl, false);
+        simrv::xlen::Byte* host_src =
+            get_direct_host_memory_for_range(cpu, simrv::xlen::VirtAddr{base_addr}, evl, false);
         if (host_src != nullptr) {
             std::memcpy(cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd)).u8.data(),
                         host_src, evl);
@@ -411,8 +421,8 @@ void execute_vlm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
         }
     }
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
-        const auto value =
-            simrv::memory::MemoryAccess::loadInt(mem, cpu, base_addr + i, isa::Funct3::Lbu);
+        const auto value = simrv::memory::MemoryAccess::loadInt(
+            mem, cpu, simrv::xlen::VirtAddr{base_addr + i}, isa::Funct3::Lbu);
         if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
@@ -425,9 +435,9 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                  simrv::xlen::Register base_addr, uint32_t vl) {
     const uint32_t evl = (vl + 7) / 8;
     if (cpu.state().vstart == 0 && evl > 0) {
-        simrv::xlen::Address physical_address = 0;
-        simrv::xlen::Byte* host_dst =
-            get_direct_host_memory_for_range(cpu, base_addr, evl, true, &physical_address);
+        simrv::xlen::PhysAddr physical_address{};
+        simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
+            cpu, simrv::xlen::VirtAddr{base_addr}, evl, true, &physical_address);
         if (host_dst != nullptr) {
             std::memcpy(host_dst,
                         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vs3)).u8.data(),
@@ -442,7 +452,8 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
     }
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
         const auto value = vector::get_group_element<uint8_t>(cpu.state().regs, vs3, i);
-        simrv::memory::MemoryAccess::storeInt(mem, cpu, base_addr + i, value, isa::Funct3::Sb);
+        simrv::memory::MemoryAccess::storeInt(mem, cpu, simrv::xlen::VirtAddr{base_addr + i}, value,
+                                              isa::Funct3::Sb);
         if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
@@ -476,9 +487,9 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             }
             const uint32_t chunk_elems = std::min(vl - elem_idx, page_remain_elems);
             const uint32_t chunk_bytes = chunk_elems * sizeof(T);
-            simrv::xlen::Address physical_address = 0;
+            simrv::xlen::PhysAddr physical_address{};
             simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
-                cpu, cur_addr, chunk_bytes, true, &physical_address);
+                cpu, simrv::xlen::VirtAddr{cur_addr}, chunk_bytes, true, &physical_address);
             if (host_dst == nullptr) {
                 break;
             }
@@ -518,7 +529,8 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
-            simrv::xlen::Address addr = base_addr + (i * nfields + f) * sizeof(T);
+            simrv::xlen::VirtAddr addr{
+                static_cast<simrv::xlen::Word>(base_addr + (i * nfields + f) * sizeof(T))};
             auto source_reg =
                 static_cast<simrv::xlen::RegId>(static_cast<uint32_t>(vs3) + f * field_registers);
             T val = vector::get_group_element<T>(cpu.state().regs, source_reg, i);
@@ -529,7 +541,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
-                        cpu.active_context().pending_tval = addr;
+                        cpu.active_context().pending_tval = addr.raw();
                         cpu.state().vstart = i;
                         return;
                     }
@@ -569,12 +581,14 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
     // Direct host DRAM fast-path when strided span resides within a single physical page
-    if (stride >= 0 && cpu.state().vstart == 0 && !cpu.state().has_active_triggers) {
+    if (stride >= 0 && stride <= 4096 && cpu.state().vstart == 0 &&
+        (simrv::xlen::kIsXLen64 || sizeof(T) != 8 ||
+         ((base_addr | static_cast<uint64_t>(stride)) & 7u) == 0)) {
         const uint64_t total_span = static_cast<uint64_t>(vl - 1) * static_cast<uint64_t>(stride) +
                                     static_cast<uint64_t>(nfields) * sizeof(T);
         if (total_span <= 4096u) {
             auto* host_ptr = get_direct_host_memory_for_range(
-                cpu, base_addr, static_cast<uint32_t>(total_span), false);
+                cpu, simrv::xlen::VirtAddr{base_addr}, static_cast<uint32_t>(total_span), false);
             if (host_ptr != nullptr) {
                 for (uint32_t i = 0; i < vl; ++i) {
                     if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -595,7 +609,8 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; ++f) {
-            simrv::xlen::Address addr = base_addr + i * stride + f * sizeof(T);
+            simrv::xlen::VirtAddr addr{
+                static_cast<simrv::xlen::Word>(base_addr + i * stride + f * sizeof(T))};
             uint64_t val = 0;
             if constexpr (sizeof(T) == 8) {
                 if constexpr (simrv::xlen::kIsXLen64) {
@@ -603,7 +618,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
-                        cpu.active_context().pending_tval = addr;
+                        cpu.active_context().pending_tval = addr.raw();
                         cpu.state().vstart = i;
                         return;
                     }
@@ -643,12 +658,14 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
     // Direct host DRAM fast-path when strided span resides within a single physical page
-    if (stride >= 0 && cpu.state().vstart == 0 && !cpu.state().has_active_triggers) {
+    if (stride >= 0 && stride <= 4096 && cpu.state().vstart == 0 &&
+        (simrv::xlen::kIsXLen64 || sizeof(T) != 8 ||
+         ((base_addr | static_cast<uint64_t>(stride)) & 7u) == 0)) {
         const uint64_t total_span = static_cast<uint64_t>(vl - 1) * static_cast<uint64_t>(stride) +
                                     static_cast<uint64_t>(nfields) * sizeof(T);
         if (total_span <= 4096u) {
             auto* host_ptr = get_direct_host_memory_for_range(
-                cpu, base_addr, static_cast<uint32_t>(total_span), true);
+                cpu, simrv::xlen::VirtAddr{base_addr}, static_cast<uint32_t>(total_span), true);
             if (host_ptr != nullptr) {
                 for (uint32_t i = 0; i < vl; ++i) {
                     if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -668,7 +685,8 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; ++f) {
-            simrv::xlen::Address addr = base_addr + i * stride + f * sizeof(T);
+            simrv::xlen::VirtAddr addr{
+                static_cast<simrv::xlen::Word>(base_addr + i * stride + f * sizeof(T))};
             const auto source =
                 static_cast<simrv::xlen::RegId>(static_cast<uint32_t>(vs3) + f * field_registers);
             T val = vector::get_group_element<T>(cpu.state().regs, source, i);
@@ -679,7 +697,7 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
-                        cpu.active_context().pending_tval = addr;
+                        cpu.active_context().pending_tval = addr.raw();
                         cpu.state().vstart = i;
                         return;
                     }
@@ -719,8 +737,8 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto offset = vector::get_group_element<T_idx>(cpu.state().regs, vs2, i);
         for (uint32_t f = 0; f < nfields; ++f) {
-            simrv::xlen::Address addr =
-                base_addr + static_cast<int64_t>(offset) + f * sizeof(T_data);
+            simrv::xlen::VirtAddr addr{static_cast<simrv::xlen::Word>(
+                base_addr + static_cast<int64_t>(offset) + f * sizeof(T_data))};
 
             uint64_t val = 0;
             if constexpr (sizeof(T_data) == 8) {
@@ -729,7 +747,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
-                        cpu.active_context().pending_tval = addr;
+                        cpu.active_context().pending_tval = addr.raw();
                         cpu.state().vstart = i;
                         return;
                     }
@@ -789,8 +807,8 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto offset = vector::get_group_element<T_idx>(cpu.state().regs, vs2, i);
         for (uint32_t f = 0; f < nfields; ++f) {
-            simrv::xlen::Address addr =
-                base_addr + static_cast<int64_t>(offset) + f * sizeof(T_data);
+            simrv::xlen::VirtAddr addr{static_cast<simrv::xlen::Word>(
+                base_addr + static_cast<int64_t>(offset) + f * sizeof(T_data))};
             const auto source =
                 static_cast<simrv::xlen::RegId>(static_cast<uint32_t>(vs3) + f * field_registers);
             auto val = vector::get_group_element<T_data>(cpu.state().regs, source, i);
@@ -801,7 +819,7 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
-                        cpu.active_context().pending_tval = addr;
+                        cpu.active_context().pending_tval = addr.raw();
                         cpu.state().vstart = i;
                         return;
                     }

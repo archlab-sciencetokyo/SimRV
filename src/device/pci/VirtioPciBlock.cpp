@@ -14,7 +14,9 @@
 namespace simrv::device {
 
 VirtioPciBlock::VirtioPciBlock(const std::string& disk_path)
-    : VirtioPciDevice(virtio::kDevIdBlock, 0x010000, 1), backend_(disk_path) {}
+    : VirtioPciDevice(PciSubsystemId{static_cast<uint16_t>(virtio::kDevIdBlock)},
+                      PciClassCode{0x010000}, 1),
+      backend_(disk_path) {}
 
 auto VirtioPciBlock::get_device_features(virtio::VirtioFeatureWord select)
     -> virtio::VirtioFeatureWord {
@@ -47,27 +49,29 @@ void VirtioPciBlock::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     const bool defer_completion = machine != nullptr && machine->runtime_profile.is_cycle_mode() &&
                                   machine->dma_engine().is_enabled();
 
-    auto dma_read_cb = [this](simrv::xlen::Address addr, void* buf, size_t size) {
-        return dma_read(addr, buf, size);
+    auto dma_read_cb = [this](uint64_t addr, void* buf, size_t size) {
+        return dma_read_wire_address(addr, buf, size);
     };
-    auto dma_write_cb = [this](simrv::xlen::Address addr, const void* buf, size_t size) {
-        return dma_write(addr, buf, size);
+    auto dma_write_cb = [this](uint64_t addr, const void* buf, size_t size) {
+        return dma_write_wire_address(addr, buf, size);
     };
     auto schedule_deferred = [this, machine, queue_index](size_t transfer_bytes,
                                                           uint16_t head_desc_idx,
                                                           uint32_t total_written) {
         const auto current_cycle = machine->memory().system_bus().cycle();
+        const auto generation = queues_[queue_index].generation;
         machine->dma_engine().schedule_transfer(
             transfer_bytes, current_cycle,
-            [this, queue_index, head_desc_idx, total_written]() {
+            [this, queue_index, head_desc_idx, total_written, generation]() {
                 auto& q = queues_[queue_index];
+                if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                dma_read(q.device_addr + 2, &used_idx, 2);
+                if (!dma_read_wire_address(q.device_addr + 2, &used_idx, 2)) return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
-                dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
-                          sizeof(elem));
+                dma_write_wire_address(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                                       sizeof(elem));
                 used_idx++;
-                dma_write(q.device_addr + 2, &used_idx, 2);
+                dma_write_wire_address(q.device_addr + 2, &used_idx, 2);
                 isr_status_ |= 0x1;
                 trigger_irq();
             },

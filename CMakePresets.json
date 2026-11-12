@@ -71,6 +71,18 @@
             "cacheVariables": {}
         },
         {
+            "name": "rv64-aarch64-release",
+            "displayName": "RV64 AArch64 Cross Release",
+            "inherits": [
+                "simrv-release",
+                "simrv-rv64"
+            ],
+            "binaryDir": "${sourceDir}/build/rv64-aarch64-release",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/aarch64-linux-gnu.cmake"
+            }
+        },
+        {
             "name": "rv64-debug",
             "displayName": "RV64 Debug (Ninja)",
             "inherits": [

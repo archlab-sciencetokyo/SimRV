@@ -63,6 +63,7 @@ struct RuntimeProfile {
             engine == ExecutionEngine::InstructionObservable && interaction == InteractionMode::Tui;
         return (fast_instruction_engine || sampled_tui_engine) && !tracing && !lockstep;
     }
+    // Host-cache discovery is diagnostic; batching remains fixed by interaction mode.
     [[nodiscard]] constexpr auto fast_batch_quantum() const -> unsigned {
         return interaction == InteractionMode::Tui ? 2048U : 65536U;
     }

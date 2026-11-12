@@ -93,8 +93,8 @@ Launch `simrv` normally (or pass `--tui`) to explore an image with the interacti
 ### Host platform
 
 Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
-on macOS 26 for both Apple silicon and Intel; macOS packages are not published yet, and host TAP
-networking and VirtIO-FS directory sharing are Linux-only. On Windows, use WSL2 with a supported
+on macOS 26 for both Apple silicon and Intel; macOS packages are not published yet. VirtIO-FS
+directory sharing is Linux-only. User-mode networking uses libslirp on Linux and macOS. On Windows, use WSL2 with a supported
 Linux distribution; native Windows builds are not currently supported.
 
 ### Prerequisites
@@ -179,8 +179,8 @@ Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/
 # Load a predefined CPU model (searches configs/models/ or custom path)
 ./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cpu-preset rvcomp --cli
 
-# Generate a scaffold model configuration with the wizard
-python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
+# Generate a starter model configuration
+./build/rv64-release/simrv --scaffold-cpu-model my_core.cfg
 ```
 
 Run Linux OS image with disk & devicetree:

@@ -1,9 +1,13 @@
+#include <algorithm>
 #include <chrono>
+#include <concepts>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -25,10 +29,18 @@
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/CliParser.hpp"
+#include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/SoCManifest.hpp"
 
 namespace {
+
+static_assert(std::same_as<decltype(simrv::core::TuiExecutionSnapshot::pc), simrv::xlen::VirtAddr>);
+
+static_assert(std::same_as<decltype(simrv::util::RuntimeOptions::trace_pc_start),
+                           std::optional<simrv::xlen::VirtAddr>>);
+static_assert(std::same_as<decltype(simrv::core::DebugConfig::trace_pc_end),
+                           std::optional<simrv::xlen::VirtAddr>>);
 
 auto failures = 0;
 
@@ -247,9 +259,12 @@ auto main() -> int {
         fs::remove_all(output, ignored);
     }
 
-    const simrv::core::MemoryGeometry custom{.dram_base = 0x40000000, .dram_size = 0x1000};
-    expect(custom.contains(0x40000FFC, 4), "custom geometry contains final word");
-    expect(!custom.contains(0x40000FFC, 8), "custom geometry rejects overflow");
+    const simrv::core::MemoryGeometry custom{.dram_base = simrv::xlen::PhysAddr{0x40000000},
+                                             .dram_size = 0x1000};
+    expect(custom.contains(simrv::xlen::PhysAddr{0x40000FFC}, 4),
+           "custom geometry contains final word");
+    expect(!custom.contains(simrv::xlen::PhysAddr{0x40000FFC}, 8),
+           "custom geometry rejects overflow");
 
     auto invalid = defaults;
     invalid.execution.num_harts = 0;
@@ -425,7 +440,7 @@ auto main() -> int {
     // C++23 explicit object parameter (deducing this) builder chaining test
     auto fluent = simrv::core::MachineConfig{}
                       .with_harts(3)
-                      .with_dram_base(0x80000000)
+                      .with_dram_base(simrv::xlen::PhysAddr{0x80000000})
                       .with_dram_size(0x40000000)
                       .with_appmode(false)
                       .with_smp_quantum(42)
@@ -609,19 +624,21 @@ auto main() -> int {
         const auto parsed = simrv::util::parse_command_line(trace_filter_args);
         expect(parsed.has_value() && parsed->options.trace_events == "call, return" &&
                    parsed->options.trace_function == "main" &&
-                   parsed->options.trace_device == "uart0" && parsed->options.trace_hart == 1 &&
+                   parsed->options.trace_device == "uart0" &&
+                   parsed->options.trace_hart == simrv::xlen::HartId{1} &&
                    parsed->options.trace_after_cycle == 100 &&
                    parsed->options.trace_before_cycle == 200 &&
-                   parsed->options.trace_pc_start == 0x80000000 &&
-                   parsed->options.trace_pc_end == 0x80001000,
+                   parsed->options.trace_pc_start == simrv::xlen::VirtAddr{0x80000000} &&
+                   parsed->options.trace_pc_end == simrv::xlen::VirtAddr{0x80001000},
                "trace event, hart, PC, and inclusive cycle filters parse");
         if (parsed) {
             const auto cfg = parsed->options.to_machine_config();
             expect(cfg.debug.trace_events == "call, return" && cfg.debug.trace_function == "main" &&
-                       cfg.debug.trace_device == "uart0" && cfg.debug.trace_hart == 1 &&
-                       cfg.debug.trace_pc_start == 0x80000000 &&
-                       cfg.debug.trace_pc_end == 0x80001000 && cfg.debug.trace_after_cycle == 100 &&
-                       cfg.debug.trace_before_cycle == 200,
+                       cfg.debug.trace_device == "uart0" &&
+                       cfg.debug.trace_hart == simrv::xlen::HartId{1} &&
+                       cfg.debug.trace_pc_start == simrv::xlen::VirtAddr{0x80000000} &&
+                       cfg.debug.trace_pc_end == simrv::xlen::VirtAddr{0x80001000} &&
+                       cfg.debug.trace_after_cycle == 100 && cfg.debug.trace_before_cycle == 200,
                    "trace filters project into machine configuration");
         }
     }
@@ -686,12 +703,12 @@ auto main() -> int {
     }
     {
         simrv::core::MachineConfig cfg{};
-        cfg.memory.dram_base = 0x10000000ULL;
+        cfg.memory.dram_base = simrv::xlen::PhysAddr{0x10000000ULL};
         cfg.memory.dram_size = 0x10000ULL;
         expect(!cfg.validate(), "MachineConfig rejects DRAM overlapping UART MMIO");
 
         cfg.memory.dram_base =
-            static_cast<simrv::xlen::Address>(~static_cast<simrv::xlen::Address>(0) - 0x1000ULL);
+            simrv::xlen::PhysAddr{~simrv::xlen::Address{0} - simrv::xlen::Address{0x1000}};
         cfg.memory.dram_size = 0x2000ULL;
         expect(!cfg.validate(), "MachineConfig rejects DRAM range overflow");
     }
@@ -719,9 +736,10 @@ auto main() -> int {
         const auto checkpoint_dir = std::filesystem::temp_directory_path() /
                                     ("simrv-periodic-checkpoint-" + std::to_string(suffix));
         simrv::core::MachineConfig periodic_config{};
-        periodic_config.memory.dram_base = 0x80000000;
+        periodic_config.memory.dram_base = simrv::xlen::PhysAddr{0x80000000};
         periodic_config.memory.dram_size = 16ULL * 1024 * 1024;
-        periodic_config.execution.start_pc = periodic_config.memory.dram_base;
+        periodic_config.execution.start_pc =
+            simrv::xlen::VirtAddr{periodic_config.memory.dram_base.raw()};
         periodic_config.execution.fincnt = 4;
         periodic_config.debug.checkpoint_every = 2;
         periodic_config.debug.checkpoint_dir = checkpoint_dir.string();
@@ -730,7 +748,8 @@ auto main() -> int {
         periodic_ram[0] = simrv::xlen::Byte{0x6f};  // jal x0, 0
         simrv::core::Machine periodic_machine(periodic_config);
         periodic_machine.set_ram_for_testing(periodic_ram.data(), periodic_ram.size());
-        periodic_machine.primary_hart().state().pc = periodic_config.memory.dram_base;
+        periodic_machine.primary_hart().state().pc =
+            simrv::xlen::VirtAddr{periodic_config.memory.dram_base.raw()};
         periodic_machine.run();
 
         size_t sidecars = 0;
@@ -761,7 +780,7 @@ auto main() -> int {
             std::filesystem::temp_directory_path() / "simrv-checkpoint-test.bin";
         const auto malformed = std::filesystem::temp_directory_path() / "simrv-checkpoint-bad.bin";
         simrv::core::MachineConfig checkpoint_config{};
-        checkpoint_config.memory.dram_base = 0x80000000;
+        checkpoint_config.memory.dram_base = simrv::xlen::PhysAddr{0x80000000};
         checkpoint_config.memory.dram_size = 4096;
         checkpoint_config.isa.vlen = 256;
         std::vector<simrv::xlen::Byte> source_ram(4096, simrv::xlen::Byte{0});
@@ -769,7 +788,7 @@ auto main() -> int {
         simrv::core::Machine source(checkpoint_config);
         source.set_ram_for_testing(source_ram.data(), source_ram.size());
         auto& source_state = source.primary_hart().state();
-        source_state.pc = 0x80000100;
+        source_state.pc = simrv::xlen::VirtAddr{0x80000100};
         source_state.regs.vlen = 256;
         source_state.regs.write(simrv::xlen::RegId::T2, 0x12345678);
         source_state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5)),
@@ -846,6 +865,58 @@ auto main() -> int {
     }
 
     {
+        using namespace simrv::util::elf;
+        const auto path =
+            std::filesystem::temp_directory_path() /
+            ("simrv-offset-segment-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".elf");
+        Elf32_Ehdr header{};
+        header.e_ident[0] = 0x7f;
+        header.e_ident[1] = 'E';
+        header.e_ident[2] = 'L';
+        header.e_ident[3] = 'F';
+        header.e_ident[4] = kClass32;
+        header.e_phoff = sizeof(header);
+        header.e_phentsize = sizeof(Elf32_Phdr);
+        header.e_phnum = 1;
+        Elf32_Phdr segment{};
+        segment.p_type = kLoadSegment;
+        segment.p_offset = sizeof(header) + sizeof(segment);
+        segment.p_paddr = 0x100;
+        segment.p_filesz = 4;
+        segment.p_memsz = 4;
+        segment.p_flags = 1;
+        {
+            std::ofstream out(path, std::ios::binary);
+            const uint32_t instruction = 0x00000013;
+            out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+            out.write(reinterpret_cast<const char*>(&segment), sizeof(segment));
+            out.write(reinterpret_cast<const char*>(&instruction), sizeof(instruction));
+        }
+        simrv::core::MachineConfig cfg{};
+        cfg.tui.enabled = true;
+        cfg.files.binary_path = path.string();
+        simrv::core::Machine machine(cfg);
+        const auto initialized = machine.initialize();
+        expect(initialized.has_value(), "machine loads RAM-relative ELF segment");
+        if (initialized && !machine.loaded_segments().empty()) {
+            const auto actual = simrv::xlen::PhysAddr{machine.ram_view().base() + 0x100};
+            expect(machine.loaded_segments().front().paddr == actual,
+                   "prewarming records the physical destination of a RAM-relative segment");
+            expect(machine.ram_view().unchecked_ptr(actual)[0] == simrv::xlen::Byte{0x13},
+                   "RAM-relative ELF bytes are loaded at the recorded address");
+            machine.prewarm_bram_caches();
+            expect(machine.primary_hart().icache.line_state(actual) ==
+                       simrv::memory::MesiState::Shared,
+                   "cache prewarming uses the loaded segment's physical address");
+        } else {
+            expect(false, "loaded ELF segment is recorded");
+        }
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+
+    {
         simrv::core::MachineConfig cfg{};
         cfg.tui.enabled = true;
         simrv::core::Machine machine(cfg);
@@ -867,28 +938,28 @@ auto main() -> int {
         cfg.platform_profile = simrv::core::PlatformProfile::None;
         cfg.soc.disable_unlisted_devices = true;
         auto uart = simrv::core::soc_device_default(SoCDeviceKind::Uart);
-        uart.base = 0x10010000;
+        uart.base = simrv::xlen::PhysAddr{0x10010000};
         uart.irq = 5;
         auto rtc = simrv::core::soc_device_default(SoCDeviceKind::Rtc);
-        rtc.base = 0x10011000;
+        rtc.base = simrv::xlen::PhysAddr{0x10011000};
         auto power = simrv::core::soc_device_default(SoCDeviceKind::Power);
-        power.base = 0x10012000;
+        power.base = simrv::xlen::PhysAddr{0x10012000};
         auto dma = simrv::core::soc_device_default(SoCDeviceKind::DmaController);
-        dma.base = 0x10013000;
+        dma.base = simrv::xlen::PhysAddr{0x10013000};
         auto plic = simrv::core::soc_device_default(SoCDeviceKind::Plic);
-        plic.base = 0x50010000;
+        plic.base = simrv::xlen::PhysAddr{0x50010000};
         auto clint = simrv::core::soc_device_default(SoCDeviceKind::Clint);
-        clint.base = 0x60010000;
+        clint.base = simrv::xlen::PhysAddr{0x60010000};
         auto mtimer = simrv::core::soc_device_default(SoCDeviceKind::AclintMtimer);
-        mtimer.base = 0x02020000;
+        mtimer.base = simrv::xlen::PhysAddr{0x02020000};
         auto mswi = simrv::core::soc_device_default(SoCDeviceKind::AclintMswi);
-        mswi.base = 0x02030000;
+        mswi.base = simrv::xlen::PhysAddr{0x02030000};
         auto imsic = simrv::core::soc_device_default(SoCDeviceKind::Imsic);
-        imsic.base = 0x24010000;
-        imsic.regions.front().base = 0x28010000;
+        imsic.base = simrv::xlen::PhysAddr{0x24010000};
+        imsic.regions.front().base = simrv::xlen::PhysAddr{0x28010000};
         auto aplic = simrv::core::soc_device_default(SoCDeviceKind::Aplic);
-        aplic.base = 0x0c010000;
-        aplic.regions.front().base = 0x0d010000;
+        aplic.base = simrv::xlen::PhysAddr{0x0c010000};
+        aplic.regions.front().base = simrv::xlen::PhysAddr{0x0d010000};
         cfg.soc.devices = {uart, rtc, power, dma, plic, clint, mtimer, mswi, imsic, aplic};
 
         simrv::core::Machine machine(cfg);
@@ -912,7 +983,7 @@ auto main() -> int {
         if (runtime_uart != nullptr) {
             simrv::memory::TlChannelA enable_rx_irq{};
             enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
-            enable_rx_irq.address = uart.base + simrv::mmio::kUartRegIerDlm;
+            enable_rx_irq.address = simrv::xlen::PhysAddr{uart.base + simrv::mmio::kUartRegIerDlm};
             enable_rx_irq.size = 0;
             enable_rx_irq.data = 1;
             simrv::memory::TlChannelD response{};
@@ -943,56 +1014,60 @@ auto main() -> int {
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) != 0,
                "PLIC pending set on level-assert");
         // Claim on context 0 (offset 0x200004)
-        const auto claim_id = plic_controller.mmio_read(0x200004);
+        const auto claim_id = plic_controller.mmio_read(simrv::memory::MmioOffset{0x200004});
         expect(claim_id == kLevelTestIrq, "PLIC claim returns active IRQ source");
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
                "PLIC pending cleared on claim");
         expect(plic_controller.is_irq_asserted(kLevelTestIrq),
                "PLIC still tracks physical line active while claimed");
         // Complete without dropping line -> must re-assert pending
-        plic_controller.mmio_write(0x200004, kLevelTestIrq);
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200004}, kLevelTestIrq);
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) != 0,
                "PLIC re-asserts pending on complete when level remains high");
         // Claim again while pending is re-asserted
-        const auto claim_id2 = plic_controller.mmio_read(0x200004);
+        const auto claim_id2 = plic_controller.mmio_read(simrv::memory::MmioOffset{0x200004});
         expect(claim_id2 == kLevelTestIrq, "Second claim retrieves re-asserted IRQ");
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
                "PLIC pending cleared on second claim");
         // Now drop line while claimed, then complete -> must stay clear
         plic_controller.set_irq(kLevelTestIrq, false);
         expect(!plic_controller.is_irq_asserted(kLevelTestIrq), "PLIC line dropped");
-        plic_controller.mmio_write(0x200004, kLevelTestIrq);
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200004}, kLevelTestIrq);
         expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
                "PLIC pending stays clear after complete when level is low");
-        const auto claim_id3 = plic_controller.mmio_read(0x200004);
+        const auto claim_id3 = plic_controller.mmio_read(simrv::memory::MmioOffset{0x200004});
         expect(claim_id3 == 0, "No pending interrupt after completion with level low");
 
         // Verify dynamic arbitration re-evaluation upon priority/threshold MMIO write
         constexpr uint32_t kDynIrq = 8;
-        plic_controller.mmio_write(0x200000, 5);            // Threshold = 5
-        plic_controller.mmio_write(kDynIrq * 4, 3);         // Priority = 3
-        plic_controller.mmio_write(0x2000, 1U << kDynIrq);  // Enable IRQ 8
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000}, 5);     // Threshold = 5
+        plic_controller.mmio_write(simrv::memory::MmioOffset{kDynIrq * 4}, 3);  // Priority = 3
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x2000},
+                                   1U << kDynIrq);  // Enable IRQ 8
         plic_controller.set_irq(kDynIrq, true);
         machine.primary_hart().apply_pending_interrupt_lines(machine);
         expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) == 0,
                "MEIP suppressed when priority (3) <= threshold (5)");
 
         // Lower threshold via MMIO -> must dynamically trigger update_mip
-        plic_controller.mmio_write(0x200000, 2);  // Threshold = 2 < Priority (3)
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000},
+                                   2);  // Threshold = 2 < Priority (3)
         machine.primary_hart().apply_pending_interrupt_lines(machine);
         expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) != 0,
                "MEIP immediately asserts when threshold lowered below pending priority");
 
         // Raise threshold via MMIO -> must dynamically suppress MEIP
-        plic_controller.mmio_write(0x200000, 4);  // Threshold = 4 > Priority (3)
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000},
+                                   4);  // Threshold = 4 > Priority (3)
         machine.primary_hart().apply_pending_interrupt_lines(machine);
         expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) == 0,
                "MEIP immediately suppresses when threshold raised above pending priority");
 
         // Clean up
         plic_controller.set_irq(kDynIrq, false);
-        plic_controller.mmio_write(0x200000, 0);        // Restore threshold to 0
-        plic_controller.mmio_write(0x200004, kDynIrq);  // Complete
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200000},
+                                   0);  // Restore threshold to 0
+        plic_controller.mmio_write(simrv::memory::MmioOffset{0x200004}, kDynIrq);  // Complete
         machine.primary_hart().apply_pending_interrupt_lines(machine);
     }
 
@@ -1014,6 +1089,9 @@ auto main() -> int {
             "pci_intx_source = 30\n"};
         expect(simrv::core::parse_soc_config_stream(input, soc),
                "PCIe host and endpoint topology parse from SoC configuration");
+        expect(soc.pcie.ecam_base == simrv::xlen::PhysAddr{0x34000000} &&
+                   soc.pcie.mmio_base == simrv::xlen::PhysAddr{0x44000000},
+               "SoC parser stores PCIe windows as physical addresses");
         const auto* endpoint = soc.find(SoCDeviceKind::VirtioMmioBlock);
         expect(endpoint != nullptr && endpoint->pci_slot == 9 && endpoint->pci_function == 2 &&
                    endpoint->pci_intx_source == 30,
@@ -1026,13 +1104,36 @@ auto main() -> int {
                    manifest.str().find("\"pci_intx_source\": 30") != std::string::npos,
                "SoC manifest records PCIe host and endpoint topology");
 
+        if constexpr (sizeof(simrv::xlen::Address) == sizeof(uint32_t)) {
+            auto invalid_width = simrv::core::SoCConfig::virt_pcie();
+            std::istringstream too_wide{"[pcie]\necam_base = 0x100000000\n"};
+            expect(!simrv::core::parse_soc_config_stream(too_wide, invalid_width),
+                   "RV32 SoC parser rejects a PCIe base outside the address width");
+        }
+
         auto invalid = simrv::core::SoCConfig::virt_pcie();
         invalid.pcie.ecam_size = 1U << 20U;
         expect(!invalid.validate(), "PCIe validation rejects insufficient ECAM capacity");
         invalid = simrv::core::SoCConfig::virt_pcie();
-        invalid.pcie.ecam_base = ~simrv::xlen::Address{0} - 0x100;
+        invalid.pcie.ecam_base = simrv::xlen::PhysAddr{~simrv::xlen::Address{0} - 0x100};
         invalid.pcie.ecam_size = 0x200;
         expect(!invalid.validate(), "PCIe validation rejects overflowing host ranges");
+
+        auto boot_config = simrv::core::SoCConfig::virt_pcie();
+        std::istringstream boot_addresses{
+            "[memory]\ndram_base = 0x80000000\ndram_size = 0x10000000\n"
+            "[boot]\nreset_pc = 0x80200000\ntohost = 0x80001000\n"};
+        expect(simrv::core::parse_soc_config_stream(boot_addresses, boot_config) &&
+                   boot_config.dram_base == simrv::xlen::PhysAddr{0x80000000} &&
+                   boot_config.reset_pc == simrv::xlen::VirtAddr{0x80200000} &&
+                   boot_config.tohost == simrv::xlen::PhysAddr{0x80001000},
+               "SoC parser preserves physical and virtual address domains for boot settings");
+        if constexpr (sizeof(simrv::xlen::Address) == sizeof(uint32_t)) {
+            auto invalid_width = simrv::core::SoCConfig::virt_pcie();
+            std::istringstream too_wide{"[boot]\nreset_pc = 0x100000000\n"};
+            expect(!simrv::core::parse_soc_config_stream(too_wide, invalid_width),
+                   "RV32 SoC parser rejects a reset PC outside the address width");
+        }
         invalid = simrv::core::SoCConfig::virt_pcie();
         invalid.disable_unlisted_devices = true;
         auto duplicate = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
@@ -1070,11 +1171,11 @@ auto main() -> int {
         simrv::core::MachineConfig cfg{};
         cfg.tui.enabled = true;
         cfg.soc.disable_unlisted_devices = true;
-        cfg.soc.pcie.ecam_base = 0x34000000;
+        cfg.soc.pcie.ecam_base = simrv::xlen::PhysAddr{0x34000000};
         cfg.soc.pcie.ecam_size = 1U << 20U;
         cfg.soc.pcie.first_bus = 4;
         cfg.soc.pcie.last_bus = 4;
-        cfg.soc.pcie.mmio_base = 0x44000000;
+        cfg.soc.pcie.mmio_base = simrv::xlen::PhysAddr{0x44000000};
         cfg.soc.pcie.mmio_size = 16U << 20U;
         auto block = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
         block.pci_bus = 4;
@@ -1085,8 +1186,8 @@ auto main() -> int {
         simrv::core::Machine machine(cfg);
         expect(machine.initialize().has_value(), "machine accepts relocated PCIe topology");
         const auto& router = machine.memory().system_bus().router();
-        auto* ecam_node = router.resolve_device(cfg.soc.pcie.ecam_base);
-        auto* mmio_node = router.resolve_device(cfg.soc.pcie.mmio_base);
+        auto* ecam_node = router.resolve_device(simrv::xlen::PhysAddr{cfg.soc.pcie.ecam_base});
+        auto* mmio_node = router.resolve_device(simrv::xlen::PhysAddr{cfg.soc.pcie.mmio_base});
         expect(ecam_node != nullptr && ecam_node->base_address() == cfg.soc.pcie.ecam_base &&
                    ecam_node->size() == cfg.soc.pcie.ecam_size,
                "relocated ECAM window is registered on the system bus");
@@ -1102,17 +1203,17 @@ auto main() -> int {
             simrv::memory::TlChannelD response{};
             request.opcode = simrv::memory::TlOpcodeA::Get;
             request.size = 2;
-            request.address = cfg.soc.pcie.ecam_base + config_offset;
+            request.address = simrv::xlen::PhysAddr{cfg.soc.pcie.ecam_base + config_offset};
             expect(ecam_node->handle_request(request, response) &&
                        (response.data & 0xffffU) == 0x1af4U,
                    "system-bus ECAM node serves the configured endpoint BDF");
             request.opcode = simrv::memory::TlOpcodeA::PutFullData;
-            request.address = cfg.soc.pcie.mmio_base + 0x1000;
+            request.address = simrv::xlen::PhysAddr{cfg.soc.pcie.mmio_base + 0x1000};
             request.data = 1;
             expect(mmio_node->handle_request(request, response),
                    "system-bus PCIe MMIO node accepts a feature-selector write");
             request.opcode = simrv::memory::TlOpcodeA::Get;
-            request.address = cfg.soc.pcie.mmio_base + 0x1004;
+            request.address = simrv::xlen::PhysAddr{cfg.soc.pcie.mmio_base + 0x1004};
             const bool mmio_read_ok = mmio_node->handle_request(request, response);
             expect(
                 mmio_read_ok && response.data == simrv::device::virtio::kVirtioFVersion1FeatureWord,
@@ -1121,13 +1222,16 @@ auto main() -> int {
         if (machine.pcie_root() != nullptr) {
             const auto id = machine.pcie_root()->ecam_read(config_offset, 4);
             expect((id & 0xffffU) == 0x1af4U, "configured PCI endpoint is discoverable at its BDF");
-            machine.pcie_root()->mmio_write(0x44001000, 1, 4);
+            machine.pcie_root()->mmio_write(simrv::xlen::PhysAddr{0x44001000}, 1, 4);
             const auto bar_count = machine.pcie_root()->active_bar_count();
-            const auto feature_word = machine.pcie_root()->mmio_read(0x44001004, 4);
+            const auto feature_word =
+                machine.pcie_root()->mmio_read(simrv::xlen::PhysAddr{0x44001004}, 4);
             expect(bar_count == 1 &&
                        feature_word == simrv::device::virtio::kVirtioFVersion1FeatureWord,
                    "configured PCI BAR is routed through relocated MMIO aperture");
-            if (auto* endpoint = machine.pcie_root()->get_device(4, 9, 2)) {
+            if (auto* endpoint = machine.pcie_root()->get_device(
+                    simrv::device::PciBusNumber{4}, simrv::device::PciDeviceNumber{9},
+                    simrv::device::PciFunctionNumber{2})) {
                 endpoint->trigger_irq();
                 expect((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << 30U)) != 0,
                        "configured PCI endpoint asserts its configured INTx source");
@@ -1321,12 +1425,14 @@ auto main() -> int {
     }
 
     {
-        for (const std::string_view removed_option : {"--server", "--listen-tui", "--attach"}) {
+        for (const std::string_view removed_option :
+             {"--server", "--listen-tui", "--attach", "--debug-mode", "--debug", "-d", "-g",
+              "--port", "-p", "-M", "-P", "-w", "-x"}) {
             std::array<std::string, 2> storage = {"SimRV", std::string(removed_option)};
             std::array<char*, 2> args = {storage[0].data(), storage[1].data()};
             const auto parsed = simrv::util::parse_command_line(args);
             expect(!parsed.has_value() && parsed.error().contains("unknown option"),
-                   "removed attach options are rejected as unknown options");
+                   "removed debug and attach options are rejected as unknown options");
         }
     }
 
@@ -1430,7 +1536,8 @@ auto main() -> int {
             const uint64_t fast_ticks = divider.advance_fast_cycles(100, rtc_fast, mtime_fast);
             expect(fast_ticks == 30, "advance_fast_cycles returns 30 fractional ticks");
             expect(mtime_fast.load() == mtime_ca.load(),
-                   "Deterministic equivalence: fast advancement matches CA cycle stepping exactly");
+                   "Deterministic equivalence: fast advancement matches CA cycle stepping "
+                   "exactly");
         }
 
         // RISC-V Hardware Performance Monitor (Zihpm) and PerformanceCounters verification
@@ -1511,6 +1618,115 @@ auto main() -> int {
         expect(simrv::util::serialize_soc_manifest(soc, manifest) &&
                    manifest.str().find("\"clock_hz\": 1843200") != std::string::npos,
                "SoC manifest emits the UART input clock");
+    }
+
+    {
+        // Machine ownership and testing RAM lifecycle (consolidated from MachineOwnershipTests)
+        simrv::core::Machine machine;
+        expect(&machine.primary_hart() == &machine.hart(), "primary_hart matches hart(0)");
+
+        machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
+        expect(machine.num_harts() == 2, "num_harts is 2 after add_hart_for_testing");
+        expect(&machine.hart(1) != &machine.primary_hart(),
+               "hart(1) is distinct from primary_hart");
+
+        constexpr size_t kRamBytes = 4096;
+        expect(machine.allocate_ram_for_testing(kRamBytes), "allocate_ram_for_testing succeeds");
+        expect(machine.ram_data() != nullptr, "ram_data is non-null after allocation");
+        expect(std::all_of(machine.ram_data(), machine.ram_data() + kRamBytes,
+                           [](simrv::xlen::Byte byte) { return byte == simrv::xlen::Byte{0}; }),
+               "ram_data is zero-initialized");
+
+        machine.ram_data()[0] = simrv::xlen::Byte{0x5a};
+        expect(machine.ram_data()[0] == simrv::xlen::Byte{0x5a}, "ram_data mutation persists");
+        machine.release_ram_for_testing();
+        expect(machine.ram_data() == nullptr, "ram_data is null after release");
+
+        machine.primary_hart().state().pc = simrv::xlen::VirtAddr{0x80001234};
+        machine.primary_hart().e_icount = 42;
+        machine.publish_tui_execution_snapshot_for_testing();
+        const auto snapshot = machine.tui_execution_snapshot();
+        expect(snapshot.pc == 0x80001234 && snapshot.instruction_count == 42,
+               "snapshot matches execution state");
+    }
+
+    {
+        // Modern CLI subcommand tests
+        std::array<std::string, 2> doctor_args_str = {"simrv", "doctor"};
+        std::array<char*, 2> doctor_args = {doctor_args_str[0].data(), doctor_args_str[1].data()};
+        auto parsed_doctor = simrv::util::parse_command_line(doctor_args);
+        expect(parsed_doctor.has_value() && parsed_doctor->action == simrv::util::CliAction::Doctor,
+               "doctor subcommand maps to CliAction::Doctor");
+
+        std::array<std::string, 3> completion_args_str = {"simrv", "completion", "zsh"};
+        std::array<char*, 3> completion_args = {completion_args_str[0].data(),
+                                                completion_args_str[1].data(),
+                                                completion_args_str[2].data()};
+        auto parsed_completion = simrv::util::parse_command_line(completion_args);
+        expect(parsed_completion.has_value() &&
+                   parsed_completion->action == simrv::util::CliAction::GenerateCompletion &&
+                   parsed_completion->options.completion_shell == "zsh",
+               "completion subcommand maps to CliAction::GenerateCompletion with requested "
+               "shell");
+        expect(simrv::util::generate_shell_completion("zsh").find("#compdef simrv") !=
+                   std::string::npos,
+               "generate_shell_completion produces valid zsh completion script");
+        expect(simrv::util::generate_shell_completion("bash").find("complete -F _simrv simrv") !=
+                   std::string::npos,
+               "generate_shell_completion produces valid bash completion script");
+        expect(simrv::util::generate_shell_completion("fish").find("complete -c simrv") !=
+                   std::string::npos,
+               "generate_shell_completion produces valid fish completion script");
+
+        std::array<std::string, 3> explain_args_str = {"simrv", "explain", "0x13"};
+        std::array<char*, 3> explain_args = {explain_args_str[0].data(), explain_args_str[1].data(),
+                                             explain_args_str[2].data()};
+        auto parsed_explain = simrv::util::parse_command_line(explain_args);
+        expect(parsed_explain.has_value() &&
+                   parsed_explain->action == simrv::util::CliAction::ExplainInstruction &&
+                   parsed_explain->options.explain_inst_val == 0x13,
+               "explain subcommand decodes hex instruction value");
+
+        std::array<std::string, 3> run_args_str = {"simrv", "run", "guest.elf"};
+        std::array<char*, 3> run_args = {run_args_str[0].data(), run_args_str[1].data(),
+                                         run_args_str[2].data()};
+        auto parsed_run = simrv::util::parse_command_line(run_args);
+        expect(parsed_run.has_value() && parsed_run->action == simrv::util::CliAction::Run &&
+                   parsed_run->options.fn_memimg == "guest.elf" &&
+                   parsed_run->options.explicit_cli_mode && !parsed_run->options.tuimode,
+               "run subcommand defaults to headless CLI execution");
+
+        std::array<std::string, 7> bench_args_str = {"simrv", "bench",     "guest.elf", "--runs",
+                                                     "12",    "--warmups", "3"};
+        std::array<char*, 7> bench_args = {bench_args_str[0].data(), bench_args_str[1].data(),
+                                           bench_args_str[2].data(), bench_args_str[3].data(),
+                                           bench_args_str[4].data(), bench_args_str[5].data(),
+                                           bench_args_str[6].data()};
+        auto parsed_bench = simrv::util::parse_command_line(bench_args);
+        expect(parsed_bench.has_value() &&
+                   parsed_bench->action == simrv::util::CliAction::RunBenchmark &&
+                   parsed_bench->options.fn_benchmark_elf == "guest.elf" &&
+                   parsed_bench->options.benchmark_runs == 12 &&
+                   parsed_bench->options.benchmark_warmups == 3,
+               "bench subcommand maps to CliAction::RunBenchmark with custom iteration count");
+
+        std::array<std::string, 4> config_args_str = {"simrv", "config", "validate", "virt-pcie"};
+        std::array<char*, 4> cfg_val_args = {config_args_str[0].data(), config_args_str[1].data(),
+                                             config_args_str[2].data(), config_args_str[3].data()};
+        auto parsed_config = simrv::util::parse_command_line(cfg_val_args);
+        expect(parsed_config.has_value() &&
+                   parsed_config->action == simrv::util::CliAction::ValidateCpuModel &&
+                   parsed_config->options.dump_cpu_model_preset == "virt-pcie",
+               "config validate subcommand maps to CliAction::ValidateCpuModel");
+
+        std::array<std::string, 4> scaffold_args_str = {"simrv", "scaffold", "cpu", "rv64gc"};
+        std::array<char*, 4> scaf_args = {scaffold_args_str[0].data(), scaffold_args_str[1].data(),
+                                          scaffold_args_str[2].data(), scaffold_args_str[3].data()};
+        auto parsed_scaffold = simrv::util::parse_command_line(scaf_args);
+        expect(parsed_scaffold.has_value() &&
+                   parsed_scaffold->action == simrv::util::CliAction::DumpCpuModel &&
+                   parsed_scaffold->options.dump_cpu_model_preset == "rv64gc",
+               "scaffold cpu subcommand maps to CliAction::DumpCpuModel");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

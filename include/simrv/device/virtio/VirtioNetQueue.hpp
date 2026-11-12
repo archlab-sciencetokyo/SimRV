@@ -31,7 +31,7 @@ template <typename DmaRead, typename DmaWrite, typename ScheduleDeferred, typena
 void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool defer_completion,
                        DmaRead&& dma_read, DmaWrite&& dma_write,
                        ScheduleDeferred&& schedule_deferred, NotifyComplete&& notify_complete) {
-    if (q.ready == 0 || q.driver_addr == 0 || q.device_addr == 0 || q.desc_addr == 0) return;
+    if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, sizeof(avail_idx))) return;
@@ -44,6 +44,7 @@ void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool 
             if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, sizeof(head_desc_idx)))
                 break;
 
+            if (head_desc_idx >= q.num) break;
             VirtqDesc desc{};
             if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc)))
                 break;
@@ -85,6 +86,7 @@ void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool 
             if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, sizeof(head_desc_idx)))
                 break;
 
+            if (head_desc_idx >= q.num) break;
             VirtqDesc desc{};
             if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc)))
                 break;

@@ -157,9 +157,7 @@ auto VirtioFsBackend::allocate_node(const std::filesystem::path& relative) -> ui
 
 void VirtioFsBackend::process_queue(QueueState& queue, const DmaRead& dma_read,
                                     const DmaWrite& dma_write, const Interrupt& interrupt) {
-    if (queue.ready == 0 || queue.num == 0 || queue.desc_addr == 0 || queue.driver_addr == 0 ||
-        queue.device_addr == 0)
-        return;
+    if (!queue.usable()) return;
     uint16_t avail_idx = 0;
     if (!dma_read(queue.driver_addr + 2, &avail_idx, sizeof(avail_idx))) return;
     bool did_work = false;
@@ -175,6 +173,10 @@ void VirtioFsBackend::process_queue(QueueState& queue, const DmaRead& dma_read,
         bool valid = true;
         for (size_t n = 0; n < queue.num; ++n) {
             virtio::VirtqDesc desc{};
+            if (index >= queue.num) {
+                valid = false;
+                break;
+            }
             if (!dma_read(queue.desc_addr + static_cast<uint64_t>(index) * sizeof(desc), &desc,
                           sizeof(desc))) {
                 valid = false;

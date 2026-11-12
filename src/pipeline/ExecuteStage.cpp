@@ -93,20 +93,21 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::LoadFp:
         case Opcode::Store:
             ctx.tkn = false;
-            ctx.mem_addr = ctx.rrs1 + ctx.imm;
+            ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1 + ctx.imm};
             break;
         case Opcode::StoreFp:
             ctx.tkn = false;
-            ctx.mem_addr = ctx.rrs1 + ctx.imm;
+            ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1 + ctx.imm};
             ctx.fp_mem_wdata = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(ctx.rs2));
             break;
         case Opcode::MiscMem:
             ctx.tkn = false;
             if (isa::is_cmo_op(ctx.op_id)) {
-                ctx.mem_addr = ctx.rrs1;
+                ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1};
             } else if (ctx.funct3 == Funct3::FenceI) {
                 icache.flush();
                 decode_cache.flush();
+                block_cache.flush();
             } else if (ctx.ir == 0x0100000f) {
                 // RISC-V PAUSE (Zihintpause / cpu_relax): architectural NOP pipeline hint
             }
@@ -122,18 +123,18 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Amo:
             ctx.tkn = false;
-            ctx.mem_addr = ctx.rrs1;
+            ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1};
             if (!amo_address_aligned(ctx.mem_addr, ctx.funct3)) {
                 ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr) ? ExceptionCode::FaultLoad
                                                                       : ExceptionCode::FaultStore;
-                ctx.pending_tval = ctx.mem_addr;
+                ctx.pending_tval = ctx.mem_addr.raw();
                 break;
             }
             break;
         case Opcode::System:
             if (isa::is_hypervisor_memory_op(ctx.op_id)) {
                 ctx.tkn = false;
-                ctx.mem_addr = ctx.rrs1;
+                ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1};
             } else if (ctx.op_id == MOP) {
                 ctx.tkn = false;
                 ctx.wb_data = 0;
@@ -143,9 +144,8 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Custom0:
             ctx.tkn = false;
-            ctx.wb_data = static_cast<simrv::xlen::Register>(
-                cfu_unit.execute(ctx.funct7, std::to_underlying(ctx.funct3),
-                                 static_cast<uint32_t>(ctx.rrs1), static_cast<uint32_t>(ctx.rrs2)));
+            ctx.wb_data =
+                cfu_unit.execute(ctx.funct7, std::to_underlying(ctx.funct3), ctx.rrs1, ctx.rrs2);
             break;
         case Opcode::MAdd:
         case Opcode::MSub:
@@ -183,21 +183,22 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Ebreak: {
                 bool semihost_handled = false;
-                const bool in_dram = machine.memory_geometry().contains(state_.pc - 4) &&
-                                     machine.memory_geometry().contains(state_.pc + 4);
+                const simrv::xlen::PhysAddr pc_paddr{state_.pc.raw()};
+                const bool in_dram = machine.memory_geometry().contains(pc_paddr - 4) &&
+                                     machine.memory_geometry().contains(pc_paddr + 4);
                 if (in_dram) {
                     const simrv::xlen::Word inst_prev = simrv::memory::ram_read_fast(
-                        state_.pc - 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                        pc_paddr - 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
                         machine.ram_view());
                     const simrv::xlen::Word inst_next = simrv::memory::ram_read_fast(
-                        state_.pc + 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                        pc_paddr + 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
                         machine.ram_view());
                     if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
                         semihost_handled = true;
                         const simrv::xlen::Word semihost_op =
                             state_.regs.read(simrv::xlen::RegId::A0);
-                        const simrv::xlen::Address arg_ptr =
-                            state_.regs.read(simrv::xlen::RegId::A1);
+                        const simrv::xlen::PhysAddr arg_ptr{
+                            state_.regs.read(simrv::xlen::RegId::A1)};
 
                         switch (semihost_op) {
                             case 0x05: {
@@ -207,9 +208,9 @@ void CPU::execute_system(Machine& machine) {
                                         : static_cast<simrv::xlen::Instruction>(Funct3::Lw);
                                 const simrv::xlen::Address fd = simrv::memory::ram_read_fast(
                                     arg_ptr, load_op, machine.ram_view());
-                                const simrv::xlen::Address buf_addr = simrv::memory::ram_read_fast(
+                                const simrv::xlen::PhysAddr buf_addr{simrv::memory::ram_read_fast(
                                     arg_ptr + (simrv::xlen::kIsXLen64 ? 8 : 4), load_op,
-                                    machine.ram_view());
+                                    machine.ram_view())};
                                 const simrv::xlen::Address len = simrv::memory::ram_read_fast(
                                     arg_ptr + (simrv::xlen::kIsXLen64 ? 16 : 8), load_op,
                                     machine.ram_view());
@@ -243,7 +244,7 @@ void CPU::execute_system(Machine& machine) {
                                 break;
                             }
                             case 0x04: {
-                                simrv::xlen::Address ptr = arg_ptr;
+                                simrv::xlen::PhysAddr ptr = arg_ptr;
                                 if (machine.memory_geometry().contains(ptr)) {
                                     while (true) {
                                         const auto ch = static_cast<uint8_t>(
@@ -254,7 +255,7 @@ void CPU::execute_system(Machine& machine) {
                                             0xFF);
                                         if (ch == 0) break;
                                         machine.console_write(static_cast<char>(ch));
-                                        ptr++;
+                                        ptr += 1;
                                     }
                                 }
                                 state_.regs.write(simrv::xlen::RegId::A0, 0);
@@ -269,7 +270,7 @@ void CPU::execute_system(Machine& machine) {
                         }
 
                         ctx.tkn = true;
-                        ctx.jmp_pc = simrv::xlen::VirtAddr{state_.pc + 8};
+                        ctx.jmp_pc = state_.pc + 8;
                     }
                 }
 

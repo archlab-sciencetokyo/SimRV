@@ -133,7 +133,7 @@ auto InspectorPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row
         const size_t depth = bp.ras_depth();
         const auto top = bp.ras_peek();
         std::string top_str =
-            top.has_value() ? std::format("0x{:08x}", static_cast<uint32_t>(*top)) : "<empty>";
+            top.has_value() ? std::format("0x{:08x}", static_cast<uint32_t>(top->raw())) : "<empty>";
         return format_to_width(
             std::format("  {}RAS Depth:\033[0m {}{}/{}\033[0m  {}Top:\033[0m {}{}\033[0m",
                         kThemeText, kThemeVal, depth, cfg.ras_entries, kThemeText, kThemeVal,

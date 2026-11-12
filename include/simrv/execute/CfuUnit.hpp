@@ -9,68 +9,14 @@
 #include <string>
 #include <string_view>
 
+#include "simrv/execute/ExternalCfu.h"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::execute {
 
-/**
- * @brief C ABI for dynamic shared-library CFU plugins (.so).
- *
- * ### Authoring and Compiling a CFU Plugin
- * A dynamic CFU plugin is a standard shared library exporting `simrv_cfu_init()`:
- *
- * ```c
- * #include <stdint.h>
- *
- * static uint32_t my_cfu_execute(uint32_t funct7, uint32_t funct3,
- *                                 uint32_t src1, uint32_t src2,
- *                                 uint32_t* latency_cycles) {
- *     if (latency_cycles != NULL) {
- *         *latency_cycles = 1; // total execution latency including issue cycle
- *     }
- *     return src1 ^ src2;     // custom accelerator computation
- * }
- *
- * static void my_cfu_reset(void) {
- *     // Reset internal accelerator state (if any)
- * }
- *
- * static const struct SimRvCfuPlugin kPlugin = {
- *     .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
- *     .execute = my_cfu_execute,
- *     .reset = my_cfu_reset,
- * };
- *
- * const struct SimRvCfuPlugin* simrv_cfu_init(void) {
- *     return &kPlugin;
- * }
- * ```
- *
- * Compile with GCC or Clang:
- * ```bash
- * gcc -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
- * # or for C++:
- * g++ -O3 -shared -fPIC -o libcfu_custom.so my_cfu.cpp
- * ```
- *
- * Run with SimRV CLI or configuration preset:
- * ```bash
- * simrv --cfu-plugin=./libcfu_custom.so guest.elf
- * ```
- */
-#define SIMRV_CFU_PLUGIN_API_VERSION 1
-
-extern "C" {
-
-struct SimRvCfuPlugin {
-    uint32_t api_version; /**< Must be SIMRV_CFU_PLUGIN_API_VERSION (1) */
-    uint32_t (*execute)(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
-                        uint32_t* latency_cycles);
-    void (*reset)();
-};
-
-using SimRvCfuPluginInitFn = const SimRvCfuPlugin* (*)();
-}
+using ::SimRvCfuInitFn;
+using ::SimRvCfuPlugin;
+using SimRvCfuPluginInitFn = ::SimRvCfuInitFn;
 
 /**
  * @class CfuUnit
@@ -93,9 +39,9 @@ class CfuUnit {
     /// Reset internal state of the CFU and any loaded plugin.
     void reset();
 
-    /// Execute a CFU instruction. Returns the 32-bit computation result.
-    [[nodiscard]] auto execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2)
-        -> uint32_t;
+    /// Execute a CFU instruction. Returns the register computation result.
+    [[nodiscard]] auto execute(uint32_t funct7, uint32_t funct3, simrv::xlen::Register src1,
+                               simrv::xlen::Register src2) -> simrv::xlen::Register;
 
     /// Query the execution latency in cycles for the specified funct7/funct3 operation.
     [[nodiscard]] auto query_latency(uint32_t funct7, uint32_t funct3) const
@@ -119,14 +65,24 @@ class CfuUnit {
     }
 
     /// Returns true if an external plugin is currently loaded.
-    [[nodiscard]] auto has_plugin() const noexcept -> bool { return plugin_handle_ != nullptr; }
+    [[nodiscard]] auto has_plugin() const noexcept -> bool {
+        return plugin_handle_ != nullptr && (plugin_ != nullptr || raw_cfu_op_ != nullptr);
+    }
 
     /// Returns the path of the loaded plugin, if any.
     [[nodiscard]] auto plugin_path() const noexcept -> std::string_view { return plugin_path_; }
 
+    /// Returns the name of the loaded plugin, if any.
+    [[nodiscard]] auto plugin_name() const noexcept -> std::string_view;
+
    private:
+    using RawCfuOpFn = uint32_t (*)(int funct3, int funct7, uint32_t rs1, uint32_t rs2);
+    using RawCfuResetFn = void (*)();
+
     void* plugin_handle_ = nullptr;
     const SimRvCfuPlugin* plugin_ = nullptr;
+    RawCfuOpFn raw_cfu_op_ = nullptr;
+    RawCfuResetFn raw_cfu_reset_ = nullptr;
     std::string plugin_path_{};
     simrv::xlen::LatencyCycles last_latency_ = 1;
     simrv::xlen::LatencyCycles default_latency_ = 1;

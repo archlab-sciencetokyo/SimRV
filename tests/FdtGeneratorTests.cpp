@@ -139,7 +139,7 @@ void test_generate_platform_fdt_pcie() {
     cfg.soc.devices.push_back(simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Uart));
     cfg.platform_profile = simrv::core::PlatformProfile::Pcie;
     cfg.execution.num_harts = 4;
-    cfg.memory.dram_base = 0x80000000ULL;
+    cfg.memory.dram_base = simrv::xlen::PhysAddr{0x80000000ULL};
     cfg.memory.dram_size = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
     cfg.files.bootargs = "console=ttyS0 earlycon root=/dev/vda rw";
     if constexpr (simrv::xlen::kIsXLen64) {
@@ -240,16 +240,36 @@ void test_uart_clock_capability() {
            "FDT reports the UART speed from its reset divisor");
 }
 
+void test_replaced_device_compatibles() {
+    simrv::core::MachineConfig cfg{};
+    cfg.soc.disable_unlisted_devices = true;
+    auto uart = simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Uart);
+    auto rtc = simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Rtc);
+    auto power = simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Power);
+    uart.compatible = "vendor,serial";
+    rtc.compatible = "vendor,rtc";
+    power.compatible = "vendor,power";
+    cfg.soc.devices = {uart, rtc, power};
+    const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
+    expect(blob_contains_string(blob, "vendor,serial"), "custom serial compatible is emitted");
+    expect(blob_contains_string(blob, "vendor,rtc"), "custom RTC compatible is emitted");
+    expect(blob_contains_string(blob, "vendor,power"), "custom power compatible is emitted");
+    expect(!blob_contains_string(blob, "ns16550a"), "custom serial is not advertised as 16550");
+    expect(!blob_contains_string(blob, "uart8250"), "custom serial has no 8250 default earlycon");
+    expect(!blob_contains_string(blob, "syscon-poweroff"),
+           "custom power device does not claim SiFive poweroff semantics");
+}
+
 void test_generate_platform_fdt_custom_pcie_topology() {
     simrv::core::MachineConfig cfg{};
     cfg.soc = simrv::core::SoCConfig::virt_pcie();
     cfg.platform_profile = simrv::core::PlatformProfile::Pcie;
     cfg.soc.disable_unlisted_devices = true;
-    cfg.soc.pcie.ecam_base = 0x34000000;
+    cfg.soc.pcie.ecam_base = simrv::xlen::PhysAddr{0x34000000};
     cfg.soc.pcie.ecam_size = 1U << 20U;
     cfg.soc.pcie.first_bus = 4;
     cfg.soc.pcie.last_bus = 4;
-    cfg.soc.pcie.mmio_base = 0x44000000;
+    cfg.soc.pcie.mmio_base = simrv::xlen::PhysAddr{0x44000000};
     cfg.soc.pcie.mmio_size = 16U << 20U;
     auto block = simrv::core::soc_device_default(simrv::core::SoCDeviceKind::VirtioMmioBlock);
     block.pci_bus = 4;
@@ -301,17 +321,19 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
         original, simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC));
     expect(!incompatible_isa && incompatible_isa.error().find("extension 'b'") != std::string::npos,
            "FDT ISA validation rejects base extensions disabled by the selected ISA");
-    const auto invalid_timebase = simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1,
-                                                         nullptr, uint64_t{1} << 32U);
+    const auto invalid_timebase =
+        simrv::util::patch_fdt(original, simrv::xlen::PhysAddr{0x80000000ULL}, 0x10000000ULL, 1,
+                               nullptr, uint64_t{1} << 32U);
     expect(!invalid_timebase &&
                invalid_timebase.error().find("timebase frequency") != std::string::npos,
            "FDT patching rejects timebase frequencies wider than its u32 property");
-    const auto invalid_cpu_clock =
-        simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1, nullptr, 0,
-                               static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1U);
+    const auto invalid_cpu_clock = simrv::util::patch_fdt(
+        original, simrv::xlen::PhysAddr{0x80000000ULL}, 0x10000000ULL, 1, nullptr, 0,
+        static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1U);
     expect(!invalid_cpu_clock && invalid_cpu_clock.error().find("CPU clock") != std::string::npos,
            "FDT patching rejects CPU frequencies wider than its u32 property");
-    const auto patched = simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1);
+    const auto patched =
+        simrv::util::patch_fdt(original, simrv::xlen::PhysAddr{0x80000000ULL}, 0x10000000ULL, 1);
     expect(patched.has_value(), "minimal FDT patches successfully for Zihintntl check");
     if (!patched) return;
     expect(blob_contains_string(*patched, "zihintntl"),
@@ -355,7 +377,7 @@ void test_generate_platform_fdt_mmio() {
     simrv::core::MachineConfig cfg{};
     cfg.platform_profile = simrv::core::PlatformProfile::Mmio;
     cfg.execution.num_harts = 2;
-    cfg.memory.dram_base = 0x80000000ULL;
+    cfg.memory.dram_base = simrv::xlen::PhysAddr{0x80000000ULL};
     cfg.memory.dram_size = 256ULL * 1024ULL * 1024ULL;  // 256 MiB
 
     const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
@@ -389,12 +411,13 @@ void test_generated_fdt_uses_explicit_soc_devices() {
     cfg.soc.enable_mmio = true;
     cfg.soc.disable_unlisted_devices = true;
     cfg.soc.devices = {
-        {simrv::core::SoCDeviceKind::Uart, "serial", 0x12345000, 0x2000, 3},
+        {simrv::core::SoCDeviceKind::Uart, "serial", simrv::xlen::PhysAddr{0x12345000}, 0x2000, 3},
         simrv::core::soc_device_default(simrv::core::SoCDeviceKind::Plic),
-        {simrv::core::SoCDeviceKind::VirtioMmioBlock, "storage", 0x12348000, 0x4000, 5},
+        {simrv::core::SoCDeviceKind::VirtioMmioBlock, "storage", simrv::xlen::PhysAddr{0x12348000},
+         0x4000, 5},
         {simrv::core::SoCDeviceKind::CustomMmio,
          "watchdog",
-         0x1234a000,
+         simrv::xlen::PhysAddr{0x1234a000},
          0x1000,
          0,
          true,
@@ -447,14 +470,47 @@ void test_explicit_gc_fdt_does_not_advertise_rva23_extensions() {
            "explicit RV64GC FDT retains its baseline unprivileged extensions");
 }
 
+void test_patch_fdt_bootargs_override() {
+    simrv::util::FdtGenerator fdt;
+    fdt.begin_node("");
+    fdt.property_u32("#address-cells", 2);
+    fdt.property_u32("#size-cells", 2);
+    fdt.begin_node("chosen");
+    fdt.property_string("bootargs", "console=tty0");
+    fdt.end_node();
+    fdt.begin_node("memory@80000000");
+    fdt.property_string("device_type", "memory");
+    fdt.property_array_u32("reg", {0, 0x80000000U, 0, 0x10000000U});
+    fdt.end_node();
+    fdt.begin_node("cpus");
+    fdt.property_u32("#address-cells", 1);
+    fdt.property_u32("#size-cells", 0);
+    fdt.begin_node("cpu@0");
+    fdt.property_u32("reg", 0);
+    fdt.end_node();
+    fdt.end_node();
+    fdt.end_node();
+
+    const auto original = fdt.serialize();
+    const auto patched = simrv::util::patch_fdt(original, simrv::xlen::PhysAddr{0x80000000ULL},
+                                                0x10000000ULL, 1, nullptr, 0, 0, nullptr,
+                                                "console=hvc0 console=tty0 root=/dev/mmcblk0 rw");
+    expect(patched.has_value(), "FDT with bootargs override patches successfully");
+    if (!patched) return;
+    expect(blob_contains_string(*patched, "console=hvc0 console=tty0 root=/dev/mmcblk0 rw"),
+           "patched FDT contains overridden bootargs string");
+}
+
 }  // namespace
 
 auto main() -> int {
     test_fdt_header_and_structure();
     test_generate_platform_fdt_pcie();
     test_uart_clock_capability();
+    test_replaced_device_compatibles();
     test_generate_platform_fdt_custom_pcie_topology();
     test_patch_fdt_advertises_zihintntl_and_64_byte_cmo();
+    test_patch_fdt_bootargs_override();
     test_generate_platform_fdt_mmio();
     test_generated_fdt_uses_explicit_soc_devices();
     test_explicit_gc_fdt_does_not_advertise_rva23_extensions();

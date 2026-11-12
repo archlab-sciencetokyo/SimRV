@@ -11,6 +11,18 @@ make -C examples/isa XLEN=64
 make -C examples/isa XLEN=32
 ```
 
+Prebuilt RV32 and RV64 ELF files are included in `build-rv32/` and `build-rv64/` so they can be
+run directly from a checkout. For example:
+
+```bash
+./build/rv64-release/simrv --tui --baremetal -m examples/isa/build-rv64/addressing.elf
+./build/rv32-release/simrv --tui --baremetal -m examples/isa/build-rv32/addressing.elf
+```
+
+The prebuilt set covers arithmetic, addressing, branches, traps, UART output and input, compressed
+instructions, atomics, floating point, and other ISA basics. Rebuild the examples when editing their
+assembly sources; the build commands above produce fresh files in `/tmp` by default.
+
 `OUT_DIR` and `RISCV_PREFIX` are overridable for classroom toolchains. For example:
 
 ```bash
@@ -99,4 +111,5 @@ to TUI controls and inspect `a0` for the number of echoed characters.
 - Rename or add `.global checkpoint_*` labels at discussion points.
 - Change constants or data tables to create variants without changing the observation workflow.
 - Use `--inspection-output <path>` when students need to share a reproducible state snapshot.
-- Keep generated ELF files in a build or temporary directory rather than committing them.
+- The checked-in ELF files are small convenience assets for hands-on testing. Keep any additional
+  generated files in a build or temporary directory.

@@ -156,12 +156,14 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
         }
     }
     simrv::xlen::CsrValue const mod = cpu_.state().mstatus ^ wdata;
-    const simrv::xlen::CsrValue tlb_sensitive =
-        MstatusBit::Mprv | MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Fs | MstatusBit::Vs;
     const auto xlen_bits = static_cast<simrv::xlen::CsrValue>(uint64_t{0xFULL} << 32U);
-    if ((mod & (tlb_sensitive | xlen_bits)) != 0 ||
-        (((cpu_.state().mstatus & MstatusBit::Mprv) != 0u) && (mod & MstatusBit::Mpp) != 0)) {
+    if (simrv::compiler::unlikely((mod & xlen_bits) != 0)) {
         cpu_.TLB_flush();
+    } else if ((mod & (MstatusBit::Sum | MstatusBit::Mxr)) != 0 ||
+               simrv::compiler::unlikely(((cpu_.state().mstatus | wdata) & MstatusBit::Mprv) !=
+                                             0u &&
+                                         (mod & MstatusBit::Mpv) != 0)) {
+        cpu_.flush_data_tlb();
     }
     const simrv::xlen::CsrValue mask = mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h);
     cpu_.state().mstatus = (cpu_.state().mstatus & ~mask) | (wdata & mask);
@@ -179,13 +181,21 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
     if (address >= 0x30CU && address <= 0x30FU) {
+        if (active_xlen == 32) {
+            return static_cast<simrv::xlen::CsrValue>(state.mstateen[address - 0x30CU] &
+                                                      0xFFFFFFFFULL);
+        }
         const uint64_t mask =
             address == 0x30CU ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
         return static_cast<simrv::xlen::CsrValue>(state.mstateen[address - 0x30CU] & mask);
     }
     if (address >= 0x31CU && address <= 0x31FU) {
         if (active_xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
-        return static_cast<simrv::xlen::CsrValue>(state.mstateen[address - 0x31CU] >> 32U);
+        const uint64_t high_mask = (address == 0x31CU)
+                                       ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                       : kStateenSuperEnable;
+        return static_cast<simrv::xlen::CsrValue>((state.mstateen[address - 0x31CU] & high_mask) >>
+                                                  32U);
     }
     if (address >= 0x10CU && address <= 0x10FU) {
         const size_t bank = address - 0x10CU;
@@ -210,6 +220,9 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             }
             return simrv::xlen::CsrValue{0};
         }
+        if (active_xlen == 32) {
+            return static_cast<simrv::xlen::CsrValue>(state.hstateen[bank] & 0xFFFFFFFFULL);
+        }
         const uint64_t mask =
             bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
         return static_cast<simrv::xlen::CsrValue>(state.hstateen[bank] & mask);
@@ -220,7 +233,9 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         if ((state.mstateen[bank] & kStateenSuperEnable) == 0) {
             return simrv::xlen::CsrValue{0};
         }
-        return static_cast<simrv::xlen::CsrValue>(state.hstateen[bank] >> 32U);
+        const uint64_t high_mask =
+            bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+        return static_cast<simrv::xlen::CsrValue>((state.hstateen[bank] & high_mask) >> 32U);
     }
 
     auto require_fp = [&state]() -> std::expected<void, ExceptionCode> {
@@ -440,12 +455,10 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                 if ((state.mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
                 }
-                bool stce = false;
-                if constexpr (simrv::xlen::kIsXLen64) {
-                    stce = (state.menvcfg & (1ULL << 63U)) != 0;
-                } else {
-                    stce = (state.menvcfgh & (1UL << 31U)) != 0;
-                }
+                const bool stce = (state.regs.xlen == 64)
+                                      ? ((state.menvcfg & (1ULL << 63U)) != 0)
+                                      : (((state.menvcfgh & (1UL << 31U)) != 0) ||
+                                         ((state.menvcfg & (1ULL << 63U)) != 0));
                 if (!stce) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
                 }
@@ -739,16 +752,23 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
     if (address >= 0x30CU && address <= 0x30FU) {
         auto& value = cpu_.state().mstateen[address - 0x30CU];
-        const uint64_t mask =
-            address == 0x30CU ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
-        value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
+        if (cpu_.state().regs.xlen == 32) {
+            value =
+                (value & 0xFFFFFFFF00000000ULL) | (static_cast<uint64_t>(wdata) & 0xFFFFFFFFULL);
+        } else {
+            const uint64_t mask = address == 0x30CU ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                                    : kStateenSuperEnable;
+            value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
+        }
         return {};
     }
     if (address >= 0x31CU && address <= 0x31FU) {
         if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
         auto& value = cpu_.state().mstateen[address - 0x31CU];
-        value = (value & 0xFFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32U);
-        value &= kStateenSuperEnable;
+        const uint64_t high_mask = (address == 0x31CU)
+                                       ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                       : kStateenSuperEnable;
+        value = (value & 0xFFFFFFFFULL) | ((static_cast<uint64_t>(wdata) << 32U) & high_mask);
         return {};
     }
     if (address >= 0x10CU && address <= 0x10FU) {
@@ -774,9 +794,14 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             return {};
         }
         auto& value = cpu_.state().hstateen[bank];
-        const uint64_t mask =
-            bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
-        value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
+        if (cpu_.state().regs.xlen == 32) {
+            value =
+                (value & 0xFFFFFFFF00000000ULL) | (static_cast<uint64_t>(wdata) & 0xFFFFFFFFULL);
+        } else {
+            const uint64_t mask =
+                bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+            value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
+        }
         return {};
     }
     if (address >= 0x71CU && address <= 0x71FU) {
@@ -784,8 +809,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         const size_t bank = address - 0x71CU;
         if ((cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) return {};
         auto& value = cpu_.state().hstateen[bank];
-        value = (value & 0xFFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32U);
-        value &= kStateenSuperEnable;
+        const uint64_t high_mask =
+            bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+        value = (value & 0xFFFFFFFFULL) | ((static_cast<uint64_t>(wdata) << 32U) & high_mask);
         return {};
     }
 
@@ -809,7 +835,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             if (was_pending != is_pending) {
                 cpu_.machine_->trace().log_interrupt_signal(cpu_, kInterruptCauseBit | code,
                                                             is_pending, source);
-                cpu_.machine_->notify_interrupt_transition(cpu_.state().mhartid,
+                cpu_.machine_->notify_interrupt_transition(cpu_.hart_id(),
                                                            static_cast<uint32_t>(code), is_pending,
                                                            source, cpu_.clint_mmio.mcycle);
             }
@@ -1013,10 +1039,16 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         }
 
-        case csr_addr(Csr::Vsstatus):
-            cpu_.state().vsstatus =
-                (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+        case csr_addr(Csr::Vsstatus): {
+            const auto next = (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+            const auto mod = cpu_.state().vsstatus ^ next;
+            cpu_.state().vsstatus = next;
+            if ((mod & (MstatusBit::Sum | MstatusBit::Mxr)) != 0) {
+                cpu_.flush_data_tlb();
+            }
+            cpu_.sync_decode_context();
             break;
+        }
         case csr_addr(Csr::Vsie):
             cpu_.state().vsie =
                 wdata & h_interrupts_to_vs(cpu_.state().hideleg) & kSupervisorInterruptBits;
@@ -1121,12 +1153,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 if ((cpu_.state().mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
                 }
-                bool stce = false;
-                if constexpr (simrv::xlen::kIsXLen64) {
-                    stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
-                } else {
-                    stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
-                }
+                const bool stce = (cpu_.state().regs.xlen == 64)
+                                      ? ((cpu_.state().menvcfg & (1ULL << 63U)) != 0)
+                                      : (((cpu_.state().menvcfgh & (1UL << 31U)) != 0) ||
+                                         ((cpu_.state().menvcfg & (1ULL << 63U)) != 0));
                 if (!stce) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
                 }
@@ -1218,12 +1248,16 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.evaluate_timer_interrupt();
             break;
         case csr_addr(Csr::Menvcfgh):
-            return require_rv32_counter().and_then(
-                [this, wdata]() -> std::expected<void, ExceptionCode> {
-                    cpu_.state().menvcfgh = wdata & ~(simrv::xlen::CsrValue{1} << 29U);
-                    cpu_.evaluate_timer_interrupt();
-                    return {};
-                });
+            return require_rv32_counter().and_then([this,
+                                                    wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().menvcfgh = wdata & ~(simrv::xlen::CsrValue{1} << 29U);
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    cpu_.state().menvcfg = (cpu_.state().menvcfg & 0x00000000FFFFFFFFULL) |
+                                           (static_cast<uint64_t>(cpu_.state().menvcfgh) << 32U);
+                }
+                cpu_.evaluate_timer_interrupt();
+                return {};
+            });
         case csr_addr(Csr::Mseccfg): {
             const auto sticky = cpu_.state().mseccfg & static_cast<simrv::xlen::CsrValue>(0x7u);
             cpu_.state().mseccfg = wdata | sticky;
@@ -1328,8 +1362,18 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                     break;
                 }
                 if (cpu_.state().satp != wdata) {
+                    const auto old_asid =
+                        static_cast<::Asid>(simrv::xlen::satp_asid(cpu_.state().satp, xlen));
+                    const auto new_asid = static_cast<::Asid>(simrv::xlen::satp_asid(wdata, xlen));
                     cpu_.state().satp = wdata;
-                    cpu_.TLB_flush_satp();
+                    if (old_asid == new_asid) {
+                        cpu_.TLB_flush_satp();
+                    } else {
+                        cpu_.decode_cache.flush_user();
+                        cpu_.block_cache.flush();
+                        cpu_.soft_tlb_flush();
+                        cpu_.sync_decode_context();
+                    }
                 }
                 // Latch: once translation is enabled it is never "un-seen"
                 if (mode != 0) {
@@ -1359,8 +1403,13 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 });
         case csr_addr(Csr::Sstatus):
             if (cpu_.state().virt) {
-                cpu_.state().vsstatus =
-                    (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+                const auto next = (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+                const auto mod = cpu_.state().vsstatus ^ next;
+                cpu_.state().vsstatus = next;
+                if ((mod & (MstatusBit::Sum | MstatusBit::Mxr)) != 0) {
+                    cpu_.flush_data_tlb();
+                }
+                cpu_.sync_decode_context();
             } else {
                 setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
             }

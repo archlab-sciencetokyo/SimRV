@@ -33,17 +33,25 @@ if(BUILD_TESTING)
     SIMRV_NATIVE_TEST_TARGETS
     GLOBAL
     PROPERTY SIMRV_NATIVE_TEST_TARGETS)
+  add_custom_target(simrv-native-tests)
   if(SIMRV_NATIVE_TEST_TARGETS)
-    add_dependencies(integration-gate ${SIMRV_NATIVE_TEST_TARGETS})
+    add_dependencies(simrv-native-tests ${SIMRV_NATIVE_TEST_TARGETS})
   endif()
+  add_dependencies(integration-gate simrv-native-tests)
+  add_custom_target(
+    microbenchmarks
+    COMMAND $<TARGET_FILE:simrv-microbenchmarks>
+    DEPENDS simrv-microbenchmarks
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Running SimRV subsystem microbenchmarks"
+    VERBATIM USES_TERMINAL)
 endif()
 
 if(SIMRV_ENABLE_TOOLING)
   add_custom_target(
     release-check
-    COMMAND "${PYTHON_BIN}" "${PROJECT_SOURCE_DIR}/scripts/release_check.py" --binary
-            $<TARGET_FILE:SimRV>
-    DEPENDS SimRV
+    COMMAND $<TARGET_FILE:simrv-release-tests>
+    DEPENDS simrv-release-tests
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Validating SimRV release metadata and binary"
     VERBATIM)
@@ -55,12 +63,12 @@ if(SIMRV_VECTOR_TESTS_DIR
   add_custom_target(
     vector-gate
     COMMAND
-      "${PYTHON_BIN}" "${PROJECT_SOURCE_DIR}/scripts/run_vector_tests.py" --simrv
+      $<TARGET_FILE:simrv-vector> --simrv
       $<TARGET_FILE:SimRV> --xlen ${SIMRV_XLEN} --gcc ${RISCV_GCC} --objcopy
       ${RISCV_OBJCOPY} --nm ${RISCV_NM} --work-dir
       ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen --vector-tests-dir
       ${SIMRV_VECTOR_TESTS_DIR}
-    DEPENDS SimRV
+    DEPENDS SimRV simrv-vector
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Running Full Vector validation gate")
 endif()

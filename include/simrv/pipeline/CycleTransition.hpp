@@ -36,7 +36,7 @@ struct InstructionPrefetchState {
 };
 
 struct DataTransferState {
-    simrv::xlen::Address address = 0;
+    simrv::xlen::PhysAddr address{};
     simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool is_write = false;
@@ -153,7 +153,7 @@ struct HartPipelineState {
     CycleInstructionSlot* memory = &storage_[3];
     CycleInstructionSlot* writeback = &storage_[4];
     CycleInstructionSlot* retired = &storage_[5];
-    simrv::xlen::Address fetch_pc = 0;
+    simrv::xlen::VirtAddr fetch_pc{};
     bool initialized = false;
     bool frontend_blocked = false;
     bool retired_this_cycle = false;
@@ -231,7 +231,7 @@ struct HartPipelineState {
         memory = &storage_[3];
         writeback = &storage_[4];
         retired = &storage_[5];
-        fetch_pc = 0;
+        fetch_pc = simrv::xlen::VirtAddr{};
         initialized = false;
         frontend_blocked = false;
         retired_this_cycle = false;

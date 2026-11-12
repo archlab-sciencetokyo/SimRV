@@ -98,14 +98,14 @@ void Plic::reset() {
 
 auto Plic::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     if (req.opcode == memory::TlOpcodeA::Get) {
-        resp.data = mmio_read(offset(req.address.raw()));
+        resp.data = mmio_read(offset(req.address));
     } else {
-        mmio_write(offset(req.address.raw()), req.data);
+        mmio_write(offset(req.address), req.data);
     }
     return true;
 }
 
-auto Plic::get_context_for_offset(simrv::xlen::Address offset) const
+auto Plic::get_context_for_offset(simrv::memory::MmioOffset offset) const
     -> std::optional<simrv::xlen::PlicContextId> {
     if (offset >= 0x200000 && offset < 0x200000 + (kMaxPlicContexts * 0x1000)) {
         return static_cast<simrv::xlen::PlicContextId>((offset - 0x200000) / 0x1000);
@@ -113,7 +113,7 @@ auto Plic::get_context_for_offset(simrv::xlen::Address offset) const
     return std::nullopt;
 }
 
-auto Plic::mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word {
+auto Plic::mmio_read(simrv::memory::MmioOffset offset) -> simrv::xlen::Word {
     if (offset < 0x1000) {
         // PLIC interrupt source zero is reserved and its priority is hardwired to zero.
         if (offset == 0) return 0;
@@ -148,7 +148,7 @@ auto Plic::mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word {
     return 0;
 }
 
-void Plic::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
+void Plic::mmio_write(simrv::memory::MmioOffset offset, simrv::xlen::Word wdata) {
     if (offset < 0x1000) {
         // Source zero means "no interrupt" and is not configurable.
         if (offset != 0) {

@@ -17,12 +17,14 @@ void MemorySubsystem::initialize_mmu() {
     }
 }
 
-auto MemorySubsystem::dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool {
+auto MemorySubsystem::dma_read(simrv::xlen::PhysAddr physical_address, void* dst, size_t len)
+    -> bool {
+    const auto paddr = physical_address.raw();
     if (machine_.ram_data() == nullptr || dst == nullptr || len == 0) {
         return false;
     }
     const auto geometry = memory_geometry();
-    if (!geometry.contains(paddr, len)) {
+    if (!geometry.contains(physical_address, len)) {
         return false;
     }
     if (!machine_.runtime_profile.is_instruction_mode()) {
@@ -31,20 +33,22 @@ auto MemorySubsystem::dma_read(simrv::xlen::Address paddr, void* dst, size_t len
         const simrv::xlen::Address last_line =
             (paddr + len - 1u) & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
         for (simrv::xlen::Address line = first_line;; line += CoherenceHub::kLineBytes) {
-            system_bus_.coherence_hub().invalidate_line_external(line);
+            system_bus_.coherence_hub().invalidate_line_external(simrv::xlen::PhysAddr{line});
             if (line == last_line) break;
         }
     }
-    std::memcpy(dst, machine_.ram_data() + (paddr - geometry.dram_base), len);
+    std::memcpy(dst, machine_.ram_data() + (paddr - geometry.dram_base.raw()), len);
     return true;
 }
 
-auto MemorySubsystem::dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool {
+auto MemorySubsystem::dma_write(simrv::xlen::PhysAddr physical_address, const void* src, size_t len)
+    -> bool {
+    const auto paddr = physical_address.raw();
     if (machine_.ram_data() == nullptr || src == nullptr || len == 0) {
         return false;
     }
     const auto geometry = memory_geometry();
-    if (!geometry.contains(paddr, len)) {
+    if (!geometry.contains(physical_address, len)) {
         return false;
     }
     if (!machine_.runtime_profile.is_instruction_mode()) {
@@ -53,11 +57,13 @@ auto MemorySubsystem::dma_write(simrv::xlen::Address paddr, const void* src, siz
         const simrv::xlen::Address last_line =
             (paddr + len - 1u) & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
         for (simrv::xlen::Address line = first_line;; line += CoherenceHub::kLineBytes) {
-            system_bus_.coherence_hub().invalidate_line_external(line);
+            system_bus_.coherence_hub().invalidate_line_external(simrv::xlen::PhysAddr{line});
             if (line == last_line) break;
         }
     }
-    std::memcpy(machine_.ram_data() + (paddr - geometry.dram_base), src, len);
+    // DMA is an external write in every execution mode, including instruction-fast.
+    reservation_table_.invalidate_range(physical_address, len);
+    std::memcpy(machine_.ram_data() + (paddr - geometry.dram_base.raw()), src, len);
     return true;
 }
 

@@ -71,7 +71,7 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
     snapshot.cycle = ca_stats_.cycle_count;
     auto stage_info = [](const PipelineReg& reg, bool stage_stalled) {
         return PipelineCycleSnapshot::StageInfo{
-            .pc = reg.pc, .op_id = reg.op_id, .valid = reg.valid, .stalled = stage_stalled};
+            .pc = simrv::xlen::VirtAddr{reg.pc}, .op_id = reg.op_id, .valid = reg.valid, .stalled = stage_stalled};
     };
     snapshot.f = stage_info(fetch_reg, event.fetch.stalled);
     snapshot.d = stage_info(decode_reg, event.decode.stalled);

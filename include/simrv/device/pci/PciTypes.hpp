@@ -4,35 +4,75 @@
  */
 #pragma once
 
+#include <compare>
+#include <concepts>
 #include <cstdint>
 #include <utility>
 
+#include "simrv/memory/MmioTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::device {
 
-// Domain type aliases for PCI configuration & endpoints
-using PciVendorId = uint16_t;
-using PciDeviceId = uint16_t;
-using PciSubsystemVendorId = uint16_t;
-using PciSubsystemId = uint16_t;
-using PciRevisionId = uint8_t;
-using PciClassCode = uint32_t;
+template <typename Tag, std::integral Rep>
+struct PciValue {
+    constexpr PciValue() noexcept = default;
+    constexpr explicit PciValue(Rep value) noexcept : val(value) {}
 
-using PciBusNumber = uint8_t;
-using PciDeviceNumber = uint8_t;
-using PciFunctionNumber = uint8_t;
+    [[nodiscard]] constexpr auto raw() const noexcept -> Rep { return val; }
+    [[nodiscard]] constexpr explicit operator Rep() const noexcept { return val; }
+
+    constexpr auto operator<=>(const PciValue&) const noexcept = default;
+    constexpr bool operator==(const PciValue&) const noexcept = default;
+
+   private:
+    Rep val{};
+};
+
+// Domain type aliases for PCI configuration & endpoints
+struct PciVendorIdTag;
+struct PciDeviceIdTag;
+struct PciSubsystemVendorIdTag;
+struct PciSubsystemIdTag;
+struct PciRevisionIdTag;
+struct PciClassCodeTag;
+using PciVendorId = PciValue<PciVendorIdTag, uint16_t>;
+using PciDeviceId = PciValue<PciDeviceIdTag, uint16_t>;
+using PciSubsystemVendorId = PciValue<PciSubsystemVendorIdTag, uint16_t>;
+using PciSubsystemId = PciValue<PciSubsystemIdTag, uint16_t>;
+using PciRevisionId = PciValue<PciRevisionIdTag, uint8_t>;
+using PciClassCode = PciValue<PciClassCodeTag, uint32_t>;
+
+struct PciBusNumberTag;
+struct PciDeviceNumberTag;
+struct PciFunctionNumberTag;
+struct PciConfigOffsetTag;
+
+using PciBusNumber = PciValue<PciBusNumberTag, uint8_t>;
+using PciDeviceNumber = PciValue<PciDeviceNumberTag, uint8_t>;
+using PciFunctionNumber = PciValue<PciFunctionNumberTag, uint8_t>;
 
 using BarIndex = uint8_t;
 using PciBarIndex = BarIndex;
-using PciBarOffset = simrv::xlen::Address;
+using PciBarOffset = simrv::memory::MmioOffset;
 using PciBarSize = uint64_t;
 using PciBarMask = uint64_t;
 
-using PciConfigOffset = uint16_t;
+using PciConfigOffset = PciValue<PciConfigOffsetTag, uint16_t>;
 using PciAccessBytes = uint8_t;
 using PciConfigData = uint32_t;
 using PciMmioData = simrv::xlen::Word;
+
+static_assert(sizeof(PciBusNumber) == sizeof(uint8_t));
+static_assert(sizeof(PciDeviceNumber) == sizeof(uint8_t));
+static_assert(sizeof(PciFunctionNumber) == sizeof(uint8_t));
+static_assert(sizeof(PciConfigOffset) == sizeof(uint16_t));
+static_assert(sizeof(PciVendorId) == sizeof(uint16_t));
+static_assert(sizeof(PciDeviceId) == sizeof(uint16_t));
+static_assert(sizeof(PciSubsystemVendorId) == sizeof(uint16_t));
+static_assert(sizeof(PciSubsystemId) == sizeof(uint16_t));
+static_assert(sizeof(PciRevisionId) == sizeof(uint8_t));
+static_assert(sizeof(PciClassCode) == sizeof(uint32_t));
 
 /**
  * @struct PciBdf
@@ -44,8 +84,8 @@ struct PciBdf {
     PciFunctionNumber func{0};
 
     [[nodiscard]] constexpr auto raw_address() const noexcept -> uint32_t {
-        return (static_cast<uint32_t>(bus) << 20) | (static_cast<uint32_t>(dev) << 15) |
-               (static_cast<uint32_t>(func) << 12);
+        return (static_cast<uint32_t>(bus.raw()) << 20) | (static_cast<uint32_t>(dev.raw()) << 15) |
+               (static_cast<uint32_t>(func.raw()) << 12);
     }
     constexpr auto operator<=>(const PciBdf&) const noexcept = default;
     constexpr bool operator==(const PciBdf&) const noexcept = default;

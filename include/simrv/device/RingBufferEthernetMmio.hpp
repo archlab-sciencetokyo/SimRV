@@ -7,6 +7,7 @@
 
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/memory/MmioDevice.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -17,10 +18,10 @@ namespace simrv::device {
 /** CSR/ring-buffer Ethernet MAC adapter backed by SimRV's packet transports. */
 class RingBufferEthernetMmio final {
    public:
-    RingBufferEthernetMmio(core::Machine& machine, std::string name, simrv::xlen::Address csr_base,
+    RingBufferEthernetMmio(core::Machine& machine, std::string name, simrv::xlen::PhysAddr csr_base,
                            simrv::xlen::Address csr_size, uint32_t irq,
-                           simrv::xlen::Address rx_base, simrv::xlen::Address rx_size,
-                           simrv::xlen::Address tx_base, simrv::xlen::Address tx_size,
+                           simrv::xlen::PhysAddr rx_base, simrv::xlen::Address rx_size,
+                           simrv::xlen::PhysAddr tx_base, simrv::xlen::Address tx_size,
                            std::array<uint8_t, 6> mac_address, virtio::NetBackend::Mode mode);
     ~RingBufferEthernetMmio();
     RingBufferEthernetMmio(const RingBufferEthernetMmio&) = delete;
@@ -37,17 +38,17 @@ class RingBufferEthernetMmio final {
     class Window;
     friend class Window;
 
-    auto read_csr(simrv::xlen::Address offset) -> uint32_t;
-    void write_csr(simrv::xlen::Address offset, uint32_t value);
-    auto read_buffer(bool tx, simrv::xlen::Address offset) -> uint32_t;
-    void write_buffer(bool tx, simrv::xlen::Address offset, uint32_t value);
+    auto read_csr(simrv::memory::MmioOffset offset) -> uint32_t;
+    void write_csr(simrv::memory::MmioOffset offset, uint32_t value);
+    auto read_buffer(bool tx, simrv::memory::MmioOffset offset) -> uint32_t;
+    void write_buffer(bool tx, simrv::memory::MmioOffset offset, uint32_t value);
     void drain_tx();
     void update_rx_irq();
     void receive_packet(std::span<const uint8_t> packet);
 
     core::Machine& machine_;
     std::string name_;
-    simrv::xlen::Address csr_base_;
+    simrv::xlen::PhysAddr csr_base_;
     simrv::xlen::Address csr_size_;
     simrv::xlen::Address rx_size_;
     simrv::xlen::Address tx_size_;

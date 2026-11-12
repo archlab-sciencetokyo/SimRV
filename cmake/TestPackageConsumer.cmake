@@ -55,12 +55,13 @@ endif()
 if(NOT EXISTS "${install_root}/share/SimRV/SimRVBuildMetadata.json")
   message(FATAL_ERROR "Expected installed SimRV build metadata manifest")
 endif()
-foreach(completion IN ITEMS
-    share/bash-completion/completions/simrv
-    share/zsh/site-functions/_simrv
-    share/fish/vendor_completions.d/simrv.fish)
-  if(NOT EXISTS "${install_root}/${completion}")
-    message(FATAL_ERROR "Expected installed shell completion ${completion}")
+foreach(shell IN ITEMS bash zsh fish)
+  execute_process(
+    COMMAND "${install_root}/bin/simrv" completion ${shell}
+    RESULT_VARIABLE completion_result
+    OUTPUT_VARIABLE completion_output)
+  if(NOT completion_result EQUAL 0 OR completion_output STREQUAL "")
+    message(FATAL_ERROR "Installed simrv completion ${shell} failed: ${completion_result}")
   endif()
 endforeach()
 execute_process(
@@ -71,14 +72,14 @@ if(NOT simulator_version_result EQUAL 0)
   message(FATAL_ERROR "Installed simrv --version failed: ${simulator_version_result}")
 endif()
 
-foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
+foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark simrv-act simrv-vector)
   if(NOT EXISTS "${install_root}/bin/${tool}")
     message(
       FATAL_ERROR "Expected installed tool ${tool} in ${install_root}/bin")
   endif()
 endforeach()
 
-foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
+foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark simrv-act simrv-vector)
   execute_process(
     COMMAND "${install_root}/bin/${tool}" --help
     RESULT_VARIABLE tool_help_result
@@ -88,14 +89,18 @@ foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
   endif()
 endforeach()
 
+if(SIMRV_BUILD_PLUGINS AND SIMRV_BUILD_RVCOMP_PLUGINS)
+  file(GLOB installed_rv98_keyboard_plugins
+       "${install_root}/lib*/simrv/plugins/*rv98-keyboard*")
+  if(NOT installed_rv98_keyboard_plugins)
+    message(FATAL_ERROR "Expected the optional RV98 keyboard plugin in the tools install")
+  endif()
+endif()
+
 if(NOT EXISTS "${install_root}/share/man/man1/simrv.1")
   message(
     FATAL_ERROR
       "Expected installed man page at ${install_root}/share/man/man1/simrv.1")
-endif()
-
-if(NOT EXISTS "${install_root}/share/SimRV/scripts/experiment_metadata.py")
-  message(FATAL_ERROR "Expected installed benchmark support module")
 endif()
 
 file(GLOB installed_guides "${install_root}/share/doc/*/USER_GUIDE.md")

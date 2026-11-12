@@ -26,7 +26,7 @@ auto take_stats_snapshot(const Machine& machine) -> MachineStatsSnapshot {
     for (size_t h = 0; h < num_harts; ++h) {
         const auto& cpu = machine.hart(h);
         HartStatsSnapshot hs{};
-        hs.hart_id = static_cast<uint32_t>(h);
+        hs.hart_id = simrv::xlen::HartId{static_cast<uint32_t>(h)};
         hs.retired_instructions = cpu.e_icount;
         hs.cycles = cpu.clint_mmio.mcycle;
         if (hs.cycles > 0) {
@@ -98,7 +98,7 @@ auto MachineStatsSnapshot::to_json() const -> std::string {
     for (size_t i = 0; i < harts.size(); ++i) {
         const auto& h = harts[i];
         ss << "    {\n";
-        ss << std::format("      \"hart_id\": {},\n", h.hart_id);
+        ss << std::format("      \"hart_id\": {},\n", h.hart_id.raw());
         ss << std::format("      \"retired_instructions\": {},\n", h.retired_instructions);
         ss << std::format("      \"cycles\": {},\n", h.cycles);
         ss << std::format("      \"ipc\": {:.4f},\n", h.ipc);
@@ -136,7 +136,7 @@ auto MachineStatsSnapshot::to_string() const -> std::string {
     ss << std::format("Bus Contention:     {} delayed, {} penalty cycles\n", bus_delayed_requests,
                       bus_contention_penalty);
     for (const auto& h : harts) {
-        ss << std::format("\n--- Hart {} ---\n", h.hart_id);
+        ss << std::format("\n--- Hart {} ---\n", h.hart_id.raw());
         ss << std::format("  Instructions: {} | Cycles: {} | IPC: {:.4f}\n", h.retired_instructions,
                           h.cycles, h.ipc);
         ss << std::format("  I-Cache:      {} hits, {} misses ({:.2f}%)\n", h.icache_hits,

@@ -32,6 +32,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     }
 
     auto const state = cpu.pipeline_sim.save_state();
+    const auto low_pc = [](simrv::xlen::VirtAddr pc) { return static_cast<uint32_t>(pc.raw()); };
 
     uint64_t total_cycles = cpu.pipeline_sim.cycle_count();
     uint64_t total_stalls = cpu.pipeline_sim.stall_cycles();
@@ -100,9 +101,9 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         auto e_reg = state.e_reg;
         auto w_reg = state.w_reg;
 
-        auto f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-        auto e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-        auto w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
+        auto f_pc = low_pc(f_reg.pc);
+        auto e_pc = low_pc(e_reg.pc);
+        auto w_pc = low_pc(w_reg.pc);
 
         auto e_rs1 = static_cast<uint8_t>(e_reg.rs1);
         auto e_rs2 = static_cast<uint8_t>(e_reg.rs2);
@@ -171,11 +172,11 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     auto m_reg = state.m_reg;
     auto w_reg = state.w_reg;
 
-    auto f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-    auto d_pc = static_cast<uint32_t>(d_reg.pc & 0xFFFFFFFFULL);
-    auto e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-    auto m_pc = static_cast<uint32_t>(m_reg.pc & 0xFFFFFFFFULL);
-    auto w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
+    auto f_pc = low_pc(f_reg.pc);
+    auto d_pc = low_pc(d_reg.pc);
+    auto e_pc = low_pc(e_reg.pc);
+    auto m_pc = low_pc(m_reg.pc);
+    auto w_pc = low_pc(w_reg.pc);
 
     auto d_rs1 = static_cast<uint8_t>(d_reg.rs1);
     auto d_rs2 = static_cast<uint8_t>(d_reg.rs2);
@@ -368,7 +369,8 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                             kThemeText, kThemeMint),
                 width);
         }
-        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(f_reg.pc);
+        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(
+            simrv::xlen::VirtAddr{f_reg.pc});
         std::string gauge;
         switch (counter) {
             case 0:

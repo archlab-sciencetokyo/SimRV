@@ -5,16 +5,18 @@
 #pragma once
 
 #include <atomic>
+#include <boost/circular_buffer.hpp>
 #include <cstdint>
-#include <deque>
 #include <mutex>
+#include <optional>
+#include <string_view>
 #include <thread>
 
 #include "simrv/core/PlatformMap.h"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/device/PtyBridge.hpp"
+#include "simrv/device/SerialDevice.hpp"
 #include "simrv/memory/Mmio.hpp"
-#include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -27,48 +29,54 @@ class Tui;
 
 namespace simrv::device {
 
-class Uart : public memory::TileLinkNode {
+class Uart : public SerialDevice {
    public:
     explicit Uart(simrv::core::Machine& machine,
-                  simrv::xlen::Address base = simrv::mmio::kUartBaseAddress,
+                  simrv::xlen::PhysAddr base = simrv::mmio::kUartBaseAddress,
                   simrv::xlen::Address size = simrv::mmio::kUartSize, uint32_t irq = 3,
                   uint64_t clock_hz = SIMRV_PLATFORM_UART_CLOCK_HZ,
                   uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz);
     ~Uart() override;
     [[nodiscard]] auto name() const -> const char* override { return "uart"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
     /// Consume a pending RX-state transition and publish it to the guest PLIC. Reader threads
     /// only enqueue bytes and mark the transition; interrupt-controller state stays owned by the
     /// simulation thread.
-    void service_interrupts();
-    void start_input_thread();
-    void stop_input_thread();
-    [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
-    [[nodiscard]] auto is_interrupt_pending() const -> bool;
-    [[nodiscard]] auto irq_number() const noexcept -> uint32_t { return irq_; }
-    void push_rx_byte(uint8_t byte);
-    /// Advance serial transmit and receive state by simulated CPU cycles.
-    void advance_cycles(uint64_t cycles);
-    [[nodiscard]] auto has_active_transfer() const noexcept -> bool {
-        return tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty();
+    void service_interrupts() override;
+    void start_input_thread() override;
+    void stop_input_thread() override;
+    [[nodiscard]] auto is_input_thread_running() const -> bool override {
+        return input_thread_.joinable();
     }
+    [[nodiscard]] auto is_interrupt_pending() const -> bool override;
+    [[nodiscard]] auto irq_number() const noexcept -> uint32_t override { return irq_; }
+    void push_rx_byte(uint8_t byte) override;
+    /// Emit a byte through the configured console and PTY. Call on the simulation thread.
+    void write_host_byte(uint8_t byte);
+    /// Advance serial transmit and receive state by simulated CPU cycles.
+    void advance_cycles(uint64_t cycles) override;
+    [[nodiscard]] auto has_active_transfer() const noexcept -> bool override;
 
     /// Open a POSIX PTY for this UART. Returns false if openpty fails.
-    [[nodiscard]] auto start_pty() -> bool;
-    void stop_pty();
-    [[nodiscard]] auto pty_slave_path() const -> const std::string& { return pty_.slave_path(); }
+    [[nodiscard]] auto start_pty() -> bool override;
+    void stop_pty() override;
+    [[nodiscard]] auto pty_slave_path() const -> const std::string& override {
+        return pty_.slave_path();
+    }
     [[nodiscard]] auto has_pty() const -> bool { return pty_.is_open(); }
     [[nodiscard]] auto pty() -> PtyBridge& { return pty_; }
     [[nodiscard]] auto pty() const -> const PtyBridge& { return pty_; }
-    void flush_tx_buffer() noexcept;
+    void flush_tx_buffer() noexcept override;
     void drain_tx_fifo() noexcept;
 
    private:
+    void update_active_transfer() noexcept;
+
     simrv::core::Machine& machine_;
-    simrv::xlen::Address base_;
+    simrv::xlen::PhysAddr base_;
     simrv::xlen::Address size_;
     uint32_t irq_;
     uint64_t clock_hz_;
@@ -86,18 +94,21 @@ class Uart : public memory::TileLinkNode {
     bool rx_overrun_ = false;
     uint64_t tx_phase_ = 0;
     uint64_t rx_phase_ = 0;
+    uint64_t rx_timeout_phase_ = 0;
+    bool rx_timeout_pending_ = false;
     bool tx_shift_active_ = false;
     uint8_t tx_shift_byte_ = 0;
     bool rx_shift_active_ = false;
     uint8_t rx_shift_byte_ = 0;
-    std::deque<uint8_t> tx_fifo_;
-    std::deque<uint8_t> pending_rx_;
+    boost::circular_buffer<uint8_t> tx_fifo_{16};
+    boost::circular_buffer<uint8_t> pending_rx_{2048};
 
     std::array<uint8_t, 256> tx_buffer_{};
     size_t tx_buffer_len_ = 0;
 
-    std::deque<uint8_t> rx_fifo_;
+    boost::circular_buffer<uint8_t> rx_fifo_{16};
     std::atomic<bool> irq_update_pending_{false};
+    std::atomic<bool> has_active_transfer_{false};
     mutable std::mutex rx_mutex_;
     std::thread input_thread_;
     std::atomic<bool> input_thread_stop_{false};

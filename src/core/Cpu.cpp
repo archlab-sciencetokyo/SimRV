@@ -101,11 +101,15 @@ void CPU::reset() {
 void CPU::TLB_flush() {
     tlb.flush();
     decode_cache.flush();
+    block_cache.flush();
     if (!machine_ || machine_->runtime_profile.is_cycle_mode()) {
         icache.flush();
         instruction_cache_timing.flush();
     }
     soft_tlb_flush();
+    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
+        machine_->memory().mmu()->flush_pdc();
+    }
     sync_decode_context();
 }
 
@@ -114,31 +118,38 @@ void CPU::TLB_flush_satp() {
         static_cast<::Asid>(simrv::xlen::satp_asid(active_satp(), state_.regs.xlen));
     tlb.flush_selective(core::TlbFlushFilter{.vaddr = std::nullopt, .asid = current_asid});
     decode_cache.flush_user();
+    block_cache.flush();
     soft_tlb_flush();
-    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
-        machine_->memory().mmu()->flush_pdc();
-    }
     sync_decode_context();
 }
 
 void CPU::flush_data_tlb() {
     tlb.flush_data();
     soft_tlb_flush();
-    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
-        machine_->memory().mmu()->flush_pdc();
-    }
 }
 
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
-    tlb.flush_selective(filter);
-    if (filter.vaddr) {
-        decode_cache.flush_page(*filter.vaddr & ~simrv::xlen::Address{0xFFF});
+    core::TlbFlushFilter sanitized = filter;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (state_.regs.xlen == 32 && sanitized.vaddr) {
+            sanitized.vaddr = simrv::xlen::VirtAddr{
+                static_cast<simrv::xlen::Address>(sanitized.vaddr->raw() & 0xFFFFFFFFULL)};
+        }
+    }
+    tlb.flush_selective(sanitized);
+    if (sanitized.vaddr) {
+        decode_cache.flush_page(*sanitized.vaddr & ~simrv::xlen::Address{0xFFF});
     } else {
         decode_cache.flush();
     }
-    soft_tlb_flush_selective(filter);
+    block_cache.flush();
+    soft_tlb_flush_selective(sanitized);
     if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
-        machine_->memory().mmu()->flush_pdc();
+        if (sanitized.vaddr) {
+            machine_->memory().mmu()->flush_pdc_vaddr(*sanitized.vaddr);
+        } else {
+            machine_->memory().mmu()->flush_pdc();
+        }
     }
 }
 
@@ -163,10 +174,10 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
         return;
     }
     if (filter.vaddr) {
-        const simrv::xlen::Address vpn = *filter.vaddr >> 12;
+        const simrv::xlen::Address vpn = filter.vaddr->raw() >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         auto invalidate_if_match = [&](SoftTlbEntry& entry) {
-            if (entry.valid(soft_tlb_epoch)) {
+            if (entry.tag != SoftTlbEntry::kInvalidTag) {
                 const uint64_t entry_vpn = (entry.tag >> 18) & 0xFFFFFFFFFFULL;
                 if (entry_vpn == (vpn & 0xFFFFFFFFFFULL)) {
                     if (filter.asid) {
@@ -186,7 +197,7 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
     }
     if (filter.asid) {
         auto invalidate_asid = [&](SoftTlbEntry& entry) {
-            if (entry.valid(soft_tlb_epoch) && !entry.global) {
+            if (entry.tag != SoftTlbEntry::kInvalidTag && !entry.global) {
                 const uint64_t entry_asid = (entry.tag >> 2) & 0xFFFFu;
                 if (entry_asid == *filter.asid) {
                     entry.invalidate();
@@ -219,10 +230,13 @@ auto CPU::write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
 }
 
 void CPU::mret() {
-    const auto old_privilege = state_.priv;
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
     const auto old_mstatus = state_.mstatus;
     TrapController::mret(state_);
-    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen ||
+                                  (((old_mstatus | state_.mstatus) & MstatusBit::Mprv) != 0 &&
+                                   ((old_mstatus ^ state_.mstatus) & MstatusBit::Mpv) != 0))) {
         TLB_flush();
     } else {
         sync_decode_context();
@@ -230,10 +244,10 @@ void CPU::mret() {
 }
 
 void CPU::sret() {
-    const auto old_privilege = state_.priv;
-    const auto old_mstatus = state_.mstatus;
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
     TrapController::sret(state_);
-    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen)) {
         TLB_flush();
     } else {
         sync_decode_context();
@@ -255,10 +269,13 @@ void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, int state) {
 }
 
 void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval) {
-    const auto old_privilege = state_.priv;
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
     const auto old_mstatus = state_.mstatus;
     TrapController::raise_exception(*this, cause, tval);
-    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen ||
+                                  (((old_mstatus | state_.mstatus) & MstatusBit::Mprv) != 0 &&
+                                   ((old_mstatus ^ state_.mstatus) & MstatusBit::Mpv) != 0))) {
         TLB_flush();
     } else {
         sync_decode_context();
@@ -319,8 +336,8 @@ void CPU::evaluate_timer_interrupt() {
             if (before != after) {
                 machine_->trace().log_interrupt_signal(*this, kInterruptCauseBit | code, after,
                                                        source);
-                machine_->notify_interrupt_transition(state_.mhartid, static_cast<uint32_t>(code),
-                                                      after, source, clint_mmio.mcycle);
+                machine_->notify_interrupt_transition(hart_id(), static_cast<uint32_t>(code), after,
+                                                      source, clint_mmio.mcycle);
             }
         };
         log_transition(MipBit::Mtip, 7, "aclint_mtimer");
@@ -411,8 +428,8 @@ void CPU::apply_pending_interrupt_lines(Machine& machine) {
         if (before != after) {
             machine.trace().log_interrupt_signal(*this, kInterruptCauseBit | causes[i], after,
                                                  sources[i]);
-            machine.notify_interrupt_transition(state_.mhartid, static_cast<uint32_t>(causes[i]),
-                                                after, sources[i], clint_mmio.mcycle);
+            machine.notify_interrupt_transition(hart_id(), static_cast<uint32_t>(causes[i]), after,
+                                                sources[i], clint_mmio.mcycle);
         }
     }
 }

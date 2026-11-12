@@ -39,6 +39,8 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/device/SerialDevice.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/Priv.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -49,6 +51,7 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -263,7 +266,7 @@ void append_retirement_record(RetirementRecordBuilder& record, const CPU& cpu,
     record.append("\",\"operation\":\"");
     record.append(pipeline::operation_name(context.op_id));
     record.append("\",\"next_pc\":\"0x");
-    record.append_hex(static_cast<uint64_t>(state.pc));
+    record.append_hex(static_cast<uint64_t>(state.pc.raw()));
     record.append("\",\"privilege\":");
     record.append_decimal(std::to_underlying(state.priv));
     record.push_back('}');
@@ -345,9 +348,17 @@ auto json_string_array(const std::vector<std::string>& values) -> std::string {
     return json;
 }
 
-auto event_function_field(const Machine& machine, simrv::xlen::Address pc) -> std::string {
+auto event_function_field(const Machine& machine, simrv::xlen::VirtAddr pc) -> std::string {
     const auto symbol = machine.symbol_table().lookup_function(pc);
     return symbol ? std::format(",\"function\":{}", json_quote(symbol->name)) : "";
+}
+
+auto trace_effective_address(const CPU& cpu, simrv::xlen::VirtAddr address)
+    -> simrv::xlen::Address {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        return cpu.effective_data_xlen() == 32 ? address.raw() & 0xffffffffULL : address.raw();
+    }
+    return address.raw();
 }
 
 auto categorize_operation(isa::OperationId op) noexcept -> std::string_view {
@@ -401,10 +412,11 @@ void Tracer::refresh_runtime_trace_metadata() {
         if (device == nullptr) continue;
         if (!first_device) trace_enabled_devices_json_.push_back(',');
         first_device = false;
-        trace_enabled_devices_json_ += std::format(
-            "{{\"name\":{},\"base\":\"0x{:x}\",\"size\":\"0x{:x}\"}}",
-            json_quote(device->name() != nullptr ? device->name() : ""),
-            static_cast<uint64_t>(device->base_address()), static_cast<uint64_t>(device->size()));
+        trace_enabled_devices_json_ +=
+            std::format("{{\"name\":{},\"base\":\"0x{:x}\",\"size\":\"0x{:x}\"}}",
+                        json_quote(device->name() != nullptr ? device->name() : ""),
+                        static_cast<uint64_t>(device->base_address().raw()),
+                        static_cast<uint64_t>(device->size()));
     }
     trace_enabled_devices_json_.push_back(']');
     trace_configuration_sha256_ = simrv::util::sha256(
@@ -422,8 +434,9 @@ auto Tracer::trace_event_selected(std::string_view event) const noexcept -> bool
         trace_event_filter_, [event](const std::string& candidate) { return candidate == event; });
 }
 
-auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle, uint32_t hart,
-                                 std::optional<simrv::xlen::Address> pc,
+auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle,
+                                 std::optional<simrv::xlen::HartId> hart,
+                                 std::optional<simrv::xlen::VirtAddr> pc,
                                  std::string_view component) const noexcept -> bool {
     const auto& config = machine_.configuration().debug;
     if (!config.trace_device.empty() && component != config.trace_device) return false;
@@ -432,9 +445,7 @@ auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cy
         const auto symbol = machine_.symbol_table().lookup_function(*pc);
         if (!symbol || symbol->name != config.trace_function) return false;
     }
-    if (config.trace_hart &&
-        (hart == std::numeric_limits<uint32_t>::max() || *config.trace_hart != hart))
-        return false;
+    if (config.trace_hart && (!hart || *config.trace_hart != *hart)) return false;
     if (config.trace_pc_start || config.trace_pc_end) {
         if (!config.trace_pc_start || !config.trace_pc_end || !pc || *pc < *config.trace_pc_start ||
             *pc > *config.trace_pc_end)
@@ -544,7 +555,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
         "\"cpuconfig\":{},\"dvtree\":{},\"command_line\":{},\"devices\":[",
         simrv::xlen::kXLenBits, json_quote(trace_isa_),
         static_cast<uint64_t>(machine_.primary_hart().state().misa), trace_vlen_, trace_harts_,
-        static_cast<uint64_t>(config.memory.dram_base),
+        static_cast<uint64_t>(config.memory.dram_base.raw()),
         static_cast<uint64_t>(config.memory.dram_size), config.execution.appmode,
         json_quote(machine_.runtime_profile.execution_name()),
         json_quote(pipeline::pipeline_type_name(config.execution.pipeline_type)),
@@ -560,21 +571,23 @@ void Tracer::init_architecture_trace(const std::string& path) {
                        ? "single-threaded"
                        : "multi-threaded"),
         json_quote(config.soc.name), json_quote(config.soc.cpu_model),
-        static_cast<uint64_t>(config.soc.pcie.ecam_base),
+        static_cast<uint64_t>(config.soc.pcie.ecam_base.raw()),
         static_cast<uint64_t>(config.soc.pcie.ecam_size),
-        static_cast<uint64_t>(config.soc.pcie.mmio_base),
+        static_cast<uint64_t>(config.soc.pcie.mmio_base.raw()),
         static_cast<uint64_t>(config.soc.pcie.mmio_size),
         static_cast<unsigned>(config.soc.pcie.first_bus),
         static_cast<unsigned>(config.soc.pcie.last_bus), config.soc.enable_pcie,
         config.soc.enable_mmio, config.soc.disable_unlisted_devices, config.debug.trace_level,
         json_quote(config.debug.trace_events), json_quote(config.debug.trace_function),
         json_quote(config.debug.trace_device),
-        config.debug.trace_hart ? std::format("{}", *config.debug.trace_hart) : "null",
+        config.debug.trace_hart ? std::format("{}", config.debug.trace_hart->raw()) : "null",
         config.debug.trace_pc_start
-            ? json_quote(std::format("0x{:x}", static_cast<uint64_t>(*config.debug.trace_pc_start)))
+            ? json_quote(
+                  std::format("0x{:x}", static_cast<uint64_t>(config.debug.trace_pc_start->raw())))
             : "null",
         config.debug.trace_pc_end
-            ? json_quote(std::format("0x{:x}", static_cast<uint64_t>(*config.debug.trace_pc_end)))
+            ? json_quote(
+                  std::format("0x{:x}", static_cast<uint64_t>(config.debug.trace_pc_end->raw())))
             : "null",
         config.debug.trace_after_cycle ? std::format("{}", *config.debug.trace_after_cycle)
                                        : "null",
@@ -595,8 +608,9 @@ void Tracer::init_architecture_trace(const std::string& path) {
             "\"pci_bus\":{},\"pci_slot\":{},\"pci_function\":{},"
             "\"pci_intx_source\":{}}}",
             json_quote(soc_device_kind_name(device.kind)), json_quote(device.name),
-            static_cast<uint64_t>(device.base), static_cast<uint64_t>(device.size), device.irq,
-            device.enabled, device.pci_bus ? std::to_string(*device.pci_bus) : std::string("null"),
+            static_cast<uint64_t>(device.base.raw()), static_cast<uint64_t>(device.size),
+            device.irq, device.enabled,
+            device.pci_bus ? std::to_string(*device.pci_bus) : std::string("null"),
             device.pci_slot ? std::to_string(*device.pci_slot) : std::string("null"),
             device.pci_function ? std::to_string(*device.pci_function) : std::string("null"),
             device.pci_intx_source ? std::to_string(*device.pci_intx_source) : std::string("null"));
@@ -772,7 +786,7 @@ void Tracer::flush_all() {
 }
 
 void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
-                                          simrv::xlen::Address epc,
+                                          simrv::xlen::VirtAddr epc,
                                           simrv::xlen::PrivilegeLevel source_mode,
                                           simrv::xlen::CsrValue tval) {
     if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
@@ -787,7 +801,8 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
     if (!interrupt) return;
     const auto depth =
         std::ranges::count_if(frames, [](const TrapTraceFrame& frame) { return frame.interrupt; });
-    if (!accepts_trace_event("interrupt_entry", cycle, static_cast<uint32_t>(hart), state.pc))
+    if (!accepts_trace_event("interrupt_entry", cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(hart)}, state.pc))
         return;
     std::println(fp_interrupts,
                  "{{\"schema_version\":2,\"event\":\"interrupt_entry\","
@@ -799,12 +814,12 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
                  "\"tval\":\"0x{:x}\","
                  "\"source_mode\":\"{}\",\"nesting_depth\":{}}}}}",
                  trace_timestamp(), cpu.clint_mmio.mcycle, static_cast<unsigned>(state.mhartid),
-                 static_cast<uint64_t>(state.pc), event_function_field(machine_, state.pc),
+                 static_cast<uint64_t>(state.pc.raw()), event_function_field(machine_, state.pc),
                  privilege_mode(state.priv), static_cast<uint64_t>(trap_exception_code(cause)),
                  static_cast<uint64_t>(cause), trap_cause_name(cause),
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "scause" : "mcause",
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "sepc" : "mepc",
-                 static_cast<uint64_t>(epc),
+                 static_cast<uint64_t>(epc.raw()),
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "stval" : "mtval",
                  static_cast<uint64_t>(tval), privilege_mode(source_mode), depth);
 }
@@ -815,8 +830,9 @@ void Tracer::log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, 
     const auto& state = cpu.state();
     const auto event = asserted ? "interrupt_asserted" : "interrupt_deasserted";
     const auto cycle = cpu.clint_mmio.mcycle;
-    if (!accepts_trace_event(event, cycle, static_cast<uint32_t>(state.mhartid), std::nullopt,
-                             source))
+    if (!accepts_trace_event(event, cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)},
+                             std::nullopt, source))
         return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_interrupts,
@@ -831,7 +847,7 @@ void Tracer::log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, 
 }
 
 void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
-                      simrv::xlen::Address addr, uint32_t size, simrv::xlen::Word data,
+                      simrv::xlen::PhysAddr addr, uint32_t size, simrv::xlen::Word data,
                       bool is_write, bool faulted, bool mapped) {
     if (!fp_dlog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     const auto& cpu = machine_.hart(hart);
@@ -842,11 +858,11 @@ void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_dlog.is_open() && !faulted) {
         std::println(fp_dlog, "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
-                     mtime, dev_name, is_write ? "WRITE" : "READ", addr,
+                     mtime, dev_name, is_write ? "WRITE" : "READ", addr.raw(),
                      simrv::xlen::kXLenHexDigits, size, data, size * 2);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event(event, cycle, hart.val, cpu.active_context().cpc.raw(), dev_name)) {
+        accepts_trace_event(event, cycle, hart, cpu.active_context().cpc, dev_name)) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"{}_{}\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -856,10 +872,10 @@ void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
                      "\"width\":{},\"access\":\"{}\",\"faulted\":{},"
                      "\"latency_cycles\":null}}}}",
                      mapped ? "mmio" : "unmapped", is_write ? "write" : "read", trace_timestamp(),
-                     cycle, static_cast<unsigned>(hart.val),
+                     cycle, static_cast<unsigned>(hart.raw()),
                      static_cast<uint64_t>(cpu.active_context().cpc.raw()),
-                     event_function_field(machine_, cpu.active_context().cpc.raw()),
-                     privilege_mode(cpu.state().priv), dev_name, static_cast<uint64_t>(addr),
+                     event_function_field(machine_, cpu.active_context().cpc),
+                     privilege_mode(cpu.state().priv), dev_name, static_cast<uint64_t>(addr.raw()),
                      static_cast<uint64_t>(data), size, mapped ? "mmio" : "unmapped",
                      faulted ? "true" : "false");
     }
@@ -867,13 +883,13 @@ void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
 
 void Tracer::log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::string_view opcode,
                                  std::uint16_t source, std::uint16_t sink,
-                                 simrv::xlen::Address address, std::string_view detail,
+                                 simrv::xlen::PhysAddr address, std::string_view detail,
                                  const BusTraceContext& context) {
     if (!fp_bus.is_open() || !trace_level_at_least(4)) return;
-    const auto hart = context.hart.value_or(std::numeric_limits<uint32_t>::max());
     const auto event_cycle =
         channel == 'D' && context.completion_cycle ? *context.completion_cycle : cycle;
-    if (!accepts_trace_event("bus_transaction", event_cycle, hart, std::nullopt, context.target))
+    if (!accepts_trace_event("bus_transaction", event_cycle, context.hart, std::nullopt,
+                             context.target))
         return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::string fields;
@@ -884,7 +900,7 @@ void Tracer::log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::
     add_number("request_cycle", context.request_cycle);
     add_number("completion_cycle", context.completion_cycle);
     add_number("latency_cycles", context.latency_cycles);
-    add_number("hart", context.hart);
+    if (context.hart) fields += std::format(",\"hart\":{}", context.hart->raw());
     add_number("size_log2", context.transfer_size);
     if (context.transfer_size)
         fields += std::format(",\"width_bytes\":{}", 1u << *context.transfer_size);
@@ -910,14 +926,15 @@ void Tracer::log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::
                  "\"channel\":\"{}\",\"opcode\":{},\"source_id\":{},"
                  "\"sink_id\":{},\"address\":\"0x{:x}\",\"detail\":{}{}}}}}",
                  event_cycle, channel, json_quote(opcode), source, sink,
-                 static_cast<uint64_t>(address), json_quote(detail), fields);
+                 static_cast<uint64_t>(address.raw()), json_quote(detail), fields);
 }
 
 void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRecord> stalls) {
     if (!fp_pipeline_.is_open() || !trace_level_at_least(4) || stalls.empty()) return;
     const auto& state = cpu.state();
     const auto cycle = cpu.clint_mmio.mcycle;
-    if (!accepts_trace_event("pipeline_stall", cycle, static_cast<uint32_t>(state.mhartid),
+    if (!accepts_trace_event("pipeline_stall", cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)},
                              stalls.front().pc))
         return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
@@ -933,7 +950,7 @@ void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRe
                          result += std::format(
                              "{{\"stage\":{},\"pc\":\"0x{:x}\","
                              "\"remaining_cycles\":{},\"reason\":{}}}",
-                             json_quote(stall.stage), static_cast<uint64_t>(stall.pc),
+                             json_quote(stall.stage), static_cast<uint64_t>(stall.pc.raw()),
                              stall.remaining_cycles, json_quote(stall.reason));
                      }
                      return result;
@@ -946,9 +963,7 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
                        : transfer.complete ? "dma_complete"
                                            : "dma_start";
     const auto cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle;
-    if (!accepts_trace_event(event, cycle, std::numeric_limits<uint32_t>::max(), std::nullopt,
-                             transfer.component))
-        return;
+    if (!accepts_trace_event(event, cycle, std::nullopt, std::nullopt, transfer.component)) return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_devices,
                  "{{\"schema_version\":2,\"event\":\"{}\",\"timestamp\":\"{}\","
@@ -961,7 +976,7 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
 }
 
 void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
-                      simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
+                      simrv::xlen::TrapCause cause, simrv::xlen::VirtAddr trap_pc,
                       simrv::xlen::PrivilegeLevel priv, const ArchState& state,
                       simrv::xlen::CsrValue tval, const CPU& cpu) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
@@ -974,7 +989,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             "tp={:0{}x} a0={:0{}x} a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} "
             "sepc={:0{}x} satp={:0{}x} tval={:0{}x}",
             mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
-            static_cast<uint64_t>(trap_pc), kLogHexWidth, static_cast<unsigned>(priv),
+            static_cast<uint64_t>(trap_pc.raw()), kLogHexWidth, static_cast<unsigned>(priv),
             static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Ra)), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Sp)), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Tp)), kLogHexWidth,
@@ -986,7 +1001,8 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event("trap", cycle, static_cast<uint32_t>(state.mhartid), trap_pc)) {
+        accepts_trace_event("trap", cycle,
+                            simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)}, trap_pc)) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"trap\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -994,9 +1010,9 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                      "\"cause_name\":\"{}\",\"pc\":\"0x{:x}\","
                      "\"tval\":\"0x{:x}\",\"privilege\":{}}}}}",
                      trace_timestamp(), cycle, static_cast<unsigned>(state.mhartid),
-                     static_cast<uint64_t>(trap_pc), event_function_field(machine_, trap_pc),
+                     static_cast<uint64_t>(trap_pc.raw()), event_function_field(machine_, trap_pc),
                      privilege_mode(priv), static_cast<uint64_t>(cause), trap_cause_name(cause),
-                     static_cast<uint64_t>(trap_pc), static_cast<uint64_t>(tval),
+                     static_cast<uint64_t>(trap_pc.raw()), static_cast<uint64_t>(tval),
                      std::to_underlying(priv));
     }
     const auto& context = cpu.active_context();
@@ -1017,15 +1033,14 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
         !scalar_memory_opcode || memory_kind == pipeline::operation::MemoryAccessKind::None)
         return;
 
-    const simrv::xlen::Address effective_address =
-        cpu.effective_data_xlen() == 32 ? (context.mem_addr & 0xffffffffULL) : context.mem_addr;
+    const simrv::xlen::Address effective_address = trace_effective_address(cpu, context.mem_addr);
     const auto access_privilege = cpu.effective_data_privilege();
-    std::optional<simrv::xlen::Address> physical_address;
+    std::optional<simrv::xlen::PhysAddr> physical_address;
     const bool translation_enabled =
         access_privilege != kPrivMachine &&
         simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
     if (!translation_enabled) {
-        physical_address = effective_address;
+        physical_address = simrv::xlen::PhysAddr{effective_address};
     } else {
         const auto asid =
             static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
@@ -1034,14 +1049,16 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
         const auto& soft_tlb =
             memory_write_fault ? cpu.soft_tlb_write[tlb_index] : cpu.soft_tlb_read[tlb_index];
         if (soft_tlb.matches(vpn, asid, access_privilege, cpu.soft_tlb_epoch)) {
-            physical_address =
-                soft_tlb.paddr_base.raw() | (effective_address & simrv::memory::kPageMask);
+            physical_address = soft_tlb.paddr_base | (effective_address & simrv::memory::kPageMask);
         } else {
-            const auto* entry =
-                memory_write_fault ? cpu.tlb.peek_data_w(effective_address, asid, access_privilege)
-                                   : cpu.tlb.peek_data_r(effective_address, asid, access_privilege);
+            const auto* entry = memory_write_fault
+                                    ? cpu.tlb.peek_data_w(simrv::xlen::VirtAddr{effective_address},
+                                                          asid, access_privilege)
+                                    : cpu.tlb.peek_data_r(simrv::xlen::VirtAddr{effective_address},
+                                                          asid, access_privilege);
             if (entry != nullptr) {
-                physical_address = entry->p_addr | (effective_address & simrv::memory::kPageMask);
+                physical_address = simrv::xlen::PhysAddr{
+                    entry->p_addr | (effective_address & simrv::memory::kPageMask)};
             }
         }
     }
@@ -1060,7 +1077,8 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
             region = "unmapped";
         }
     }
-    if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid), trap_pc,
+    if (!accepts_trace_event("memory_fault", cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)}, trap_pc,
                              component))
         return;
     const auto store_value =
@@ -1074,12 +1092,12 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                  "\"region\":\"{}\",\"direction\":\"{}\",\"operation\":{},"
                  "\"width\":{},\"value\":{},\"cause\":{},\"cause_name\":{},"
                  "\"tval\":\"0x{:x}\",\"faulted\":true,\"latency_cycles\":null}}}}",
-                 cycle, static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(trap_pc),
+                 cycle, static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(trap_pc.raw()),
                  event_function_field(machine_, trap_pc), privilege_mode(access_privilege),
                  component.empty() ? "" : std::format("\"component\":{},", json_quote(component)),
                  static_cast<uint64_t>(effective_address),
                  physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
-                                                static_cast<uint64_t>(*physical_address))
+                                                static_cast<uint64_t>(physical_address->raw()))
                                   : "",
                  region, memory_write_fault ? "write" : "read",
                  json_quote(pipeline::operation_name(context.op_id)), width, value_json,
@@ -1089,7 +1107,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
 
 void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
                      simrv::xlen::Word ext_id, simrv::xlen::Word func_id, simrv::xlen::Word a0,
-                     simrv::xlen::Word a1, simrv::xlen::Address pc, simrv::xlen::HartId hart) {
+                     simrv::xlen::Word a1, simrv::xlen::VirtAddr pc, simrv::xlen::HartId hart) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
@@ -1100,10 +1118,10 @@ void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, uns
                      mtime, cause, static_cast<uint64_t>(ext_id), kLogHexWidth,
                      static_cast<uint64_t>(func_id), kLogHexWidth, static_cast<uint64_t>(a0),
                      kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth,
-                     static_cast<uint64_t>(pc), kLogHexWidth);
+                     static_cast<uint64_t>(pc.raw()), kLogHexWidth);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
-        accepts_trace_event("sbi", cycle, hart.val, pc)) {
+        accepts_trace_event("sbi", cycle, hart, pc)) {
         std::println(fp_devices,
                      "{{\"schema_version\":2,\"event\":\"sbi\","
                      "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1111,17 +1129,17 @@ void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, uns
                      "\"extension\":\"0x{:x}\",\"function\":\"0x{:x}\","
                      "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\","
                      "\"pc\":\"0x{:x}\"}}}}",
-                     trace_timestamp(), cycle, hart.val, static_cast<uint64_t>(pc),
+                     trace_timestamp(), cycle, hart.raw(), static_cast<uint64_t>(pc.raw()),
                      event_function_field(machine_, pc), cause, static_cast<uint64_t>(ext_id),
                      static_cast<uint64_t>(func_id), static_cast<uint64_t>(a0),
-                     static_cast<uint64_t>(a1), static_cast<uint64_t>(pc));
+                     static_cast<uint64_t>(a1), static_cast<uint64_t>(pc.raw()));
     }
 }
 
 void Tracer::log_architecture_retirement(const CPU& cpu,
                                          const pipeline::PipelineContext& retiring_context) {
     if (!needs_retiring_context()) return;
-    const auto hart_id = static_cast<uint32_t>(cpu.state().mhartid);
+    const auto hart_id = simrv::xlen::HartId{static_cast<uint32_t>(cpu.state().mhartid)};
     const auto cycle = cpu.clint_mmio.mcycle;
     const auto memory_kind = pipeline::operation::info(retiring_context.op_id).memory;
     const auto opcode = static_cast<Opcode>(retiring_context.opcode);
@@ -1154,9 +1172,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          (retiring_context.opcode == isa::Opcode::Jal ||
                           retiring_context.opcode == isa::Opcode::Jalr) &&
                          is_link_register;
-    const bool emit_retire =
-        trace_level_at_least(3) &&
-        accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc.raw());
+    const bool emit_retire = trace_level_at_least(3) &&
+                             accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc);
     const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2) &&
                             (is_call || is_return) &&
                             (trace_event_selected("call") || trace_event_selected("return"));
@@ -1165,7 +1182,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                                  trace_event_selected("interrupt_return");
     const bool emit_registers =
         fp_registers_.is_open() &&
-        accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc.raw());
+        accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc);
     if (!emit_retire && !emit_calls && !emit_interrupts && !emit_memory && !emit_registers) return;
     const auto& state = cpu.state();
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
@@ -1179,14 +1196,14 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                      "\"register_file\":\"fpr\",\"index\":{},"
                      "\"before_bits\":\"0x{:016x}\",\"after_bits\":\"0x{:016x}\","
                      "\"flen\":64,\"fcsr\":\"0x{:x}\"}}",
-                     hart_id, cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
+                     hart_id.raw(), cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
                      static_cast<uint32_t>(retiring_context.ir),
                      json_quote(pipeline::operation_name(retiring_context.op_id)), index,
                      static_cast<uint64_t>(retiring_context.fp_old_value),
                      static_cast<uint64_t>(after), static_cast<uint64_t>(state.fcsr));
     }
     if (emit_registers && retiring_context.traits.writes_vec) {
-        const auto hart = static_cast<size_t>(hart_id);
+        const auto hart = static_cast<size_t>(hart_id.raw());
         const auto sequence = retiring_context.trace_sequence;
         auto before = std::vector<uint8_t>{};
         if (hart < vector_write_before_.size()) {
@@ -1224,7 +1241,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          "\"register_file\":\"vector\",\"index\":{},"
                          "\"before_bits\":{},\"after_bits\":{},\"vlen\":{},"
                          "\"vl\":{},\"vtype\":\"0x{:x}\"}}",
-                         hart_id, cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
+                         hart_id.raw(), cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
                          static_cast<uint32_t>(retiring_context.ir),
                          json_quote(pipeline::operation_name(retiring_context.op_id)), index,
                          to_hex(before_bits), to_hex(after_bits), trace_vlen_,
@@ -1233,15 +1250,14 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     }
     if (emit_memory) {
         const simrv::xlen::Address effective_address =
-            cpu.effective_data_xlen() == 32 ? (retiring_context.mem_addr & 0xffffffffULL)
-                                            : retiring_context.mem_addr;
+            trace_effective_address(cpu, retiring_context.mem_addr);
         const auto access_privilege = cpu.effective_data_privilege();
-        std::optional<simrv::xlen::Address> physical_address;
+        std::optional<simrv::xlen::PhysAddr> physical_address;
         const bool translation_enabled =
             access_privilege != kPrivMachine &&
             simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
         if (!translation_enabled) {
-            physical_address = effective_address;
+            physical_address = simrv::xlen::PhysAddr{effective_address};
         } else {
             const auto asid =
                 static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
@@ -1252,15 +1268,17 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                                        : cpu.soft_tlb_read[tlb_index];
             if (soft_tlb.matches(vpn, asid, access_privilege, cpu.soft_tlb_epoch)) {
                 physical_address =
-                    soft_tlb.paddr_base.raw() | (effective_address & simrv::memory::kPageMask);
+                    soft_tlb.paddr_base | (effective_address & simrv::memory::kPageMask);
             } else {
                 const auto* entry =
                     memory_kind == pipeline::operation::MemoryAccessKind::Store
-                        ? cpu.tlb.peek_data_w(effective_address, asid, access_privilege)
-                        : cpu.tlb.peek_data_r(effective_address, asid, access_privilege);
+                        ? cpu.tlb.peek_data_w(simrv::xlen::VirtAddr{effective_address}, asid,
+                                              access_privilege)
+                        : cpu.tlb.peek_data_r(simrv::xlen::VirtAddr{effective_address}, asid,
+                                              access_privilege);
                 if (entry != nullptr) {
-                    physical_address =
-                        entry->p_addr | (effective_address & simrv::memory::kPageMask);
+                    physical_address = simrv::xlen::PhysAddr{
+                        entry->p_addr | (effective_address & simrv::memory::kPageMask)};
                 }
             }
         }
@@ -1287,8 +1305,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
             opcode == Opcode::LoadFp ? retiring_context.fp_mem_rdata : retiring_context.mem_rdata);
         const auto write_value = static_cast<uint64_t>(
             opcode == Opcode::StoreFp ? retiring_context.fp_mem_wdata : retiring_context.mem_wdata);
-        if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc.raw(),
-                                component)) {
+        if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc, component)) {
             if (memory_kind == pipeline::operation::MemoryAccessKind::Atomic) {
                 std::println(
                     fp_memory,
@@ -1299,14 +1316,14 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     "\"region\":\"{}\",\"operation\":{},\"width\":{},"
                     "\"read_value\":\"0x{:x}\",\"write_value\":\"0x{:x}\","
                     "\"faulted\":false,\"latency_cycles\":null}}}}",
-                    cycle, hart_id, static_cast<uint64_t>(retiring_context.cpc.raw()),
-                    event_function_field(machine_, retiring_context.cpc.raw()),
+                    cycle, hart_id.raw(), static_cast<uint64_t>(retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
                     privilege_mode(access_privilege),
                     component.empty() ? ""
                                       : std::format("\"component\":{},", json_quote(component)),
                     static_cast<uint64_t>(effective_address),
                     physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
-                                                   static_cast<uint64_t>(*physical_address))
+                                                   static_cast<uint64_t>(physical_address->raw()))
                                      : "",
                     region, json_quote(pipeline::operation_name(retiring_context.op_id)), width,
                     read_value, write_value);
@@ -1319,15 +1336,15 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     "\"region\":\"{}\",\"direction\":\"{}\","
                     "\"operation\":{},\"width\":{},\"value\":\"0x{:x}\","
                     "\"faulted\":false,\"latency_cycles\":null}}}}",
-                    json_quote(memory_event), cycle, hart_id,
+                    json_quote(memory_event), cycle, hart_id.raw(),
                     static_cast<uint64_t>(retiring_context.cpc.raw()),
-                    event_function_field(machine_, retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
                     privilege_mode(access_privilege),
                     component.empty() ? ""
                                       : std::format("\"component\":{},", json_quote(component)),
                     static_cast<uint64_t>(effective_address),
                     physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
-                                                   static_cast<uint64_t>(*physical_address))
+                                                   static_cast<uint64_t>(physical_address->raw()))
                                      : "",
                     region, is_load ? "read" : (is_store ? "write" : "access"),
                     json_quote(pipeline::operation_name(retiring_context.op_id)), width,
@@ -1344,7 +1361,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                              "\"record\":{},\"byte_offset\":{},\"cycle\":{},"
                              "\"hart\":{},\"pc\":\"0x{:x}\",\"event\":\"retire\"}}",
                              retire_record_count_, static_cast<uint64_t>(record_offset), cycle,
-                             hart_id, static_cast<uint64_t>(retiring_context.cpc.raw()));
+                             hart_id.raw(), static_cast<uint64_t>(retiring_context.cpc.raw()));
             }
         }
         RetirementRecordBuilder record;
@@ -1367,24 +1384,26 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
             const auto frame = trap_frames_[hart_id].back();
             trap_frames_[hart_id].pop_back();
             if (frame.interrupt &&
-                accepts_trace_event("interrupt_return", cycle, static_cast<uint32_t>(hart_id),
-                                    retiring_context.cpc.raw())) {
+                accepts_trace_event("interrupt_return", cycle,
+                                    simrv::xlen::HartId{static_cast<uint32_t>(hart_id)},
+                                    retiring_context.cpc)) {
                 const auto depth = std::ranges::count_if(
                     trap_frames_[hart_id],
                     [](const TrapTraceFrame& trap_frame) { return trap_frame.interrupt; });
-                std::println(
-                    fp_interrupts,
-                    "{{\"schema_version\":2,\"event\":\"interrupt_return\","
-                    "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
-                    "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{"
-                    "\"cause\":{},\"epc\":\"0x{:x}\","
-                    "\"target_pc\":\"0x{:x}\",\"nesting_depth\":{}}}}}",
-                    trace_timestamp(), cpu.clint_mmio.mcycle, static_cast<unsigned>(state.mhartid),
-                    static_cast<uint64_t>(retiring_context.cpc.raw()),
-                    event_function_field(machine_, retiring_context.cpc.raw()),
-                    privilege_mode(state.priv),
-                    static_cast<uint64_t>(trap_exception_code(frame.cause)),
-                    static_cast<uint64_t>(frame.epc), static_cast<uint64_t>(state.pc), depth);
+                std::println(fp_interrupts,
+                             "{{\"schema_version\":2,\"event\":\"interrupt_return\","
+                             "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                             "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{"
+                             "\"cause\":{},\"epc\":\"0x{:x}\","
+                             "\"target_pc\":\"0x{:x}\",\"nesting_depth\":{}}}}}",
+                             trace_timestamp(), cpu.clint_mmio.mcycle,
+                             static_cast<unsigned>(state.mhartid),
+                             static_cast<uint64_t>(retiring_context.cpc.raw()),
+                             event_function_field(machine_, retiring_context.cpc),
+                             privilege_mode(state.priv),
+                             static_cast<uint64_t>(trap_exception_code(frame.cause)),
+                             static_cast<uint64_t>(frame.epc.raw()),
+                             static_cast<uint64_t>(state.pc.raw()), depth);
             }
         }
     }
@@ -1394,7 +1413,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     if (hart >= call_depth_.size()) call_depth_.resize(hart + 1);
     if (is_call) {
         const auto depth = ++call_depth_[hart];
-        if (fp_calls.is_open() && accepts_trace_event("call", cycle, hart_id, source_pc)) {
+        if (fp_calls.is_open() &&
+            accepts_trace_event("call", cycle, hart_id, retiring_context.cpc)) {
             std::println(fp_calls,
                          "{{\"schema_version\":2,\"event\":\"call\","
                          "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1403,13 +1423,14 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          "\"return_pc\":\"0x{:x}\",\"call_depth\":{}}}}}",
                          trace_timestamp(), cpu.clint_mmio.mcycle,
                          static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(source_pc),
-                         event_function_field(machine_, source_pc), privilege_mode(state.priv),
-                         static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc),
-                         static_cast<uint64_t>(return_pc), depth);
+                         event_function_field(machine_, retiring_context.cpc),
+                         privilege_mode(state.priv), static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), static_cast<uint64_t>(return_pc), depth);
         }
     } else if (is_return) {
         const auto depth = call_depth_[hart] == 0 ? 0 : --call_depth_[hart];
-        if (fp_calls.is_open() && accepts_trace_event("return", cycle, hart_id, source_pc)) {
+        if (fp_calls.is_open() &&
+            accepts_trace_event("return", cycle, hart_id, retiring_context.cpc)) {
             std::println(fp_calls,
                          "{{\"schema_version\":2,\"event\":\"return\","
                          "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -1418,8 +1439,9 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          "\"call_depth\":{}}}}}",
                          trace_timestamp(), cpu.clint_mmio.mcycle,
                          static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(source_pc),
-                         event_function_field(machine_, source_pc), privilege_mode(state.priv),
-                         static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc), depth);
+                         event_function_field(machine_, retiring_context.cpc),
+                         privilege_mode(state.priv), static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), depth);
         }
     }
 }
@@ -1455,15 +1477,17 @@ void Tracer::write_trace_metadata(bool completed) {
         json_quote(machine_.configuration().debug.trace_function),
         json_quote(machine_.configuration().debug.trace_device),
         machine_.configuration().debug.trace_hart
-            ? std::format("{}", *machine_.configuration().debug.trace_hart)
+            ? std::format("{}", machine_.configuration().debug.trace_hart->raw())
             : "null",
         machine_.configuration().debug.trace_pc_start
             ? json_quote(std::format(
-                  "0x{:x}", static_cast<uint64_t>(*machine_.configuration().debug.trace_pc_start)))
+                  "0x{:x}",
+                  static_cast<uint64_t>(machine_.configuration().debug.trace_pc_start->raw())))
             : "null",
         machine_.configuration().debug.trace_pc_end
             ? json_quote(std::format(
-                  "0x{:x}", static_cast<uint64_t>(*machine_.configuration().debug.trace_pc_end)))
+                  "0x{:x}",
+                  static_cast<uint64_t>(machine_.configuration().debug.trace_pc_end->raw())))
             : "null",
         machine_.configuration().debug.trace_after_cycle
             ? std::format("{}", *machine_.configuration().debug.trace_after_cycle)
@@ -1650,6 +1674,85 @@ void Tracer::write_instruction_mix_report() {
         static_cast<simrv::xlen::Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
 
+namespace {
+
+auto visual_width(std::string_view s) -> size_t {
+    size_t width = 0;
+    bool in_esc = false;
+    for (size_t i = 0; i < s.length(); ++i) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c == '\033') {
+            in_esc = true;
+        } else if (in_esc) {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
+                in_esc = false;
+            }
+        } else {
+            if ((c & 0x80) == 0) {
+                ++width;
+            } else if ((c & 0xE0) == 0xC0) {
+                ++width;
+                if (i + 1 < s.length()) ++i;
+            } else if ((c & 0xF0) == 0xE0) {
+                ++width;
+                if (i + 2 < s.length())
+                    i += 2;
+                else
+                    i = s.length();
+            } else if ((c & 0xF8) == 0xF0) {
+                ++width;
+                if (i + 3 < s.length())
+                    i += 3;
+                else
+                    i = s.length();
+            }
+        }
+    }
+    return width;
+}
+
+auto format_duration_adaptive(uint64_t microseconds) -> std::string {
+    if (microseconds < 1000) {
+        return std::format("{} µs", microseconds);
+    }
+    if (microseconds < 1000000) {
+        return std::format("{:.2f} ms", static_cast<double>(microseconds) / 1000.0);
+    }
+    return std::format("{:.3f} s", static_cast<double>(microseconds) / 1000000.0);
+}
+
+auto format_speed_value(double mips) -> std::string {
+    if (mips >= 1000.0) {
+        return std::format("{:.3f} GIPS", mips / 1000.0);
+    }
+    if (mips >= 1.0) {
+        return std::format("{:.2f} MIPS", mips);
+    }
+    const auto kips = static_cast<uint64_t>(mips * 1000.0);
+    return std::format("{} KIPS", simrv::util::format_with_commas(kips));
+}
+
+auto render_progress_bar(double percent, bool tty, std::string_view c_fill,
+                         std::string_view c_empty, std::string_view c_reset) -> std::string {
+    const int total_blocks = 10;
+    const int filled = std::clamp(static_cast<int>(std::round(percent / 10.0)), 0, total_blocks);
+    std::string bar = "[";
+    if (tty) {
+        bar += c_fill;
+        for (int i = 0; i < filled; ++i) bar += "█";
+        bar += c_empty;
+        for (int i = filled; i < total_blocks; ++i) bar += "░";
+        bar += c_reset;
+    } else {
+        for (int i = 0; i < filled; ++i) bar += "█";
+        for (int i = filled; i < total_blocks; ++i) bar += "░";
+    }
+    bar += "]";
+    return bar;
+}
+
+}  // namespace
+
 void Tracer::print_summary() {
     using simrv::util::format_scaled;
     using simrv::util::format_with_commas;
@@ -1662,8 +1765,9 @@ void Tracer::print_summary() {
     simrv::xlen::Counter icount = 0;
     simrv::xlen::Counter ccount = 0;
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
-        icount += machine_.hart(hart).e_icount;
-        ccount += machine_.hart(hart).e_ccount;
+        const auto& h = machine_.hart(hart);
+        icount += (h.state().minstret != 0 ? h.state().minstret : h.e_icount);
+        ccount += h.e_ccount;
     }
 
     const double cpi =
@@ -1672,93 +1776,187 @@ void Tracer::print_summary() {
         mcycle == 0 ? 0.0 : static_cast<double>(icount) / static_cast<double>(mcycle);
     const double comp_ratio =
         icount == 0 ? 0.0 : (static_cast<double>(ccount) * 100.0) / static_cast<double>(icount);
-    const double etime_sec = static_cast<double>(etime) / 1000000.0;
+    FILE* const stream = simrv::log::get_log_to_stderr() ? stderr : stdout;
+    const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
+    const bool tty = simrv::util::terminal_color_enabled(fd);
 
-    simrv::log::info("--------------------------------------------------");
-    simrv::log::info("                Execution Summary                 ");
-    simrv::log::info("--------------------------------------------------");
-    simrv::log::info("Simulation Engine        : {:>22}",
-                     machine_.runtime_profile.execution_name());
-    simrv::log::info("Termination reason       : {:>22}",
-                     Machine::stop_reason_name(machine_.stop_reason()));
-    simrv::log::info("Process exit status      : {:>22}", machine_.exit_code.load());
-    simrv::log::info("Target / harts           : {:>13} / {:<3}",
-                     std::format("RV{}", simrv::xlen::kXLenBits), machine_.num_harts());
-    if (machine_.runtime_profile.is_cycle_mode()) {
-        simrv::log::info("CA pipeline              : {:>22}",
-                         pipeline::pipeline_type_name(machine_.execution_config().pipeline_type));
+    const std::string_view c_border = tty ? "\033[1;36m" : "";
+    const std::string_view c_header = tty ? "\033[1;37m" : "";
+    const std::string_view c_green = tty ? "\033[1;32m" : "";
+    const std::string_view c_red = tty ? "\033[1;31m" : "";
+    const std::string_view c_yellow = tty ? "\033[1;33m" : "";
+    const std::string_view c_cyan = tty ? "\033[36m" : "";
+    const std::string_view c_dim = tty ? "\033[90m" : "";
+    const std::string_view c_reset = tty ? "\033[0m" : "";
+
+    auto row = [&](std::string_view content) {
+        const size_t vw = visual_width(content);
+        const size_t pad = (vw < 66) ? (66 - vw) : 0;
+        std::println(stream, "{}│{} {}{}{} │{}", c_border, c_reset, content, std::string(pad, ' '),
+                     c_border, c_reset);
+    };
+
+    auto empty_row = [&]() { row(""); };
+
+    std::fflush(stdout);
+    if (auto* uart = machine_.uart_device(); uart != nullptr) {
+        uart->flush_tx_buffer();
     }
-    simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle),
-                     format_with_commas(mcycle));
-    simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
-                     format_with_commas(icount));
-    simrv::log::info("Final architectural PC   :   0x{:016x}", machine_.primary_hart().state().pc);
-    simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
-                     format_with_commas(ccount), comp_ratio);
-    simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
-    simrv::log::info("Instrs Per Cycle (IPC)   : {:>12.3f}", ipc);
+    std::fflush(stdout);
 
+    std::println(stream);
+    std::println(stream,
+                 "{}┌── SimRV Execution Summary ─────────────────────────────────────────┐{}",
+                 c_border, c_reset);
+
+    // Section 1: Simulation Status
+    row(std::format("{}Simulation Status{}", c_header, c_reset));
+    const std::string isa_str =
+        simrv::xlen::resolve_misa_string(machine_.primary_hart().state().misa);
+    const auto profile_str = to_profile_string(machine_.execution_config().profile);
+    std::string arch_desc = isa_str;
+    if (!profile_str.empty() && profile_str != "legacy" &&
+        !(isa_str.starts_with("RV32") && profile_str.ends_with("64"))) {
+        arch_desc += std::format(" ({})", profile_str);
+    }
+    row(std::format("  {:<22}: {} · {} hart(s)", "Target Architecture", arch_desc,
+                    machine_.num_harts()));
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        row(std::format("  {:<22}: {} ({})", "Simulation Engine",
+                        machine_.runtime_profile.execution_name(),
+                        pipeline::pipeline_type_name(machine_.execution_config().pipeline_type)));
+    } else {
+        row(std::format("  {:<22}: {}", "Simulation Engine",
+                        machine_.runtime_profile.execution_name()));
+    }
+    row(std::format("  {:<22}: {}", "Termination Reason",
+                    Machine::stop_reason_name(machine_.stop_reason())));
+    const int exit_code = machine_.exit_code.load();
+    if (exit_code == 0) {
+        row(std::format("  {:<22}: {}0 (Success){}", "Exit Status", c_green, c_reset));
+    } else {
+        row(std::format("  {:<22}: {}{} (Failure){}", "Exit Status", c_red, exit_code, c_reset));
+    }
+
+    // Section 2: Performance & Throughput
+    empty_row();
+    row(std::format("{}Performance & Throughput{}", c_header, c_reset));
+    row(std::format("  {:<22}: {}  ({})", "Retired Instructions", format_scaled(icount),
+                    format_with_commas(icount)));
+    row(std::format("  {:<22}: {}  ({})", "Elapsed Cycles", format_scaled(mcycle),
+                    format_with_commas(mcycle)));
+    row(std::format("  {:<22}: {:.3f}  (IPC: {:.3f})", "Cycles Per Inst (CPI)", cpi, ipc));
+    const bool has_c =
+        (machine_.primary_hart().state().misa & (1ULL << ('c' - 'a'))) != 0 || ccount > 0;
+    if (has_c) {
+        const auto bar = render_progress_bar(comp_ratio, tty, c_cyan, c_dim, c_reset);
+        row(std::format("  {:<22}: {:>5.1f}%  {}  ({} insns)", "Compressed RVC Share", comp_ratio,
+                        bar, format_with_commas(ccount)));
+    }
+    row(std::format("  {:<22}: {}0x{:016x}{}", "Final Primary PC", c_yellow,
+                    machine_.primary_hart().state().pc.raw(), c_reset));
+    row(std::format("  {:<22}: {}", "Host Wall Time", format_duration_adaptive(etime)));
+
+    machine_.sample_throughput();
+    const double avg_mips =
+        (etime == 0) ? 0.0 : static_cast<double>(icount) / static_cast<double>(etime);
+    const double peak_mips = std::max(machine_.peak_mips(), avg_mips);
+    const std::string avg_str = format_speed_value(avg_mips);
+    const std::string peak_str = format_speed_value(peak_mips);
+    row(std::format("  {:<22}: {}{} avg{}  ({} peak)", "Simulation Speed", c_green, avg_str,
+                    c_reset, peak_str));
+
+    // Section 3: Multi-Hart Breakdown
     if (machine_.num_harts() > 1) {
+        empty_row();
+        row(std::format("{}Multi-Hart Core Breakdown{}", c_header, c_reset));
         for (size_t i = 0; i < machine_.num_harts(); ++i) {
             const auto& h = machine_.hart(i);
             const char* priv_str = (h.state().priv == simrv::xlen::PrivilegeLevel::Machine) ? "M"
                                    : (h.state().priv == simrv::xlen::PrivilegeLevel::Supervisor)
                                        ? "S"
                                        : "U";
-            simrv::log::info("Hart {:<2} [mode {:>1}, PC 0x{:016x}] Executed Insns : {:>12}  ({})",
-                             i, priv_str, h.state().pc, format_scaled(h.e_icount),
-                             format_with_commas(h.e_icount));
+            const double share = icount == 0 ? 0.0
+                                             : (static_cast<double>(h.e_icount) * 100.0) /
+                                                   static_cast<double>(icount);
+            row(std::format("  Hart {:<2} [{}-mode]  PC: {}0x{:016x}{}  {:>10} insns ({:4.1f}%)", i,
+                            priv_str, c_yellow, h.state().pc.raw(), c_reset,
+                            format_scaled(h.e_icount), share));
         }
     }
 
+    // Section 4: Microarchitecture & Pipeline / Memory (if cycle mode)
     if (machine_.runtime_profile.is_cycle_mode()) {
+        empty_row();
+        row(std::format("{}Microarchitecture & Pipeline{}", c_header, c_reset));
         const auto& ps = machine_.primary_hart().pipeline_sim;
-        double stall_pct = mcycle == 0 ? 0.0
-                                       : (static_cast<double>(ps.stall_cycles()) * 100.0) /
-                                             static_cast<double>(mcycle);
-        simrv::log::info("Total Stall/Bubble Cycles: {:>12}  [{:.1f}%]",
-                         format_with_commas(ps.stall_cycles()), stall_pct);
-        simrv::log::info(" - Data RAW Stalls       : {:>12}",
-                         format_with_commas(ps.data_hazard_stalls()));
-        simrv::log::info(" - Control Bubbles       : {:>12}",
-                         format_with_commas(ps.control_hazard_bubbles()));
-        simrv::log::info(" - ICache Miss Stalls    : {:>12}",
-                         format_with_commas(ps.icache_stalls()));
-        simrv::log::info(" - DCache Miss Stalls    : {:>12}",
-                         format_with_commas(ps.dcache_stalls()));
-        simrv::log::info(" - Page-walk Stalls      : {:>12}", format_with_commas(ps.tlb_stalls()));
-        simrv::log::info("L1I hits / misses        : {:>12} / {}",
-                         format_with_commas(machine_.primary_hart().icache.hit_count()),
-                         format_with_commas(machine_.primary_hart().icache.miss_count()));
-        simrv::log::info("L1D hits / misses        : {:>12} / {}",
-                         format_with_commas(machine_.primary_hart().dcache.hit_count()),
-                         format_with_commas(machine_.primary_hart().dcache.miss_count()));
+        const double stall_pct = mcycle == 0 ? 0.0
+                                             : (static_cast<double>(ps.stall_cycles()) * 100.0) /
+                                                   static_cast<double>(mcycle);
+        row(std::format("  {:<22}: {}  ({:.1f}% of cycles)", "Total Stall Cycles",
+                        format_with_commas(ps.stall_cycles()), stall_pct));
+        row(std::format("    · {:<20}: {}", "Data RAW Stalls",
+                        format_with_commas(ps.data_hazard_stalls())));
+        row(std::format("    · {:<20}: {}", "Control Bubbles",
+                        format_with_commas(ps.control_hazard_bubbles())));
+        row(std::format("    · {:<20}: {}", "I-Cache Miss",
+                        format_with_commas(ps.icache_stalls())));
+        row(std::format("    · {:<20}: {}", "D-Cache Miss",
+                        format_with_commas(ps.dcache_stalls())));
+        row(std::format("    · {:<20}: {}", "Page-Walk Stalls",
+                        format_with_commas(ps.tlb_stalls())));
+
+        empty_row();
+        row(std::format("{}Memory & Cache Subsystem{}", c_header, c_reset));
+        const auto ic_hits = machine_.primary_hart().icache.hit_count();
+        const auto ic_miss = machine_.primary_hart().icache.miss_count();
+        const auto ic_total = ic_hits + ic_miss;
+        const double ic_rate =
+            ic_total == 0 ? 0.0 : (static_cast<double>(ic_hits) * 100.0) / ic_total;
+        if (ic_total > 0) {
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% hit rate)",
+                            "L1 Instruction Cache", format_with_commas(ic_hits),
+                            format_with_commas(ic_miss), ic_rate));
+        } else {
+            row(std::format("  {:<22}: 0 hits / 0 misses", "L1 Instruction Cache"));
+        }
+
+        const auto dc_hits = machine_.primary_hart().dcache.hit_count();
+        const auto dc_miss = machine_.primary_hart().dcache.miss_count();
+        const auto dc_total = dc_hits + dc_miss;
+        const double dc_rate =
+            dc_total == 0 ? 0.0 : (static_cast<double>(dc_hits) * 100.0) / dc_total;
+        if (dc_total > 0) {
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% hit rate)", "L1 Data Cache",
+                            format_with_commas(dc_hits), format_with_commas(dc_miss), dc_rate));
+        } else {
+            row(std::format("  {:<22}: 0 hits / 0 misses", "L1 Data Cache"));
+        }
+
         const auto& bp_stats = machine_.primary_hart().branch_predictor.stats();
         if (bp_stats.direction_predictions > 0) {
-            simrv::log::info("Branch hits / misses     : {:>12} / {}",
-                             format_with_commas(bp_stats.direction_hits),
-                             format_with_commas(bp_stats.direction_misses));
+            const double bp_rate = (static_cast<double>(bp_stats.direction_hits) * 100.0) /
+                                   bp_stats.direction_predictions;
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% accuracy)", "Branch Predictor",
+                            format_with_commas(bp_stats.direction_hits),
+                            format_with_commas(bp_stats.direction_misses), bp_rate));
         }
+
         const auto& bus = machine_.memory().system_bus();
-        simrv::log::info("Bus reads / writes       : {:>12} / {}",
-                         format_with_commas(bus.read_count()),
-                         format_with_commas(bus.write_count()));
-        simrv::log::info("Bus pending req / resp   : {:>12} / {}",
-                         format_with_commas(bus.pending_requests()),
-                         format_with_commas(bus.pending_responses()));
+        row(std::format("  {:<22}: {} reads / {} writes", "System Bus Activity",
+                        format_with_commas(bus.read_count()),
+                        format_with_commas(bus.write_count())));
+        if (bus.pending_requests() > 0 || bus.pending_responses() > 0) {
+            row(std::format("  {:<22}: {} req / {} resp", "Bus Pending",
+                            format_with_commas(bus.pending_requests()),
+                            format_with_commas(bus.pending_responses())));
+        }
     }
 
-    simrv::log::info("Elapsed time (real)      : {:>12.3f} sec", etime_sec);
-
-    const auto kips = icount * 1000UL / etime;
-    const double mips = static_cast<double>(icount) / static_cast<double>(etime);
-    if (mips >= 1.0) {
-        simrv::log::info("Simulation speed         : {:>12.2f} MIPS ({}/s)", mips,
-                         format_with_commas(kips * 1000));
-    } else {
-        simrv::log::info("Simulation speed         : {:>12} KIPS", format_with_commas(kips));
-    }
-    simrv::log::info("--------------------------------------------------");
+    std::println(stream,
+                 "{}└────────────────────────────────────────────────────────────────────┘{}",
+                 c_border, c_reset);
+    std::fflush(stream);
 
     if (machine_.instruction_mix_enabled()) {
         write_instruction_mix_report();
@@ -1777,12 +1975,18 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         compressed += machine_.hart(hart).e_ccount;
     }
     const auto cycles = machine_.primary_hart().clint_mmio.mcycle;
-    const auto pc = machine_.primary_hart().state().pc;
+    const auto pc = machine_.primary_hart().state().pc.raw();
     const auto& cpu = machine_.primary_hart();
     const auto& bp = cpu.branch_predictor.stats();
     const auto& bus = machine_.memory().system_bus();
     const double cpi = retired == 0 ? 0.0 : static_cast<double>(cycles) / retired;
     const double ipc = cycles == 0 ? 0.0 : static_cast<double>(retired) / cycles;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now() - machine_.start_time())
+                             .count();
+    const double json_avg_mips =
+        elapsed == 0 ? 0.0 : static_cast<double>(retired) / static_cast<double>(elapsed);
+    const double json_peak_mips = std::max(machine_.peak_mips(), json_avg_mips);
 
     out << "{\n"
         << "  \"schema_version\": 1,\n"
@@ -1798,6 +2002,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         << "  \"compressed_instructions\": " << compressed << ",\n"
         << "  \"cpi\": " << std::format("{:.9f}", cpi) << ",\n"
         << "  \"ipc\": " << std::format("{:.9f}", ipc) << ",\n"
+        << "  \"speed_mips_avg\": " << std::format("{:.3f}", json_avg_mips) << ",\n"
+        << "  \"speed_mips_peak\": " << std::format("{:.3f}", json_peak_mips) << ",\n"
         << "  \"performance\": {\n"
         << "    \"icache_hits\": " << cpu.icache.hit_count() << ",\n"
         << "    \"icache_misses\": " << cpu.icache.miss_count() << ",\n"
@@ -1815,8 +2021,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         const auto& cpu = machine_.hart(hart);
         const auto& hart_bp = cpu.branch_predictor.stats();
         out << "    {\"hart\": " << hart << ", \"retired_instructions\": " << cpu.e_icount
-            << ", \"compressed_instructions\": " << cpu.e_ccount << ", \"pc\": " << cpu.state().pc
-            << ", \"cycles\": " << cpu.clint_mmio.mcycle
+            << ", \"compressed_instructions\": " << cpu.e_ccount
+            << ", \"pc\": " << cpu.state().pc.raw() << ", \"cycles\": " << cpu.clint_mmio.mcycle
             << ", \"performance\": {\"icache_hits\": " << cpu.icache.hit_count()
             << ", \"icache_misses\": " << cpu.icache.miss_count()
             << ", \"dcache_hits\": " << cpu.dcache.hit_count()
@@ -1830,8 +2036,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     return static_cast<bool>(out);
 }
 
-void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
-                                          simrv::xlen::Register jmp_pc, Opcode r_opcode,
+void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::VirtAddr cpc,
+                                          simrv::xlen::VirtAddr jmp_pc, Opcode r_opcode,
                                           bool r_tkn) {
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (!bpred_opened_) {
@@ -1848,8 +2054,8 @@ void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xle
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
     const int ir_branch = static_cast<int>(opcode == Opcode::Branch);
 
-    const simrv::xlen::Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
-    std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
+    const simrv::xlen::Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc.raw() : 0;
+    std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc.raw(),
                  D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn),
                  ir_jump, ir_branch);
 }
@@ -1868,7 +2074,7 @@ void Tracer::write_trace_snapshot() {
                  static_cast<simrv::xlen::Counter>(cpu.clint_mmio.mtime),
                  static_cast<unsigned>(st.mhartid), static_cast<uint64_t>(context.cpc.raw()),
                  D_TRACE_HEX_WIDTH, static_cast<uint32_t>(context.ir), operation,
-                 static_cast<uint64_t>(st.pc), D_TRACE_HEX_WIDTH);
+                 static_cast<uint64_t>(st.pc.raw()), D_TRACE_HEX_WIDTH);
     for (unsigned row = 0; row < 8; ++row) {
         std::print(fp_trace, "  ");
         for (unsigned column = 0; column < 4; ++column) {

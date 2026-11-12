@@ -128,8 +128,9 @@ void HartModal::render(std::vector<std::string>& /*content_rows*/,
         }
 
         std::string pc_str = (st.regs.xlen == 64)
-                                 ? std::format("0x{:016x}", st.pc)
-                                 : std::format("0x{:08x}        ", static_cast<uint32_t>(st.pc));
+                                 ? std::format("0x{:016x}", st.pc.raw())
+                                 : std::format("0x{:08x}        ",
+                                               static_cast<uint32_t>(st.pc.raw()));
 
         std::string sym = machine.symbol_table().lookup(st.pc);
         if (sym.empty()) sym = "-";
@@ -143,8 +144,9 @@ void HartModal::render(std::vector<std::string>& /*content_rows*/,
             line = std::format(
                 " \033[1;7m▶ #{:<5} {:<5} {:<15} {:<19} {:<21} {:>8} \033[0m", i, priv_str,
                 hart.is_wfi_quiescent() ? "WFI" : (machine.is_paused() ? "PAUSED" : "RUNNING"),
-                (st.regs.xlen == 64) ? std::format("0x{:016x}", st.pc)
-                                     : std::format("0x{:08x}", static_cast<uint32_t>(st.pc)),
+                (st.regs.xlen == 64) ? std::format("0x{:016x}", st.pc.raw())
+                                     : std::format("0x{:08x}",
+                                                   static_cast<uint32_t>(st.pc.raw())),
                 sym, ret_str);
         } else {
             line = std::format("   #{:<5} {:<5} {:<24} {:<19} {:<21} {:>8}", i, priv_str,

@@ -1,0 +1,43 @@
+# Toolchain file for cross-compiling SimRV to Linux AArch64 (ARM64)
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+
+if(DEFINED ENV{AARCH64_TOOLCHAIN_PREFIX})
+    set(_aarch64_prefix "$ENV{AARCH64_TOOLCHAIN_PREFIX}")
+else()
+    set(_aarch64_prefix "aarch64-linux-gnu-")
+endif()
+
+find_program(AARCH64_C_COMPILER NAMES "${_aarch64_prefix}gcc" "${_aarch64_prefix}clang" "clang")
+find_program(AARCH64_CXX_COMPILER NAMES "${_aarch64_prefix}g++" "${_aarch64_prefix}clang++" "clang++")
+
+if(AARCH64_C_COMPILER AND AARCH64_CXX_COMPILER)
+    set(CMAKE_C_COMPILER "${AARCH64_C_COMPILER}")
+    set(CMAKE_CXX_COMPILER "${AARCH64_CXX_COMPILER}")
+    if(AARCH64_C_COMPILER MATCHES "clang")
+        set(CMAKE_C_FLAGS_INIT "--target=aarch64-linux-gnu")
+        set(CMAKE_CXX_FLAGS_INIT "--target=aarch64-linux-gnu")
+        find_program(AARCH64_LLD NAMES ld.lld lld HINTS /usr/sbin /usr/bin)
+        if(AARCH64_LLD)
+            set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld")
+            set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
+            set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld")
+        endif()
+    endif()
+endif()
+
+# QEMU User-Mode Emulator detection for executing cross-compiled CTest binaries
+find_program(AARCH64_EMULATOR NAMES qemu-aarch64-static qemu-aarch64 HINTS /usr/sbin /usr/bin)
+if(AARCH64_EMULATOR)
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${AARCH64_EMULATOR}")
+endif()
+
+if(DEFINED ENV{AARCH64_SYSROOT})
+    set(CMAKE_SYSROOT "$ENV{AARCH64_SYSROOT}")
+    set(CMAKE_FIND_ROOT_PATH "$ENV{AARCH64_SYSROOT}")
+endif()
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)

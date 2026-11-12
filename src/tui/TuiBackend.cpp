@@ -2,7 +2,6 @@
 
 #include <cstring>
 #include <format>
-#include <limits>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
@@ -58,7 +57,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
         error("session ended");
     else if (request.generation != 0 && request.generation != generation_)
         error("stale inspection generation");
-    else if (request.hart >= machine.num_harts())
+    else if (request.hart.raw() >= machine.num_harts())
         error("invalid hart");
     else {
         const bool inspect = request.command >= BackendCommand::Registers &&
@@ -93,7 +92,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                         error("step requires pause and count=1");
                     else {
                         ++generation_;
-                        if (!machine.begin_debug_step(simrv::xlen::HartId{request.hart}))
+                        if (!machine.begin_debug_step(request.hart))
                             error("hart cannot step");
                         else {
                             const auto weak = weak_from_this();
@@ -121,7 +120,8 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                     break;
                 case BackendCommand::Registers: {
                     const auto& state = machine.hart(request.hart).state();
-                    reply.text = std::format("hart {} PC {:016x}\n", request.hart, state.pc);
+                    reply.text =
+                        std::format("hart {} PC {:016x}\n", request.hart.raw(), state.pc.raw());
                     for (int r = 0; r < 32; ++r)
                         reply.text += std::format(
                             "x{:<2} {:016x}   f{:<2} {:016x}\n", r,
@@ -133,30 +133,31 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                 case BackendCommand::Memory:
                 case BackendCommand::Disassemble: {
                     const auto ram = machine.ram_view();
-                    if (request.address > std::numeric_limits<simrv::xlen::Address>::max() ||
-                        request.count == 0 || request.count > 4096 ||
-                        !ram.contains(static_cast<simrv::xlen::Address>(request.address),
-                                      request.count)) {
+                    const auto* address = std::get_if<simrv::xlen::PhysAddr>(&request.address);
+                    if (address == nullptr || request.count == 0 || request.count > 4096 ||
+                        !ram.contains(*address, request.count)) {
                         error("physical RAM range must contain 1..4096 bytes");
                         break;
                     }
                     for (uint32_t i = 0; i < request.count;) {
-                        const auto address = static_cast<simrv::xlen::Address>(request.address + i);
+                        const auto current_address = *address + i;
                         if (request.command == BackendCommand::Disassemble) {
                             if (request.count - i < 2) break;
                             uint32_t instruction = 0;
-                            std::memcpy(&instruction, ram.unchecked_ptr(address), 2);
+                            std::memcpy(&instruction, ram.unchecked_ptr(current_address), 2);
                             const uint32_t size = (instruction & 3) == 3 ? 4 : 2;
                             if (request.count - i < size) break;
-                            std::memcpy(&instruction, ram.unchecked_ptr(address), size);
+                            std::memcpy(&instruction, ram.unchecked_ptr(current_address), size);
                             reply.text += std::format(
-                                "{:016x}  {:08x}  {}\n", address, instruction,
+                                "{:016x}  {:08x}  {}\n", current_address.raw(), instruction,
                                 pipeline::operation_name(pipeline::decoder(instruction)));
                             i += size;
                         } else {
-                            if (i % 16 == 0) reply.text += std::format("\n{:016x}: ", address);
+                            if (i % 16 == 0)
+                                reply.text += std::format("\n{:016x}: ", current_address.raw());
                             reply.text += std::format(
-                                "{:02x} ", static_cast<uint8_t>(*ram.unchecked_ptr(address)));
+                                "{:02x} ",
+                                static_cast<uint8_t>(*ram.unchecked_ptr(current_address)));
                             ++i;
                         }
                     }
@@ -165,18 +166,19 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                 case BackendCommand::Breakpoints:
                 case BackendCommand::AddBreakpoint:
                 case BackendCommand::RemoveBreakpoint:
-                    if (request.address > std::numeric_limits<simrv::xlen::Address>::max()) {
+                    if (request.command != BackendCommand::Breakpoints &&
+                        !std::holds_alternative<simrv::xlen::VirtAddr>(request.address)) {
                         error("invalid address");
                         break;
                     }
                     if (request.command == BackendCommand::AddBreakpoint)
                         machine.breakpoint_manager().add_pc_breakpoint(
-                            static_cast<simrv::xlen::Address>(request.address));
+                            std::get<simrv::xlen::VirtAddr>(request.address));
                     if (request.command == BackendCommand::RemoveBreakpoint)
                         machine.breakpoint_manager().remove_pc_breakpoint(
-                            static_cast<simrv::xlen::Address>(request.address));
+                            std::get<simrv::xlen::VirtAddr>(request.address));
                     for (auto address : machine.breakpoint_manager().get_pc_breakpoints())
-                        reply.text += std::format("{:016x}\n", address);
+                        reply.text += std::format("{:016x}\n", address.raw());
                     if (reply.text.empty()) reply.text = "No breakpoints";
                     break;
                 case BackendCommand::Reboot:

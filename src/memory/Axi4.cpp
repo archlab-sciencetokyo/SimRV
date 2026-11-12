@@ -166,13 +166,13 @@ auto Axi4Bridge::send_ar(const Axi4Ar& ar) -> bool {
 
         if (machine_ != nullptr && machine_->ram_data() != nullptr) {
             const auto geometry = machine_->memory_geometry();
-            if (geometry.contains(beat_addr, beat_bytes)) {
-                std::memcpy(&val, machine_->ram_data() + (beat_addr - geometry.dram_base),
+            if (geometry.contains(simrv::xlen::PhysAddr{beat_addr}, beat_bytes)) {
+                std::memcpy(&val, machine_->ram_data() + (beat_addr - geometry.dram_base.raw()),
                             std::min<std::size_t>(beat_bytes, sizeof(val)));
             } else {
                 TlChannelA req{};
                 req.opcode = TlOpcodeA::Get;
-                req.address = beat_addr;
+                req.address = simrv::xlen::PhysAddr{beat_addr};
                 req.size = ar.size;
                 req.source = 0;
                 req.mask = TlChannelA::compute_mask(req.size, req.address);
@@ -263,8 +263,9 @@ auto Axi4Bridge::send_w(const Axi4W& w) -> bool {
 
             if (machine_ != nullptr && machine_->ram_data() != nullptr) {
                 const auto geometry = machine_->memory_geometry();
-                if (geometry.contains(beat_addr, beat_bytes)) {
-                    auto* destination = machine_->ram_data() + (beat_addr - geometry.dram_base);
+                if (geometry.contains(simrv::xlen::PhysAddr{beat_addr}, beat_bytes)) {
+                    auto* destination =
+                        machine_->ram_data() + (beat_addr - geometry.dram_base.raw());
                     for (uint32_t lane = 0; lane < beat_bytes; ++lane) {
                         if ((strobe & (uint32_t{1} << lane)) != 0) {
                             std::memcpy(
@@ -280,7 +281,7 @@ auto Axi4Bridge::send_w(const Axi4W& w) -> bool {
                     TlChannelA req{};
                     req.opcode = transfer_mask == natural_mask ? TlOpcodeA::PutFullData
                                                                : TlOpcodeA::PutPartialData;
-                    req.address = beat_addr;
+                    req.address = simrv::xlen::PhysAddr{beat_addr};
                     req.size = aw.size;
                     req.source = 0;
                     req.data = beat.data;

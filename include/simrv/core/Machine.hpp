@@ -44,6 +44,8 @@ class ExecuteUnit;
 
 namespace simrv::device {
 class Uart;
+class SerialDevice;
+class FramebufferDevice;
 class PowerMmio;
 class DmaController;
 class AclintMtimer;
@@ -116,7 +118,7 @@ enum class ExecutionState : uint32_t {
 /// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
 struct TuiExecutionSnapshot {
     size_t hart = 0;
-    simrv::xlen::Register pc = 0;
+    simrv::xlen::VirtAddr pc{};
     simrv::xlen::Counter cycle_count = 0;
     simrv::xlen::Counter instruction_count = 0;
     simrv::xlen::Counter timer_ticks = 0;
@@ -172,6 +174,7 @@ class Machine final : public core::IInterruptController {
         GuestExit,
         LockstepDivergence,
         UnhandledTrap,
+        TrapLoop,
         ExternalStop,
     };
 
@@ -257,14 +260,21 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto stage_reconfiguration(MachineConfig machine_config)
         -> std::expected<void, std::string>;
     [[nodiscard]] auto take_staged_reconfiguration() -> std::optional<MachineConfig>;
-    void set_start_time(std::chrono::steady_clock::time_point time) noexcept { start_time_ = time; }
+    void set_start_time(std::chrono::steady_clock::time_point time) noexcept {
+        start_time_ = time;
+        last_sample_time_ = time;
+        last_sample_instructions_ = retired_instruction_count();
+        peak_mips_ = 0.0;
+    }
     [[nodiscard]] auto start_time() const noexcept -> std::chrono::steady_clock::time_point {
         return start_time_;
     }
+    [[nodiscard]] auto peak_mips() const noexcept -> double { return peak_mips_; }
+    void sample_throughput() noexcept;
     /// Initialization-only derived boot state; image symbols never rewrite the input config.
-    void set_resolved_boot_state(simrv::xlen::Address start_pc,
+    void set_resolved_boot_state(simrv::xlen::VirtAddr start_pc,
                                  std::optional<simrv::xlen::Address> tohost_address) noexcept;
-    [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::Address {
+    [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::VirtAddr {
         return resolved_start_pc_;
     }
     [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
@@ -283,13 +293,14 @@ class Machine final : public core::IInterruptController {
     /// file.
     [[nodiscard]] auto dump_signature(const std::string& filepath) const -> bool;
     struct LoadedMemorySegment {
-        simrv::xlen::Address paddr = 0;
+        simrv::xlen::PhysAddr paddr{};
         size_t size = 0;
         bool is_executable = false;
     };
-    void record_loaded_segment(simrv::xlen::Address paddr, size_t size, bool is_executable) {
+    void record_loaded_segment(simrv::xlen::PhysAddr paddr, size_t size, bool is_executable) {
         loaded_segments_.push_back({.paddr = paddr, .size = size, .is_executable = is_executable});
     }
+    void record_loaded_segment(simrv::xlen::Address, size_t, bool) = delete;
     void clear_loaded_segments() noexcept { loaded_segments_.clear(); }
     [[nodiscard]] auto loaded_segments() const noexcept -> const std::vector<LoadedMemorySegment>& {
         return loaded_segments_;
@@ -410,7 +421,10 @@ class Machine final : public core::IInterruptController {
     void apply_configuration(MachineConfig machine_config);
     MachineConfig config{};
     std::chrono::steady_clock::time_point start_time_{};
-    simrv::xlen::Address resolved_start_pc_ = 0;
+    std::chrono::steady_clock::time_point last_sample_time_{};
+    simrv::xlen::Counter last_sample_instructions_{0};
+    double peak_mips_{0.0};
+    simrv::xlen::VirtAddr resolved_start_pc_{};
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
     FramebufferConfig framebuffer_geometry_{};
     bool is_smp_enabled_ = false;
@@ -427,8 +441,8 @@ class Machine final : public core::IInterruptController {
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
     [[nodiscard]] auto hart(size_t index = 0) -> CPU&;
     [[nodiscard]] auto hart(size_t index = 0) const -> const CPU&;
-    [[nodiscard]] auto hart(simrv::xlen::HartId id) -> CPU& { return hart(id.val); }
-    [[nodiscard]] auto hart(simrv::xlen::HartId id) const -> const CPU& { return hart(id.val); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) -> CPU& { return hart(id.raw()); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) const -> const CPU& { return hart(id.raw()); }
     [[nodiscard]] auto num_harts() const -> size_t;
     [[nodiscard]] auto primary_hart() noexcept -> CPU&;
     [[nodiscard]] auto primary_hart() const noexcept -> const CPU&;
@@ -439,15 +453,9 @@ class Machine final : public core::IInterruptController {
         return instruction_memory_mutex_;
     }
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
-    [[nodiscard]] auto framebuffer_geometry() const noexcept -> const FramebufferConfig& {
-        return framebuffer_geometry_;
-    }
-    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t {
-        return framebuffer_geometry_.width;
-    }
-    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t {
-        return framebuffer_geometry_.height;
-    }
+    [[nodiscard]] auto framebuffer_geometry() const noexcept -> FramebufferConfig;
+    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t;
+    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t;
     void set_framebuffer_resolution_for_testing(uint32_t width, uint32_t height) noexcept {
         framebuffer_geometry_.width = width;
         framebuffer_geometry_.height = height;
@@ -469,8 +477,14 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto platform_time() const noexcept -> uint64_t;
     [[nodiscard]] auto rtc_device() noexcept -> simrv::Rtc*;
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
-    [[nodiscard]] auto uart_device() noexcept -> simrv::device::Uart*;
-    [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::Uart*;
+    [[nodiscard]] auto uart_device() noexcept -> simrv::device::SerialDevice*;
+    [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::SerialDevice*;
+    /// Advance simulation cycles for all registered platform/extension devices (UART, ticked
+    /// MMIOs).
+    void advance_device_cycles(uint64_t cycles);
+    [[nodiscard]] auto framebuffer_device() noexcept -> simrv::device::FramebufferDevice*;
+    [[nodiscard]] auto framebuffer_device() const noexcept
+        -> const simrv::device::FramebufferDevice*;
     [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;
     [[nodiscard]] auto dma_controller() const noexcept -> const simrv::device::DmaController*;
     [[nodiscard]] auto axi_bridge() noexcept -> simrv::memory::Axi4Bridge*;
@@ -565,7 +579,8 @@ class Machine final : public core::IInterruptController {
     void add_hart_for_testing(std::unique_ptr<CPU> hart);
     [[nodiscard]] auto test_secondary_harts() noexcept
         -> std::vector<std::unique_ptr<simrv::core::CPU>>&;
-    [[nodiscard]] auto mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::Uart>&;
+    [[nodiscard]] auto mutable_uart_for_testing() noexcept
+        -> std::unique_ptr<simrv::device::SerialDevice>&;
     void finalize_for_testing() { finalize_runner_cycle(); }
     void execute_cycle_for_testing() { execute_runner_cycle(); }
     [[nodiscard]] auto execute_fast_batch_for_testing(uint32_t batch_size) -> bool {

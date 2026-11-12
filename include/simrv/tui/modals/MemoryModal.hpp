@@ -52,7 +52,7 @@ class MemoryModal : public framework::IModal {
         return true;
     }
 
-    static void open(simrv::xlen::Address initial_addr, simrv::core::Machine& machine,
+    static void open(simrv::xlen::VirtAddr initial_addr, simrv::core::Machine& machine,
                      InspectorPane* inspector_pane);
     static void move_cursor(int delta_byte, int delta_row, const simrv::core::Machine& machine);
     static void scroll_page(int pages, const simrv::core::Machine& machine);

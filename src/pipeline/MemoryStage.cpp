@@ -102,7 +102,7 @@ void CPU::memory_load_phase(Machine& machine) {
         if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
             state_.load_res = ctx.mem_paddr.raw();
             state_.lr_reservation_active = true;
-            machine.memory_.reservation_table().set_reservation(hart_id(), ctx.mem_paddr.raw());
+            machine.memory_.reservation_table().set_reservation(hart_id(), ctx.mem_paddr);
         }
     }
 }

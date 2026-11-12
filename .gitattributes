@@ -38,9 +38,8 @@ Makefile            text eol=lf
 *.mk                text eol=lf
 
 # -----------------------------------------------------------------------------
-# Python & Automation Tooling
+# Automation & Shell Scripts
 # -----------------------------------------------------------------------------
-*.py      text diff=python eol=lf
 *.sh      text eol=lf
 *.bash    text eol=lf
 

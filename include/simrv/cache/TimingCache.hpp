@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "simrv/CompilerHints.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
@@ -40,9 +41,9 @@ class TimingCache {
 
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    [[nodiscard]] auto access(simrv::xlen::Address address) -> Access {
+    [[nodiscard]] auto access(simrv::xlen::VirtAddr address) -> Access {
         if (!enabled_) return {};
-        const auto raw = static_cast<uint64_t>(address);
+        const auto raw = static_cast<uint64_t>(address.raw());
         uint64_t line = 0;
         uint32_t set = 0;
         uint64_t tag = 0;
@@ -136,7 +137,7 @@ class TimingCacheHierarchy {
 
     [[nodiscard]] auto enabled() const -> bool { return !levels_.empty(); }
 
-    [[nodiscard]] auto access(simrv::xlen::Address address, bool backing_miss) -> Access {
+    [[nodiscard]] auto access(simrv::xlen::VirtAddr address, bool backing_miss) -> Access {
         for (size_t index = 0; index < levels_.size(); ++index) {
             if (levels_[index].access(address).hit) {
                 return {.hit_level = index, .latency = configs_[index].hit_latency, .hit = true};
