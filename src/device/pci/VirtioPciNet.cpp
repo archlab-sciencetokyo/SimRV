@@ -216,7 +216,7 @@ auto virtio::NetBackend::poll_host_rx() -> std::size_t {
     slirp_->run_timers();
     slirp_->poll_fds.clear();
     uint32_t timeout = 0;
-#if SLIRP_CHECK_VERSION(4, 7, 0)
+#if SLIRP_CHECK_VERSION(4, 9, 0)
     slirp_pollfds_fill_socket(slirp_->stack, &timeout, &SlirpState::add_poll_fd, slirp_.get());
 #else
 #pragma GCC diagnostic push
