@@ -241,33 +241,8 @@ jobs:
             arch: x86_64
           - runner: ubuntu-24.04-arm
             arch: aarch64
-    container:
-      # Alpine supplies a musl-native C++ runtime. This release-only job uses
-      # its GCC15 toolchain with the explicit unqualified-toolchain exception.
-      # Alpine edge is required because GCC15 provides the C++23 headers used by
-      # SimRV; the cache has a small mdspan fallback for the still-missing header.
-      image: alpine:edge
     steps:
       - uses: actions/checkout@v6
-      - name: Install musl build tools
-        run: |
-          apk add --no-cache bash build-base boost-dev cmake glib-dev glib-static \
-            gettext-static meson ninja pcre2-static pkgconf python3 tar gzip file \
-            linux-headers zlib-static
-      - name: Build static musl libslirp
-        shell: bash
-        run: |
-          set -euo pipefail
-          wget -q https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.bz2 \
-            -O /tmp/libslirp-v4.9.5.tar.bz2
-          echo '4f59df896cb345ea76d7f68b1e820872feaa9d8255a6761f6bf8a0f2d5144bcd  /tmp/libslirp-v4.9.5.tar.bz2' \
-            | sha256sum -c -
-          tar -xjf /tmp/libslirp-v4.9.5.tar.bz2 -C /tmp
-          meson setup /tmp/libslirp-build /tmp/libslirp-v4.9.5 \
-            --prefix=/usr/local --buildtype=release --default-library=static \
-            -Dstatic=true
-          ninja -C /tmp/libslirp-build install
-          echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig' >> "$GITHUB_ENV"
       - name: Validate release tag
         id: names
         shell: bash
@@ -279,40 +254,19 @@ jobs:
           fi
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "asset_base=SimRV-linux-${{ matrix.arch }}-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-      - name: Build static RV64 runtime
+      - name: Build static musl archive inside Alpine
         shell: bash
+        env:
+          SIMRV_ASSET_BASE: ${{ steps.names.outputs.asset_base }}
+          SIMRV_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          cmake -S . -B build/rv64-musl-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
-            -DSIMRV_X86_64_V3_BASELINE=OFF \
-            -DSIMRV_NATIVE_HOST_OPTIMIZATIONS=OFF \
-            -DSIMRV_WARNINGS_AS_ERRORS=ON \
-            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
-            -DPKG_CONFIG_ARGN=--static \
-            -DCMAKE_FIND_LIBRARY_SUFFIXES=.a \
-            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++"
-          cmake --build build/rv64-musl-release --parallel 2
-          file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
-          # Alpine's ldd exits successfully for static-pie binaries because they
-          # carry the musl interpreter path. Inspect the ELF dynamic table instead
-          # so the check rejects only actual shared-library dependencies.
-          ! readelf -d build/rv64-musl-release/simrv | grep -q ' NEEDED '
-      - name: Package and validate static archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p portable-package
-          cpack --config build/rv64-musl-release/CPackConfig.cmake -G TGZ \
-            -D CPACK_COMPONENTS_ALL=Runtime -B portable-package
-          mapfile -t archives < <(find portable-package -maxdepth 1 -name '*.tar.gz' -type f)
-          test "${#archives[@]}" -eq 1
-          asset="${{ steps.names.outputs.asset_base }}.tar.gz"
-          mv "${archives[0]}" "$asset"
-          tar -tzf "$asset" > portable-archive.list
-          grep -q '^usr/share/SimRV/SimRVBuildMetadata.json$' portable-archive.list
-          grep -q '^usr/share/SimRV/schemas/simrv-build-metadata.schema.json$' portable-archive.list
-          build/rv64-musl-release/simrv-release-check --binary build/rv64-musl-release/simrv
+          SIMRV_HOST_UID="$(id -u)"
+          SIMRV_HOST_GID="$(id -g)"
+          docker run --rm \
+            -e SIMRV_ASSET_BASE -e SIMRV_ARCH -e SIMRV_HOST_UID -e SIMRV_HOST_GID \
+            -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            alpine:edge sh .github/scripts/portable-musl-release.sh
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}

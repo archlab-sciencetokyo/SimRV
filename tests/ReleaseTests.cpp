@@ -147,6 +147,7 @@ int main() {
         expect(release_wf.find("runner: ubuntu-24.04-arm") != std::string::npos);
         expect(release_wf.find("Guest architecture (${{ matrix.arch }})") != std::string::npos);
         expect(release_wf.find("Portable Linux archive (${{ matrix.arch }})") != std::string::npos);
+        expect(release_wf.find(".github/scripts/portable-musl-release.sh") != std::string::npos);
         expect(release_wf.find(".sha256") == std::string::npos);
         expect(release_wf.find("reproducibility-framework:") == std::string::npos);
         expect(release_wf.find("documentation:") == std::string::npos);
