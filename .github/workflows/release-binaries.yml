@@ -189,6 +189,7 @@ jobs:
           set -euo pipefail
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb
+          dnf install -y epel-release
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
             libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
