@@ -1,5 +1,9 @@
 add_library(simrv-reset SHARED ResetPlugin.cpp)
 target_include_directories(simrv-reset PRIVATE ${PROJECT_SOURCE_DIR}/include)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(simrv-reset PRIVATE -Wl,--no-as-needed)
+  target_link_libraries(simrv-reset PRIVATE c)
+endif()
 set_target_properties(simrv-reset PROPERTIES
   OUTPUT_NAME "simrv-reset"
   PREFIX "lib"

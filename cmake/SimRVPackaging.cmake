@@ -91,6 +91,15 @@ install(
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
         COMPONENT Runtime)
+install(
+  FILES docs/man/simrv-cpu-wizard.1 docs/man/simrv-parity.1
+       docs/man/simrv-tune.1 docs/man/simrv-benchmark.1
+  DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+  COMPONENT Tools)
+install(
+  FILES docs/man/simrv-act.1 docs/man/simrv-vector.1
+  DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+  COMPONENT Tests)
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
@@ -121,7 +130,7 @@ set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "ArchLab Science Tokyo")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Explainable RISC-V architectural simulator")
 set(CPACK_PACKAGE_DESCRIPTION
-    "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution, an interactive terminal workbench, microarchitecture models, and Linux support.")
+    "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution and an interactive terminal workbench,\n microarchitecture models, and Linux support.")
 set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
 if(NOT SIMRV_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-(.+))?$")
   message(FATAL_ERROR "SIMRV_VERSION is not packageable: ${SIMRV_VERSION}")

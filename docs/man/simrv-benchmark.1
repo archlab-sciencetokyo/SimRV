@@ -1,0 +1,49 @@
+.TH SIMRV-BENCHMARK 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-benchmark \- run and compare native SimRV benchmarks
+.SH SYNOPSIS
+.B simrv-benchmark
+.RI [ options ]
+.I elf-file | suite-name
+.br
+.B simrv-benchmark compare
+.I baseline.json candidate.json
+.SH DESCRIPTION
+.B simrv-benchmark
+runs guest workloads with SimRV, optionally compares results with Spike, and
+exports measurements as JSON. Comparison mode computes speedup from two saved
+benchmark results.
+.SH OPTIONS
+.TP
+.B \-\-runs \fIN\fR, \-\-warmup \fIN\fR
+Set measured and warmup run counts.
+.TP
+.B \-\-mode \fIMODE\fR, \-\-ca
+Select \fBfast\fR, \fBdetailed\fR, or \fBcycle-accurate\fR execution. \fB--ca\fR
+selects cycle-accurate mode.
+.TP
+.B \-\-nanobench
+Run in-process microbenchmarks.
+.TP
+.B \-\-spike [\fIPATH\fR]
+Compare against Spike, using the supplied executable or automatic discovery.
+.TP
+.B \-\-suite \fINAME\fR
+Run a standard benchmark suite.
+.TP
+.B \-e, \-\-limit \fIN\fR
+Set the instruction execution limit.
+.TP
+.B \-\-isa \fIISA\fR, \-\-vlen \fIBITS\fR
+Override the guest ISA or vector register length.
+.TP
+.B \-\-json \fIPATH\fR
+Write benchmark measurements as JSON.
+.TP
+.B \-\-timeout \fISECONDS\fR
+Set the execution timeout.
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.SH SEE ALSO
+.BR simrv (1)
