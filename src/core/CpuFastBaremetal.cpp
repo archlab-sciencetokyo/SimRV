@@ -66,6 +66,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         if (simrv::compiler::unlikely(state_.has_active_triggers)) break;
         auto* cached = decode_cache.lookup_aligned(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
+            // `time` advances at batch boundaries. End the current batch before
+            // a later time read so a guest polling loop can observe elapsed cycles.
+            if (cached_ops != 0 && is_time_counter_csr(*cached)) break;
             if constexpr (!kCopyContext && !kInstMix) {
                 const auto execute_fast_chain =
                     [&]<bool kGuestXlen64>(CachedOp* initial_op, uint32_t& b_ref)
@@ -1840,21 +1843,28 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     record_hpm_event(HpmEvent::Instructions, ops_executed);
                     record_hpm_event(HpmEvent::Cycles, ops_executed);
                     if (fallback_op != nullptr) {
-                        if (uart != nullptr && uart->has_active_transfer()) {
-                            const uint32_t unushed = cached_ops - flushed_uart_ops;
-                            if (unushed > 0) {
-                                uart->advance_cycles(unushed);
-                                flushed_uart_ops = cached_ops;
+                        if (cached_ops != 0 && is_time_counter_csr(*fallback_op)) {
+                            // The chain stopped at this CSR with PC still pointing to
+                            // it. Commit preceding cycles first; execute the read in
+                            // the next batch so its value reflects those cycles.
+                            b = batch_size;
+                        } else {
+                            if (uart != nullptr && uart->has_active_transfer()) {
+                                const uint32_t unushed = cached_ops - flushed_uart_ops;
+                                if (unushed > 0) {
+                                    uart->advance_cycles(unushed);
+                                    flushed_uart_ops = cached_ops;
+                                }
                             }
-                        }
-                        const bool is_csr = is_csr_instruction(fallback_op->op_id);
-                        execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
-                        ++cached_ops;
-                        ++b;
-                        if constexpr (kHpmClassMode != 2) {
-                            if (is_csr && perf_counters.has_instruction_class_listeners() !=
-                                              (kHpmClassMode == 1)) {
-                                b = batch_size;
+                            const bool is_csr = is_csr_instruction(fallback_op->op_id);
+                            execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
+                            ++cached_ops;
+                            ++b;
+                            if constexpr (kHpmClassMode != 2) {
+                                if (is_csr && perf_counters.has_instruction_class_listeners() !=
+                                                  (kHpmClassMode == 1)) {
+                                    b = batch_size;
+                                }
                             }
                         }
                     }
