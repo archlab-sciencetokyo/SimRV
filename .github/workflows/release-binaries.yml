@@ -263,6 +263,7 @@ jobs:
           set -euo pipefail
           SIMRV_HOST_UID="$(id -u)"
           SIMRV_HOST_GID="$(id -g)"
+          export SIMRV_HOST_UID SIMRV_HOST_GID
           docker run --rm \
             -e SIMRV_ASSET_BASE -e SIMRV_ARCH -e SIMRV_HOST_UID -e SIMRV_HOST_GID \
             -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
