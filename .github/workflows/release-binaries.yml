@@ -212,6 +212,10 @@ jobs:
             bzip2-devel pkgconf-pkg-config wget which
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          for tool in cmake ninja ctest; do
+            command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
+          done
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 \
             -O /tmp/boost_1_83_0.tar.bz2
           echo '6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e  /tmp/boost_1_83_0.tar.bz2' \
