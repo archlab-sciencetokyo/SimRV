@@ -116,6 +116,7 @@ jobs:
           cd "$RUNNER_TEMP/riscv-arch-test"
           uv sync
           gem install bundler
+          cd framework/src/act/data
           bundle install
 
       - name: Generate and run full RVA23 ACT4 suite
