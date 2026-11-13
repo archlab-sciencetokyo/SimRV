@@ -288,10 +288,9 @@ jobs:
           if [[ "$(printf '%s\n%s\n' 2.9.0 "$rpmlint_version" | sort -V | sed -n '1p')" != 2.9.0 ]]; then
             rpmlint_config=/tmp/simrv-rpmlintrc
             cp packaging/simrv.rpmlintrc "$rpmlint_config"
-            # rpmlint 2.8 flags the release LTO archive; 2.9 removed these checks.
+            # rpmlint 2.8 flags the SDK archive because it has no debug info.
             cat >> "$rpmlint_config" <<'EOF'
           addFilter("static-library-without-debuginfo .*libsimrv-runtime[.]a")
-          addFilter("lto-no-text-in-archive .*libsimrv-runtime[.]a")
           EOF
           fi
           rpmlint --rpmlintrc "$rpmlint_config" packages/*.rpm
