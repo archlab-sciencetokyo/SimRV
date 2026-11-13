@@ -181,7 +181,7 @@ jobs:
       # Rocky Linux 10 is the supported RPM baseline. GCC Toolset 15 supplies
       # the C++23 library; the executable statically links that runtime.
       # Rocky's CRB repository provides libslirp-devel, which UBI does not publish.
-      image: rockylinux:10
+      image: rockylinux/rockylinux:10
     steps:
       - name: Install build tools
         shell: bash
@@ -480,7 +480,7 @@ jobs:
         include:
           - image: fedora:44
             family: rpm
-          - image: rockylinux:10
+          - image: rockylinux/rockylinux:10
             family: rpm
           - image: ubuntu:24.04
             family: deb
