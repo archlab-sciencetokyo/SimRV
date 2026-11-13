@@ -98,7 +98,12 @@ jobs:
       - name: Install ACT4 prerequisites
         if: matrix.arch == 'rv64'
         run: |
-          dnf install -y python3 python3-pip ruby ruby-devel rubygems jq
+          dnf install -y python3 python3-pip ruby-build-core ruby-build-ruby \
+            gcc make bzip2-devel openssl-devel libyaml-devel libffi-devel \
+            readline-devel zlib-ng-compat-devel gdbm-devel ncurses-devel jq
+          ruby-build 3.4.12 "$RUNNER_TEMP/ruby-3.4.12"
+          echo "$RUNNER_TEMP/ruby-3.4.12/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/ruby-3.4.12/bin/ruby" --version
           python3 -m venv "$RUNNER_TEMP/act-venv"
           "$RUNNER_TEMP/act-venv/bin/pip" install uv
           echo "$RUNNER_TEMP/act-venv/bin" >> "$GITHUB_PATH"
