@@ -22,6 +22,7 @@ concurrency:
 
 env:
   RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
+  RISCV_ARCH_TEST_REVISION: act4
 
 jobs:
   guest-architecture-check:
@@ -94,6 +95,57 @@ jobs:
       - name: Run GA smoke workflow
         run: build/${{ matrix.arch }}-release/simrv-smoke --simrv build/${{ matrix.arch }}-release/simrv
 
+      - name: Install ACT4 prerequisites
+        if: matrix.arch == 'rv64'
+        run: |
+          dnf install -y python3 python3-pip ruby ruby-devel rubygems jq
+          python3 -m venv "$RUNNER_TEMP/act-venv"
+          "$RUNNER_TEMP/act-venv/bin/pip" install uv
+          echo "$RUNNER_TEMP/act-venv/bin" >> "$GITHUB_PATH"
+          echo "$PWD/tools/sail-riscv-0.16/bin" >> "$GITHUB_PATH"
+          ln -sf /opt/riscv/bin/riscv-none-elf-gcc /usr/local/bin/riscv64-linux-gnu-gcc
+          ln -sf /opt/riscv/bin/riscv-none-elf-objdump /usr/local/bin/riscv64-linux-gnu-objdump
+
+      - name: Fetch ACT4 and install its tools
+        if: matrix.arch == 'rv64'
+        run: |
+          git clone --branch "$RISCV_ARCH_TEST_REVISION" --depth 1 --recurse-submodules \
+            https://github.com/riscv/riscv-arch-test.git "$RUNNER_TEMP/riscv-arch-test"
+          echo "ACT4 source commit: $(git -C "$RUNNER_TEMP/riscv-arch-test" rev-parse HEAD)" \
+            >> "$GITHUB_STEP_SUMMARY"
+          cd "$RUNNER_TEMP/riscv-arch-test"
+          uv sync
+          gem install bundler
+          bundle install
+
+      - name: Generate and run full RVA23 ACT4 suite
+        if: matrix.arch == 'rv64'
+        env:
+          ACT_DIR: ${{ runner.temp }}/riscv-arch-test
+          ACT_WORKDIR: ${{ runner.temp }}/act4-rva23s64
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C "$ACT_DIR" \
+            CONFIG_FILES="$GITHUB_WORKSPACE/tests/act4/simrv-rva23s64/test_config.yaml" \
+            CERTIFICATE=RVA23 JOBS="$(nproc)" \
+            WORKDIR="$ACT_WORKDIR"
+          report="$ACT_WORKDIR/simrv-rva23s64/simrv-report.json"
+          set +e
+          build/rv64-release/simrv-act \
+            --simrv build/rv64-release/simrv \
+            --elf-dir "$ACT_WORKDIR/simrv-rva23s64/elfs" \
+            --report "$report" --jobs "$(nproc)" --vlen 128
+          act_status=$?
+          set -e
+          # The current full suite has 50 documented expectation conflicts with
+          # ratified Vector/H behavior. Require the known baseline so new failures
+          # or a changed suite fail release qualification.
+          jq -e '.total == 3188 and .passed == 3138 and .failed == 50 and .timeouts == 0' \
+            "$report" >/dev/null
+          test "$act_status" -eq 1
+          echo "ACT4 matched the documented 3138/3188 baseline (50 known expectation conflicts)."
+
       - name: Validate source release metadata
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L release
 
@@ -138,8 +190,8 @@ jobs:
           set -euo pipefail
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb
-          dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
-            gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
+          dnf install -y gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
+            gcc-toolset-14-libstdc++-devel gcc gcc-c++ \
             libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
             bzip2-devel pkgconf-pkg-config tar wget which
           python3 -m pip install cmake==4.3.0 ninja || \
@@ -154,9 +206,9 @@ jobs:
           ./b2 --with-headers install --prefix=/opt/boost-1.83
           echo "/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_PATH"
           echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
-          echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
-          echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
-          echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
+          echo "/opt/rh/gcc-toolset-14/root/usr/bin" >> "$GITHUB_PATH"
+          echo "CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc" >> "$GITHUB_ENV"
+          echo "CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
       - name: Validate release tag
         id: names
@@ -391,14 +443,16 @@ jobs:
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
-          lintian --fail-on warning \
-            --suppress-tags malformed-contact,too-many-contacts,no-changelog,no-copyright-file,uncompressed-manual-page,unstripped-binary-or-object,hardening-no-pie,binary-from-other-architecture,statically-linked-binary \
-            packages/*.deb
           apt-get install -y ./packages/*.deb
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
           cmake -S tests/package-consumer -B packages/consumer-build
           cmake --build packages/consumer-build
           packages/consumer-build/simrv-package-consumer
+          # Debian Lintian cannot inspect GCC LTO-only archives. The consumer
+          # build above verifies the shipped archive links successfully.
+          lintian --fail-on warning \
+            --suppress-tags malformed-contact,too-many-contacts,no-changelog,no-copyright-file,uncompressed-manual-page,unstripped-binary-or-object,hardening-no-pie,binary-from-other-architecture,statically-linked-binary,no-code-sections \
+            packages/*.deb
           apt-get remove -y simrv-devel
           dpkg-query -W -f='${Status}' simrv | grep -Fx 'install ok installed'
           development_status="$(dpkg-query -W -f='${Status}' simrv-devel 2>/dev/null || true)"

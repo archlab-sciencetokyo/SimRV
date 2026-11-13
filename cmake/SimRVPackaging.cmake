@@ -164,7 +164,7 @@ set(CPACK_COMPONENT_TESTS_DESCRIPTION
     "Optional RISC-V architectural compliance test drivers (ACT4 and Vector).")
 set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "SimRV C++ development files")
 set(CPACK_COMPONENT_DEVELOPMENT_DESCRIPTION
-    "C++23 headers, static runtime library, and CMake package for downstream projects.")
+    "C++23 headers, runtime library, and CMake package for downstream projects.")
 
 # Native Linux package metadata. CPack's RPM and DEB generators derive runtime
 # library dependencies from the installed ELF when the host packaging tools are

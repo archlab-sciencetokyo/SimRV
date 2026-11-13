@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     outputs:
       cpp: ${{ steps.filter.outputs.cpp }}
     steps:
@@ -34,10 +35,39 @@ jobs:
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        GH_TOKEN: ${{ github.token }}
       shell: bash
       run: |
         if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
           changed_files=manual-dispatch
+        elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          branch_query="$(jq -rn --arg value "$PR_BRANCH" '$value | @uri')"
+          runs="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/c-cpp.yml/runs?branch=$branch_query&per_page=100")"
+          last_success="$(jq -r --argjson number "$PR_NUMBER" '
+            [.workflow_runs[]
+             | select(.conclusion == "success")
+             | select(any(.pull_requests[]?; .number == $number))]
+            | sort_by(.run_started_at) | last | .head_sha // empty' <<< "$runs")"
+          baseline="$last_success"
+          if [[ -n "$baseline" ]] && ! git cat-file -e "${baseline}^{commit}" 2>/dev/null; then
+            baseline=""
+          fi
+          if [[ -z "$baseline" ]]; then baseline="$BASE_SHA"; fi
+          changed_files="$(git diff --name-only "$baseline" "$HEAD_SHA" -- \
+            . \
+            ':(exclude)docs/**' \
+            ':(exclude)zensical.yml' \
+            ':(exclude)pyproject.toml' \
+            ':(exclude)uv.lock' \
+            ':(exclude)cmake/SimRVPackaging.cmake' \
+            ':(exclude).github/workflows/c-cpp.yml' \
+            ':(exclude).github/workflows/docs.yml' \
+            ':(exclude).github/workflows/release-binaries.yml')"
         else
           changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
             . \
@@ -45,7 +75,10 @@ jobs:
             ':(exclude)zensical.yml' \
             ':(exclude)pyproject.toml' \
             ':(exclude)uv.lock' \
-            ':(exclude).github/workflows/docs.yml')"
+            ':(exclude)cmake/SimRVPackaging.cmake' \
+            ':(exclude).github/workflows/c-cpp.yml' \
+            ':(exclude).github/workflows/docs.yml' \
+            ':(exclude).github/workflows/release-binaries.yml')"
         fi
         if [[ -n "$changed_files" ]]; then
           echo "cpp=true" >> "$GITHUB_OUTPUT"
