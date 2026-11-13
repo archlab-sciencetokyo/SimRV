@@ -42,9 +42,8 @@ install(
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
 install(
-  PROGRAMS $<TARGET_FILE:simrv-parity>
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-tune
+  CODE
+    "file(CREATE_LINK \"simrv-parity\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/simrv-tune\" SYMBOLIC)"
   COMPONENT Tools)
 install(
   TARGETS simrv-act simrv-vector
@@ -73,6 +72,7 @@ install(
   DESTINATION ${CMAKE_INSTALL_DOCDIR}/user
   COMPONENT Runtime
   FILES_MATCHING
+  PATTERN "index.md" EXCLUDE
   PATTERN "*.md")
 install(
   DIRECTORY examples/hello/
@@ -91,10 +91,19 @@ install(
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
         COMPONENT Runtime)
+install(
+  FILES docs/man/simrv-cpu-wizard.1 docs/man/simrv-parity.1
+       docs/man/simrv-tune.1 docs/man/simrv-benchmark.1
+  DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+  COMPONENT Tools)
+install(
+  FILES docs/man/simrv-act.1 docs/man/simrv-vector.1
+  DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+  COMPONENT Tests)
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV")
+  INSTALL_DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/SimRV")
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
   VERSION "${PROJECT_VERSION}"
@@ -103,7 +112,7 @@ install(
   EXPORT SimRVTargets
   FILE SimRVTargets.cmake
   NAMESPACE SimRV::
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/SimRV"
   COMPONENT Development)
 export(
   EXPORT SimRVTargets
@@ -111,7 +120,7 @@ export(
   NAMESPACE SimRV::)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/SimRV"
         COMPONENT Development)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md
         DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV
@@ -121,7 +130,7 @@ set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "ArchLab Science Tokyo")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Explainable RISC-V architectural simulator")
 set(CPACK_PACKAGE_DESCRIPTION
-    "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution, an interactive terminal workbench, microarchitecture models, and Linux support.")
+    "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution and an interactive terminal workbench,\n microarchitecture models, and Linux support.")
 set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
 if(NOT SIMRV_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-(.+))?$")
   message(FATAL_ERROR "SIMRV_VERSION is not packageable: ${SIMRV_VERSION}")
@@ -155,7 +164,7 @@ set(CPACK_COMPONENT_TESTS_DESCRIPTION
     "Optional RISC-V architectural compliance test drivers (ACT4 and Vector).")
 set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "SimRV C++ development files")
 set(CPACK_COMPONENT_DEVELOPMENT_DESCRIPTION
-    "C++23 headers, static runtime library, and CMake package for downstream projects.")
+    "C++23 headers, runtime library, and CMake package for downstream projects.")
 
 # Native Linux package metadata. CPack's RPM and DEB generators derive runtime
 # library dependencies from the installed ELF when the host packaging tools are

@@ -77,9 +77,12 @@ int main() {
 
         expect(manifest.find(std::string("\"version\": \"") + source_ver + "\"") !=
                std::string::npos);
+        expect(manifest.find(R"("architectures": ["x86_64", "aarch64"])") != std::string::npos);
 
         // Check required artifacts
         expect(manifest.find(std::string("SimRV-linux-x86_64-v") + source_ver + ".tar.gz") !=
+               std::string::npos);
+        expect(manifest.find(std::string("SimRV-linux-aarch64-v") + source_ver + ".tar.gz") !=
                std::string::npos);
         expect(manifest.find(std::string("SimRV-rpm-packages-v") + source_ver + ".tar.gz") !=
                std::string::npos);
@@ -88,7 +91,7 @@ int main() {
 
         // Package support
         expect(manifest.find("Ubuntu 22.04") != std::string::npos);
-        expect(manifest.find("Rocky Linux 9") != std::string::npos);
+        expect(manifest.find("Rocky Linux 10") != std::string::npos);
         expect(manifest.find("Fedora 44") != std::string::npos);
         expect(manifest.find("Ubuntu 24.04") != std::string::npos);
         expect(manifest.find("Debian sid") != std::string::npos);
@@ -140,6 +143,11 @@ int main() {
         expect(release_wf.find("publish-release:") != std::string::npos);
         expect(release_wf.find("SimRV-rpm-packages-v${VERSION}.tar.gz") != std::string::npos);
         expect(release_wf.find("SimRV-deb-packages-v${VERSION}.tar.gz") != std::string::npos);
+        expect(release_wf.find("SimRV-linux-aarch64-v${VERSION}.tar.gz") != std::string::npos);
+        expect(release_wf.find("runner: ubuntu-24.04-arm") != std::string::npos);
+        expect(release_wf.find("Guest architecture (${{ matrix.arch }})") != std::string::npos);
+        expect(release_wf.find("Portable Linux archive (${{ matrix.arch }})") != std::string::npos);
+        expect(release_wf.find(".github/scripts/portable-musl-release.sh") != std::string::npos);
         expect(release_wf.find(".sha256") == std::string::npos);
         expect(release_wf.find("reproducibility-framework:") == std::string::npos);
         expect(release_wf.find("documentation:") == std::string::npos);
@@ -151,6 +159,11 @@ int main() {
         expect(docs_wf.find("uv sync") == std::string::npos);
         expect(docs_wf.find("uv.lock") == std::string::npos);
         expect(docs_wf.find("pyproject.toml") == std::string::npos);
+
+        const auto ci_wf = read_file_string(root / ".github/workflows/c-cpp.yml");
+        expect(ci_wf.find("name: SimRV CI") != std::string::npos);
+        expect(ci_wf.find("runner: macos-26") != std::string::npos);
+        expect(ci_wf.find("runner: macos-26-intel") != std::string::npos);
     };
 
     "cmake_presets_native_release"_test = [&] {

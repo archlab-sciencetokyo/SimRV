@@ -120,18 +120,17 @@ if(NOT parity_check_result EQUAL 0)
   )
 endif()
 
-file(GLOB package_dirs "${install_root}/lib*/cmake/SimRV")
+file(GLOB package_dirs "${install_root}/share/cmake/SimRV")
 list(LENGTH package_dirs package_dir_count)
 if(NOT package_dir_count EQUAL 1)
   message(
     FATAL_ERROR
       "Expected one installed SimRV package directory, found: ${package_dirs}")
 endif()
-list(GET package_dirs 0 package_dir)
-
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${consumer_root}/build"
-          -D "SimRV_DIR=${package_dir}" ${extra_consumer_args} RESULT_VARIABLE configure_result)
+          -D "CMAKE_PREFIX_PATH=${install_root}" ${extra_consumer_args}
+  RESULT_VARIABLE configure_result)
 if(NOT configure_result EQUAL 0)
   message(
     FATAL_ERROR

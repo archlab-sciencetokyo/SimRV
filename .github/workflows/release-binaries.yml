@@ -1,6 +1,15 @@
 name: Release Binaries
 
 on:
+  pull_request:
+    branches: [main, dev]
+    paths-ignore:
+      - 'docs/**'
+      - 'zensical.yml'
+      - 'mkdocs.yml'
+      - '.github/requirements-docs.txt'
+      - 'pyproject.toml'
+      - 'uv.lock'
   push:
     tags: ['v*']
 
@@ -8,18 +17,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
+  RISCV_ARCH_TEST_REVISION: act4
 
 jobs:
-  build-and-upload:
+  guest-architecture-check:
+    name: Guest architecture (${{ matrix.arch }})
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: write
+      contents: read
     container:
       image: fedora:44
 
@@ -83,6 +95,57 @@ jobs:
       - name: Run GA smoke workflow
         run: build/${{ matrix.arch }}-release/simrv-smoke --simrv build/${{ matrix.arch }}-release/simrv
 
+      - name: Install ACT4 prerequisites
+        if: matrix.arch == 'rv64'
+        run: |
+          dnf install -y python3 python3-pip ruby ruby-devel rubygems jq
+          python3 -m venv "$RUNNER_TEMP/act-venv"
+          "$RUNNER_TEMP/act-venv/bin/pip" install uv
+          echo "$RUNNER_TEMP/act-venv/bin" >> "$GITHUB_PATH"
+          echo "$PWD/tools/sail-riscv-0.16/bin" >> "$GITHUB_PATH"
+          ln -sf /opt/riscv/bin/riscv-none-elf-gcc /usr/local/bin/riscv64-linux-gnu-gcc
+          ln -sf /opt/riscv/bin/riscv-none-elf-objdump /usr/local/bin/riscv64-linux-gnu-objdump
+
+      - name: Fetch ACT4 and install its tools
+        if: matrix.arch == 'rv64'
+        run: |
+          git clone --branch "$RISCV_ARCH_TEST_REVISION" --depth 1 --recurse-submodules \
+            https://github.com/riscv/riscv-arch-test.git "$RUNNER_TEMP/riscv-arch-test"
+          echo "ACT4 source commit: $(git -C "$RUNNER_TEMP/riscv-arch-test" rev-parse HEAD)" \
+            >> "$GITHUB_STEP_SUMMARY"
+          cd "$RUNNER_TEMP/riscv-arch-test"
+          uv sync
+          gem install bundler
+          bundle install
+
+      - name: Generate and run full RVA23 ACT4 suite
+        if: matrix.arch == 'rv64'
+        env:
+          ACT_DIR: ${{ runner.temp }}/riscv-arch-test
+          ACT_WORKDIR: ${{ runner.temp }}/act4-rva23s64
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C "$ACT_DIR" \
+            CONFIG_FILES="$GITHUB_WORKSPACE/tests/act4/simrv-rva23s64/test_config.yaml" \
+            CERTIFICATE=RVA23 JOBS="$(nproc)" \
+            WORKDIR="$ACT_WORKDIR"
+          report="$ACT_WORKDIR/simrv-rva23s64/simrv-report.json"
+          set +e
+          build/rv64-release/simrv-act \
+            --simrv build/rv64-release/simrv \
+            --elf-dir "$ACT_WORKDIR/simrv-rva23s64/elfs" \
+            --report "$report" --jobs "$(nproc)" --vlen 128
+          act_status=$?
+          set -e
+          # The current full suite has 50 documented expectation conflicts with
+          # ratified Vector/H behavior. Require the known baseline so new failures
+          # or a changed suite fail release qualification.
+          jq -e '.total == 3188 and .passed == 3138 and .failed == 50 and .timeouts == 0' \
+            "$report" >/dev/null
+          test "$act_status" -eq 1
+          echo "ACT4 matched the documented 3138/3188 baseline (50 known expectation conflicts)."
+
       - name: Validate source release metadata
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L release
 
@@ -98,17 +161,15 @@ jobs:
           fi
 
           VERSION_TAG="v${SIMRV_VERSION}"
-          TAG="${GITHUB_REF_NAME}"
-
-          if [[ "${TAG}" != "${VERSION_TAG}" ]]; then
-            echo "Release tag ${TAG} does not match CMake version tag ${VERSION_TAG}" >&2
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" && "${GITHUB_REF_NAME}" != "${VERSION_TAG}" ]]; then
+            echo "Release tag ${GITHUB_REF_NAME} does not match CMake version tag ${VERSION_TAG}" >&2
             exit 1
           fi
 
           ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
   rpm-packages:
@@ -117,24 +178,47 @@ jobs:
     permissions:
       contents: read
     container:
-      # Rocky Linux 9 keeps the glibc baseline at 2.34 while GCC Toolset 15 supplies
-      # the C++23 library needed by SimRV. The executable statically links the
-      # toolset C++ runtime so users do not need GCC Toolset installed. Rocky's
-      # CRB repository provides libslirp-devel, which UBI does not publish.
-      image: rockylinux:9
+      # Rocky Linux 10 is the supported RPM baseline. GCC Toolset 15 supplies
+      # the C++23 library; the executable statically links that runtime.
+      # Rocky's CRB repository provides libslirp-devel, which UBI does not publish.
+      image: rockylinux/rockylinux:10
     steps:
+      - name: Install checkout tools
+        shell: bash
+        run: dnf install -y git tar
+      - uses: actions/checkout@v6
+      - name: Validate release tag
+        id: names
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          fi
+          test "${SIMRV_VERSION%%.*}" -ge 3
+          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Install build tools
         shell: bash
         run: |
           set -euo pipefail
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb
+          dnf install -y epel-release
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
-            libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
-            bzip2-devel pkgconf-pkg-config tar wget which
+            libslirp-devel make python3-pip rpm-build rpmlint findutils binutils \
+            bzip2-devel pkgconf-pkg-config wget which
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          for path in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin \
+                      /opt/rh/gcc-toolset-15/root/usr/bin; do
+            echo "$path" >> "$GITHUB_PATH"
+          done
+          for tool in cmake ninja ctest; do
+            command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
+          done
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 \
             -O /tmp/boost_1_83_0.tar.bz2
           echo '6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e  /tmp/boost_1_83_0.tar.bz2' \
@@ -143,37 +227,38 @@ jobs:
           cd /tmp/boost_1_83_0
           ./bootstrap.sh
           ./b2 --with-headers install --prefix=/opt/boost-1.83
-          echo "/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_PATH"
           echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
-          echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v6
-      - name: Validate release tag
-        id: names
+      - name: Configure and build RHEL 10 baseline
         shell: bash
         run: |
           set -euo pipefail
-          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
-          test "${SIMRV_VERSION%%.*}" -ge 3
-          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-      - name: Configure and build RHEL 9 baseline
-        shell: bash
-        run: |
-          set -euo pipefail
+          # The separate guest-architecture gate uses the qualified GCC 16 toolchain;
+          # this package job checks the RHEL 10 runtime and RPM consumer baseline.
           cmake --preset rv64-release \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_ENABLE_LTO=OFF \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
           cmake --build --preset rv64-release --parallel 2
-          ! readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'
+          if readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'; then
+            echo "RHEL 10 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
+            readelf -d build/rv64-release/simrv | grep -E 'NEEDED.*(libstdc\+\+|libgcc_s)' >&2
+            exit 1
+          fi
           max_glibc="$(readelf --version-info build/rv64-release/simrv \
             | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
-          test -n "$max_glibc"
-          test "$(printf '%s\n' "$max_glibc" 2.34 | sort -V | tail -n 1)" = 2.34
+          if [[ -z "$max_glibc" ]]; then
+            echo "Could not determine the maximum GLIBC version required by the RHEL 10 runtime" >&2
+            exit 1
+          fi
+          echo "RHEL 10 runtime maximum GLIBC requirement: $max_glibc"
+          if [[ "$(printf '%s\n' "$max_glibc" 2.39 | sort -V | tail -n 1)" != 2.39 ]]; then
+            echo "RHEL 10 runtime must require GLIBC 2.39 or older (found $max_glibc)" >&2
+            exit 1
+          fi
           ctest --test-dir build/rv64-release --output-on-failure -R package-install-consumer
       - name: Build and validate RPM packages
         shell: bash
@@ -198,7 +283,17 @@ jobs:
           fi
           rpm -qp --requires "$development_rpm" | grep -Fx \
             "simrv = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$runtime_rpm")"
-          rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm
+          rpmlint_config=packaging/simrv.rpmlintrc
+          rpmlint_version="$(rpmlint --version)"
+          if [[ "$(printf '%s\n%s\n' 2.9.0 "$rpmlint_version" | sort -V | sed -n '1p')" != 2.9.0 ]]; then
+            rpmlint_config=/tmp/simrv-rpmlintrc
+            cp packaging/simrv.rpmlintrc "$rpmlint_config"
+            # rpmlint 2.8 flags the SDK archive because it has no debug info.
+            cat >> "$rpmlint_config" <<'EOF'
+          addFilter("static-library-without-debuginfo .*libsimrv-runtime[.]a")
+          EOF
+          fi
+          rpmlint --rpmlintrc "$rpmlint_config" packages/*.rpm
           dnf install -y packages/*.rpm
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
           cmake -S tests/package-consumer -B packages/consumer-build
@@ -217,77 +312,46 @@ jobs:
           retention-days: 14
 
   portable-musl:
-    runs-on: ubuntu-latest
+    name: Portable Linux archive (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
-    container:
-      # Alpine supplies a musl-native C++ runtime. This release-only job uses
-      # its GCC15 toolchain with the explicit unqualified-toolchain exception.
-      # Alpine edge is required because GCC15 provides the C++23 headers used by
-      # SimRV; the cache has a small mdspan fallback for the still-missing header.
-      image: alpine:edge
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
     steps:
       - uses: actions/checkout@v6
-      - name: Install musl build tools
-        run: |
-          apk add --no-cache bash build-base boost-dev cmake glib-dev glib-static \
-            gettext-static meson ninja pcre2-static pkgconf python3 tar gzip file \
-            linux-headers zlib-static
-      - name: Build static musl libslirp
-        shell: bash
-        run: |
-          set -euo pipefail
-          wget -q https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.bz2 \
-            -O /tmp/libslirp-v4.9.5.tar.bz2
-          echo '4f59df896cb345ea76d7f68b1e820872feaa9d8255a6761f6bf8a0f2d5144bcd  /tmp/libslirp-v4.9.5.tar.bz2' \
-            | sha256sum --check
-          tar -xjf /tmp/libslirp-v4.9.5.tar.bz2 -C /tmp
-          meson setup /tmp/libslirp-build /tmp/libslirp-v4.9.5 \
-            --prefix=/usr/local --buildtype=release --default-library=static \
-            -Dstatic=true
-          ninja -C /tmp/libslirp-build install
-          echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig' >> "$GITHUB_ENV"
       - name: Validate release tag
         id: names
         shell: bash
         run: |
           set -euo pipefail
           SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          fi
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-      - name: Build static RV64 runtime
+          echo "asset_base=SimRV-linux-${{ matrix.arch }}-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Build static musl archive inside Alpine
         shell: bash
+        env:
+          SIMRV_ASSET_BASE: ${{ steps.names.outputs.asset_base }}
+          SIMRV_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          cmake -S . -B build/rv64-musl-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
-            -DSIMRV_X86_64_V3_BASELINE=OFF \
-            -DSIMRV_WARNINGS_AS_ERRORS=ON \
-            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
-            -DPKG_CONFIG_ARGN=--static \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
-          cmake --build build/rv64-musl-release --parallel 2
-          file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
-          # Alpine's ldd exits successfully for static-pie binaries because they
-          # carry the musl interpreter path. Inspect the ELF dynamic table instead
-          # so the check rejects only actual shared-library dependencies.
-          ! readelf -d build/rv64-musl-release/simrv | grep -q ' NEEDED '
-      - name: Package and validate static archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p portable-package
-          cpack --config build/rv64-musl-release/CPackConfig.cmake -G TGZ \
-            -D CPACK_COMPONENTS_ALL=Runtime -B portable-package
-          mapfile -t archives < <(find portable-package -maxdepth 1 -name '*.tar.gz' -type f)
-          test "${#archives[@]}" -eq 1
-          mv "${archives[0]}" "${{ steps.names.outputs.asset_base }}.tar.gz"
-          tar -tzf "${{ steps.names.outputs.asset_base }}.tar.gz" > portable-archive.list
-          grep -q '^usr/share/SimRV/SimRVBuildMetadata.json$' portable-archive.list
-          grep -q '^usr/share/SimRV/schemas/simrv-build-metadata.schema.json$' portable-archive.list
-          build/rv64-release/simrv-release-check --binary build/rv64-musl-release/simrv
+          SIMRV_HOST_UID="$(id -u)"
+          SIMRV_HOST_GID="$(id -g)"
+          export SIMRV_HOST_UID SIMRV_HOST_GID
+          docker run --rm \
+            -e SIMRV_ASSET_BASE -e SIMRV_ARCH -e SIMRV_HOST_UID -e SIMRV_HOST_GID \
+            -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            alpine:edge sh .github/scripts/portable-musl-release.sh
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}
@@ -298,7 +362,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
     container:
       # Build against Noble's glibc baseline. GCC 15 provides std::flat_map and
       # std::flat_set; static C++ runtime linkage keeps the package runnable on
@@ -327,7 +391,9 @@ jobs:
         run: |
           set -euo pipefail
           SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          fi
           test "${SIMRV_VERSION%%.*}" -ge 3
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_tag=v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
@@ -336,15 +402,27 @@ jobs:
         run: |
           cmake --preset rv64-release \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_CXX_FLAGS=-ffat-lto-objects \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
           cmake --build --preset rv64-release --parallel 2
           max_glibc="$(readelf --version-info build/rv64-release/simrv \
             | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
-          test -n "$max_glibc"
-          test "$(printf '%s\n' "$max_glibc" 2.39 | sort -V | tail -n 1)" = 2.39
-          ! readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'
+          if [[ -z "$max_glibc" ]]; then
+            echo "Could not determine the maximum GLIBC version required by the Ubuntu 24.04 runtime" >&2
+            exit 1
+          fi
+          echo "Ubuntu 24.04 runtime maximum GLIBC requirement: $max_glibc"
+          if [[ "$(printf '%s\n' "$max_glibc" 2.39 | sort -V | tail -n 1)" != 2.39 ]]; then
+            echo "Ubuntu 24.04 runtime must require GLIBC 2.39 or older (found $max_glibc)" >&2
+            exit 1
+          fi
+          if readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'; then
+            echo "Ubuntu 24.04 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
+            readelf -d build/rv64-release/simrv | grep -E 'NEEDED.*(libstdc\+\+|libgcc_s)' >&2
+            exit 1
+          fi
           if readelf --version-info build/rv64-release/simrv | grep -q 'Name: GLIBCXX_'; then
             echo "Ubuntu DEB runtime unexpectedly depends on a dynamic libstdc++ symbol" >&2
             exit 1
@@ -385,14 +463,16 @@ jobs:
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
-          lintian --fail-on error \
-            --suppress-tags malformed-contact,too-many-contacts,no-changelog,no-copyright-file,uncompressed-manual-page,unstripped-binary-or-object,hardening-no-pie,binary-from-other-architecture,statically-linked-binary \
-            packages/*.deb
           apt-get install -y ./packages/*.deb
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
           cmake -S tests/package-consumer -B packages/consumer-build
           cmake --build packages/consumer-build
           packages/consumer-build/simrv-package-consumer
+          # Debian Lintian cannot inspect GCC LTO-only archives. The consumer
+          # build above verifies the shipped archive links successfully.
+          lintian --fail-on warning \
+            --suppress-tags malformed-contact,too-many-contacts,no-changelog,no-copyright-file,uncompressed-manual-page,unstripped-binary-or-object,hardening-no-pie,binary-from-other-architecture,statically-linked-binary,no-code-sections \
+            packages/*.deb
           apt-get remove -y simrv-devel
           dpkg-query -W -f='${Status}' simrv | grep -Fx 'install ok installed'
           development_status="$(dpkg-query -W -f='${Status}' simrv-devel 2>/dev/null || true)"
@@ -408,7 +488,7 @@ jobs:
           retention-days: 14
 
   package-distro-matrix:
-    needs: [build-and-upload, rpm-packages, debian-packages, portable-musl]
+    needs: [rpm-packages, debian-packages, portable-musl]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -419,7 +499,7 @@ jobs:
         include:
           - image: fedora:44
             family: rpm
-          - image: rockylinux:9
+          - image: rockylinux/rockylinux:10
             family: rpm
           - image: ubuntu:24.04
             family: deb
@@ -474,7 +554,8 @@ jobs:
           fi
 
   publish-release:
-    needs: [build-and-upload, rpm-packages, debian-packages, portable-musl, package-distro-matrix]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [guest-architecture-check, rpm-packages, debian-packages, portable-musl, package-distro-matrix]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -487,7 +568,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends createrepo-c dpkg-dev
       - uses: actions/download-artifact@v8
         with:
-          pattern: SimRV-linux-x86_64-v*
+          pattern: SimRV-linux-*-v*
           path: staging
           merge-multiple: true
       - name: Bundle native packages
@@ -514,7 +595,8 @@ jobs:
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
             -C deb-packages -czf "dist/SimRV-deb-packages-v${VERSION}.tar.gz" .
           cp staging/SimRV-linux-x86_64-v${VERSION}.tar.gz dist/
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
+          cp staging/SimRV-linux-aarch64-v${VERSION}.tar.gz dist/
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
       - uses: actions/upload-artifact@v7
         with:
           name: SimRV-release-assets

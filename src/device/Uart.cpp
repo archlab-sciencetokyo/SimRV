@@ -109,7 +109,20 @@ void Uart::stop_input_thread() {
     input_thread_stop_.store(true, std::memory_order_relaxed);
     if (wake_pipe_[1] >= 0) {
         const char c = 1;
-        (void)::write(wake_pipe_[1], &c, 1);
+        for (;;) {
+            const auto written = ::write(wake_pipe_[1], &c, 1);
+            if (written == 1) break;
+            if (written < 0) {
+                if (errno == EAGAIN) break;
+#if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
+                if (errno == EWOULDBLOCK) break;
+#endif
+                if (errno == EINTR) continue;
+            }
+            // The reader's bounded select timeout observes input_thread_stop_ even if
+            // the wake pipe has been closed or otherwise cannot accept a byte.
+            break;
+        }
     }
     if (input_thread_.joinable()) input_thread_.join();
     if (wake_pipe_[0] >= 0) {
@@ -147,8 +160,20 @@ void Uart::flush_tx_buffer() noexcept {
     if (tx_buffer_len_ == 0) return;
     if (pty_.is_open())
         (void)pty_.write_to_master(tx_buffer_.data(), tx_buffer_len_);
-    else if (!machine_.console_sink())
-        (void)::write(STDOUT_FILENO, tx_buffer_.data(), tx_buffer_len_);
+    else if (!machine_.console_sink()) {
+        std::size_t written_total = 0;
+        while (written_total < tx_buffer_len_) {
+            const auto written = ::write(STDOUT_FILENO, tx_buffer_.data() + written_total,
+                                         tx_buffer_len_ - written_total);
+            if (written > 0) {
+                written_total += static_cast<std::size_t>(written);
+            } else if (written < 0 && errno == EINTR) {
+                continue;
+            } else {
+                break;
+            }
+        }
+    }
     tx_buffer_len_ = 0;
 }
 

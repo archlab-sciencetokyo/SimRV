@@ -1,0 +1,37 @@
+.TH SIMRV-ACT 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-act \- run the RISC-V RVA23 Architecture Certification Tests
+.SH SYNOPSIS
+.B simrv-act
+.RI [ options ]
+.RI [ --elf-dir DIR ]
+.SH DESCRIPTION
+.B simrv-act
+runs generated ACT4 ELF tests using SimRV and writes a JSON test report.
+.SH OPTIONS
+.TP
+.B \-\-elf-dir \fIPATH\fR
+Directory containing generated ACT4 ELF files. Required.
+.TP
+.B \-\-simrv \fIPATH\fR
+Select the SimRV executable.
+.TP
+.B \-\-report \fIPATH\fR
+Write the evaluation report as JSON.
+.TP
+.B \-\-jobs, \-j \fIN\fR
+Set the number of parallel test jobs.
+.TP
+.B \-\-vlen \fIBITS\fR, \-\-timeout \fISECONDS\fR
+Set the vector register length or timeout for each test.
+.TP
+.B \-\-max-failures \fIN\fR
+Limit the number of failure details printed.
+.TP
+.B \-\-filter \fIPATTERN\fR
+Run only ELF files whose names contain this pattern.
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.SH SEE ALSO
+.BR simrv (1)

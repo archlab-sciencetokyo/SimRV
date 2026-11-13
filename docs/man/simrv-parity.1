@@ -1,0 +1,47 @@
+.TH SIMRV-PARITY 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-parity \- compare SimRV execution with hardware-model targets
+.SH SYNOPSIS
+.B simrv-parity
+.RI [ options ]
+.RI [ target ]
+.SH DESCRIPTION
+.B simrv-parity
+evaluates SimRV against a registered RTL or hardware-model target. Targets may
+be built in or loaded from an external parity plugin.
+.SH OPTIONS
+.TP
+.B \-\-list-targets
+List registered and discovered targets.
+.TP
+.B \-\-plugin \fILIBRARY\fR
+Load an external parity target adapter.
+.TP
+.B \-\-simrv \fIPATH\fR
+Select the simulator executable.
+.TP
+.B \-\-target-dir \fIPATH\fR
+Select a target checkout; \fBRVCOMP_DIR\fR and \fBCFU_PG_DIR\fR are also
+recognized.
+.TP
+.B \-\-target-bin \fIPATH\fR
+Select a prebuilt Verilator simulator executable.
+.TP
+.B \-\-config \fIPATH\fR
+Use a custom SimRV platform or CPU configuration.
+.TP
+.B \-\-trace-dir \fIPATH\fR, \-\-work-dir \fIPATH\fR
+Choose directories for traces and intermediate build artifacts.
+.TP
+.B \-\-out \fIPATH\fR
+Write the evaluation summary as JSON.
+.TP
+.B \-\-tune, \-\-quick, \-\-apply
+Tune configuration parameters, use a coarse search, or apply the selected
+parameters to the configuration file.
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.SH SEE ALSO
+.BR simrv (1),
+.BR simrv-tune (1)

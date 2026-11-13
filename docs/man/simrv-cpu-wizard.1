@@ -1,0 +1,28 @@
+.TH SIMRV-CPU-WIZARD 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-cpu-wizard \- create SimRV CPU model configurations
+.SH SYNOPSIS
+.B simrv-cpu-wizard
+.RI [ options ]
+.SH DESCRIPTION
+.B simrv-cpu-wizard
+creates a CPU model configuration interactively or directly from a preset.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.TP
+.B \-\-name \fINAME\fR
+Set the configuration name. The default is \fBcustom_riscv\fR.
+.TP
+.B \-\-template \fIPRESET\fR, \-\-preset \fIPRESET\fR
+Choose \fBbalanced\fR, \fBtiny\fR, \fBperformance\fR, or \fBrvcomp\fR.
+.TP
+.B \-o, \-\-output \fIPATH\fR
+Write the configuration to this path. By default it is written below
+\fBconfigs/models/\fR using the configuration name.
+.TP
+.B \-\-non-interactive
+Generate the configuration without prompting for adjustments.
+.SH SEE ALSO
+.BR simrv (1)

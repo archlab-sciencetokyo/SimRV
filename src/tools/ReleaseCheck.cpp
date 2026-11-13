@@ -132,6 +132,7 @@ void verify_metadata(const fs::path& root) {
 
     // Required artifacts check
     for (const auto& art : {"SimRV-linux-x86_64-v" + version + ".tar.gz",
+                            "SimRV-linux-aarch64-v" + version + ".tar.gz",
                             "SimRV-rpm-packages-v" + version + ".tar.gz",
                             "SimRV-deb-packages-v" + version + ".tar.gz"}) {
         if (!artifact_contains_version(art, version)) {
@@ -141,7 +142,7 @@ void verify_metadata(const fs::path& root) {
 
     // Check package support
     for (const auto& distro :
-         {"Ubuntu 22.04", "Rocky Linux 9", "Fedora 44", "Ubuntu 24.04", "Debian sid"}) {
+         {"Ubuntu 22.04", "Rocky Linux 10", "Fedora 44", "Ubuntu 24.04", "Debian sid"}) {
         if (manifest.find(distro) == std::string::npos) {
             fail(std::string("manifest missing package support distribution: ") + distro);
         }

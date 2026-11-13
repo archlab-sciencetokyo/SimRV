@@ -1,10 +1,11 @@
-name: C/C++ CI
+name: SimRV CI
 
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "dev", 'release/**' ]
   pull_request:
     branches: [ "main", "dev" ]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     outputs:
       cpp: ${{ steps.filter.outputs.cpp }}
     steps:
@@ -33,15 +35,51 @@ jobs:
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        GH_TOKEN: ${{ github.token }}
       shell: bash
       run: |
-        changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
-          . \
-          ':(exclude)docs/**' \
-          ':(exclude)zensical.yml' \
-          ':(exclude)pyproject.toml' \
-          ':(exclude)uv.lock' \
-          ':(exclude).github/workflows/docs.yml')"
+        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          changed_files=manual-dispatch
+        elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          branch_query="$(jq -rn --arg value "$PR_BRANCH" '$value | @uri')"
+          runs="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/c-cpp.yml/runs?branch=$branch_query&per_page=100")"
+          last_success="$(jq -r --argjson number "$PR_NUMBER" '
+            [.workflow_runs[]
+             | select(.conclusion == "success")
+             | select(any(.pull_requests[]?; .number == $number))]
+            | sort_by(.run_started_at) | last | .head_sha // empty' <<< "$runs")"
+          baseline="$last_success"
+          if [[ -n "$baseline" ]] && ! git cat-file -e "${baseline}^{commit}" 2>/dev/null; then
+            baseline=""
+          fi
+          if [[ -z "$baseline" ]]; then baseline="$BASE_SHA"; fi
+          changed_files="$(git diff --name-only "$baseline" "$HEAD_SHA" -- \
+            . \
+            ':(exclude)docs/**' \
+            ':(exclude)zensical.yml' \
+            ':(exclude)pyproject.toml' \
+            ':(exclude)uv.lock' \
+            ':(exclude)cmake/SimRVPackaging.cmake' \
+            ':(exclude).github/workflows/c-cpp.yml' \
+            ':(exclude).github/workflows/docs.yml' \
+            ':(exclude).github/workflows/release-binaries.yml')"
+        else
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+            . \
+            ':(exclude)docs/**' \
+            ':(exclude)zensical.yml' \
+            ':(exclude)pyproject.toml' \
+            ':(exclude)uv.lock' \
+            ':(exclude)cmake/SimRVPackaging.cmake' \
+            ':(exclude).github/workflows/c-cpp.yml' \
+            ':(exclude).github/workflows/docs.yml' \
+            ':(exclude).github/workflows/release-binaries.yml')"
+        fi
         if [[ -n "$changed_files" ]]; then
           echo "cpp=true" >> "$GITHUB_OUTPUT"
         else
@@ -160,6 +198,12 @@ jobs:
         export RISCV_TESTS_DIR="${RUNNER_TEMP}/riscv-tests"
         ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
+    - name: Run release smoke checks
+      if: matrix.arch == 'rv64' && matrix.compiler == 'gcc'
+      run: |
+        build/rv64-release/simrv-smoke --simrv build/rv64-release/simrv
+        ctest --test-dir build/rv64-release --output-on-failure -L release
+
     - name: Record required-suite evidence
       shell: bash
       run: |
@@ -187,6 +231,69 @@ jobs:
         path: evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
         retention-days: 14
 
+  macos:
+    name: macOS (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build tools
+        run: brew install boost libslirp cmake ninja gcc
+      - name: Configure macOS build
+        run: |
+          cmake -S . -B build/macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc-16 \
+            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DSIMRV_XLEN=64 \
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_ENABLE_LTO=OFF
+      - name: Build simulator
+        run: cmake --build build/macos --target SimRV --parallel 2
+      - name: Smoke test simulator
+        run: build/macos/SimRV --help
+      - name: Upload simulator binary
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: simrv-macos-${{ matrix.arch }}
+          path: build/macos/SimRV
+          if-no-files-found: error
+          retention-days: 7
+
+  native-arm64:
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    container:
+      image: fedora:44
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install native build tools
+        run: dnf install -y cmake ninja-build boost-devel libslirp-devel gcc gcc-c++
+      - name: Configure native ARM64 optimization
+        run: >-
+          cmake --preset rv64-gcc-release
+          -DSIMRV_WARNINGS_AS_ERRORS=ON
+          -DSIMRV_NATIVE_HOST_OPTIMIZATIONS=ON
+      - name: Build native ARM64 simulator
+        run: cmake --build --preset rv64-gcc-release --parallel 3
+      - name: Smoke test native ARM64 simulator
+        run: >-
+          build/rv64-gcc-release/simrv-smoke
+          --simrv build/rv64-gcc-release/simrv
+
   quality:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
@@ -206,6 +313,8 @@ jobs:
       run: |
         if [[ "${{ github.event_name }}" == "pull_request" ]]; then
           BASE="${{ github.event.pull_request.base.sha }}"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          BASE="$(git rev-parse HEAD^)"
         else
           BASE="${{ github.event.before }}"
         fi

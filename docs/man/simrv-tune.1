@@ -1,0 +1,19 @@
+.TH SIMRV-TUNE 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-tune \- alias for the SimRV target-evaluation tool
+.SH SYNOPSIS
+.B simrv-tune
+.RI [ options ]
+.RI [ target ]
+.SH DESCRIPTION
+.B simrv-tune
+is an alias for \fBsimrv-parity\fR. Use \fB--tune\fR to tune CPU or platform
+configuration parameters against a registered hardware-model target.
+.SH OPTIONS
+The command accepts the same options as \fBsimrv-parity\fR, including
+\fB--plugin\fR, \fB--target-dir\fR, \fB--config\fR, \fB--trace-dir\fR,
+\fB--out\fR, \fB--tune\fR, \fB--quick\fR, and \fB--apply\fR. See
+\fBsimrv-parity --help\fR for the complete option list.
+.SH SEE ALSO
+.BR simrv (1),
+.BR simrv-parity (1)

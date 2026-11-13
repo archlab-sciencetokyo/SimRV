@@ -39,6 +39,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix spurious NUL characters in the RVComp UART by using its serial device plugin.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
 - Fix Linux packages so optional plugin libraries are installed with the tools package.
+- Publish a statically linked Linux AArch64 archive with a generic ARMv8-A baseline for 64-bit ARM systems.
 
 ## [v3.0.0-rc.18] — 2026-11-04
 

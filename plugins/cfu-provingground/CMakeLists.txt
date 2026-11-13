@@ -1,5 +1,9 @@
 add_library(simrv-cfu-provingground SHARED CfuPlugin.cpp)
 target_include_directories(simrv-cfu-provingground PRIVATE ${PROJECT_SOURCE_DIR}/include)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(simrv-cfu-provingground PRIVATE -Wl,--no-as-needed)
+  target_link_libraries(simrv-cfu-provingground PRIVATE c)
+endif()
 set_target_properties(simrv-cfu-provingground PROPERTIES
   OUTPUT_NAME "simrv-cfu-provingground"
   PREFIX "lib"

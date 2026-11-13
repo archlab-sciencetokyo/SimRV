@@ -5,7 +5,7 @@
   "release_tag": "v3.0.0-rc.19",
   "host_support": {
     "os": "Linux",
-    "architecture": "x86_64",
+    "architectures": ["x86_64", "aarch64"],
     "compilers": {
       "gcc": "16+",
       "clang": "22+"
@@ -13,7 +13,7 @@
   },
   "package_support": {
     "rpm": [
-      "Rocky Linux 9",
+      "Rocky Linux 10",
       "Fedora 44"
     ],
     "deb": [
@@ -195,6 +195,7 @@
   },
   "artifacts": [
     "SimRV-linux-x86_64-v3.0.0-rc.19.tar.gz",
+    "SimRV-linux-aarch64-v3.0.0-rc.19.tar.gz",
     "SimRV-rpm-packages-v3.0.0-rc.19.tar.gz",
     "SimRV-deb-packages-v3.0.0-rc.19.tar.gz"
   ]
