@@ -28,6 +28,10 @@ Set the vector register length or timeout for each test.
 .B \-\-max-failures \fIN\fR
 Limit the number of failure details printed.
 .TP
+.B \-\-compare-detailed-on-failure
+Rerun each failed test with instruction-detailed execution and report whether that run passes.
+The original fast-mode result remains authoritative for the suite totals and exit status.
+.TP
 .B \-\-filter \fIPATTERN\fR
 Run only ELF files whose names contain this pattern.
 .TP

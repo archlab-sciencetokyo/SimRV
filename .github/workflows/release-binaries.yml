@@ -152,7 +152,8 @@ jobs:
           build/rv64-release/simrv-act \
             --simrv build/rv64-release/simrv \
             --elf-dir "$ACT_WORKDIR/simrv-rva23s64/elfs" \
-            --report "$report" --jobs "$(nproc)" --vlen 128 --max-failures 1000
+            --report "$report" --jobs "$(nproc)" --vlen 128 --max-failures 1000 \
+            --compare-detailed-on-failure
           act_status=$?
           set -e
           # The current full suite has 50 documented expectation conflicts with

@@ -34,8 +34,12 @@ simrv-act \
   --simrv build/rv64-debug/simrv \
   --elf-dir build/act4-rva23s64/simrv-rva23s64/elfs \
   --report build/act4-rva23s64/simrv-rva23s64/simrv-report.json \
-  --jobs 12
+  --jobs 12 --compare-detailed-on-failure
 ```
+
+The optional `--compare-detailed-on-failure` flag reruns failed ELFs without instruction batching.
+It helps separate issues in the fast path from behavior shared with instruction-detailed execution;
+the fast-mode result still determines the report totals and exit status.
 
 The generated Sail configuration fixes VLEN at 128 bits; the runner passes the
 same `--vlen 128` setting to SimRV. The generated suite and report belong under
