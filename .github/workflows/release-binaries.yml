@@ -107,7 +107,17 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/act-venv"
           "$RUNNER_TEMP/act-venv/bin/pip" install uv
           echo "$RUNNER_TEMP/act-venv/bin" >> "$GITHUB_PATH"
-          echo "$PWD/tools/sail-riscv-0.16/bin" >> "$GITHUB_PATH"
+          sail_archive="$RUNNER_TEMP/sail-riscv-Linux-x86_64.tar.gz"
+          curl --fail --location --retry 3 \
+            https://github.com/riscv/sail-riscv/releases/download/0.16/sail-riscv-Linux-x86_64.tar.gz \
+            --output "$sail_archive"
+          echo "f9bb8a32b8f3eddbdf69b3a29d96dff4ba1e77f45877165e0478418367da6bee  $sail_archive" \
+            | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/sail-riscv-0.16"
+          tar -xzf "$sail_archive" -C "$RUNNER_TEMP/sail-riscv-0.16"
+          sail_sim="$(find "$RUNNER_TEMP/sail-riscv-0.16" -type f -name sail_riscv_sim -print -quit)"
+          test -n "$sail_sim" && test -x "$sail_sim"
+          echo "$(dirname "$sail_sim")" >> "$GITHUB_PATH"
           ln -sf /opt/riscv/bin/riscv-none-elf-gcc /usr/local/bin/riscv64-linux-gnu-gcc
           ln -sf /opt/riscv/bin/riscv-none-elf-objdump /usr/local/bin/riscv64-linux-gnu-objdump
 
