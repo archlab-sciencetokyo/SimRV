@@ -142,6 +142,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "ACT4 source commit: $(git -C "$ACT_DIR" rev-parse HEAD)"
           make -C "$ACT_DIR" \
             CONFIG_FILES="$GITHUB_WORKSPACE/tests/act4/simrv-rva23s64/test_config.yaml" \
             CERTIFICATE=RVA23 JOBS="$(nproc)" \
@@ -151,14 +152,18 @@ jobs:
           build/rv64-release/simrv-act \
             --simrv build/rv64-release/simrv \
             --elf-dir "$ACT_WORKDIR/simrv-rva23s64/elfs" \
-            --report "$report" --jobs "$(nproc)" --vlen 128
+            --report "$report" --jobs "$(nproc)" --vlen 128 --max-failures 1000
           act_status=$?
           set -e
           # The current full suite has 50 documented expectation conflicts with
           # ratified Vector/H behavior. Require the known baseline so new failures
           # or a changed suite fail release qualification.
-          jq -e '.total == 3188 and .passed == 3138 and .failed == 50 and .timeouts == 0' \
-            "$report" >/dev/null
+          if ! jq -e '.total == 3188 and .passed == 3138 and .failed == 50 and .timeouts == 0' \
+            "$report" >/dev/null; then
+            echo "ACT4 report differs from the documented 3138/3188 baseline; failed tests:" >&2
+            jq -r '.tests[] | select(.status != "PASS") | "  - " + .name' "$report" >&2
+            exit 1
+          fi
           test "$act_status" -eq 1
           echo "ACT4 matched the documented 3138/3188 baseline (50 known expectation conflicts)."
 
