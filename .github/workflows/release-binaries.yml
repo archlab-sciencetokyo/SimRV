@@ -183,6 +183,10 @@ jobs:
       # Rocky's CRB repository provides libslirp-devel, which UBI does not publish.
       image: rockylinux/rockylinux:10
     steps:
+      - name: Install checkout tools
+        shell: bash
+        run: dnf install -y git tar
+      - uses: actions/checkout@v6
       - name: Install build tools
         shell: bash
         run: |
@@ -192,8 +196,8 @@ jobs:
           dnf install -y epel-release
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
-            libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
-            bzip2-devel pkgconf-pkg-config tar wget which
+            libslirp-devel make python3-pip rpm-build rpmlint findutils binutils \
+            bzip2-devel pkgconf-pkg-config wget which
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 \
@@ -209,7 +213,6 @@ jobs:
           echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v6
       - name: Validate release tag
         id: names
         shell: bash
