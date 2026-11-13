@@ -103,7 +103,7 @@ install(
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV")
+  INSTALL_DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/SimRV")
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
   VERSION "${PROJECT_VERSION}"
@@ -112,7 +112,7 @@ install(
   EXPORT SimRVTargets
   FILE SimRVTargets.cmake
   NAMESPACE SimRV::
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/SimRV"
   COMPONENT Development)
 export(
   EXPORT SimRVTargets
@@ -120,7 +120,7 @@ export(
   NAMESPACE SimRV::)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/SimRV"
         COMPONENT Development)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md
         DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV
