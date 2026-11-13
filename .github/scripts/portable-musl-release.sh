@@ -37,6 +37,13 @@ tar -xjf /tmp/libslirp-v4.9.5.tar.bz2 -C /tmp
 meson setup /tmp/libslirp-build /tmp/libslirp-v4.9.5 \
     --prefix=/usr/local --buildtype=release --default-library=static -Dstatic=true
 ninja -C /tmp/libslirp-build install
+# libslirp's Meson build creates a static_library when `static=true`, but that
+# target is not marked for installation. Stage it explicitly so CMake's
+# pkg-config dependency resolves to the archive instead of a missing library.
+install -Dm644 /tmp/libslirp-build/libslirp.a /usr/local/lib/libslirp.a
+# Meson/GNU ar emits a thin archive whose members are relative to the archive.
+# Keep its member directory beside the staged archive so the linker can resolve it.
+cp -a /tmp/libslirp-build/libslirp.a.p /usr/local/lib/
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
 cmake -S . -B build/rv64-musl-release -G Ninja \
@@ -46,9 +53,9 @@ cmake -S . -B build/rv64-musl-release -G Ninja \
     -DSIMRV_WARNINGS_AS_ERRORS=ON \
     -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
     -DPKG_CONFIG_ARGN=--static \
-    -DCMAKE_FIND_LIBRARY_SUFFIXES=.a \
+    -DCMAKE_PROJECT_SimRV_INCLUDE="${PWD}/.github/scripts/static-library-search.cmake" \
     -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++"
-cmake --build build/rv64-musl-release --parallel 2
+cmake --build build/rv64-musl-release --target SimRV simrv-release-check --parallel 2
 
 file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
 if readelf -d build/rv64-musl-release/simrv | grep -q ' NEEDED '; then
