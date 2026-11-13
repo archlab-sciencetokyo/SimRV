@@ -212,7 +212,10 @@ jobs:
             bzip2-devel pkgconf-pkg-config wget which
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          for path in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin \
+                      /opt/rh/gcc-toolset-15/root/usr/bin; do
+            echo "$path" >> "$GITHUB_PATH"
+          done
           for tool in cmake ninja ctest; do
             command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
           done
@@ -224,9 +227,7 @@ jobs:
           cd /tmp/boost_1_83_0
           ./bootstrap.sh
           ./b2 --with-headers install --prefix=/opt/boost-1.83
-          echo "/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_PATH"
           echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
-          echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
       - name: Configure and build RHEL 10 baseline
