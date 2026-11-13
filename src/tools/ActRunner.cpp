@@ -35,6 +35,7 @@ void print_help(const char* prog) {
     std::println("  --timeout <SEC>       Timeout per test in seconds (default: 30)");
     std::println("  --max-failures <N>    Maximum failure details printed (default: 30)");
     std::println("  --filter <PATTERN>    Only run ELFs matching substring pattern");
+    std::println("  --compare-detailed-on-failure  Rerun failures in instruction-detailed mode");
     std::println("  -h, --help            Show this help message and exit");
 }
 
@@ -63,10 +64,32 @@ struct TestResult {
     int returncode = 0;
     double duration_seconds = 0.0;
     std::string detail;
+    bool detailed_rerun = false;
+    bool detailed_passed = false;
+    bool detailed_timed_out = false;
+    int detailed_returncode = 0;
+    std::string detailed_detail;
 };
 
+void print_failure_output(std::string_view heading, std::string_view output) {
+    constexpr std::size_t kMaxPrintedDetail = 2048;
+    if (output.size() > kMaxPrintedDetail) {
+        output.remove_prefix(output.size() - kMaxPrintedDetail);
+        if (const auto newline = output.find('\n'); newline != std::string_view::npos) {
+            output.remove_prefix(newline + 1);
+        }
+    }
+    std::println("      {}:", heading);
+    while (!output.empty()) {
+        const auto newline = output.find('\n');
+        std::println("        {}", output.substr(0, newline));
+        if (newline == std::string_view::npos) break;
+        output.remove_prefix(newline + 1);
+    }
+}
+
 auto run_single_test(const std::filesystem::path& simrv_bin, const std::filesystem::path& elf_path,
-                     unsigned int vlen, double timeout_sec) -> TestResult {
+                     unsigned int vlen, double timeout_sec, bool detailed = false) -> TestResult {
     TestResult res;
     res.name = elf_path.filename().string();
     res.path = elf_path.string();
@@ -97,13 +120,17 @@ auto run_single_test(const std::filesystem::path& simrv_bin, const std::filesyst
         std::string elf_str = elf_path.string();
         std::string simrv_str = simrv_bin.string();
 
-        std::vector<char*> c_args = {
-            const_cast<char*>(simrv_str.c_str()),  const_cast<char*>("--cli"),
-            const_cast<char*>("--baremetal"),      const_cast<char*>("--no-sbi"),
-            const_cast<char*>("--act-test-hooks"), const_cast<char*>("--vlen"),
-            const_cast<char*>(vlen_str.c_str()),   const_cast<char*>("-m"),
-            const_cast<char*>(elf_str.c_str()),    nullptr,
-        };
+        std::vector<std::string> args{simrv_str};
+        if (detailed) {
+            args.emplace_back("--mode");
+            args.emplace_back("detailed");
+        }
+        args.insert(args.end(), {"--cli", "--baremetal", "--no-sbi", "--act-test-hooks", "--vlen",
+                                 vlen_str, "-m", elf_str});
+        std::vector<char*> c_args;
+        c_args.reserve(args.size() + 1);
+        for (auto& arg : args) c_args.push_back(arg.data());
+        c_args.push_back(nullptr);
 
         ::execvp(c_args[0], c_args.data());
         ::_exit(127);
@@ -191,6 +218,7 @@ int main(int argc, char** argv) {
     unsigned int vlen = 128;
     double timeout_sec = 30.0;
     std::size_t max_failures = 30;
+    bool compare_detailed_on_failure = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -213,6 +241,8 @@ int main(int argc, char** argv) {
             max_failures = std::stoul(argv[++i]);
         } else if (arg == "--filter" && i + 1 < argc) {
             filter_pattern = argv[++i];
+        } else if (arg == "--compare-detailed-on-failure") {
+            compare_detailed_on_failure = true;
         } else if (!arg.starts_with("-") && elf_dir.empty()) {
             elf_dir = arg;
         } else {
@@ -278,6 +308,14 @@ int main(int argc, char** argv) {
 
             const auto& elf = elfs[idx];
             auto res = run_single_test(resolved_simrv, elf, vlen, timeout_sec);
+            if (compare_detailed_on_failure && !res.passed) {
+                const auto detailed = run_single_test(resolved_simrv, elf, vlen, timeout_sec, true);
+                res.detailed_rerun = true;
+                res.detailed_passed = detailed.passed;
+                res.detailed_timed_out = detailed.timed_out;
+                res.detailed_returncode = detailed.returncode;
+                res.detailed_detail = detailed.detail;
+            }
             if (res.passed) {
                 pass_count.fetch_add(1);
             } else if (res.timed_out) {
@@ -311,6 +349,20 @@ int main(int argc, char** argv) {
                 if (printed_failures++ < max_failures) {
                     std::println("  - {:40} [{}] (exit {})", res.name,
                                  res.timed_out ? "TIMEOUT" : "FAIL", res.returncode);
+                    if (res.detailed_rerun) {
+                        std::println("      Detailed execution: {} (exit {})",
+                                     res.detailed_passed ? "PASS"
+                                     : res.detailed_timed_out ? "TIMEOUT"
+                                                              : "FAIL",
+                                     res.detailed_returncode);
+                    }
+                    if (!res.detail.empty()) {
+                        print_failure_output("Failure output", res.detail);
+                    }
+                    if (res.detailed_rerun && !res.detailed_passed &&
+                        !res.detailed_detail.empty()) {
+                        print_failure_output("Detailed failure output", res.detailed_detail);
+                    }
                 }
             }
         }
@@ -335,6 +387,14 @@ int main(int argc, char** argv) {
                 report << std::format("      \"name\": \"{}\",\n", r.name);
                 report << std::format("      \"status\": \"{}\",\n",
                                       r.passed ? "PASS" : (r.timed_out ? "TIMEOUT" : "FAIL"));
+                if (r.detailed_rerun) {
+                    report << std::format("      \"detailed_status\": \"{}\",\n",
+                                          r.detailed_passed
+                                              ? "PASS"
+                                              : (r.detailed_timed_out ? "TIMEOUT" : "FAIL"));
+                } else {
+                    report << "      \"detailed_status\": null,\n";
+                }
                 report << std::format("      \"duration\": {:.3f}\n", r.duration_seconds);
                 report << std::format("    }}{}\n", (i + 1 < results.size()) ? "," : "");
             }
