@@ -142,7 +142,7 @@ void verify_metadata(const fs::path& root) {
 
     // Check package support
     for (const auto& distro :
-         {"Ubuntu 22.04", "Rocky Linux 9", "Fedora 44", "Ubuntu 24.04", "Debian sid"}) {
+         {"Ubuntu 22.04", "Rocky Linux 10", "Fedora 44", "Ubuntu 24.04", "Debian sid"}) {
         if (manifest.find(distro) == std::string::npos) {
             fail(std::string("manifest missing package support distribution: ") + distro);
         }

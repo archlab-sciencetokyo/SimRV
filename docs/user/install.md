@@ -130,7 +130,7 @@ sudo apt install ./simrv-deb/simrv_*_amd64.deb ./simrv-deb/simrv-devel_*_amd64.d
 
 The native `simrv-devel` package contains SimRV's public C++ headers, the static runtime library,
 and the CMake package that exports `SimRV::runtime`. It is optional and is not part of the portable
-TGZ. Native SDK packages are qualified on Ubuntu 24.04 and RHEL 9-compatible systems; the SDK
+TGZ. Native SDK packages are qualified on Ubuntu 24.04 and RHEL 10-compatible systems; the SDK
 expects a C++23-capable compiler. Source installs also provide the CMake package and do not require
 a native development package.
 
@@ -161,7 +161,7 @@ TGZ archives are published for x86-64 and AArch64 Linux:
 
 | Package | Tested distributions | Notes |
 | --- | --- | --- |
-| RPM | Rocky Linux 9 and Fedora 44 | Built against the RHEL 9 glibc baseline; the simulator statically links its C++ runtime. |
+| RPM | Rocky Linux 10 and Fedora 44 | Built against the RHEL 10 glibc baseline; the simulator statically links its C++ runtime. |
 | DEB | Ubuntu 24.04 and Debian sid | Built against Ubuntu 24.04; the simulator statically links its C++ runtime. |
 | Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 or AArch64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
 

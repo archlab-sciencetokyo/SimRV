@@ -91,7 +91,7 @@ int main() {
 
         // Package support
         expect(manifest.find("Ubuntu 22.04") != std::string::npos);
-        expect(manifest.find("Rocky Linux 9") != std::string::npos);
+        expect(manifest.find("Rocky Linux 10") != std::string::npos);
         expect(manifest.find("Fedora 44") != std::string::npos);
         expect(manifest.find("Ubuntu 24.04") != std::string::npos);
         expect(manifest.find("Debian sid") != std::string::npos);

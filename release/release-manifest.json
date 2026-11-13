@@ -13,7 +13,7 @@
   },
   "package_support": {
     "rpm": [
-      "Rocky Linux 9",
+      "Rocky Linux 10",
       "Fedora 44"
     ],
     "deb": [

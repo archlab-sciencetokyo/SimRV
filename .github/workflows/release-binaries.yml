@@ -178,11 +178,10 @@ jobs:
     permissions:
       contents: read
     container:
-      # Rocky Linux 9 keeps the glibc baseline at 2.34 while GCC Toolset 15 supplies
-      # the C++23 library needed by SimRV. The executable statically links the
-      # toolset C++ runtime so users do not need GCC Toolset installed. Rocky's
-      # CRB repository provides libslirp-devel, which UBI does not publish.
-      image: rockylinux:9
+      # Rocky Linux 10 is the supported RPM baseline. GCC Toolset 15 supplies
+      # the C++23 library; the executable statically links that runtime.
+      # Rocky's CRB repository provides libslirp-devel, which UBI does not publish.
+      image: rockylinux:10
     steps:
       - name: Install build tools
         shell: bash
@@ -190,8 +189,8 @@ jobs:
           set -euo pipefail
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb
-          dnf install -y gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
-            gcc-toolset-14-libstdc++-devel gcc gcc-c++ \
+          dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
+            gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
             libslirp-devel git make python3-pip rpm-build rpmlint findutils binutils \
             bzip2-devel pkgconf-pkg-config tar wget which
           python3 -m pip install cmake==4.3.0 ninja || \
@@ -206,9 +205,9 @@ jobs:
           ./b2 --with-headers install --prefix=/opt/boost-1.83
           echo "/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_PATH"
           echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
-          echo "/opt/rh/gcc-toolset-14/root/usr/bin" >> "$GITHUB_PATH"
-          echo "CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc" >> "$GITHUB_ENV"
-          echo "CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++" >> "$GITHUB_ENV"
+          echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
+          echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
+          echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
       - name: Validate release tag
         id: names
@@ -222,10 +221,12 @@ jobs:
           test "${SIMRV_VERSION%%.*}" -ge 3
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-      - name: Configure and build RHEL 9 baseline
+      - name: Configure and build RHEL 10 baseline
         shell: bash
         run: |
           set -euo pipefail
+          # The separate guest-architecture gate uses the qualified GCC 16 toolchain;
+          # this package job checks the RHEL 10 runtime and RPM consumer baseline.
           cmake --preset rv64-release \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_CXX_FLAGS=-ffat-lto-objects \
@@ -234,19 +235,19 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
           cmake --build --preset rv64-release --parallel 2
           if readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'; then
-            echo "RHEL 9 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
+            echo "RHEL 10 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
             readelf -d build/rv64-release/simrv | grep -E 'NEEDED.*(libstdc\+\+|libgcc_s)' >&2
             exit 1
           fi
           max_glibc="$(readelf --version-info build/rv64-release/simrv \
             | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
           if [[ -z "$max_glibc" ]]; then
-            echo "Could not determine the maximum GLIBC version required by the RHEL 9 runtime" >&2
+            echo "Could not determine the maximum GLIBC version required by the RHEL 10 runtime" >&2
             exit 1
           fi
-          echo "RHEL 9 runtime maximum GLIBC requirement: $max_glibc"
-          if [[ "$(printf '%s\n' "$max_glibc" 2.34 | sort -V | tail -n 1)" != 2.34 ]]; then
-            echo "RHEL 9 runtime must require GLIBC 2.34 or older (found $max_glibc)" >&2
+          echo "RHEL 10 runtime maximum GLIBC requirement: $max_glibc"
+          if [[ "$(printf '%s\n' "$max_glibc" 2.39 | sort -V | tail -n 1)" != 2.39 ]]; then
+            echo "RHEL 10 runtime must require GLIBC 2.39 or older (found $max_glibc)" >&2
             exit 1
           fi
           ctest --test-dir build/rv64-release --output-on-failure -R package-install-consumer
@@ -479,7 +480,7 @@ jobs:
         include:
           - image: fedora:44
             family: rpm
-          - image: rockylinux:9
+          - image: rockylinux:10
             family: rpm
           - image: ubuntu:24.04
             family: deb
