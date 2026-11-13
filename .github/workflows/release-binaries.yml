@@ -283,7 +283,18 @@ jobs:
           fi
           rpm -qp --requires "$development_rpm" | grep -Fx \
             "simrv = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$runtime_rpm")"
-          rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm
+          rpmlint_config=packaging/simrv.rpmlintrc
+          rpmlint_version="$(rpmlint --version)"
+          if [[ "$(printf '%s\n%s\n' 2.9.0 "$rpmlint_version" | sort -V | sed -n '1p')" != 2.9.0 ]]; then
+            rpmlint_config=/tmp/simrv-rpmlintrc
+            cp packaging/simrv.rpmlintrc "$rpmlint_config"
+            # rpmlint 2.8 flags the release LTO archive; 2.9 removed these checks.
+            cat >> "$rpmlint_config" <<'EOF'
+          addFilter("static-library-without-debuginfo .*libsimrv-runtime[.]a")
+          addFilter("lto-no-text-in-archive .*libsimrv-runtime[.]a")
+          EOF
+          fi
+          rpmlint --rpmlintrc "$rpmlint_config" packages/*.rpm
           dnf install -y packages/*.rpm
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
           cmake -S tests/package-consumer -B packages/consumer-build

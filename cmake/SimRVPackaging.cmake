@@ -42,9 +42,8 @@ install(
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
 install(
-  PROGRAMS $<TARGET_FILE:simrv-parity>
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-tune
+  CODE
+    "file(CREATE_LINK \"simrv-parity\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/simrv-tune\" SYMBOLIC)"
   COMPONENT Tools)
 install(
   TARGETS simrv-act simrv-vector
@@ -73,6 +72,7 @@ install(
   DESTINATION ${CMAKE_INSTALL_DOCDIR}/user
   COMPONENT Runtime
   FILES_MATCHING
+  PATTERN "index.md" EXCLUDE
   PATTERN "*.md")
 install(
   DIRECTORY examples/hello/
