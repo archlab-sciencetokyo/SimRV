@@ -1,14 +1,17 @@
 # Install SimRV
 
-SimRV publishes Linux x86-64 simulator builds. The installed `simrv` executable runs RV64
+SimRV publishes Linux x86-64 and AArch64 simulator builds. The installed `simrv` executable runs RV64
 guests and provides RV32 guest compatibility. Native RV32 builds remain a source-level validation
 target and are not distributed separately.
 
-Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
-on macOS 26 for Apple silicon and Intel; macOS packages are not published yet. VirtIO-FS directory
-sharing is Linux-only. User-mode networking uses libslirp on Linux and macOS. Windows users should run SimRV inside
-[WSL2](https://learn.microsoft.com/windows/wsl/) with a supported Linux distribution; native
-Windows builds are not currently supported.
+Linux release archives target x86-64 and AArch64. The AArch64 archive uses a generic ARMv8-A
+baseline and is intended for 64-bit Raspberry Pi OS, including Raspberry Pi 5; Pi hardware testing
+is still pending. Native macOS source builds are smoke-tested on macOS 26 for Apple silicon and
+Intel; macOS packages are not published yet. VirtIO-FS directory sharing is Linux-only. User-mode
+networking uses libslirp on Linux and macOS. SimRV also uses POSIX terminal I/O, file descriptors,
+polling, and process APIs that Windows does not provide natively, so a native Windows port would
+need substantial rework. [WSL2](https://learn.microsoft.com/windows/wsl/) is the practical
+compatibility option: it runs a real Linux kernel and userland and is readily available on Windows.
 
 Download the newest package bundle or portable archive from
 [GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). Beta releases are marked
@@ -20,9 +23,9 @@ Install libslirp with the platform package manager before configuring: `brew ins
 macOS, `dnf install libslirp-devel` on Fedora, or `apt install libslirp-dev` on Debian and Ubuntu.
 
 The macOS build is an experimental source-build target, validated on macOS 26 with GCC 16 on both
-Apple silicon and Intel. The compatibility workflow also runs `simrv --help` as a startup smoke
-test. It does not qualify every TUI feature or provide a macOS installer. Its successful CI runs
-publish architecture-specific test binaries as workflow artifacts; those are not release packages.
+Apple silicon and Intel. The regular CI runs `simrv --help` as a startup smoke test. It does not
+qualify every TUI feature or provide a macOS installer. Successful non-PR CI runs publish
+architecture-specific test binaries as workflow artifacts; those are not release packages.
 
 Install the build tools with Homebrew, then configure and build using the same compiler settings as
 the compatibility job:
@@ -40,20 +43,23 @@ cmake --build build/macos --target SimRV --parallel 2
 build/macos/SimRV --help
 ```
 
-The [macOS compatibility workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/macos-compatibility.yml)
-uploads separate `arm64` and `x86_64` artifacts after a successful build and smoke test. Graphical
-guest display uses Kitty graphics when detected, then SIXEL when available; support depends on the
-terminal emulator, not just the host OS. The TUI falls back to text when neither is available.
+The [SimRV CI workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
+uploads separate `arm64` and `x86_64` artifacts after successful non-PR builds and smoke tests.
+Graphical guest display uses Kitty graphics when detected, then SIXEL when available; support
+depends on the terminal emulator, not just the host OS. The TUI falls back to text when neither is
+available.
 
 ## Portable archive
 
-The portable archive contains the runtime component only and is fully statically linked against
-musl. It needs an x86-64 Linux kernel but no host glibc or SimRV runtime libraries. Extract it into
+Portable archives contain the runtime component only and are fully statically linked against musl.
+Use the `x86_64` archive for x86-64 Linux and the `aarch64` archive for 64-bit ARM Linux; neither
+needs host glibc or SimRV runtime libraries. Extract the matching archive into
 `/usr/local` while removing the archive's leading `usr/` directory:
 
 ```bash
-tar -tzf SimRV-linux-x86_64-vVERSION.tar.gz
-sudo tar -xzf SimRV-linux-x86_64-vVERSION.tar.gz \
+ARCH=aarch64 # use x86_64 on x86-64 Linux
+tar -tzf "SimRV-linux-${ARCH}-vVERSION.tar.gz"
+sudo tar -xzf "SimRV-linux-${ARCH}-vVERSION.tar.gz" \
   --strip-components=1 -C /usr/local
 simrv --version
 ```
@@ -64,7 +70,8 @@ For a per-user install without administrator rights, extract it under `~/.local`
 
 ```bash
 mkdir -p "$HOME/.local"
-tar -xzf SimRV-linux-x86_64-vVERSION.tar.gz \
+ARCH=aarch64 # use x86_64 on x86-64 Linux
+tar -xzf "SimRV-linux-${ARCH}-vVERSION.tar.gz" \
   --strip-components=1 -C "$HOME/.local"
 "$HOME/.local/bin/simrv" --version
 ```
@@ -144,7 +151,8 @@ headers, library, or CMake package and cannot serve as an SDK.
 
 ## Supported Linux distributions
 
-Native packages are qualified in release CI on the following x86-64 distributions:
+Native RPM and DEB packages are qualified in release CI on these x86-64 distributions. Portable
+TGZ archives are published for x86-64 and AArch64 Linux:
 
 !!! info "Choose an install format"
     Use the RPM or DEB bundle for OS-managed installation and removal. Choose the static TGZ for
@@ -155,7 +163,7 @@ Native packages are qualified in release CI on the following x86-64 distribution
 | --- | --- | --- |
 | RPM | Rocky Linux 9 and Fedora 44 | Built against the RHEL 9 glibc baseline; the simulator statically links its C++ runtime. |
 | DEB | Ubuntu 24.04 and Debian sid | Built against Ubuntu 24.04; the simulator statically links its C++ runtime. |
-| Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
+| Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 or AArch64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
 
 The native packages are tested rather than promised for every derivative. Use the static TGZ when a
 distribution is outside this matrix or when package-manager integration is unavailable.
@@ -164,7 +172,7 @@ distribution is outside this matrix or when package-manager integration is unava
 
 | Package | Included content | Compatibility notes |
 | --- | --- | --- |
-| `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 Linux host; RV64 guests and RV32 guest compatibility |
+| `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 or AArch64 Linux host; RV64 guests and RV32 guest compatibility |
 | `simrv-devel` | Public C++ headers, static runtime library, and `SimRV::runtime` CMake package | Optional native SDK; C++23 compiler and host-compatible C++ standard library |
 | `simrv-tools` | CPU model wizard, tuning, RTL parity, and benchmarking suite | Standalone utilities; RTL parity also needs the selected external RTL/toolchain environment |
 | `simrv-tests` | Architectural compliance test drivers (ACT4 and Vector test runners) | Standalone test execution drivers; requires separately prepared test suites |

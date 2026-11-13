@@ -1,10 +1,11 @@
-name: Simulator Build and Test
+name: SimRV CI
 
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "dev", "test/macos", 'release/**' ]
   pull_request:
     branches: [ "main", "dev" ]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,13 +36,17 @@ jobs:
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       shell: bash
       run: |
-        changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
-          . \
-          ':(exclude)docs/**' \
-          ':(exclude)zensical.yml' \
-          ':(exclude)pyproject.toml' \
-          ':(exclude)uv.lock' \
-          ':(exclude).github/workflows/docs.yml')"
+        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          changed_files=manual-dispatch
+        else
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+            . \
+            ':(exclude)docs/**' \
+            ':(exclude)zensical.yml' \
+            ':(exclude)pyproject.toml' \
+            ':(exclude)uv.lock' \
+            ':(exclude).github/workflows/docs.yml')"
+        fi
         if [[ -n "$changed_files" ]]; then
           echo "cpp=true" >> "$GITHUB_OUTPUT"
         else
@@ -193,6 +198,46 @@ jobs:
         path: evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
         retention-days: 14
 
+  macos:
+    name: macOS (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build tools
+        run: brew install boost libslirp cmake ninja gcc
+      - name: Configure macOS build
+        run: |
+          cmake -S . -B build/macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc-16 \
+            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DSIMRV_XLEN=64 \
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_ENABLE_LTO=OFF
+      - name: Build simulator
+        run: cmake --build build/macos --target SimRV --parallel 2
+      - name: Smoke test simulator
+        run: build/macos/SimRV --help
+      - name: Upload simulator binary
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: simrv-macos-${{ matrix.arch }}
+          path: build/macos/SimRV
+          if-no-files-found: error
+          retention-days: 7
+
   native-arm64:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
@@ -235,6 +280,8 @@ jobs:
       run: |
         if [[ "${{ github.event_name }}" == "pull_request" ]]; then
           BASE="${{ github.event.pull_request.base.sha }}"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          BASE="$(git rev-parse HEAD^)"
         else
           BASE="${{ github.event.before }}"
         fi

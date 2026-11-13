@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="SimRV CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
   <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
@@ -92,10 +92,13 @@ Launch `simrv` normally (or pass `--tui`) to explore an image with the interacti
 
 ### Host platform
 
-Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
-on macOS 26 for both Apple silicon and Intel; macOS packages are not published yet. VirtIO-FS
-directory sharing is Linux-only. User-mode networking uses libslirp on Linux and macOS. On Windows, use WSL2 with a supported
-Linux distribution; native Windows builds are not currently supported.
+Linux release archives target x86-64 and AArch64, including 64-bit Raspberry Pi OS. Native macOS
+source builds are smoke-tested on macOS 26 for Apple silicon and Intel, but macOS packages are not
+published yet. VirtIO-FS directory sharing is Linux-only. User-mode networking uses libslirp on
+Linux and macOS. SimRV relies on POSIX terminal I/O, file-descriptor, polling, and process APIs that
+Windows does not provide natively, so a native Windows port would require substantial rework. WSL2
+is the practical compatibility option: it runs a real Linux kernel and userland and is readily
+available on Windows.
 
 ### Prerequisites
 

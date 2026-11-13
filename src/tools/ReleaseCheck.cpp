@@ -132,6 +132,7 @@ void verify_metadata(const fs::path& root) {
 
     // Required artifacts check
     for (const auto& art : {"SimRV-linux-x86_64-v" + version + ".tar.gz",
+                            "SimRV-linux-aarch64-v" + version + ".tar.gz",
                             "SimRV-rpm-packages-v" + version + ".tar.gz",
                             "SimRV-deb-packages-v" + version + ".tar.gz"}) {
         if (!artifact_contains_version(art, version)) {
