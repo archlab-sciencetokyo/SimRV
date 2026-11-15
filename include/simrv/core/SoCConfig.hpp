@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "simrv/SafetyProfiles.hpp"
 #include "simrv/core/InterruptTopology.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/AddressTypes.hpp"
@@ -144,7 +145,8 @@ struct SoCDeviceConfig {
           mac_address(device_mac),
           clock_hz(device_kind == SoCDeviceKind::Uart ? SIMRV_PLATFORM_UART_CLOCK_HZ : 0) {}
 
-    [[nodiscard]] auto find_region(std::string_view region_name) const -> const SoCDeviceRegion* {
+    [[nodiscard]] auto find_region(std::string_view region_name) const SIMRV_LIFETIMEBOUND
+        -> const SoCDeviceRegion* {
         const auto it = std::ranges::find_if(
             regions, [region_name](const auto& region) { return region.name == region_name; });
         return it == regions.end() ? nullptr : &*it;
@@ -443,7 +445,8 @@ struct SoCConfig {
         return std::nullopt;
     }
 
-    [[nodiscard]] auto find(SoCDeviceKind kind) const -> const SoCDeviceConfig* {
+    [[nodiscard]] auto find(SoCDeviceKind kind) const SIMRV_LIFETIMEBOUND
+        -> const SoCDeviceConfig* {
         const auto it = std::ranges::find_if(
             devices, [kind](const auto& device) { return device.enabled && device.kind == kind; });
         return it == devices.end() ? nullptr : &*it;

@@ -134,6 +134,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                 return state;
             }
             state.physical_address = translated->physical_address;
+            state.pbmt = translated->pbmt;
         } else {
             state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
         }
@@ -286,6 +287,19 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
                                  .target_level = 1};
     }
     const unsigned offset_bits = 12 + state.level * state.vpn_bits_per_level;
+    simrv::xlen::Word updated = pte | PteFlag::A;
+    if (state.access == PteAccess::Write) {
+        updated |= PteFlag::D;
+    }
+    if (updated != pte && !state.update_access_bits) {
+        // Svade requires a page fault when software has not set a required
+        // accessed or dirty bit. Hardware A/D updates are reserved for an
+        // implementation that exposes Svadu and enables menvcfg.ADUE.
+        state.fault = page_fault_for(state.access);
+        state.status = PageWalkStatus::Fault;
+        return;
+    }
+
     const simrv::xlen::Word offset_mask = (static_cast<simrv::xlen::Word>(1) << offset_bits) - 1;
     const simrv::xlen::Word stage_one_address =
         (state.virtual_address.raw() & offset_mask) | ((ppn << 12) & ~offset_mask);
@@ -301,8 +315,11 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             return;
         }
         state.physical_address = translated->physical_address;
+        // A non-default VS-stage PBMT overrides the intermediate G-stage/PMA type.
+        state.pbmt = view.pbmt() != PtePbmt::Pma ? view.pbmt() : translated->pbmt;
     } else {
         state.physical_address = simrv::xlen::PhysAddr{stage_one_address};
+        state.pbmt = view.pbmt();
     }
 
     if (state.arch_state != nullptr) {
@@ -321,19 +338,6 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             state.status = PageWalkStatus::Fault;
             return;
         }
-    }
-
-    simrv::xlen::Word updated = pte | PteFlag::A;
-    if (state.access == PteAccess::Write) {
-        updated |= PteFlag::D;
-    }
-    if (updated != pte && !state.update_access_bits) {
-        // Svade requires a page fault when software has not set a required
-        // accessed or dirty bit. Hardware A/D updates are reserved for an
-        // implementation that exposes Svadu and enables menvcfg.ADUE.
-        state.fault = page_fault_for(state.access);
-        state.status = PageWalkStatus::Fault;
-        return;
     }
     if (updated != pte) {
         if (state.arch_state != nullptr &&
@@ -368,9 +372,9 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
     const bool pte_u = view.user();
     // Supervisor access to user-only page (U=1)
     if (priv == kPrivSupervisor && pte_u) {
-        if (access == PteAccess::Code || access == PteAccess::ReadExecute) {
+        if (access == PteAccess::Code) {
             // Executing code from a U=1 page in Supervisor mode raises a Page Fault regardless of
-            // SUM
+            // SUM. HLVX uses execute permission but retains load privilege checks, including SUM.
             return false;
         }
         if ((mstatus & MstatusBit::Sum) == 0u) {
@@ -421,7 +425,9 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
     };
     const simrv::xlen::Word mode = simrv::xlen::satp_mode(hgatp, xlen);
     if (mode == 0) {
-        return PageWalkResult{.physical_address = simrv::xlen::PhysAddr{guest_address}, .pte = 0};
+        return PageWalkResult{.physical_address = simrv::xlen::PhysAddr{guest_address},
+                              .pte = 0,
+                              .pbmt = PtePbmt::Pma};
     }
     if (xlen != 64 || (mode != 8 && mode != 9 && mode != 10)) {
         return guest_fault();
@@ -461,6 +467,10 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
         if (!view.valid() || view.has_reserved_bits(8) || view.is_reserved_encoding()) {
             return guest_fault();
         }
+        if (view.pbmt() != PtePbmt::Pma && arch_state != nullptr &&
+            (arch_state->menvcfg & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U)) == 0) {
+            return guest_fault();
+        }
         if (view.is_table_pointer()) {
             if (view.is_napot() || view.pbmt() != PtePbmt::Pma ||
                 view.table_pointer_has_reserved_bits() || level == 0) {
@@ -475,10 +485,11 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
         const bool read_allowed = (rwx & (1U << std::to_underlying(PteAccess::Read))) != 0 ||
                                   (mxr && (rwx & (1U << std::to_underlying(PteAccess::Code))) != 0);
         const bool permission_denied =
-            access == PteAccess::ReadExecute
-                ? (rwx & (1U << std::to_underlying(PteAccess::Code))) == 0
-                : (access == PteAccess::Read ? !read_allowed
-                                             : (rwx & (1U << std::to_underlying(access))) == 0);
+            !view.user() ||
+            (access == PteAccess::ReadExecute
+                 ? (rwx & (1U << std::to_underlying(PteAccess::Code))) == 0
+                 : (access == PteAccess::Read ? !read_allowed
+                                              : (rwx & (1U << std::to_underlying(access))) == 0));
         if (rwx == 0x2U || rwx == 0x6U || permission_denied) {
             return guest_fault();
         }
@@ -506,7 +517,9 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
         const simrv::xlen::Word physical =
             (guest_address & offset_mask) | ((ppn << 12U) & ~offset_mask);
         leaf_pte = pte;
-        return PageWalkResult{.physical_address = simrv::xlen::PhysAddr{physical}, .pte = leaf_pte};
+        return PageWalkResult{.physical_address = simrv::xlen::PhysAddr{physical},
+                              .pte = leaf_pte,
+                              .pbmt = view.pbmt()};
     }
 }
 
@@ -544,7 +557,8 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         }
         return std::unexpected(state.fault);
     }
-    return PageWalkResult{.physical_address = state.physical_address, .pte = state.pte};
+    return PageWalkResult{
+        .physical_address = state.physical_address, .pte = state.pte, .pbmt = state.pbmt};
 }
 
 }  // namespace simrv::memory

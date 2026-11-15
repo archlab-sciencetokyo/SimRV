@@ -578,6 +578,34 @@ void test_soft_tlb_global_mappings() {
            "Page-specific flush without ASID invalidates soft TLB global entry");
 }
 
+void test_soft_tlb_rejects_vpns_outside_compact_tag() {
+    simrv::core::SoftTlbEntry entry;
+    std::array<simrv::xlen::Byte, 256> host_page{};
+    constexpr simrv::xlen::VpnIndex kVpn = 0x12345;
+    constexpr simrv::xlen::VpnIndex kUnrepresentableVpn =
+        (simrv::xlen::VpnIndex{1} << 46U) | kVpn;
+    constexpr simrv::xlen::PrivilegeLevel kPrivilege = simrv::xlen::PrivilegeLevel::Supervisor;
+    constexpr uint64_t kAsid = 3;
+    constexpr uint32_t kEpoch = 7;
+
+    entry.set(kVpn, kAsid, kPrivilege, kEpoch, simrv::xlen::PhysAddr{0x80012000},
+              host_page.data());
+    expect(entry.matches(kVpn, kAsid, kPrivilege, kEpoch),
+           "Soft TLB caches a VPN within its compact tag width");
+    expect(entry.host_ptr(simrv::xlen::VirtAddr{(kVpn << 12U) | 0x40U}) ==
+               host_page.data() + 0x40U,
+           "Soft TLB host pointer preserves the page offset");
+    expect(!entry.matches(kUnrepresentableVpn, kAsid, kPrivilege, kEpoch),
+           "Soft TLB rejects high VPNs instead of aliasing a low VPN");
+
+    entry.set(kUnrepresentableVpn, kAsid, kPrivilege, kEpoch,
+              simrv::xlen::PhysAddr{0x90012000}, host_page.data());
+    expect(entry.matches(kVpn, kAsid, kPrivilege, kEpoch),
+           "Unrepresentable VPN insertion leaves the valid low VPN entry intact");
+    expect(!entry.matches(kUnrepresentableVpn, kAsid, kPrivilege, kEpoch),
+           "Unrepresentable VPN insertion cannot create a compact-tag alias");
+}
+
 // 8. Strong typing & operator overloading enhancements
 void test_strong_typing_and_operators() {
     using ::ExceptionCode;
@@ -1000,6 +1028,7 @@ int run() {
     test_pmp_range_arithmetic();
     test_tlb_global_mappings();
     test_soft_tlb_global_mappings();
+    test_soft_tlb_rejects_vpns_outside_compact_tag();
     test_strong_typing_and_operators();
     test_sret_spp_reset_semantics();
     test_ratified_privilege_csrs();

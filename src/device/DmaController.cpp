@@ -126,7 +126,7 @@ void DmaController::start_transfer() {
 void DmaController::execute_transfer(simrv::xlen::PhysAddr src, simrv::xlen::PhysAddr dst,
                                      uint32_t count) {
     busy_ = false;
-    if (machine_ == nullptr || count == 0) {
+    if (machine_ == nullptr || count == 0 || count > machine_->ram_view().size()) {
         status_ |= kStatusError;
         if ((control_ & kControlIntEnable) != 0 && machine_ != nullptr) {
             machine_->set_platform_irq(irq_num_, true);

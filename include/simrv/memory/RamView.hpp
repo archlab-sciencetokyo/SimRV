@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "simrv/CompilerHints.hpp"
+#include "simrv/SafetyProfiles.hpp"
 #include "simrv/core/BuildConfig.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/AddressTypes.hpp"
@@ -38,7 +39,7 @@ inline constexpr simrv::xlen::Address kDramSize =
  * Fast paths receive this value rather than relying on the build-time DRAM mask,
  * so a configured machine never aliases addresses above 256 MiB.
  */
-class RamView {
+class SIMRV_GSL_POINTER RamView {
    public:
     constexpr RamView() = default;
     constexpr RamView(simrv::xlen::Byte* data, simrv::xlen::PhysAddr base,
@@ -62,7 +63,18 @@ class RamView {
         return reinterpret_cast<uintptr_t>(data_) - base_.raw();
     }
     [[nodiscard]] constexpr auto span() const noexcept -> std::span<simrv::xlen::Byte> {
+        if (data_ == nullptr || size_ == 0) {
+            return {};
+        }
         return {data_, static_cast<std::size_t>(size_)};
+    }
+    [[nodiscard]] constexpr auto subspan(simrv::xlen::PhysAddr address, size_t bytes) const noexcept
+        -> std::span<simrv::xlen::Byte> {
+        auto* ptr = try_get_ptr(address, bytes);
+        if (ptr == nullptr) {
+            return {};
+        }
+        return {ptr, bytes};
     }
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::PhysAddr address,
                                                               size_t bytes = 1) const noexcept

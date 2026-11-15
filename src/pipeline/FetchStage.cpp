@@ -34,6 +34,16 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 namespace {
+[[nodiscard]] inline auto fetch_translation_enabled(const ArchState& state) noexcept -> bool {
+    if (state.priv == kPrivMachine) return false;
+    if (simrv::xlen::satp_translation_enabled(state.virt ? state.vsatp : state.satp,
+                                              state.regs.xlen)) {
+        return true;
+    }
+    return state.virt && state.regs.xlen == 64 &&
+           simrv::xlen::satp_translation_enabled(state.hgatp, state.regs.xlen);
+}
+
 [[nodiscard]] inline auto is_guest_page_fault(simrv::xlen::TrapCause cause) noexcept -> bool {
     return cause == to_trap_cause(ExceptionCode::GuestInstructionPageFault) ||
            cause == to_trap_cause(ExceptionCode::GuestLoadPageFault) ||
@@ -85,9 +95,7 @@ void CPU::run_fetch_stage(Machine& machine) {
 
     const bool split_page =
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
-    const bool translation_enabled =
-        state_.priv != kPrivMachine &&
-        simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
+    const bool translation_enabled = fetch_translation_enabled(state_);
 
     fetch_address_translate(machine);
 
@@ -141,8 +149,7 @@ void CPU::fetch_address_translate(Machine& machine) {
 
     ctx.cpc = state_.pc;
 
-    if (state_.priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen)) {
+    if (!fetch_translation_enabled(state_)) {
         w_padr1 = (state_.regs.xlen == 32) ? (w_vadr1 & 0xFFFFFFFFULL) : w_vadr1;
         w_padr2 = (state_.regs.xlen == 32) ? (w_vadr2 & 0xFFFFFFFFULL) : w_vadr2;
     } else {
@@ -267,15 +274,24 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
                                   simrv::pipeline::TimedPageWalkState& timed_walk)
     -> std::optional<std::expected<PageWalkResult, simrv::xlen::TrapCause>> {
     auto* mmu = machine.memory_.mmu();
-    const bool hypervisor_access = hypervisor_memory_access_active();
+    const bool force_virt =
+        (port == simrv::memory::TlPort::Data) ? effective_data_virt() : state_.virt;
+    const auto satp = (port == simrv::memory::TlPort::Data)
+                          ? active_satp()
+                          : (state_.virt ? state_.vsatp : state_.satp);
+    const auto status = (port == simrv::memory::TlPort::Data)
+                            ? active_translation_status()
+                            : (state_.virt ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
+                                           : state_.mstatus);
     if (machine.runtime_profile.is_instruction_mode()) {
         simrv::memory::GuestPhysAddr guest_fault_address{};
         bool implicit_vs_stage_page_table_fault = false;
-        if (hypervisor_access) state_.virt = true;
-        auto result = mmu->translate(
-            virtual_address, access, privilege, active_translation_status(), active_satp(),
-            active_xlen, false, &state_, &guest_fault_address, &implicit_vs_stage_page_table_fault);
-        if (hypervisor_access) state_.virt = false;
+        const bool saved_virt = state_.virt;
+        state_.virt = force_virt;
+        auto result =
+            mmu->translate(virtual_address, access, privilege, status, satp, active_xlen, false,
+                           &state_, &guest_fault_address, &implicit_vs_stage_page_table_fault);
+        state_.virt = saved_virt;
         active_context().pending_htval =
             result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address.raw() >> 2U;
         active_context().pending_htinst =
@@ -290,11 +306,11 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
         if (timed_walk.active && timed_walk.request_pending) {
             machine.memory_.system_bus().cancel_source(timed_walk.source);
         }
-        if (hypervisor_access) state_.virt = true;
-        timed_walk.walk =
-            mmu->begin_page_walk(virtual_address, access, privilege, active_translation_status(),
-                                 active_satp(), active_xlen, false, &state_);
-        if (hypervisor_access) state_.virt = false;
+        const bool saved_virt = state_.virt;
+        state_.virt = force_virt;
+        timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, status, satp,
+                                               active_xlen, false, &state_);
+        state_.virt = saved_virt;
         timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
         timed_walk.request_pending = false;
@@ -320,7 +336,8 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     if (walk.status == PageWalkStatus::Complete) {
         active_context().pending_htval = 0;
         active_context().pending_htinst = 0;
-        const PageWalkResult result{.physical_address = walk.physical_address, .pte = walk.pte};
+        const PageWalkResult result{
+            .physical_address = walk.physical_address, .pte = walk.pte, .pbmt = walk.pbmt};
         timed_walk.reset();
         return std::expected<PageWalkResult, simrv::xlen::TrapCause>{result};
     }
@@ -672,9 +689,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 
         simrv::pipeline::Decoder dec_temp(ir_l);
         if (!dec_temp.is_compressed()) {
-            const bool translation_enabled =
-                state_.priv != kPrivMachine &&
-                simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
+            const bool translation_enabled = fetch_translation_enabled(state_);
             if (translation_enabled && ctx.padr2 == simrv::xlen::kWordAllOnes) {
                 fetch_resolve_page_walk(machine, 2);
             }
@@ -862,13 +877,12 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
         ctx.padr2 = simrv::xlen::PhysAddr{(state_.pc + 2).raw()};
     }
 
-    // Fast path: DRAM physical fetch - valid only while the MMU has never been
-    // enabled.  The latch is set once on the first satp write that activates
-    // translation, so the branch predictor sees this as "not taken" for nearly
-    // all cycles of a physical-only run and switches to "always taken" after
-    // the OS enables virtual memory.
+    // Fast path: DRAM physical fetch - valid only before translation has been
+    // used and when the current guest state does not need a G-stage walk.
+    // The latch covers SATP use globally; the active-state check also catches
+    // guest-only translation when VSATP is Bare.
     if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
-                                !machine.s_mmu_ever_used)) {
+                                !machine.s_mmu_ever_used && !fetch_translation_enabled(state_))) {
         const uint16_t h1 = simrv::memory::ram_read_fast(
             ctx.padr1, static_cast<simrv::xlen::Instruction>(Funct3::Lhu), machine.ram_view());
         if ((h1 & 0x3) != 0x3) {
@@ -891,9 +905,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
         // on every cycle in the fast path above).
         const bool split_page = ((state_.pc & ~simrv::memory::kPageMask) !=
                                  ((state_.pc + 2) & ~simrv::memory::kPageMask));
-        const bool translation_enabled =
-            state_.priv != kPrivMachine &&
-            simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
+        const bool translation_enabled = fetch_translation_enabled(state_);
 
         fetch_address_translate(machine);
 

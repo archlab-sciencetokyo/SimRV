@@ -1,4 +1,4 @@
-name: simrv-rva23s64
+name: rva23s64
 compiler_exe: riscv64-linux-gnu-gcc
 objdump_exe: riscv64-linux-gnu-objdump
 ref_model_exe: sail_riscv_sim

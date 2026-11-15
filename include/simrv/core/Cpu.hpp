@@ -230,6 +230,21 @@ struct alignas(128) ArchState {
         }
     }
 
+    /** Synchronize aliased hypervisor/VS interrupt enable registers from mie and hideleg. */
+    constexpr void refresh_hypervisor_enables() noexcept {
+        constexpr simrv::xlen::CsrValue kVsMask = (simrv::xlen::CsrValue{1} << 2U) |
+                                                  (simrv::xlen::CsrValue{1} << 6U) |
+                                                  (simrv::xlen::CsrValue{1} << 10U);
+        constexpr simrv::xlen::CsrValue kHsMask = kVsMask | (simrv::xlen::CsrValue{1} << 12U);
+        if (!isa::misa_has_extension(misa, isa::IsaExtension::H)) {
+            hie = 0;
+            vsie = 0;
+            return;
+        }
+        hie = mie & kHsMask;
+        vsie = h_interrupts_to_vs(mie & hideleg & kVsMask);
+    }
+
     /** Recompute supervisor pending bits that combine independent software/device sources. */
     constexpr void refresh_supervisor_pending() {
         if (seip_software || seip_external)
@@ -240,6 +255,19 @@ struct alignas(128) ArchState {
             mip |= MipBit::Stip;
         else
             mip &= ~MipBit::Stip;
+        if (isa::misa_has_extension(misa, isa::IsaExtension::H)) {
+            constexpr simrv::xlen::CsrValue kVsMask = (simrv::xlen::CsrValue{1} << 2U) |
+                                                      (simrv::xlen::CsrValue{1} << 6U) |
+                                                      (simrv::xlen::CsrValue{1} << 10U);
+            constexpr simrv::xlen::CsrValue kHsMask = kVsMask | (simrv::xlen::CsrValue{1} << 12U);
+            const simrv::xlen::CsrValue h_pending =
+                (hvip & kVsMask) | (vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U) |
+                selected_guest_external_pending() | supervisor_guest_external_pending();
+            hip = h_pending;
+            vsip = h_interrupts_to_vs(hvip & hideleg) & (simrv::xlen::CsrValue{1} << 1U);
+            mip = (mip & ~kHsMask) | h_pending;
+            refresh_hypervisor_enables();
+        }
     }
 
     /**
@@ -340,15 +368,17 @@ struct alignas(128) ArchState {
  * @struct SoftTlbEntry
  * @brief Compact software TLB entry (32 bytes) for the fast-path translation cache.
  *
- * Packs vpn, asid, priv, and valid into a single 64-bit tag for efficient comparison.
+ * Packs vpn, asid, and priv into a single 64-bit tag for efficient comparison.
  * Tag layout (64-bit):
- *   bits [63:16] = VPN (page-frame number, vaddr >> 12)
- *   bits [15: 2] = ASID (14-bit ASID from satp)
+ *   bits [63:18] = VPN (46-bit fast-cache domain, vaddr >> 12)
+ *   bits [17: 2] = ASID (16-bit ASID from satp)
  *   bits [ 1: 0] = privilege (0=User, 1=Supervisor, 3=Machine)
+ * VPNs above this domain bypass the compact fast TLB rather than aliasing a lower address.
  * valid == false when tag == kInvalidTag.
  */
 struct alignas(32) SoftTlbEntry {
     static constexpr uint64_t kInvalidTag = ~uint64_t{0};
+    static constexpr uint64_t kVpnMask = (uint64_t{1} << 46U) - 1U;
 
     uint64_t tag = kInvalidTag;  ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
     simrv::xlen::PhysAddr paddr_base{0};  ///< Physical page base (paddr & ~0xFFF) (8 bytes)
@@ -361,7 +391,7 @@ struct alignas(32) SoftTlbEntry {
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_tag(
         simrv::xlen::VpnIndex vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept
         -> uint64_t {
-        return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
+        return ((vpn & kVpnMask) << 18U) | ((asid & 0xFFFFu) << 2U) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
@@ -374,11 +404,12 @@ struct alignas(32) SoftTlbEntry {
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches_fast(
         simrv::xlen::VpnIndex vpn, uint32_t asid_priv_tag, uint32_t priv_tag,
         uint32_t current_epoch) const noexcept -> bool {
+        if ((vpn & ~kVpnMask) != 0) return false;
         if (simrv::compiler::likely(epoch == current_epoch && tag != kInvalidTag)) {
-            const uint64_t expected_tag = ((vpn & 0xFFFFFFFFFFULL) << 18) | asid_priv_tag;
+            const uint64_t expected_tag = ((vpn & kVpnMask) << 18U) | asid_priv_tag;
             if (simrv::compiler::likely(tag == expected_tag)) return true;
             return simrv::compiler::unlikely(global) &&
-                   ((tag & ~uint64_t{0x3FFFCULL}) == (((vpn & 0xFFFFFFFFFFULL) << 18) | priv_tag));
+                   ((tag & ~uint64_t{0x3FFFCULL}) == (((vpn & kVpnMask) << 18U) | priv_tag));
         }
         return false;
     }
@@ -388,6 +419,7 @@ struct alignas(32) SoftTlbEntry {
                                                              simrv::xlen::PrivilegeLevel priv,
                                                              uint32_t current_epoch) const noexcept
         -> bool {
+        if ((vpn & ~kVpnMask) != 0) return false;
         if (simrv::compiler::likely(epoch == current_epoch && tag != kInvalidTag)) {
             const uint64_t expected_tag = make_tag(vpn, asid, priv);
             if (simrv::compiler::likely(tag == expected_tag)) return true;
@@ -406,13 +438,14 @@ struct alignas(32) SoftTlbEntry {
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr_base() const noexcept -> simrv::xlen::Byte* {
-        return has_host ? reinterpret_cast<simrv::xlen::Byte*>(host_offset + ((tag >> 18) << 12))
+        return has_host ? reinterpret_cast<simrv::xlen::Byte*>(host_offset + ((tag >> 18U) << 12U))
                         : nullptr;
     }
 
     void set(simrv::xlen::VpnIndex vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv,
              uint32_t current_epoch, simrv::xlen::PhysAddr paddr_base_in,
              simrv::xlen::Byte* host_ptr_base_in, bool is_global = false) noexcept {
+        if ((vpn & ~kVpnMask) != 0) return;
         tag = make_tag(vpn, asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
@@ -969,18 +1002,63 @@ class CPU {
         return state_.priv;
     }
 
+    /// Effective virtualization state for explicit data accesses (including HLV/HSV and MPRV+MPV).
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_virt() const noexcept -> bool {
+        if (simrv::compiler::unlikely(hypervisor_memory_access_active_)) {
+            return true;
+        }
+        if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
+                                      (state_.mstatus & MstatusBit::Mprv) != 0)) {
+            return mstatus_mpp(state_.mstatus) != kPrivMachine &&
+                   (state_.mstatus & MstatusBit::Mpv) != 0;
+        }
+        return state_.virt;
+    }
+
     /// SATP selected by the current virtualization mode for address translation.
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_satp() const noexcept
         -> simrv::xlen::CsrValue {
-        return (state_.virt || hypervisor_memory_access_active_) ? state_.vsatp : state_.satp;
+        return effective_data_virt() ? state_.vsatp : state_.satp;
     }
 
     /// Status fields used by VS-stage translation, with HS MXR applying to both stages.
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_translation_status() const noexcept
         -> simrv::xlen::CsrValue {
-        return (state_.virt || hypervisor_memory_access_active_)
-                   ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
-                   : state_.mstatus;
+        return effective_data_virt() ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
+                                     : state_.mstatus;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto fetch_translation_active() const noexcept
+        -> bool {
+        if (state_.priv == kPrivMachine) return false;
+        const auto satp = state_.virt ? state_.vsatp : state_.satp;
+        return simrv::xlen::satp_translation_enabled(satp, state_.regs.xlen) ||
+               (state_.virt && state_.regs.xlen == 64 &&
+                simrv::xlen::satp_translation_enabled(state_.hgatp, state_.regs.xlen));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto data_translation_active() const noexcept
+        -> bool {
+        const auto eff_priv = effective_data_privilege();
+        if (eff_priv == kPrivMachine) return false;
+        const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
+        return simrv::xlen::satp_translation_enabled(active_satp(), active_xlen) ||
+               (effective_data_virt() && active_xlen == 64 &&
+                simrv::xlen::satp_translation_enabled(state_.hgatp, active_xlen));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto data_pointer_masking_active() const noexcept
+        -> bool {
+        const auto eff_priv = effective_data_privilege();
+        if (state_.xlen_for_privilege(eff_priv) != 64) return false;
+        constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
+        if (eff_priv == kPrivUser) {
+            return ((static_cast<uint64_t>(state_.senvcfg) & kPmmMask) >> 32U) == 2U;
+        }
+        if (eff_priv == kPrivSupervisor && effective_data_virt()) {
+            return ((static_cast<uint64_t>(state_.henvcfg) & kPmmMask) >> 32U) == 2U;
+        }
+        return false;
     }
 
     [[nodiscard]] constexpr auto hypervisor_memory_access_active() const noexcept -> bool {
@@ -1008,8 +1086,7 @@ class CPU {
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto compute_decode_context() const noexcept
         -> uint8_t {
         const uint8_t priv_bits = static_cast<uint8_t>(state_.priv) & 0x3u;
-        const bool satp_en = state_.priv != kPrivMachine &&
-                             simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
+        const bool satp_en = fetch_translation_active() || data_translation_active();
         const uint8_t satp_bit = satp_en ? 0x04u : 0u;
         const uint8_t xlen_bit = (state_.regs.xlen == 64) ? 0x08u : 0u;
         const uint8_t fs_bit = state_.extension_state_enabled(MstatusBit::Fs) ? 0x10u : 0u;

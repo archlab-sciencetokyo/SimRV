@@ -34,6 +34,8 @@ typedef struct TimerState {
 } TimerState;
 
 static int timer_init(void** out_ctx, const char* args) {
+    if (!out_ctx) return -1;
+    *out_ctx = NULL;
     TimerState* st = (TimerState*)calloc(1, sizeof(TimerState));
     if (!st) return -1;
     st->irq_num = 14; /* Default platform IRQ line */

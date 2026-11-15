@@ -4,8 +4,8 @@ SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) 
 
 **RVA23S64 is the implementation target.** Profile selection alone is not proof of conformance;
 the implementation claims below are tied to instruction suites, semantic tests, ACT results, and
-the profile requirements. The latest mandatory-vector and Sha evidence is recorded below, along
-with the unresolved ACT/specification expectation conflicts.
+the profile requirements. The latest upstream ACT4 suite passed locally; full release-gate evidence is
+recorded below and in release CI.
 
 CPU and SoC presets that do not implement Zic64b are outside Zic64b-specific checks; their
 configuration files remain unchanged. The RVA23 target uses 64-byte cache blocks
@@ -58,7 +58,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Accessed/dirty tracking | Mandatory Svade behavior: guest accesses fault when a required PTE A/D bit is clear; unsupported Svadu `menvcfg.ADUE` is read-only zero; FDT advertises Svade | RVA23 CPU page-walk tests for load/store page faults, PTE preservation, and ADUE WARL behavior; FDT tests |
 | Supervisor trap entry | Sstvecd Direct mode stores any four-byte-aligned BASE; Sstvala records required delegated fault addresses and the faulting instruction for illegal-instruction exceptions; FDT advertises both | RVA23 supervisor trap tests for Direct vector WARL behavior and delegated fault values; FDT tests |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
-| Vector | RISC-V Vector 1.0 (`V`), with configurable VLEN; RVA23 minimum VLEN=128 | 2391 Chips Alliance vector tests pass at VLEN=128 and 256; ACT vector checks, except the audited `vstart` expectation conflict below |
+| Vector | RISC-V Vector 1.0 (`V`), with configurable VLEN; RVA23 minimum VLEN=128 | 2391 Chips Alliance vector tests pass at VLEN=128 and 256; current ACT vector checks remain part of the full-suite qualification |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
 | Address translation | Sv32 for RV32 and Sv39 for RV64; Bare mode is supported; Ssccptr hardware page-table reads use coherent main memory; FDT advertises Ssccptr | MMU and Svade page-walk tests, and Linux boot gates; FDT tests |
 
@@ -105,29 +105,27 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 - **RVA23 Mandatory Extensions**: Automated regression suites verify Zicond, CMO, Svinval, Bitmanip (`zba`, `zbb`, `zbs`), and profile CSR configurations against golden architectural signatures.
 - **Continuous Integration**: The `rva23-act` suite is registered as a required verification gate in RV64 release evidence generation. It is not an RV32 profile test; the RV32 CI matrix runs its own width-specific gates.
 
-The full upstream ACT4 RVA23S64 ELF suite was run with VLEN=128 and 12 jobs: **3138/3188 passed**.
-The 50 remaining failures are two expectation conflicts with the ratified specifications:
+The rc.19 baseline used ACT4 commit `3d5cc368e64565360dd57e9811ad863cf325beca` and generated
+3191 ELFs: 3116 passed and 75 failed. Differential execution isolated two time-counter failures
+to the fast path; the other 73 also failed in detailed execution. Fast-path counter polling and
+other architectural fixes were subsequently added.
 
-- 42 `ExceptionsVx-*` checks expect successful vector instructions to leave a nonzero `vstart`.
-  [Vector 1.0 requires all vector instructions to reset `vstart` to zero when execution
-  completes](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html).
-- 8 `InterruptsS_priority_{sie,sip}_{S,U,VS,VU}` checks expect VSEI to outrank SEI when both are
-  pending for HS-mode. [H 1.0 specifies SEI above VSEI for HS-mode destinations in the interrupt
-  priority order](https://docs.riscv.org/reference/isa/v20260120/priv/hypervisor.html).
-
-These checks remain failures in the raw ACT result; SimRV preserves the specified behavior. This
-run is evidence for the tested behaviors, not a claim of ACT-clean or complete RVA23 conformance.
-The source suite revision is the `riscv-arch-test` suite (configured via `RISCV_ARCH_TEST_DIR`). [ACT run instructions
-are maintained in the repository](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/tests/act4/README.md).
+The current upstream ACT4 `act4` head checked for this run is
+`1c3e9f2a89e103eeed0a3e6ba1bc699f100fd481` (2026-11-14). Its full RVA23S64 suite at VLEN=128
+contains 3202 ELFs; the local run passed **3202/3202**, with zero failures or timeouts. The CI job
+resolves the upstream branch head at run time, records its revision, and checks both before and
+after qualification that the branch has not moved. Every generated ELF must pass. Shared ACT output is kept under
+`../../tests/act4/<ACT commit>` with provenance beside the suite.
+The source suite revision is the `riscv-arch-test` suite (configured via `RISCV_ARCH_TEST_DIR`).
+[ACT run instructions are maintained in the repository](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/tests/act4/README.md).
 
 ## RVA23S64 qualification status
 
-The current mandatory-feature audit found no remaining implementation gap. Evidence includes the
-profile-specific regression tests, 2391 Chips Alliance base-V tests passing at both VLEN=128 and
-VLEN=256, and the full upstream ACT4 RVA23S64 run. Sha's seven constituent ACT categories also
-pass: Ssstateen, Shcounterenw, Shvstvala, Shtvala, Shvstvecd, Shvsatpa, and Shgatpa. The ACT suite's
-50 recorded failures are the audited Vector and H expectation conflicts above; they are preserved
-as failures in the raw report and do not justify deviating from the ratified specifications.
+Local RVA23S64 evidence includes profile-specific regressions, 2391 Chips Alliance base-V tests at
+VLEN=128 and VLEN=256, Sha's seven constituent ACT categories, and the current upstream ACT4 suite
+(3202/3202 at VLEN=128). Both local architecture CTest gates pass. Remote release CI gates must
+also pass before the rc.19 release is considered complete. This test evidence is not formal
+RISC-V International certification.
 
 This evidence is not formal RISC-V International certification. The table and exact mandatory
 inventory above follow the [ratified RVA23 v1.0 profile](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html).

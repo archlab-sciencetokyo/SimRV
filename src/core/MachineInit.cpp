@@ -3,10 +3,13 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "MachineRuntime.hpp"
@@ -330,7 +333,12 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
         std::exit(EXIT_FAILURE);
     }
 
-    const auto file_size = static_cast<std::size_t>(in.tellg());
+    const auto end_pos = in.tellg();
+    if (end_pos < 0) {
+        simrv::log::error("image_file {} size query failed", file_path);
+        std::exit(EXIT_FAILURE);
+    }
+    const auto file_size = static_cast<std::size_t>(end_pos);
     in.seekg(0, std::ios::beg);
 
     std::array<char, 16> ident{};
@@ -342,8 +350,13 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
         const char class_byte = ident[4];
         in.seekg(0, std::ios::beg);
         auto load_segment = [&](const auto& phdr) {
-            if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0) return;
-            const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+            if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0 ||
+                !std::in_range<std::streamoff>(phdr.p_offset)) {
+                return;
+            }
+            const auto raw_paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+            if (!std::in_range<simrv::xlen::Address>(raw_paddr)) return;
+            const auto paddr = static_cast<simrv::xlen::Address>(raw_paddr);
             const simrv::xlen::Address dram_base = ram_view.base().raw();
             simrv::xlen::Address dest_offset = 0;
             if (paddr >= dram_base && (paddr - dram_base) < capacity) {
@@ -361,49 +374,57 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 loaded_segment = true;
                 if (machine != nullptr) {
                     const bool is_exec = (phdr.p_flags & 0x1) != 0;
+                    const simrv::xlen::Address seg_memsz =
+                        std::in_range<simrv::xlen::Address>(phdr.p_memsz)
+                            ? static_cast<simrv::xlen::Address>(phdr.p_memsz)
+                            : static_cast<simrv::xlen::Address>(capacity - dest_offset);
                     machine->record_loaded_segment(simrv::xlen::PhysAddr{dram_base + dest_offset},
-                                                   phdr.p_memsz, is_exec);
+                                                   seg_memsz, is_exec);
                 }
-                if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
-                    const size_t bss_bytes = std::min<size_t>(
-                        phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
-                    std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                if (phdr.p_memsz > phdr.p_filesz && phdr.p_filesz < capacity - dest_offset) {
+                    const size_t filesz = static_cast<size_t>(phdr.p_filesz);
+                    const size_t rem = capacity - dest_offset - filesz;
+                    const size_t bss_bytes =
+                        static_cast<size_t>(std::min<uint64_t>(phdr.p_memsz - phdr.p_filesz, rem));
+                    std::memset(ram + dest_offset + filesz, 0, bss_bytes);
                 }
             }
         };
 
-        if (class_byte == kClass32) {
-            Elf32_Ehdr ehdr{};
-            if (in.read(reinterpret_cast<char*>(&ehdr),
-                        sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
-                in.seekg(ehdr.e_phoff, std::ios::beg);
-                if (in.read(
-                        reinterpret_cast<char*>(phdrs.data()),
+        auto read_phdrs = [&](auto& ehdr, auto& phdrs) -> bool {
+            if (!in.read(reinterpret_cast<char*>(&ehdr),
+                         sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                return false;
+            }
+            constexpr uint16_t kMaxElfProgramHeaders = 1024;
+            if (ehdr.e_phnum == 0 || ehdr.e_phnum > kMaxElfProgramHeaders ||
+                !std::in_range<std::streamoff>(ehdr.e_phoff)) {
+                return false;
+            }
+            phdrs.resize(ehdr.e_phnum);
+            in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
+            using Phdr = typename std::decay_t<decltype(phdrs)>::value_type;
+            return static_cast<bool>(
+                in.read(reinterpret_cast<char*>(phdrs.data()),
                         static_cast<std::streamsize>(
                             static_cast<size_t>(ehdr.e_phnum) *
-                            sizeof(
-                                Elf32_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                    for (const auto& phdr : phdrs) {
-                        load_segment(phdr);
-                    }
+                            sizeof(Phdr))));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        };
+
+        if (class_byte == kClass32) {
+            Elf32_Ehdr ehdr{};
+            std::vector<Elf32_Phdr> phdrs;
+            if (read_phdrs(ehdr, phdrs)) {
+                for (const auto& phdr : phdrs) {
+                    load_segment(phdr);
                 }
             }
         } else if (class_byte == kClass64) {
             Elf64_Ehdr ehdr{};
-            if (in.read(reinterpret_cast<char*>(&ehdr),
-                        sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
-                in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
-                if (in.read(
-                        reinterpret_cast<char*>(phdrs.data()),
-                        static_cast<std::streamsize>(
-                            static_cast<size_t>(ehdr.e_phnum) *
-                            sizeof(
-                                Elf64_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                    for (const auto& phdr : phdrs) {
-                        load_segment(phdr);
-                    }
+            std::vector<Elf64_Phdr> phdrs;
+            if (read_phdrs(ehdr, phdrs)) {
+                for (const auto& phdr : phdrs) {
+                    load_segment(phdr);
                 }
             }
         }
@@ -575,6 +596,14 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             return std::unexpected(err);
         }
     }
+
+    memory().system_bus().router().clear();
+    runtime_->framebuffer = nullptr;
+    runtime_->input_devices.clear();
+    runtime_->ticked_extension_mmios.clear();
+    runtime_->extension_mmios.clear();
+    runtime_->dummy_mmios.clear();
+    runtime_->ring_buffer_ethernet.reset();
 
     const auto device_descriptor = [this](SoCDeviceKind kind) {
         return SoCDeviceRegistry::descriptor(config.soc, kind).value_or(soc_device_default(kind));

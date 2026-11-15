@@ -125,6 +125,9 @@ option(
 option(SIMRV_X86_64_V3_BASELINE
        "Use the x86-64-v3 ISA baseline for non-native x86-64 Release builds" ON)
 option(SIMRV_USE_LIBCXX "Use LLVM libc++ standard library with Clang" OFF)
+option(SIMRV_ENABLE_CXX_PROFILES
+       "Enable C++ safety profile diagnostics and hardened standard library bounds"
+       OFF)
 if(NOT DEFINED SIMRV_VECTOR_TESTS_DIR OR "${SIMRV_VECTOR_TESTS_DIR}" STREQUAL "")
   if(DEFINED ENV{RISCV_VECTOR_TESTS_DIR} AND NOT "$ENV{RISCV_VECTOR_TESTS_DIR}" STREQUAL "")
     set(SIMRV_VECTOR_TESTS_DIR "$ENV{RISCV_VECTOR_TESTS_DIR}")

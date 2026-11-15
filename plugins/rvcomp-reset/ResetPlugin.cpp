@@ -3,6 +3,7 @@
  * @brief External device simulation plugin for rvcomp-reset (isct,rvcomp-reset).
  */
 #include <cstdint>
+#include <new>
 
 #include "simrv/device/ExternalDevice.h"
 
@@ -12,20 +13,24 @@ struct ResetContext {
     const SimRvHostServices* services{nullptr};
 };
 
-int reset_init(void** out_ctx, const char* /*args*/) {
-    auto* ctx = new ResetContext();
+int reset_init(void** out_ctx, const char* /*args*/) noexcept {
+    if (out_ctx == nullptr) return -1;
+    *out_ctx = nullptr;
+    auto* ctx = new (std::nothrow) ResetContext();
+    if (ctx == nullptr) return -1;
     *out_ctx = ctx;
     return 0;
 }
 
-void reset_reset(void* /*raw_ctx*/) {}
+void reset_reset(void* /*raw_ctx*/) noexcept {}
 
-int reset_read(void* /*raw_ctx*/, uint64_t /*offset*/, uint32_t /*size*/, uint64_t* out_val) {
+int reset_read(void* /*raw_ctx*/, uint64_t /*offset*/, uint32_t /*size*/,
+               uint64_t* out_val) noexcept {
     if (out_val != nullptr) *out_val = 0;
     return 0;
 }
 
-int reset_write(void* raw_ctx, uint64_t offset, uint32_t /*size*/, uint64_t /*val*/) {
+int reset_write(void* raw_ctx, uint64_t offset, uint32_t /*size*/, uint64_t /*val*/) noexcept {
     auto* ctx = static_cast<ResetContext*>(raw_ctx);
     if (offset == 0 && ctx != nullptr && ctx->services != nullptr &&
         ctx->services->request_reboot != nullptr) {
@@ -34,9 +39,9 @@ int reset_write(void* raw_ctx, uint64_t offset, uint32_t /*size*/, uint64_t /*va
     return 0;
 }
 
-void reset_destroy(void* raw_ctx) { delete static_cast<ResetContext*>(raw_ctx); }
+void reset_destroy(void* raw_ctx) noexcept { delete static_cast<ResetContext*>(raw_ctx); }
 
-void reset_set_services(void* raw_ctx, const SimRvHostServices* services) {
+void reset_set_services(void* raw_ctx, const SimRvHostServices* services) noexcept {
     auto* ctx = static_cast<ResetContext*>(raw_ctx);
     if (ctx != nullptr) {
         ctx->services = services;
@@ -60,5 +65,5 @@ const SimRvExternalDevice kDevice = {
 }  // namespace
 
 extern "C" {
-const SimRvExternalDevice* simrv_device_plugin_init() { return &kDevice; }
+const SimRvExternalDevice* simrv_device_plugin_init() noexcept { return &kDevice; }
 }

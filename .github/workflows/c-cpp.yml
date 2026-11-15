@@ -2,7 +2,7 @@ name: SimRV CI
 
 on:
   push:
-    branches: [ "main", "dev", 'release/**' ]
+    branches: [ "main", "dev" ]
   pull_request:
     branches: [ "main", "dev" ]
   workflow_dispatch:
@@ -69,7 +69,13 @@ jobs:
             ':(exclude).github/workflows/docs.yml' \
             ':(exclude).github/workflows/release-binaries.yml')"
         else
-          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+          baseline="$BASE_SHA"
+          if [[ -z "$baseline" || "$baseline" =~ ^0+$ ]] || \
+            ! git cat-file -e "${baseline}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin dev
+            baseline="$(git merge-base "$HEAD_SHA" FETCH_HEAD)"
+          fi
+          changed_files="$(git diff --name-only "$baseline" "$HEAD_SHA" -- \
             . \
             ':(exclude)docs/**' \
             ':(exclude)zensical.yml' \

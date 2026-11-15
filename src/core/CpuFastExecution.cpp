@@ -160,8 +160,7 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::VirtAddr
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
 
-    if (simrv::compiler::likely(eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(
-                                                                active_satp(), active_xlen))) {
+    if (simrv::compiler::likely(data_translation_active())) {
         const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
         const simrv::xlen::Address vpn = mem_addr.raw() >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
@@ -259,8 +258,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::VirtAddr vaddr, isa::Fun
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
 
-    if (simrv::compiler::likely(eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(
-                                                                active_satp(), active_xlen))) {
+    if (simrv::compiler::likely(data_translation_active())) {
         const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
         const simrv::xlen::Address vpn = mem_addr.raw() >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
@@ -363,6 +361,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             return isa::Funct3::Lwu;
     }();
     constexpr unsigned kSizeBytes = 1u << (std::to_underlying(kFunct3) & 0x3u);
+    pipeline_context.op_id = op.op_id;
     simrv::xlen::Address mem_addr = rrs1 + op.imm;
     mem_addr =
         simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
@@ -395,10 +394,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         simrv::xlen::Address lookup_addr = mem_addr;
         if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
         const unsigned page_offset = lookup_addr & 0xFFFu;
-        if (simrv::compiler::likely(
-                (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                eff_priv != kPrivMachine &&
-                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+        if (simrv::compiler::likely((lookup_addr & align_mask) == 0 &&
+                                    page_offset + size_bytes <= 4096u &&
+                                    data_translation_active())) {
             const simrv::xlen::Word current_asid =
                 simrv::xlen::satp_asid(active_satp(), active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
@@ -489,6 +487,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     }();
     constexpr unsigned kSizeBytes = 1u << (std::to_underlying(kFunct3) & 0x3u);
     constexpr simrv::xlen::Address kAlignMask = kSizeBytes - 1u;
+    pipeline_context.op_id = op.op_id;
     simrv::xlen::Address mem_addr = rrs1 + op.imm;
     mem_addr =
         simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
@@ -525,10 +524,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         simrv::xlen::Address lookup_addr = mem_addr;
         if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
         const unsigned page_offset = lookup_addr & 0xFFFu;
-        if (simrv::compiler::likely(
-                (lookup_addr & kAlignMask) == 0 && page_offset + size_bytes <= 4096u &&
-                eff_priv != kPrivMachine &&
-                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+        if (simrv::compiler::likely((lookup_addr & kAlignMask) == 0 &&
+                                    page_offset + size_bytes <= 4096u &&
+                                    data_translation_active())) {
             const simrv::xlen::Word current_asid =
                 simrv::xlen::satp_asid(active_satp(), active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
@@ -652,10 +650,15 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
 }
 
 void CPU::dispatch_pending_interrupts() {
-    simrv::xlen::Word pending_interrupts = state_.mip & state_.mie;
+    constexpr simrv::xlen::Word kHsInterruptMask =
+        (simrv::xlen::Word{1} << 2U) | (simrv::xlen::Word{1} << 6U) |
+        (simrv::xlen::Word{1} << 10U) | (simrv::xlen::Word{1} << 12U);
+    const bool has_h = isa::misa_has_extension(state_.misa, isa::IsaExtension::H);
+    simrv::xlen::Word pending_interrupts =
+        (state_.mip & state_.mie) & ~(has_h ? kHsInterruptMask : 0U);
     simrv::xlen::Word hypervisor_interrupt_candidates = 0;
     simrv::xlen::Word virtual_interrupt_candidates = 0;
-    if (isa::misa_has_extension(state_.misa, isa::IsaExtension::H)) {
+    if (has_h) {
         constexpr std::array<std::pair<simrv::xlen::Word, simrv::xlen::Word>, 3> kVsInterrupts = {
             std::pair{simrv::xlen::Word{1} << 2U, simrv::xlen::Word{1} << 1U},
             std::pair{simrv::xlen::Word{1} << 6U, simrv::xlen::Word{1} << 5U},
@@ -671,12 +674,13 @@ void CPU::dispatch_pending_interrupts() {
                 const bool global_enabled =
                     state_.priv != kPrivSupervisor || (state_.vsstatus & MstatusBit::Sie) != 0;
                 if (global_enabled && (state_.vsie & vs_bit) != 0) {
-                    // In VS mode the virtual supervisor interrupt is reported with
-                    // the supervisor cause number (for example, VSEI is cause 9).
-                    virtual_interrupt_candidates |= vs_bit;
+                    // Raise the hypervisor cause (2/6/10) so TrapController routes via
+                    // hideleg to VS mode and maps it to the VS cause (1/5/9).
+                    virtual_interrupt_candidates |= h_bit;
                 }
-            } else if ((state_.hie & h_bit) != 0 && (state_.priv < kPrivSupervisor || state_.virt ||
-                                                     (state_.mstatus & MstatusBit::Sie) != 0)) {
+            } else if ((state_.hideleg & h_bit) == 0 && (state_.hie & h_bit) != 0 &&
+                       (state_.priv < kPrivSupervisor || state_.virt ||
+                        (state_.mstatus & MstatusBit::Sie) != 0)) {
                 hypervisor_interrupt_candidates |= h_bit;
             }
         }
@@ -856,6 +860,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- FP Loads ----
         case isa::FLW:
         case isa::FLD: {
+            pipeline_context.op_id = op.op_id;
             simrv::xlen::Address mem_addr = rrs1 + op.imm;
             mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
                            *this, simrv::xlen::VirtAddr{mem_addr})
@@ -889,10 +894,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 simrv::xlen::Address lookup_addr = mem_addr;
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
                 const unsigned page_offset = lookup_addr & 0xFFFu;
-                if (simrv::compiler::likely(
-                        (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                        eff_priv != kPrivMachine &&
-                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+                if (simrv::compiler::likely((lookup_addr & align_mask) == 0 &&
+                                            page_offset + size_bytes <= 4096u &&
+                                            data_translation_active())) {
                     const simrv::xlen::Word current_asid =
                         simrv::xlen::satp_asid(active_satp(), active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;
@@ -939,6 +943,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- FP Stores ----
         case isa::FSW:
         case isa::FSD: {
+            pipeline_context.op_id = op.op_id;
             simrv::xlen::Address mem_addr = rrs1 + op.imm;
             mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
                            *this, simrv::xlen::VirtAddr{mem_addr})
@@ -975,10 +980,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 simrv::xlen::Address lookup_addr = mem_addr;
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
                 const unsigned page_offset = lookup_addr & 0xFFFu;
-                if (simrv::compiler::likely(
-                        (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                        eff_priv != kPrivMachine &&
-                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+                if (simrv::compiler::likely((lookup_addr & align_mask) == 0 &&
+                                            page_offset + size_bytes <= 4096u &&
+                                            data_translation_active())) {
                     const simrv::xlen::Word current_asid =
                         simrv::xlen::satp_asid(active_satp(), active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;

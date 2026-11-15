@@ -211,58 +211,73 @@ struct KeyboardState {
     std::deque<uint8_t> fifo;
 };
 
-int init(void** out, const char*) {
+int init(void** out, const char*) noexcept {
+    if (!out) return -1;
     *out = new (std::nothrow) KeyboardState;
     return *out ? 0 : -1;
 }
 
-void destroy(void* ctx) { delete static_cast<KeyboardState*>(ctx); }
+void destroy(void* ctx) noexcept { delete static_cast<KeyboardState*>(ctx); }
 
-void reset(void* ctx) {
-    auto& kb = *static_cast<KeyboardState*>(ctx);
-    std::scoped_lock lock(kb.mutex);
-    kb.fifo.clear();
+void reset(void* ctx) noexcept {
+    auto* kb = static_cast<KeyboardState*>(ctx);
+    if (!kb) return;
+    try {
+        std::scoped_lock lock(kb->mutex);
+        kb->fifo.clear();
+    } catch (...) {
+    }
 }
 
-int read(void* ctx, uint64_t offset, uint32_t /*size*/, uint64_t* out) {
-    if (!out) return -1;
+int read(void* ctx, uint64_t offset, uint32_t /*size*/, uint64_t* out) noexcept {
+    auto* kb = static_cast<KeyboardState*>(ctx);
+    if (!kb || !out) return -1;
     if (offset != 0) {
         *out = 0;
         return 0;
     }
-    auto& kb = *static_cast<KeyboardState*>(ctx);
-    std::scoped_lock lock(kb.mutex);
-    if (kb.fifo.empty()) {
+    try {
+        std::scoped_lock lock(kb->mutex);
+        if (kb->fifo.empty()) {
+            *out = 0;
+        } else {
+            *out = kb->fifo.front();
+            kb->fifo.pop_front();
+        }
+    } catch (...) {
         *out = 0;
-    } else {
-        *out = kb.fifo.front();
-        kb.fifo.pop_front();
+        return -1;
     }
     return 0;
 }
 
-int write(void* /*ctx*/, uint64_t /*offset*/, uint32_t /*size*/, uint64_t /*value*/) { return 0; }
+int write(void* /*ctx*/, uint64_t /*offset*/, uint32_t /*size*/, uint64_t /*value*/) noexcept {
+    return 0;
+}
 
-void send_key(void* ctx, uint16_t keycode, int pressed) {
+void send_key(void* ctx, uint16_t keycode, int pressed) noexcept {
     auto* kb = static_cast<KeyboardState*>(ctx);
     if (!kb) return;
     const auto code_opt = linux_keycode_to_ps2(keycode);
     if (!code_opt) return;
 
-    std::scoped_lock lock(kb->mutex);
-    if (kb->fifo.size() + 3 >= kMaxQueueSize) return;
+    try {
+        std::scoped_lock lock(kb->mutex);
+        if (kb->fifo.size() + 3 >= kMaxQueueSize) return;
 
-    if (code_opt->extended) {
-        kb->fifo.push_back(0xE0);
-        if (!pressed) {
-            kb->fifo.push_back(0xF0);
+        if (code_opt->extended) {
+            kb->fifo.push_back(0xE0);
+            if (!pressed) {
+                kb->fifo.push_back(0xF0);
+            }
+            kb->fifo.push_back(code_opt->scancode);
+        } else {
+            if (!pressed) {
+                kb->fifo.push_back(0xF0);
+            }
+            kb->fifo.push_back(code_opt->scancode);
         }
-        kb->fifo.push_back(code_opt->scancode);
-    } else {
-        if (!pressed) {
-            kb->fifo.push_back(0xF0);
-        }
-        kb->fifo.push_back(code_opt->scancode);
+    } catch (...) {
     }
 }
 
@@ -290,7 +305,7 @@ const SimRvExternalInputDevice kInputDesc{
 
 extern "C" {
 
-const SimRvExternalDevice* simrv_device_plugin_init() { return &kDeviceDesc; }
+const SimRvExternalDevice* simrv_device_plugin_init() noexcept { return &kDeviceDesc; }
 
-const SimRvExternalInputDevice* simrv_input_plugin_init() { return &kInputDesc; }
+const SimRvExternalInputDevice* simrv_input_plugin_init() noexcept { return &kInputDesc; }
 }

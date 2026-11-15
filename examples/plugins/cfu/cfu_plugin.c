@@ -66,7 +66,7 @@ void cfu_reset(void) { s_accumulator = 0; }
 /* SimRV CFU v2 ABI entry points */
 static uint32_t cfu_v2_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
                                uint32_t* latency_cycles) {
-    if (latency_cycles != nullptr) {
+    if (latency_cycles != NULL) {
         // Dot product and popcount take 1 cycle; SAD takes 2 cycles
         *latency_cycles = (funct3 == 1) ? 2 : 1;
     }
@@ -75,7 +75,7 @@ static uint32_t cfu_v2_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, 
 
 static uint64_t cfu_v2_execute64(uint32_t funct7, uint32_t funct3, uint64_t src1, uint64_t src2,
                                  uint32_t* latency_cycles) {
-    if (latency_cycles != nullptr) {
+    if (latency_cycles != NULL) {
         *latency_cycles = (funct3 == 1) ? 2 : 1;
     }
     if (funct3 == 2) {

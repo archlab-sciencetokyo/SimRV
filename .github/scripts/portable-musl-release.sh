@@ -55,7 +55,7 @@ cmake -S . -B build/rv64-musl-release -G Ninja \
     -DPKG_CONFIG_ARGN=--static \
     -DCMAKE_PROJECT_SimRV_INCLUDE="${PWD}/.github/scripts/static-library-search.cmake" \
     -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++"
-cmake --build build/rv64-musl-release --target SimRV simrv-release-check --parallel 2
+cmake --build build/rv64-musl-release --target SimRV --parallel 2
 
 file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
 if readelf -d build/rv64-musl-release/simrv | grep -q ' NEEDED '; then
@@ -73,4 +73,6 @@ mv "$archive" "$asset"
 tar -tzf "$asset" > portable-archive.list
 grep -q '^usr/share/SimRV/SimRVBuildMetadata.json$' portable-archive.list
 grep -q '^usr/share/SimRV/schemas/simrv-build-metadata.schema.json$' portable-archive.list
-build/rv64-musl-release/simrv-release-check --binary build/rv64-musl-release/simrv
+build/rv64-musl-release/simrv --version >/dev/null
+build/rv64-musl-release/simrv --isa-info >/dev/null
+build/rv64-musl-release/simrv --license >/dev/null

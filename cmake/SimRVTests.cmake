@@ -71,6 +71,10 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-core-semantics-tests tests/CoreSemanticsTests.cpp core-semantics
     "gate;regress;memory;mmio")
+  if(SIMRV_XLEN STREQUAL "64")
+    # This target includes focused RV32 guest-width checks for the RV64 build.
+    set_property(TEST core-semantics APPEND PROPERTY LABELS hosted-rv32)
+  endif()
   simrv_add_runtime_test(simrv-memory-protection-tests tests/MemoryProtectionTests.cpp
                          memory-protection "gate;regress;core;memory;pmp")
   simrv_add_runtime_test(

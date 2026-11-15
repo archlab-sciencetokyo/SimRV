@@ -7,12 +7,15 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
 #include "simrv/device/virtio/VirtioCore.hpp"
 
 namespace simrv::device::virtio {
+
+inline constexpr uint32_t kMaxVirtioNetFrameBytes = 65536U;
 
 // VirtIO Net Header (10 or 12 bytes)
 #pragma pack(push, 1)
@@ -53,12 +56,14 @@ void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool 
             VirtioNetHdr hdr{};
             uint32_t written = 0;
 
-            if (desc.len >= sizeof(hdr)) {
+            if (desc.len >= sizeof(hdr) &&
+                desc.addr <= std::numeric_limits<uint64_t>::max() - sizeof(hdr)) {
                 (void)dma_write(desc.addr, &hdr, sizeof(hdr));
                 written += sizeof(hdr);
                 const uint32_t payload_len = static_cast<uint32_t>(
                     std::min(static_cast<size_t>(desc.len - sizeof(hdr)), pkt.size()));
-                if (payload_len > 0) {
+                if (payload_len > 0 && payload_len - 1U <= std::numeric_limits<uint64_t>::max() -
+                                                               (desc.addr + sizeof(hdr))) {
                     (void)dma_write(desc.addr + sizeof(hdr), pkt.data(), payload_len);
                     written += payload_len;
                 }
@@ -91,10 +96,17 @@ void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool 
             if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc)))
                 break;
 
-            if (desc.len > sizeof(VirtioNetHdr)) {
-                std::vector<uint8_t> pkt(desc.len - sizeof(VirtioNetHdr));
-                (void)dma_read(desc.addr + sizeof(VirtioNetHdr), pkt.data(), pkt.size());
-                backend.send_tx_packet(pkt.data(), pkt.size());
+            if (desc.len > sizeof(VirtioNetHdr) &&
+                desc.len - sizeof(VirtioNetHdr) <= kMaxVirtioNetFrameBytes &&
+                desc.addr <= std::numeric_limits<uint64_t>::max() - sizeof(VirtioNetHdr)) {
+                const uint32_t frame_len = desc.len - static_cast<uint32_t>(sizeof(VirtioNetHdr));
+                if (frame_len - 1U <=
+                    std::numeric_limits<uint64_t>::max() - (desc.addr + sizeof(VirtioNetHdr))) {
+                    std::vector<uint8_t> pkt(frame_len);
+                    if (dma_read(desc.addr + sizeof(VirtioNetHdr), pkt.data(), pkt.size())) {
+                        backend.send_tx_packet(pkt.data(), pkt.size());
+                    }
+                }
             }
 
             if (defer_completion) {

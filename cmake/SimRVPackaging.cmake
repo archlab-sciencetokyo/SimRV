@@ -49,6 +49,29 @@ install(
   TARGETS simrv-act simrv-vector
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tests)
+
+# Native release packages contain the Runtime, Tools, Tests, and Development
+# components. Keep distro release builds limited to the executable payloads
+# those components install; the architecture qualification workflow builds the
+# full project independently.
+add_custom_target(
+  simrv-package-binaries
+  DEPENDS SimRV simrv-cpu-wizard simrv-parity simrv-benchmark simrv-act
+          simrv-vector)
+if(SIMRV_BUILD_PLUGINS)
+  set(_simrv_package_plugin_targets)
+  if(SIMRV_BUILD_RVCOMP_PLUGINS)
+    list(APPEND _simrv_package_plugin_targets simrv-mmc simrv-reset simrv-ethernet
+         simrv-rvcomp-uart simrv-rv98-keyboard)
+  endif()
+  if(SIMRV_BUILD_CFU_PLUGINS)
+    list(APPEND _simrv_package_plugin_targets simrv-cfu-provingground)
+  endif()
+  if(_simrv_package_plugin_targets)
+    add_dependencies(simrv-package-binaries ${_simrv_package_plugin_targets})
+  endif()
+endif()
+
 install(
   FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl

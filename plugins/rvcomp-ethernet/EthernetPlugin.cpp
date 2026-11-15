@@ -2,14 +2,20 @@
  * @file EthernetPlugin.cpp
  * @brief External device simulation plugin for rvcomp-ethernet (isct,rvcomp-ethernet).
  */
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <vector>
 
 #include "simrv/device/ExternalDevice.h"
 
 namespace {
+
+constexpr auto is_valid_access_size(uint32_t size) noexcept -> bool {
+    return size == 1U || size == 2U || size == 4U || size == 8U;
+}
 
 struct EthernetContext {
     const SimRvHostServices* services{nullptr};
@@ -20,32 +26,40 @@ struct EthernetContext {
     uint32_t tx_size{16384};
 };
 
-int ethernet_init(void** out_ctx, const char* /*args*/) {
-    auto* ctx = new EthernetContext();
-    ctx->rx_buffer.assign(ctx->rx_size, 0);
-    ctx->tx_buffer.assign(ctx->tx_size, 0);
+int ethernet_init(void** out_ctx, const char* /*args*/) noexcept {
+    if (out_ctx == nullptr) return -1;
+    *out_ctx = nullptr;
+    auto* ctx = new (std::nothrow) EthernetContext();
+    if (ctx == nullptr) return -1;
+    try {
+        ctx->rx_buffer.assign(ctx->rx_size, 0);
+        ctx->tx_buffer.assign(ctx->tx_size, 0);
+    } catch (...) {
+        delete ctx;
+        return -1;
+    }
     ctx->csr[1] = static_cast<uint32_t>(ctx->rx_buffer.size() - 1);
     ctx->csr[3] = static_cast<uint32_t>(ctx->tx_buffer.size() - 1);
     *out_ctx = ctx;
     return 0;
 }
 
-void ethernet_reset(void* raw_ctx) {
+void ethernet_reset(void* raw_ctx) noexcept {
     auto* ctx = static_cast<EthernetContext*>(raw_ctx);
     if (ctx == nullptr) return;
     ctx->csr.fill(0);
     ctx->csr[1] = static_cast<uint32_t>(ctx->rx_buffer.size() - 1);
     ctx->csr[3] = static_cast<uint32_t>(ctx->tx_buffer.size() - 1);
-    ctx->rx_buffer.assign(ctx->rx_size, 0);
-    ctx->tx_buffer.assign(ctx->tx_size, 0);
+    std::fill(ctx->rx_buffer.begin(), ctx->rx_buffer.end(), uint8_t{0});
+    std::fill(ctx->tx_buffer.begin(), ctx->tx_buffer.end(), uint8_t{0});
     if (ctx->services != nullptr && ctx->services->set_irq != nullptr) {
         ctx->services->set_irq(ctx->services->host_ctx, 2, 0);
     }
 }
 
-int ethernet_read(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t* out_val) {
+int ethernet_read(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t* out_val) noexcept {
     auto* ctx = static_cast<EthernetContext*>(raw_ctx);
-    if (ctx == nullptr || out_val == nullptr) return -1;
+    if (ctx == nullptr || out_val == nullptr || !is_valid_access_size(size)) return -1;
     *out_val = 0;
 
     // Window 0: CSRs (0x0 .. 0x4000)
@@ -66,7 +80,7 @@ int ethernet_read(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t* out_v
     // Window 1: RX Buffer (0x04000000 .. 0x08000000)
     if (offset >= 0x04000000ULL && offset < 0x08000000ULL) {
         const uint64_t buf_off = offset - 0x04000000ULL;
-        if (buf_off + size <= ctx->rx_buffer.size()) {
+        if (buf_off <= ctx->rx_buffer.size() && size <= ctx->rx_buffer.size() - buf_off) {
             uint64_t val = 0;
             std::memcpy(&val, ctx->rx_buffer.data() + buf_off, size);
             *out_val = val;
@@ -77,7 +91,7 @@ int ethernet_read(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t* out_v
     // Window 2: TX Buffer (0x08000000 .. 0x0c000000)
     if (offset >= 0x08000000ULL && offset < 0x0c000000ULL) {
         const uint64_t buf_off = offset - 0x08000000ULL;
-        if (buf_off + size <= ctx->tx_buffer.size()) {
+        if (buf_off <= ctx->tx_buffer.size() && size <= ctx->tx_buffer.size() - buf_off) {
             uint64_t val = 0;
             std::memcpy(&val, ctx->tx_buffer.data() + buf_off, size);
             *out_val = val;
@@ -88,9 +102,9 @@ int ethernet_read(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t* out_v
     return 0;
 }
 
-int ethernet_write(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t val) {
+int ethernet_write(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t val) noexcept {
     auto* ctx = static_cast<EthernetContext*>(raw_ctx);
-    if (ctx == nullptr) return -1;
+    if (ctx == nullptr || !is_valid_access_size(size)) return -1;
 
     // Window 0: CSRs
     if (offset < 0x04000000ULL) {
@@ -115,7 +129,7 @@ int ethernet_write(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t val) 
     // Window 1: RX Buffer
     if (offset >= 0x04000000ULL && offset < 0x08000000ULL) {
         const uint64_t buf_off = offset - 0x04000000ULL;
-        if (buf_off + size <= ctx->rx_buffer.size()) {
+        if (buf_off <= ctx->rx_buffer.size() && size <= ctx->rx_buffer.size() - buf_off) {
             std::memcpy(ctx->rx_buffer.data() + buf_off, &val, size);
         }
         return 0;
@@ -124,7 +138,7 @@ int ethernet_write(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t val) 
     // Window 2: TX Buffer
     if (offset >= 0x08000000ULL && offset < 0x0c000000ULL) {
         const uint64_t buf_off = offset - 0x08000000ULL;
-        if (buf_off + size <= ctx->tx_buffer.size()) {
+        if (buf_off <= ctx->tx_buffer.size() && size <= ctx->tx_buffer.size() - buf_off) {
             std::memcpy(ctx->tx_buffer.data() + buf_off, &val, size);
         }
         return 0;
@@ -133,7 +147,7 @@ int ethernet_write(void* raw_ctx, uint64_t offset, uint32_t size, uint64_t val) 
     return 0;
 }
 
-void ethernet_destroy(void* raw_ctx) {
+void ethernet_destroy(void* raw_ctx) noexcept {
     auto* ctx = static_cast<EthernetContext*>(raw_ctx);
     if (ctx != nullptr) {
         if (ctx->services != nullptr && ctx->services->set_irq != nullptr) {
@@ -143,7 +157,7 @@ void ethernet_destroy(void* raw_ctx) {
     }
 }
 
-void ethernet_set_services(void* raw_ctx, const SimRvHostServices* services) {
+void ethernet_set_services(void* raw_ctx, const SimRvHostServices* services) noexcept {
     auto* ctx = static_cast<EthernetContext*>(raw_ctx);
     if (ctx != nullptr) {
         ctx->services = services;
@@ -167,5 +181,5 @@ const SimRvExternalDevice kDevice = {
 }  // namespace
 
 extern "C" {
-const SimRvExternalDevice* simrv_device_plugin_init() { return &kDevice; }
+const SimRvExternalDevice* simrv_device_plugin_init() noexcept { return &kDevice; }
 }

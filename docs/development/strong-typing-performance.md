@@ -229,3 +229,35 @@ threshold with low variability; branch and memory remained within that threshold
 supports keeping the simpler dispatch on this x86 host. It is not an ARM measurement or a claim
 that the change helps every host. Raw hyperfine records are in `/tmp/fastop-paired-*.json` and are
 not checked in.
+
+## Matched rc.19 and current-tree comparison
+
+The tagged `v3.0.0-rc.19` source and current worktree were exported into isolated trees and built
+with matching settings on an Intel Core Ultra X7 358H under x86-64 WSL2. Both used GCC 16.2.1,
+Release, `-O3 -DNDEBUG -g1`, `-flto=auto`, `-march=x86-64-v3`,
+`SIMRV_ENABLE_LTO=ON`, and `SIMRV_NATIVE_HOST_OPTIMIZATIONS=OFF`. The effective link lines matched
+apart from source and build paths. Workloads used the RV64 release binaries, fast mode, ISA
+`rv64gc_zicsr_zifencei_zicntr`, and a fixed 100-million-instruction stop, pinned to CPU 0. Each
+workload had five warmups and 20 measured runs; all samples retired the same instruction count.
+
+| Workload | rc.19 median (CV) | Current median (CV) | Change |
+| --- | ---: | ---: | ---: |
+| Compute | 89.185 ms (1.31%) | 89.158 ms (1.34%) | -0.03% |
+| Branch | 151.825 ms (1.65%) | 151.297 ms (1.35%) | -0.35% |
+| Memory | 105.581 ms (1.74%) | 105.238 ms (1.57%) | -0.32% |
+
+A diskless Alpine Linux workload used the same binaries with a 25-million-instruction cap, fast
+mode, and `--no-realtime`, pinned to CPU 0. Hyperfine used three warmups and 20 measured runs.
+Median wall time was 696.844 ms (mean 695.278 ms, SD 11.75 ms) for rc.19 and 693.914 ms (mean
+694.338 ms, SD 12.97 ms) for the current tree, a 0.42% decrease. Both stopped at exactly 25 million
+instructions and the same PC; this measures capped boot progress, not a completed OS boot.
+
+All four workloads remained within the 5% investigation threshold. These whole-tree comparisons
+do not isolate individual changes. The matched executables were 31,196,264 and 31,921,072 bytes
+(+2.32%); `size` reports text/data/bss of 7,729,973/5,396/30,568 and
+7,995,774/5,428/30,568 bytes respectively. One clean four-job build with ccache disabled took
+93.23 seconds for rc.19 and 97.86 seconds for the current tree; these single build-time samples
+are insufficient to establish a repeatable build slowdown. ARM hardware and usable host
+performance counters were unavailable. Raw workload records are
+`/tmp/simrv-match-{base,current}-{compute,branch,memory}.json` and
+`/tmp/simrv-matched-linux-boot.json`.

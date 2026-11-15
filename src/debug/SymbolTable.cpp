@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <utility>
 #include <vector>
@@ -22,6 +23,8 @@ namespace simrv::debug {
 namespace {
 
 constexpr size_t kElfIdentSize = 16;
+constexpr size_t kMaxElfSections = 4096;
+constexpr size_t kMaxElfSectionBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::array<uint8_t, 4> kElfMagic = {0x7f, 'E', 'L', 'F'};
 using util::elf::Elf32_Ehdr;
 using util::elf::Elf32_Shdr;
@@ -46,6 +49,11 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::VirtAddr, std::s
         return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     out_entry = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(ehdr.e_entry)};
 
+    if (ehdr.e_shnum == 0) return true;
+    if (ehdr.e_shnum > kMaxElfSections || !std::in_range<std::streamoff>(ehdr.e_shoff)) {
+        return false;
+    }
+
     std::vector<Shdr> shdrs(ehdr.e_shnum);
     fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
     if (!fs.read(reinterpret_cast<char*>(shdrs.data()),
@@ -60,18 +68,30 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::VirtAddr, std::s
     for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
         if (shdrs[i].sh_type == kSymbolTable) {
             symtab_idx = i;
+            if (!std::in_range<int>(shdrs[i].sh_link)) return false;
             strtab_idx = static_cast<int>(shdrs[i].sh_link);
         }
     }
 
-    if (symtab_idx != -1 && strtab_idx != -1) {
-        std::vector<char> strtab(shdrs[strtab_idx].sh_size);
-        fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
-        if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size))) {
+    if (symtab_idx != -1) {
+        if (strtab_idx < 0 || !std::cmp_less(strtab_idx, shdrs.size())) return false;
+        const auto strtab_size = shdrs[strtab_idx].sh_size;
+        const auto symtab_size = shdrs[symtab_idx].sh_size;
+        if (strtab_size > kMaxElfSectionBytes || symtab_size > kMaxElfSectionBytes ||
+            !std::in_range<std::streamoff>(shdrs[strtab_idx].sh_offset) ||
+            !std::in_range<std::streamoff>(shdrs[symtab_idx].sh_offset)) {
             return false;
         }
+        std::vector<char> strtab(static_cast<size_t>(strtab_size));
+        if (!strtab.empty()) {
+            fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
+            if (!fs.read(strtab.data(), static_cast<std::streamsize>(strtab.size()))) {
+                return false;
+            }
+            strtab.back() = '\0';
+        }
 
-        size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Sym);
+        const size_t num_syms = static_cast<size_t>(symtab_size) / sizeof(Sym);
         fs.seekg(static_cast<std::streamoff>(shdrs[symtab_idx].sh_offset), std::ios::beg);
         for (size_t index = 0; index < num_syms; ++index) {
             Sym sym{};

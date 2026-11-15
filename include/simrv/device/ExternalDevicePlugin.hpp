@@ -22,8 +22,15 @@ class ExternalMmioDevice : public memory::MmioDevice {
    public:
     ExternalMmioDevice(const SimRvExternalDevice* desc, void* ctx, std::string name,
                        simrv::xlen::PhysAddr base, simrv::xlen::Address size,
-                       simrv::core::Machine& machine, bool defer_reset = false);
+                       simrv::core::Machine& machine, bool defer_reset = false,
+                       std::shared_ptr<void> plugin_handle = nullptr);
     ~ExternalMmioDevice() override;
+
+    ExternalMmioDevice(const ExternalMmioDevice&) = delete;
+    auto operator=(const ExternalMmioDevice&) -> ExternalMmioDevice& = delete;
+    ExternalMmioDevice(ExternalMmioDevice&&) = delete;
+    auto operator=(ExternalMmioDevice&&) -> ExternalMmioDevice& = delete;
+
     void reset() override;
 
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
@@ -48,6 +55,12 @@ class ExternalMmioDevice : public memory::MmioDevice {
     [[nodiscard]] auto has_cycle_ticking() const noexcept -> bool override;
 
    private:
+    void initialize_host_services(simrv::core::Machine& machine) noexcept;
+    [[nodiscard]] auto read_region(simrv::memory::MmioOffset offset, uint32_t width) -> uint64_t;
+    void write_region(simrv::memory::MmioOffset offset, uint32_t width, uint64_t val);
+
+    // Declared first so dlclose runs last after desc_->destroy(ctx_) finishes.
+    std::shared_ptr<void> plugin_handle_{};
     SimRvHostServices host_services_{};
     const SimRvExternalDevice* desc_{nullptr};
     void* ctx_{nullptr};

@@ -13,6 +13,8 @@
 
 namespace simrv::device::virtio {
 
+inline constexpr uint32_t kMaxVirtioBlockTransferBytes = 16U * 1024U * 1024U;
+
 template <typename DmaRead, typename DmaWrite, typename ScheduleDeferred, typename NotifyComplete>
 void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::byte>& io_buffer,
                          bool defer_completion, DmaRead&& dma_read, DmaWrite&& dma_write,
@@ -59,23 +61,32 @@ void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::
                         desc1.len >= 1 && (desc1.flags & kVirtqDescFWrite) != 0;
                     request_status = backend.flush() ? 0 : 1;
                 } else if (hdr.type == 0) {  // READ
-                    io_buffer.resize(desc1.len);
-                    if ((desc1.flags & kVirtqDescFWrite) != 0 &&
-                        backend.read_sectors(hdr.sector, std::span<std::byte>(io_buffer)) &&
-                        dma_write(desc1.addr, io_buffer.data(), desc1.len)) {
-                        request_status = 0;
-                        data_written = desc1.len;
-                        transfer_bytes = desc1.len;
+                    if ((desc1.flags & kVirtqDescFWrite) != 0 && desc1.len > 0 &&
+                        (desc1.len % 512U) == 0 && desc1.len <= kMaxVirtioBlockTransferBytes) {
+                        io_buffer.resize(desc1.len);
+                        if (backend.read_sectors(hdr.sector, std::span<std::byte>(io_buffer)) &&
+                            dma_write(desc1.addr, io_buffer.data(), desc1.len)) {
+                            request_status = 0;
+                            data_written = desc1.len;
+                            transfer_bytes = desc1.len;
+                        } else {
+                            request_status = 1;  // VIRTIO_BLK_S_IOERR
+                        }
                     } else {
                         request_status = 1;  // VIRTIO_BLK_S_IOERR
                     }
                 } else if (hdr.type == 1) {  // WRITE
-                    io_buffer.resize(desc1.len);
-                    if ((desc1.flags & kVirtqDescFWrite) == 0 &&
-                        dma_read(desc1.addr, io_buffer.data(), desc1.len) &&
-                        backend.write_sectors(hdr.sector, std::span<const std::byte>(io_buffer))) {
-                        request_status = 0;
-                        transfer_bytes = desc1.len;
+                    if ((desc1.flags & kVirtqDescFWrite) == 0 && desc1.len > 0 &&
+                        (desc1.len % 512U) == 0 && desc1.len <= kMaxVirtioBlockTransferBytes) {
+                        io_buffer.resize(desc1.len);
+                        if (dma_read(desc1.addr, io_buffer.data(), desc1.len) &&
+                            backend.write_sectors(hdr.sector,
+                                                  std::span<const std::byte>(io_buffer))) {
+                            request_status = 0;
+                            transfer_bytes = desc1.len;
+                        } else {
+                            request_status = 1;  // VIRTIO_BLK_S_IOERR
+                        }
                     } else {
                         request_status = 1;  // VIRTIO_BLK_S_IOERR
                     }
@@ -106,9 +117,8 @@ void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::
 
                 if (hdr.type != 4 && (desc1.flags & kVirtqDescFNext) != 0) {
                     VirtqDesc desc2{};
-                    if (desc1.next < q.num &&
-                        dma_read(q.desc_addr + desc1.next * sizeof(VirtqDesc), &desc2,
-                                 sizeof(desc2))) {
+                    if (desc1.next < q.num && dma_read(q.desc_addr + desc1.next * sizeof(VirtqDesc),
+                                                       &desc2, sizeof(desc2))) {
                         status_addr = desc2.addr;
                         status_descriptor_valid =
                             desc2.len >= 1 && (desc2.flags & kVirtqDescFWrite) != 0;

@@ -48,6 +48,14 @@ class HypervisorMemoryAccessScope {
     bool hypervisor_operation_;
 };
 
+[[nodiscard]] auto data_translation_enabled(const core::CPU& cpu,
+                                            simrv::xlen::PrivilegeLevel effective_privilege,
+                                            unsigned /*active_xlen*/,
+                                            bool hypervisor_access) noexcept -> bool {
+    if (effective_privilege == simrv::xlen::PrivilegeLevel::Machine) return false;
+    return cpu.data_translation_active() || hypervisor_access;
+}
+
 [[nodiscard]] auto apply_user_pointer_mask(core::CPU& cpu, simrv::xlen::VirtAddr address,
                                            unsigned active_xlen) -> simrv::xlen::VirtAddr {
     const auto op = cpu.active_context().op_id;
@@ -66,8 +74,15 @@ class HypervisorMemoryAccessScope {
             pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
         }
     } else {
-        if (cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::User) return address;
-        pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
+        const auto eff_priv = cpu.effective_data_privilege();
+        if (eff_priv == simrv::xlen::PrivilegeLevel::User) {
+            pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
+        } else if (eff_priv == simrv::xlen::PrivilegeLevel::Supervisor &&
+                   cpu.effective_data_virt()) {
+            pmm = (static_cast<uint64_t>(cpu.state().henvcfg) & kPmmMask) >> 32U;
+        } else {
+            return address;
+        }
     }
     if (pmm != 2U) return address;  // RVA23 requires PMLEN=0 and PMLEN=7.
 
@@ -76,15 +91,18 @@ class HypervisorMemoryAccessScope {
     // VS-stage MXR bit, and HLV/HSV accesses use the same effective status.
     const simrv::xlen::CsrValue mxr =
         cpu.state().mstatus |
-        ((cpu.state().virt || hypervisor_access) ? cpu.state().vsstatus : simrv::xlen::CsrValue{0});
+        ((cpu.effective_data_virt() || hypervisor_access) ? cpu.state().vsstatus
+                                                          : simrv::xlen::CsrValue{0});
     if ((mxr & simrv::core::MstatusBit::Mxr) != 0) return address;
 
     constexpr uint64_t kLow57Mask = (uint64_t{1} << 57U) - 1U;
     const uint64_t low = address.raw() & kLow57Mask;
+    // Canonicalize a masked pointer as a virtual address only when the VS
+    // stage translates it. With VS-stage Bare, HLV/HSV operands are GPAs;
+    // an active G stage does not turn them back into canonical virtual addrs.
     const bool translated =
         hypervisor_access
-            ? (simrv::xlen::satp_mode(cpu.state().vsatp, active_xlen) != 0 ||
-               simrv::xlen::satp_mode(cpu.state().hgatp, active_xlen) != 0)
+            ? (simrv::xlen::satp_mode(cpu.state().vsatp, active_xlen) != 0)
             : (cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::Machine &&
                simrv::xlen::satp_mode(cpu.active_satp(), active_xlen) != 0);
     const uint64_t upper = translated && ((low >> 56U) & 1U) != 0 ? ~kLow57Mask : 0;
@@ -195,8 +213,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const simrv::xlen::Word active_satp = cpu.active_satp();
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
-        (eff_priv != kPrivMachine &&
-         (simrv::xlen::satp_translation_enabled(active_satp, active_xlen) || hypervisor_access));
+        data_translation_enabled(cpu, eff_priv, active_xlen, hypervisor_access);
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (translation_enabled) {
@@ -474,7 +491,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
                     p_addr = res.physical_address.raw();
                     is_global = res.global();
-                    pbmt = simrv::memory::PteView{.raw = res.pte}.pbmt();
+                    pbmt = res.pbmt;
                     if (!hypervisor_access) {
                         cpu.tlb.insert_data_r(v_addr, simrv::xlen::PhysAddr{p_addr}, current_asid,
                                               eff_priv, is_global, pbmt);
@@ -614,8 +631,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     const simrv::xlen::Word active_satp = cpu.active_satp();
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
-        (eff_priv != kPrivMachine &&
-         (simrv::xlen::satp_translation_enabled(active_satp, active_xlen) || hypervisor_access));
+        data_translation_enabled(cpu, eff_priv, active_xlen, hypervisor_access);
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (translation_enabled) {
@@ -999,7 +1015,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
                     p_addr = res.physical_address.raw();
                     is_global = res.global();
-                    pbmt = simrv::memory::PteView{.raw = res.pte}.pbmt();
+                    pbmt = res.pbmt;
                     if (!hypervisor_access) {
                         cpu.tlb.insert_data_w(v_addr, simrv::xlen::PhysAddr{p_addr}, current_asid,
                                               eff_priv, is_global, pbmt);
@@ -1139,52 +1155,34 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const unsigned active_xlen = cpu.effective_data_xlen();
     addr = apply_user_pointer_mask(cpu, addr, active_xlen);
 
-    // 1. Permission checks
-    if (op == isa::OperationId::CBO_ZERO) {
-        if (eff_priv == kPrivUser) {
-            if ((cpu.state().senvcfg & (1ULL << 7)) == 0 ||
-                (cpu.state().menvcfg & (1ULL << 7)) == 0) {
-                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
-                cpu.active_context().pending_tval = cpu.active_context().ir;
-                return;
-            }
-        } else if (eff_priv == kPrivSupervisor) {
-            if ((cpu.state().menvcfg & (1ULL << 7)) == 0) {
-                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
-                cpu.active_context().pending_tval = cpu.active_context().ir;
-                return;
-            }
+    // 1. Permission checks (M-mode menvcfg -> IllegalInstruction; H-mode henvcfg/VS senvcfg ->
+    // VirtualInstruction; HS U-mode senvcfg -> IllegalInstruction).
+    const simrv::xlen::CsrValue cmo_mask =
+        (op == isa::OperationId::CBO_ZERO)
+            ? (simrv::xlen::CsrValue{1} << 7U)
+            : ((op == isa::OperationId::CBO_CLEAN || op == isa::OperationId::CBO_FLUSH)
+                   ? (simrv::xlen::CsrValue{1} << 6U)
+                   : (simrv::xlen::CsrValue{3} << 4U));
+    if (eff_priv != kPrivMachine && (cpu.state().menvcfg & cmo_mask) == 0) {
+        cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
+        cpu.active_context().pending_tval = cpu.active_context().ir;
+        return;
+    }
+    if (cpu.effective_data_virt()) {
+        if (eff_priv != kPrivMachine && (cpu.state().henvcfg & cmo_mask) == 0) {
+            cpu.active_context().pending_exception = ExceptionCode::VirtualInstruction;
+            cpu.active_context().pending_tval = cpu.active_context().ir;
+            return;
         }
-    } else if (op == isa::OperationId::CBO_CLEAN || op == isa::OperationId::CBO_FLUSH) {
-        if (eff_priv == kPrivUser) {
-            if ((cpu.state().senvcfg & (1ULL << 6)) == 0 ||
-                (cpu.state().menvcfg & (1ULL << 6)) == 0) {
-                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
-                cpu.active_context().pending_tval = cpu.active_context().ir;
-                return;
-            }
-        } else if (eff_priv == kPrivSupervisor) {
-            if ((cpu.state().menvcfg & (1ULL << 6)) == 0) {
-                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
-                cpu.active_context().pending_tval = cpu.active_context().ir;
-                return;
-            }
+        if (eff_priv == kPrivUser && (cpu.state().senvcfg & cmo_mask) == 0) {
+            cpu.active_context().pending_exception = ExceptionCode::VirtualInstruction;
+            cpu.active_context().pending_tval = cpu.active_context().ir;
+            return;
         }
-    } else if (op == isa::OperationId::CBO_INVAL) {
-        if (eff_priv == kPrivUser) {
-            if ((cpu.state().senvcfg & (3ULL << 4)) == 0 ||
-                (cpu.state().menvcfg & (3ULL << 4)) == 0) {
-                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
-                cpu.active_context().pending_tval = cpu.active_context().ir;
-                return;
-            }
-        } else if (eff_priv == kPrivSupervisor) {
-            if ((cpu.state().menvcfg & (3ULL << 4)) == 0) {
-                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
-                cpu.active_context().pending_tval = cpu.active_context().ir;
-                return;
-            }
-        }
+    } else if (eff_priv == kPrivUser && (cpu.state().senvcfg & cmo_mask) == 0) {
+        cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
+        cpu.active_context().pending_tval = cpu.active_context().ir;
+        return;
     }
 
     constexpr simrv::xlen::Address kLineSize = simrv::cache::DCache::kLineBytes;
@@ -1192,8 +1190,7 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const simrv::xlen::Word active_satp = cpu.active_satp();
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
-        (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
+        data_translation_enabled(cpu, eff_priv, active_xlen, /*hypervisor_access=*/false);
 
     simrv::xlen::PhysAddr paddr{vaddr.raw()};
     if (translation_enabled) {

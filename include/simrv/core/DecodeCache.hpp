@@ -29,6 +29,7 @@ enum class FastMemClass : uint8_t {
     IntStore,
     FpLoad,
     FpStore,
+    OtherMemory,
 };
 
 /**
@@ -512,7 +513,10 @@ struct CachedOp {
                 break;
             default:
                 mem_size = 0;
-                mem_class = FastMemClass::None;
+                mem_class = (simrv::pipeline::operation::is_memory(decoded.op_id) ||
+                             isa::is_cmo_op(decoded.op_id))
+                                ? FastMemClass::OtherMemory
+                                : FastMemClass::None;
                 fast_op = FastOp::Other;
                 break;
         }

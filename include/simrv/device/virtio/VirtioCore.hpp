@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <span>
 #include <string>
@@ -147,6 +147,8 @@ class BlockBackend {
 
 class ConsoleBackend {
    public:
+    static constexpr std::size_t kMaxTxBufferBytes = 65536;
+
     ConsoleBackend() = default;
 
     void push_rx(uint8_t byte) { rx_fifo_.push_back(byte); }
@@ -158,7 +160,13 @@ class ConsoleBackend {
         return val;
     }
 
-    void write_tx(uint8_t byte) { tx_buffer_.push_back(byte); }
+    void write_tx(uint8_t byte) {
+        if (tx_buffer_.size() >= kMaxTxBufferBytes) {
+            tx_buffer_.erase(tx_buffer_.begin(), tx_buffer_.begin() + static_cast<std::ptrdiff_t>(
+                                                                          kMaxTxBufferBytes / 2));
+        }
+        tx_buffer_.push_back(byte);
+    }
 
     [[nodiscard]] auto get_tx_data() const -> const std::vector<uint8_t>& { return tx_buffer_; }
 
@@ -191,6 +199,9 @@ inline constexpr uint64_t kVirtioNetFStatus = (1ULL << 16);
 
 class NetBackend {
    public:
+    static constexpr std::size_t kMaxRxQueuePackets = 1024;
+    static constexpr std::size_t kMaxPacketBytes = 65536;
+
     struct SlirpState;
 
     enum class Mode : uint8_t {
@@ -214,10 +225,13 @@ class NetBackend {
     [[nodiscard]] auto host_backend_available() const noexcept -> bool;
 
     void push_rx_packet(const std::vector<uint8_t>& packet) {
-        rx_queue_.push_back(packet);
-        ++pending_rx_packets_;
+        push_rx_packet(std::span<const uint8_t>(packet));
     }
     void push_rx_packet(std::span<const uint8_t> packet) {
+        if (packet.empty() || packet.size() > kMaxPacketBytes) return;
+        if (rx_queue_.size() >= kMaxRxQueuePackets) {
+            rx_queue_.pop_front();
+        }
         rx_queue_.emplace_back(packet.begin(), packet.end());
         ++pending_rx_packets_;
     }
@@ -225,8 +239,8 @@ class NetBackend {
     [[nodiscard]] auto has_rx_packet() const -> bool { return !rx_queue_.empty(); }
     void reset() {
         rx_queue_.clear();
-        tx_history_.clear();
-      pending_rx_packets_ = 0;
+        tx_packet_count_ = 0;
+        pending_rx_packets_ = 0;
     }
 
     auto pop_rx_packet() -> std::vector<uint8_t> {
@@ -242,7 +256,7 @@ class NetBackend {
         send_tx_packet(std::span<const uint8_t>(data, len));
     }
 
-    [[nodiscard]] auto tx_packet_count() const -> std::size_t { return tx_history_.size(); }
+    [[nodiscard]] auto tx_packet_count() const noexcept -> std::size_t { return tx_packet_count_; }
 
    private:
     void initialize_user_mode_network();
@@ -250,7 +264,7 @@ class NetBackend {
     Mode mode_{Mode::User};
     std::array<uint8_t, 6> mac_{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
     std::deque<std::vector<uint8_t>> rx_queue_;
-    std::vector<std::vector<uint8_t>> tx_history_;
+    std::size_t tx_packet_count_{0};
     std::size_t pending_rx_packets_{0};
     std::unique_ptr<SlirpState> slirp_;
 };

@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <span>
+
+#include "simrv/SafetyProfiles.hpp"
 
 namespace simrv::device::virtio {
 
@@ -132,23 +135,36 @@ void HostAudioSink::write_samples(const uint8_t* data, std::size_t bytes) {
     if (is_mute) {
         std::fill(adjusted.begin(), adjusted.end(), 0);
     } else if (std::abs(vol - 1.0f) > 0.01f) {
-        const auto* src16 = reinterpret_cast<const int16_t*>(data);
-        auto* dst16 = reinterpret_cast<int16_t*>(adjusted.data());
+        const std::span<const uint8_t> src_bytes(data, bytes);
+        const std::span<uint8_t> dst_bytes(adjusted);
         const std::size_t num_samples = bytes / sizeof(int16_t);
         for (std::size_t i = 0; i < num_samples; ++i) {
-            float sample = static_cast<float>(src16[i]) * vol;
+            const std::size_t byte_off = i * sizeof(int16_t);
+            const int16_t raw =
+                simrv::profiles::read_unaligned<int16_t>(src_bytes, byte_off).value_or(0);
+            float sample = static_cast<float>(raw) * vol;
             sample = std::clamp(sample, -32768.0f, 32767.0f);
-            dst16[i] = static_cast<int16_t>(sample);
+            (void)simrv::profiles::write_unaligned<int16_t>(dst_bytes, byte_off,
+                                                            static_cast<int16_t>(sample));
+        }
+        if ((bytes % sizeof(int16_t)) != 0) {
+            adjusted.back() = data[bytes - 1];
         }
     } else {
         std::memcpy(adjusted.data(), data, bytes);
     }
 
-    if (ring_buffer_.size() + adjusted.size() > kMaxBufferSize) {
-        const std::size_t drop = (ring_buffer_.size() + adjusted.size()) - kMaxBufferSize;
-        ring_buffer_.erase(ring_buffer_.begin(), ring_buffer_.begin() + drop);
+    if (adjusted.size() >= kMaxBufferSize) {
+        ring_buffer_.assign(adjusted.end() - static_cast<std::ptrdiff_t>(kMaxBufferSize),
+                            adjusted.end());
+    } else {
+        if (ring_buffer_.size() > kMaxBufferSize - adjusted.size()) {
+            const std::size_t drop = ring_buffer_.size() - (kMaxBufferSize - adjusted.size());
+            ring_buffer_.erase(ring_buffer_.begin(),
+                               ring_buffer_.begin() + static_cast<std::ptrdiff_t>(drop));
+        }
+        ring_buffer_.insert(ring_buffer_.end(), adjusted.begin(), adjusted.end());
     }
-    ring_buffer_.insert(ring_buffer_.end(), adjusted.begin(), adjusted.end());
     cv_.notify_one();
 }
 
@@ -168,8 +184,10 @@ void HostAudioSink::playback_worker() {
 
             const std::size_t fetch_bytes =
                 std::min(ring_buffer_.size(), static_cast<std::size_t>(4096));
-            chunk.assign(ring_buffer_.begin(), ring_buffer_.begin() + fetch_bytes);
-            ring_buffer_.erase(ring_buffer_.begin(), ring_buffer_.begin() + fetch_bytes);
+            chunk.assign(ring_buffer_.begin(),
+                         ring_buffer_.begin() + static_cast<std::ptrdiff_t>(fetch_bytes));
+            ring_buffer_.erase(ring_buffer_.begin(),
+                               ring_buffer_.begin() + static_cast<std::ptrdiff_t>(fetch_bytes));
         }
 
         if (!chunk.empty()) {
