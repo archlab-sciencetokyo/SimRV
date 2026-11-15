@@ -4,13 +4,18 @@
  */
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <limits>
+#include <span>
 
 #include "simrv/device/virtio/VirtioCore.hpp"
 
 namespace simrv::device::virtio {
+
+inline constexpr uint32_t kMaxVirtioRngRequestBytes = 64U * 1024U;
 
 template <typename DmaRead, typename DmaWrite, typename TriggerIrq>
 void process_rng_queue(QueueState& q, RngBackend& backend, DmaRead&& dma_read, DmaWrite&& dma_write,
@@ -36,15 +41,27 @@ void process_rng_queue(QueueState& q, RngBackend& backend, DmaRead&& dma_read, D
             break;
         }
 
+        uint32_t written = 0;
         if (desc.len > 0) {
-            std::vector<std::byte> rand_buf(desc.len);
-            backend.fill_random(rand_buf.data(), desc.len);
-            (void)dma_write(desc.addr, rand_buf.data(), desc.len);
+            const uint32_t total = std::min(desc.len, kMaxVirtioRngRequestBytes);
+            std::array<std::byte, 256> chunk{};
+            while (written < total) {
+                const uint32_t step =
+                    std::min<uint32_t>(total - written, static_cast<uint32_t>(chunk.size()));
+                if (desc.addr > std::numeric_limits<uint64_t>::max() - written) {
+                    break;
+                }
+                backend.fill_random(std::span<std::byte>(chunk.data(), step));
+                if (!dma_write(desc.addr + written, chunk.data(), step)) {
+                    break;
+                }
+                written += step;
+            }
         }
 
         uint16_t used_idx = 0;
         (void)dma_read(q.device_addr + 2, &used_idx, sizeof(used_idx));
-        const VirtqUsedElem elem{.id = head_desc_idx, .len = desc.len};
+        const VirtqUsedElem elem{.id = head_desc_idx, .len = written};
         (void)dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
         ++used_idx;
         (void)dma_write(q.device_addr + 2, &used_idx, sizeof(used_idx));

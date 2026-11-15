@@ -3,6 +3,7 @@
  * @brief Regression tests for RVA23 Profile: Zicond, CMO (Zicboz/Zicbom/Zicbop), Svinval, and
  * profile engine.
  */
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -22,6 +23,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CsrFile.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Aclint.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/FpConversions.hpp"
@@ -1405,6 +1407,39 @@ void test_sha_hideleg_warl_mask() {
         cpu.csr_file.write(simrv::core::Csr::Henvcfg, ~simrv::xlen::CsrValue{0}).has_value());
     const auto henvcfg = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
     TEST_ASSERT(henvcfg.has_value() && *henvcfg == 0xF1U);
+    constexpr auto kPbmte = uint64_t{1} << 62U;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Menvcfg, kPbmte).has_value());
+        TEST_ASSERT(
+            cpu.csr_file.write(simrv::core::Csr::Henvcfg, ~simrv::xlen::CsrValue{0}).has_value());
+        const auto henvcfg_pbmte_enabled = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
+        TEST_ASSERT(henvcfg_pbmte_enabled.has_value() && (*henvcfg_pbmte_enabled & kPbmte) != 0);
+        TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Menvcfg, 0).has_value());
+        const auto henvcfg_pbmte_disabled = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
+        TEST_ASSERT(henvcfg_pbmte_disabled.has_value() && (*henvcfg_pbmte_disabled & kPbmte) == 0);
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        TEST_ASSERT(cpu.csr_file.read(simrv::core::csr_num(simrv::core::Csr::Vstimecmp)).error() ==
+                    simrv::isa::ExceptionCode::IllegalInstruction);
+        const auto vstimecmp_write_stce_disabled =
+            cpu.csr_file.write(simrv::core::Csr::Vstimecmp, 100);
+        TEST_ASSERT(!vstimecmp_write_stce_disabled.has_value() &&
+                    vstimecmp_write_stce_disabled.error() ==
+                        simrv::isa::ExceptionCode::IllegalInstruction);
+        TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Menvcfg, uint64_t{1} << 63U).has_value());
+        const auto vstimecmp_disabled =
+            cpu.csr_file.read(simrv::core::csr_num(simrv::core::Csr::Vstimecmp));
+        TEST_ASSERT(!vstimecmp_disabled.has_value() &&
+                    vstimecmp_disabled.error() == simrv::isa::ExceptionCode::IllegalInstruction);
+        const auto vstimecmp_write_tm_disabled =
+            cpu.csr_file.write(simrv::core::Csr::Vstimecmp, 100);
+        TEST_ASSERT(!vstimecmp_write_tm_disabled.has_value() &&
+                    vstimecmp_write_tm_disabled.error() ==
+                        simrv::isa::ExceptionCode::IllegalInstruction);
+        TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mcounteren, 1U << 1U).has_value());
+        TEST_ASSERT(
+            cpu.csr_file.read(simrv::core::csr_num(simrv::core::Csr::Vstimecmp)).has_value());
+        TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Vstimecmp, 100).has_value());
+    }
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Vsstatus, kStatusXsHighBit).has_value());
     const auto vsstatus = cpu.csr_file.read(simrv::core::Csr::Vsstatus);
     TEST_ASSERT(vsstatus.has_value() && (*vsstatus & kStatusXsHighBit) == 0);
@@ -1522,7 +1557,8 @@ void test_sha_hypervisor_virtual_load_store() {
         const uint64_t g_leaf_flags =
             std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::R) |
             std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::X) |
-            std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
+            std::to_underlying(simrv::PteFlag::U) | std::to_underlying(simrv::PteFlag::A) |
+            std::to_underlying(simrv::PteFlag::D);
         put_pte(g_root, ((g_middle >> 12U) << 10U) | valid_table);
         put_pte(g_middle, ((base >> 12U) << 10U) | g_leaf_flags);
         constexpr uint64_t v_a =
@@ -1559,6 +1595,20 @@ void test_sha_hypervisor_virtual_load_store() {
             simrv::isa::Funct3::Lw);
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(static_cast<Register>(pointer_masked) == payload);
+
+        // If VS translation is Bare, an HLV operand is a GPA even when the
+        // G stage is active. PMM must clear the top tag bits without
+        // canonicalizing bit 56 as a virtual address.
+        cpu.state().vsatp = 0;
+        ctx.op_id = OperationId::HLV_W;
+        ctx.pending_exception.reset();
+        (void)simrv::memory::MemoryAccess::target_read(machine.memory(), cpu,
+                                                       simrv::xlen::VirtAddr{0xFF00000080011000ULL},
+                                                       simrv::isa::Funct3::Lw);
+        TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::GuestLoadPageFault);
+        TEST_ASSERT(ctx.pending_tval == 0x0100000080011000ULL);
+        cpu.state().vsatp = (uint64_t{8} << 60U) | (root >> 12U);
+        ctx.pending_exception.reset();
         cpu.state().henvcfg = 0;
 
         constexpr Register store_payload = 0x13579BDFU;
@@ -1803,7 +1853,10 @@ void test_sha_two_stage_cpu_translation_uses_vsatp() {
         constexpr uint64_t kLeafFlags =
             std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::R) |
             std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::X) |
-            std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
+            std::to_underlying(simrv::PteFlag::U) | std::to_underlying(simrv::PteFlag::A) |
+            std::to_underlying(simrv::PteFlag::D);
+        constexpr uint64_t kVsLeafFlags =
+            kLeafFlags & ~std::to_underlying(simrv::PteFlag::U);
         const auto put = [&](simrv::xlen::Address address, uint64_t pte) {
             std::memcpy(ram.data() + (address - kDramBase), &pte, sizeof(pte));
         };
@@ -1814,7 +1867,9 @@ void test_sha_two_stage_cpu_translation_uses_vsatp() {
         // VS-stage page tables live in GPA space and map the test VA to a different GPA.
         put(kHostBase + kVsRoot, (uint64_t{2} << 10U) | kValidTable);
         put(kHostBase + kVsMiddle, (uint64_t{3} << 10U) | kValidTable);
-        put(kHostBase + kVsLeaf + 8U, ((kGuestPa >> 12U) << 10U) | kLeafFlags);
+        // VS-stage S-mode leaves must have U=0; the G-stage guest mapping above
+        // deliberately has U=1 to grant the virtualized access.
+        put(kHostBase + kVsLeaf + 8U, ((kGuestPa >> 12U) << 10U) | kVsLeafFlags);
 
         cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
         cpu.state().virt = true;
@@ -1830,6 +1885,40 @@ void test_sha_two_stage_cpu_translation_uses_vsatp() {
         TEST_ASSERT(translated.has_value() && translated->has_value());
         TEST_ASSERT(translated->value().physical_address.raw() ==
                     kHostBase + kGuestPa + (kGuestVa & 0xFFFU));
+
+        constexpr auto kPbmtEnable = uint64_t{1} << 62U;
+        constexpr auto kPbmtNc = uint64_t{1} << 61U;
+        constexpr auto kPbmtIo = uint64_t{2} << 61U;
+        cpu.state().menvcfg |= kPbmtEnable;
+        put(kGMiddle, ((kHostBase >> 12U) << 10U) | kLeafFlags | kPbmtNc);
+        translated = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kGuestVa}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(translated.has_value() && translated->has_value());
+        TEST_ASSERT(translated->value().pbmt == simrv::PtePbmt::NonCacheable);
+
+        // A non-default VS-stage PBMT overrides the intermediate G-stage type.
+        cpu.state().henvcfg |= kPbmtEnable;
+        put(kHostBase + kVsLeaf + 8U, ((kGuestPa >> 12U) << 10U) | kVsLeafFlags | kPbmtIo);
+        translated = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kGuestVa}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(translated.has_value() && translated->has_value());
+        TEST_ASSERT(translated->value().pbmt == simrv::PtePbmt::Io);
+
+        // G-stage PBMT is a page fault when menvcfg.PBMTE is clear.
+        cpu.state().menvcfg &= ~kPbmtEnable;
+        cpu.state().henvcfg &= ~kPbmtEnable;
+        put(kHostBase + kVsLeaf + 8U, ((kGuestPa >> 12U) << 10U) | kVsLeafFlags);
+        translated = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kGuestVa}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(translated.has_value() && !translated->has_value());
+        TEST_ASSERT(translated->error() ==
+                    std::to_underlying(simrv::isa::ExceptionCode::GuestLoadPageFault));
     }
 }
 
@@ -1915,6 +2004,245 @@ void test_fast_time_csr_polling_advances_between_batches() {
         TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::S0) == 1);
         TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::T2) < 100);
     }
+}
+
+void test_fast_cycle_csr_polling_advances_between_batches() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        const auto run_polling_guest = [](bool appmode, bool collect_instruction_mix) {
+            simrv::core::MachineConfig config{};
+            config.execution.appmode = appmode;
+            simrv::core::Machine machine(config);
+            std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+            machine.set_ram_for_testing(ram.data(), ram.size());
+            machine.memory().initialize_mmu();
+            machine.set_instruction_mix_enabled(collect_instruction_mix);
+
+            constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
+            constexpr uint32_t read_cycle_x5 = (0xC00U << 20U) | (2U << 12U) | (5U << 7U) | 0x73U;
+            constexpr uint32_t read_cycle_x6 = (0xC00U << 20U) | (2U << 12U) | (6U << 7U) | 0x73U;
+            constexpr std::array<uint32_t, 6> program = {
+                read_cycle_x5,  // Initial cycle value.
+                read_cycle_x6,  // Poll until batch-accounted cycles advance.
+                0x00138393U,    // addi x7, x7, 1 (bound the guest-side polling count).
+                0xFE628CE3U,    // beq x5, x6, -8
+                0x00100413U,    // addi x8, x0, 1 (observed cycle change).
+                0x0000006FU,    // jal x0, 0
+            };
+            std::memcpy(ram.data(), program.data(), sizeof(program));
+
+            auto& cpu = machine.primary_hart();
+            cpu.state().pc = simrv::xlen::VirtAddr{pc};
+            for (unsigned batch = 0;
+                 batch < 32 && cpu.state().regs.read(simrv::xlen::RegId::S0) == 0; ++batch) {
+                TEST_ASSERT(machine.execute_fast_batch_for_testing(65536));
+            }
+
+            TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::S0) == 1);
+            TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::T2) < 5);
+        };
+
+        run_polling_guest(/*appmode=*/true, /*collect_instruction_mix=*/false);
+        // OsRunner's instrumented path executes cached instructions without the
+        // ordinary CSR fallback, so verify that it flushes pending cycle state.
+        run_polling_guest(/*appmode=*/false, /*collect_instruction_mix=*/true);
+    }
+}
+
+void test_fast_mcountinhibit_matches_instruction_execution() {
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
+    constexpr std::array<uint32_t, 4> program = {
+        0x00100293U,  // addi t0, zero, 1 (inhibit CY)
+        0x32029073U,  // csrrw zero, mcountinhibit, t0
+        0xB0002373U,  // csrrs t1, mcycle, zero
+        0x0000006FU,  // jal zero, 0
+    };
+    const auto run_reference = [&]() {
+        simrv::core::MachineConfig config{};
+        config.execution.appmode = true;
+        simrv::core::Machine machine(config);
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        auto& cpu = machine.primary_hart();
+        cpu.clint_mmio.mcycle = 0;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+        for (unsigned instruction = 0; instruction < 3; ++instruction) {
+            machine.execute_cycle_for_testing();
+        }
+        return std::array<uint64_t, 2>{cpu.clint_mmio.mcycle,
+                                       cpu.state().regs.read(simrv::xlen::RegId::T1)};
+    };
+    const auto reference = run_reference();
+    TEST_ASSERT(reference[0] == 1 && reference[1] == 1);
+
+    const auto run_guest = [&](bool appmode, bool collect_instruction_mix) {
+        simrv::core::MachineConfig config{};
+        config.execution.appmode = appmode;
+        simrv::core::Machine machine(config);
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        machine.set_instruction_mix_enabled(collect_instruction_mix);
+
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+
+        auto& cpu = machine.primary_hart();
+        cpu.clint_mmio.mcycle = 0;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+        for (unsigned batch = 0; batch < 3; ++batch) {
+            TEST_ASSERT(machine.execute_fast_batch_for_testing(4));
+        }
+
+        TEST_ASSERT(cpu.clint_mmio.mcycle == reference[0]);
+        TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::T1) == reference[1]);
+    };
+
+    run_guest(/*appmode=*/true, /*collect_instruction_mix=*/false);
+    run_guest(/*appmode=*/true, /*collect_instruction_mix=*/true);
+}
+
+void test_fast_mtime_mmio_matches_instruction_execution() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
+    constexpr size_t kProgramSize = 24;
+    const auto run = [&](bool fast_batch, bool collect_instruction_mix, bool guest_xlen64) {
+        std::array<uint32_t, kProgramSize> program{};
+        program[0] = 0x020082B7U;  // lui t0, 0x02008 (ACLINT mtime address after adjustment)
+        program[1] = 0xFF828293U;  // addi t0, t0, -8
+        const uint32_t load_mtime = guest_xlen64 ? 0x0002B303U : 0x0002A303U;
+        program[2] = load_mtime;                                         // ld/lw t1, 0(t0)
+        std::fill(program.begin() + 3, program.end() - 1, 0x00000013U);  // nop
+        program.back() = guest_xlen64 ? 0x0002B403U : 0x0002A403U;       // ld/lw s0, 0(t0)
+
+        simrv::core::MachineConfig config{};
+        config.execution.appmode = true;
+        simrv::core::Machine machine(config);
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        machine.set_instruction_mix_enabled(collect_instruction_mix);
+        simrv::device::AclintMtimer mtimer(&machine);
+        TEST_ASSERT(machine.memory().system_bus().add_node(&mtimer));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+
+        auto& cpu = machine.primary_hart();
+        cpu.state().regs.xlen = guest_xlen64 ? 64 : 32;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+        for (size_t instruction = 0; instruction < program.size(); ++instruction) {
+            machine.execute_cycle_for_testing();
+        }
+        simrv::xlen::Address decode_pc = pc;
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (!guest_xlen64) {
+                decode_pc = static_cast<simrv::xlen::Address>(
+                    static_cast<int64_t>(static_cast<int32_t>(pc)));
+            }
+        }
+        TEST_ASSERT(cpu.decode_cache.lookup(simrv::xlen::VirtAddr{decode_pc}) != nullptr);
+        cpu.state().regs.fill(0);
+        cpu.e_icount = 0;
+        cpu.e_ccount = 0;
+        cpu.clint_mmio.mtime.store(1, std::memory_order_relaxed);
+        cpu.clint_mmio.mcycle = 0;
+        cpu.clint_mmio.rtc_divider = simrv::core::timing::kCyclesPerTimebaseTick - 2;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+        if (fast_batch) {
+            while (cpu.e_icount < program.size()) {
+                const auto remaining = static_cast<uint32_t>(program.size() - cpu.e_icount);
+                TEST_ASSERT(machine.execute_fast_batch_for_testing(remaining));
+            }
+        } else {
+            for (size_t instruction = 0; instruction < program.size(); ++instruction) {
+                machine.execute_cycle_for_testing();
+            }
+        }
+        return std::array<uint64_t, 2>{cpu.state().regs.read(simrv::xlen::RegId::T1),
+                                       cpu.state().regs.read(simrv::xlen::RegId::S0)};
+    };
+
+    const auto check_guest_width = [&](bool guest_xlen64) {
+        const auto reference =
+            run(/*fast_batch=*/false, /*collect_instruction_mix=*/false, guest_xlen64);
+        const auto fast = run(/*fast_batch=*/true, /*collect_instruction_mix=*/false, guest_xlen64);
+        const auto instrumented =
+            run(/*fast_batch=*/true, /*collect_instruction_mix=*/true, guest_xlen64);
+        TEST_ASSERT(reference[1] > reference[0]);
+        TEST_ASSERT(fast == reference);
+        TEST_ASSERT(instrumented == reference);
+    };
+    if constexpr (simrv::xlen::kIsXLen64) check_guest_width(true);
+    check_guest_width(false);
+}
+
+void test_fast_vector_mtime_mmio_flushes_prior_cycles() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
+    constexpr size_t kInstructionCount = 24;
+    constexpr auto kVsetvliE64M1 = 0x0D807357U;  // vsetvli t1, zero, e64, m1, ta, ma
+    constexpr auto kVle64V1T0 = 0x0202F087U;     // vle64.v v1, (t0)
+
+    const auto run = [&](bool fast_batch, bool collect_instruction_mix) {
+        simrv::core::MachineConfig config{};
+        config.execution.appmode = true;
+        simrv::core::Machine machine(config);
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        machine.set_instruction_mix_enabled(collect_instruction_mix);
+        simrv::device::AclintMtimer mtimer(&machine);
+        TEST_ASSERT(machine.memory().system_bus().add_node(&mtimer));
+
+        std::array<uint32_t, kInstructionCount> program{};
+        program[0] = kVsetvliE64M1;
+        program[1] = 0x020082B7U;  // lui t0, 0x02008
+        program[2] = 0xFF828293U;  // addi t0, t0, -8 (ACLINT mtime)
+        std::fill(program.begin() + 3, program.end() - 1, 0x00000013U);
+        program.back() = kVle64V1T0;
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+
+        auto& cpu = machine.primary_hart();
+        cpu.state().misa = simrv::isa::misa_with_mxl(simrv::isa::kMisaDefault, 64);
+        cpu.state().refresh_misa_status();
+        cpu.state().mstatus |= simrv::core::MstatusBit::Vs;
+        cpu.sync_decode_context();
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+        for (size_t i = 0; i < program.size(); ++i) machine.execute_cycle_for_testing();
+
+        // Warm the decode cache, then rerun with mtime positioned one tick from rollover.
+        cpu.state().regs.fill(0);
+        cpu.state().regs.read_vector(simrv::xlen::VecRegId::V1).u64[0] = 0;
+        cpu.e_icount = 0;
+        cpu.e_ccount = 0;
+        cpu.clint_mmio.mtime.store(1, std::memory_order_relaxed);
+        cpu.clint_mmio.mcycle = 0;
+        cpu.clint_mmio.rtc_divider = simrv::core::timing::kCyclesPerTimebaseTick - 2;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+
+        if (fast_batch) {
+            while (cpu.e_icount < program.size()) {
+                TEST_ASSERT(machine.execute_fast_batch_for_testing(
+                    static_cast<uint32_t>(program.size() - cpu.e_icount)));
+            }
+        } else {
+            for (size_t i = 0; i < program.size(); ++i) machine.execute_cycle_for_testing();
+        }
+        return cpu.state().regs.read_vector(simrv::xlen::VecRegId::V1).u64[0];
+    };
+
+    const auto reference = run(/*fast_batch=*/false, /*collect_instruction_mix=*/false);
+    const auto fast = run(/*fast_batch=*/true, /*collect_instruction_mix=*/false);
+    const auto instrumented = run(/*fast_batch=*/true, /*collect_instruction_mix=*/true);
+    TEST_ASSERT(reference > 1);
+    TEST_ASSERT(fast == reference);
+    TEST_ASSERT(instrumented == reference);
 }
 
 void test_zcb_decompression() {
@@ -2352,6 +2680,191 @@ void test_profile_engine() {
 #endif
 }
 
+void test_sha_and_ssnpm_audit_regressions() {
+#if SIMRV_XLEN == 64
+    using simrv::core::Csr;
+    using simrv::core::Machine;
+    using simrv::core::MstatusBit;
+    using simrv::isa::ExceptionCode;
+    using simrv::isa::Funct3;
+    using simrv::isa::IsaExtension;
+    using simrv::isa::misa_extension_bit;
+    using simrv::isa::OperationId;
+    using simrv::xlen::Address;
+    using simrv::xlen::Byte;
+    using simrv::xlen::CsrValue;
+    using simrv::xlen::PrivilegeLevel;
+    using simrv::xlen::Register;
+
+    // 1. hgatp WARL must reject unimplemented Sv48x4 (9) / Sv57x4 (10) modes.
+    {
+        Machine machine;
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        cpu.state().misa |= misa_extension_bit(IsaExtension::H);
+        constexpr uint64_t kSv39x4 = (uint64_t{8} << 60U) | 4U;
+        TEST_ASSERT(cpu.csr_file.write(Csr::Hgatp, kSv39x4).has_value());
+        TEST_ASSERT(cpu.state().hgatp == kSv39x4);
+        TEST_ASSERT(cpu.csr_file.write(Csr::Hgatp, (uint64_t{9} << 60U) | 5U).has_value());
+        TEST_ASSERT(cpu.state().hgatp == kSv39x4);
+        TEST_ASSERT(cpu.csr_file.write(Csr::Hgatp, (uint64_t{10} << 60U) | 6U).has_value());
+        TEST_ASSERT(cpu.state().hgatp == kSv39x4);
+    }
+
+    // 2. VS-Bare + G-stage must keep translation active in CPU decode context and data helpers.
+    {
+        Machine machine;
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        cpu.state().misa |=
+            misa_extension_bit(IsaExtension::H) | misa_extension_bit(IsaExtension::S);
+        cpu.state().hgatp = (uint64_t{8} << 60U) | 0x10U;
+        cpu.state().vsatp = 0;
+        cpu.state().satp = 0;
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().virt = false;
+        TEST_ASSERT(!cpu.fetch_translation_active());
+        TEST_ASSERT(!cpu.data_translation_active());
+
+        cpu.state().virt = true;
+        TEST_ASSERT(cpu.fetch_translation_active());
+        TEST_ASSERT(cpu.data_translation_active());
+        TEST_ASSERT((cpu.compute_decode_context() & 0x04U) != 0);
+
+        cpu.state().virt = false;
+        cpu.state().priv = PrivilegeLevel::Machine;
+        cpu.state().mstatus = simrv::core::mstatus_with_mpp(MstatusBit::Mprv | MstatusBit::Mpv,
+                                                            PrivilegeLevel::Supervisor);
+        TEST_ASSERT(cpu.effective_data_virt());
+        TEST_ASSERT(!cpu.fetch_translation_active());
+        TEST_ASSERT(cpu.data_translation_active());
+        TEST_ASSERT((cpu.compute_decode_context() & 0x04U) != 0);
+    }
+
+    // 3. VS-stage Svade A/D fault takes precedence over G-stage fault on the translated GPA.
+    {
+        Machine machine;
+        std::vector<Byte> ram(0x40000, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        cpu.state().misa |= misa_extension_bit(IsaExtension::H);
+        const Address kBase = machine.memory_geometry().dram_base.raw();
+        constexpr Address kVsRoot = 0x1000;
+        constexpr Address kVsMid = 0x2000;
+        constexpr Address kVsLeaf = 0x3000;
+        const Address kGRoot = kBase + 0x4000;
+        const Address kGMid = kBase + 0x5000;
+        const auto put = [&](Address addr, uint64_t val) {
+            std::memcpy(ram.data() + (addr - kBase), &val, sizeof(val));
+        };
+        constexpr uint64_t kValid = std::to_underlying(simrv::PteFlag::V);
+        const uint64_t g_leaf =
+            kValid | std::to_underlying(simrv::PteFlag::R) | std::to_underlying(simrv::PteFlag::W) |
+            std::to_underlying(simrv::PteFlag::X) | std::to_underlying(simrv::PteFlag::U) |
+            std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
+        put(kGRoot, ((kGMid >> 12U) << 10U) | kValid);
+        put(kGMid, ((kBase >> 12U) << 10U) | g_leaf);
+        // VS-stage leaf maps VA 0x1000 to an unmapped GPA with A=0 (Svade fault).
+        put(kBase + kVsRoot, (uint64_t{2} << 10U) | kValid);
+        put(kBase + kVsMid, (uint64_t{3} << 10U) | kValid);
+        put(kBase + kVsLeaf + 8U,
+            (uint64_t{0x90000} << 10U) | kValid | std::to_underlying(simrv::PteFlag::R));
+
+        cpu.state().virt = true;
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().vsatp = (uint64_t{8} << 60U) | (kVsRoot >> 12U);
+        cpu.state().hgatp = (uint64_t{8} << 60U) | (kGRoot >> 12U);
+        simrv::memory::GuestPhysAddr fault_gpa{};
+        const auto res = machine.memory().mmu()->translate(
+            simrv::xlen::VirtAddr{0x1000}, simrv::PteAccess::Read, PrivilegeLevel::Supervisor, 0,
+            cpu.state().vsatp, 64, false, &cpu.state(), &fault_gpa);
+        TEST_ASSERT(!res.has_value());
+        TEST_ASSERT(res.error() == std::to_underlying(ExceptionCode::LoadPageFault));
+    }
+
+    // 4. H-mode CMO permission checks raise VirtualInstruction for henvcfg/VS senvcfg.
+    {
+        Machine machine;
+        std::vector<Byte> ram(0x20000, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        cpu.state().misa |=
+            misa_extension_bit(IsaExtension::H) | misa_extension_bit(IsaExtension::U);
+        const Address target = machine.memory_geometry().dram_base.raw() + 0x1000;
+        cpu.state().virt = true;
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().menvcfg = (CsrValue{1} << 7U) | (CsrValue{1} << 6U) | (CsrValue{3} << 4U);
+        cpu.state().henvcfg = 0;
+        cpu.state().senvcfg = (CsrValue{1} << 7U) | (CsrValue{1} << 6U) | (CsrValue{3} << 4U);
+
+        for (const auto op :
+             {OperationId::CBO_ZERO, OperationId::CBO_CLEAN, OperationId::CBO_INVAL}) {
+            cpu.active_context().pending_exception.reset();
+            simrv::memory::MemoryAccess::execute_cmo(machine.memory(), cpu,
+                                                     simrv::xlen::VirtAddr{target}, op);
+            TEST_ASSERT(cpu.active_context().pending_exception ==
+                        ExceptionCode::VirtualInstruction);
+        }
+
+        cpu.state().henvcfg = cpu.state().menvcfg;
+        cpu.state().senvcfg = 0;
+        cpu.state().priv = PrivilegeLevel::User;
+        cpu.active_context().pending_exception.reset();
+        simrv::memory::MemoryAccess::execute_cmo(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{target}, OperationId::CBO_ZERO);
+        TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::VirtualInstruction);
+
+        cpu.state().menvcfg = 0;
+        cpu.active_context().pending_exception.reset();
+        simrv::memory::MemoryAccess::execute_cmo(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{target}, OperationId::CBO_ZERO);
+        TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction);
+    }
+
+    // 5. VS-mode henvcfg.PMM=2 pointer masking works even with stale HLV op_id and respects MXR.
+    {
+        Machine machine;
+        std::vector<Byte> ram(0x20000, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        cpu.state().misa |= misa_extension_bit(IsaExtension::H);
+        const Address kBase = machine.memory_geometry().dram_base.raw();
+        const Address kDataAddr = kBase + 0x2000;
+        const Address kCodeAddr = kBase + 0x1000;
+        constexpr uint64_t kSentinel = UINT64_C(0x1122334455667788);
+        std::memcpy(ram.data() + 0x2000, &kSentinel, sizeof(kSentinel));
+        const uint32_t ld_t0_a0 = (0x000U << 20U) | (10U << 15U) | (3U << 12U) | (5U << 7U) | 0x03U;
+        std::memcpy(ram.data() + 0x1000, &ld_t0_a0, sizeof(ld_t0_a0));
+
+        cpu.state().virt = true;
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().henvcfg = CsrValue{2} << 32U;
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr};
+        cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr | (uint64_t{0x2A} << 57U));
+        cpu.active_context().op_id = OperationId::HLV_W;  // Stale HLV op from an earlier fallback.
+        TEST_ASSERT(cpu.data_pointer_masking_active());
+
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+        cpu.run_cycle(machine);
+        TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::T0) == kSentinel);
+
+        cpu.state().vsstatus |= MstatusBit::Mxr;
+        cpu.active_context().pending_exception.reset();
+        cpu.active_context().op_id = OperationId::LD;
+        (void)simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kDataAddr | (uint64_t{0x2A} << 57U)},
+            Funct3::Ld);
+        TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::FaultLoad);
+    }
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -2480,6 +2993,9 @@ int main() {
     std::cout << "[RUN] test_sha_two_stage_cpu_translation_uses_vsatp" << std::endl;
     test_sha_two_stage_cpu_translation_uses_vsatp();
     std::cout << "[PASS] test_sha_two_stage_cpu_translation_uses_vsatp" << std::endl;
+    std::cout << "[RUN] test_sha_and_ssnpm_audit_regressions" << std::endl;
+    test_sha_and_ssnpm_audit_regressions();
+    std::cout << "[PASS] test_sha_and_ssnpm_audit_regressions" << std::endl;
     std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
     test_zicntr_base_counter_values_and_access();
     std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;
@@ -2487,6 +3003,22 @@ int main() {
     std::cout << "[RUN] test_fast_time_csr_polling_advances_between_batches" << std::endl;
     test_fast_time_csr_polling_advances_between_batches();
     std::cout << "[PASS] test_fast_time_csr_polling_advances_between_batches" << std::endl;
+
+    std::cout << "[RUN] test_fast_cycle_csr_polling_advances_between_batches" << std::endl;
+    test_fast_cycle_csr_polling_advances_between_batches();
+    std::cout << "[PASS] test_fast_cycle_csr_polling_advances_between_batches" << std::endl;
+
+    std::cout << "[RUN] test_fast_mcountinhibit_matches_instruction_execution" << std::endl;
+    test_fast_mcountinhibit_matches_instruction_execution();
+    std::cout << "[PASS] test_fast_mcountinhibit_matches_instruction_execution" << std::endl;
+
+    std::cout << "[RUN] test_fast_mtime_mmio_matches_instruction_execution" << std::endl;
+    test_fast_mtime_mmio_matches_instruction_execution();
+    std::cout << "[PASS] test_fast_mtime_mmio_matches_instruction_execution" << std::endl;
+
+    std::cout << "[RUN] test_fast_vector_mtime_mmio_flushes_prior_cycles" << std::endl;
+    test_fast_vector_mtime_mmio_flushes_prior_cycles();
+    std::cout << "[PASS] test_fast_vector_mtime_mmio_flushes_prior_cycles" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();

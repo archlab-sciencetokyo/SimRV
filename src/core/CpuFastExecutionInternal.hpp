@@ -20,10 +20,16 @@ namespace simrv::core {
     return op >= isa::CSRRW && op <= isa::CSRRCI;
 }
 
-[[nodiscard]] constexpr auto is_time_counter_csr(const CachedOp& op) noexcept -> bool {
+[[nodiscard]] constexpr auto is_batch_accounted_counter_csr(const CachedOp& op) noexcept -> bool {
     if (!is_csr_instruction(op.op_id)) return false;
     const auto csr = op.funct12();
-    return csr == csr_addr(Csr::Time) || csr == csr_addr(Csr::Timeh);
+    return csr == csr_addr(Csr::Cycle) || csr == csr_addr(Csr::Cycleh) ||
+           csr == csr_addr(Csr::Mcycle) || csr == csr_addr(Csr::Mcycleh) ||
+           csr == csr_addr(Csr::Time) || csr == csr_addr(Csr::Timeh);
+}
+
+[[nodiscard]] constexpr auto is_cached_memory_access(const CachedOp& op) noexcept -> bool {
+    return op.mem_size != 0 || op.mem_class == FastMemClass::OtherMemory;
 }
 
 template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>

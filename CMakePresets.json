@@ -121,6 +121,19 @@
             }
         },
         {
+            "name": "rv64-profiles",
+            "displayName": "RV64 C++ Profiles & Hardened STL (Ninja)",
+            "inherits": [
+                "simrv-release",
+                "simrv-rv64"
+            ],
+            "binaryDir": "${sourceDir}/build/rv64-profiles",
+            "cacheVariables": {
+                "SIMRV_ENABLE_CXX_PROFILES": "ON",
+                "SIMRV_WARNINGS_AS_ERRORS": "ON"
+            }
+        },
+        {
             "name": "rv64-asan",
             "displayName": "RV64 ASAN (Ninja)",
             "inherits": "simrv-rv64-sanitizer",
@@ -190,6 +203,11 @@
         {
             "name": "rv64-gcc-release",
             "configurePreset": "rv64-gcc-release",
+            "inherits": "simrv-build-base"
+        },
+        {
+            "name": "rv64-profiles",
+            "configurePreset": "rv64-profiles",
             "inherits": "simrv-build-base"
         },
         {

@@ -6,11 +6,14 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace simrv::device::virtio {
 
 namespace {
+
+constexpr std::size_t kMaxPcmTransferBytes = 192000;
 
 auto dma_read_wire_address(const VirtioSoundBackend::DmaReadFn& dma_read, uint64_t address,
                            void* dst, std::size_t len) -> bool {
@@ -48,12 +51,11 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
             break;
 
         VirtioSndHdr hdr{};
-        if (desc0.len >= sizeof(hdr)) {
-            dma_read_wire_address(dma_read, desc0.addr, &hdr, sizeof(hdr));
-        }
+        const bool have_hdr = desc0.len >= sizeof(hdr) &&
+                              dma_read_wire_address(dma_read, desc0.addr, &hdr, sizeof(hdr));
 
         uint32_t written_len = 0;
-        if ((desc0.flags & kVirtqDescFNext) != 0) {
+        if (have_hdr && (desc0.flags & kVirtqDescFNext) != 0) {
             VirtqDesc desc1{};
             if (desc0.next < q.num &&
                 dma_read_wire_address(dma_read, q.desc_addr + desc0.next * sizeof(VirtqDesc),
@@ -93,16 +95,18 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
                     }
                     case kVirtioSndRPcmSetParams: {
                         VirtioSndPcmSetParams params{};
-                        if (desc0.len >= sizeof(params)) {
+                        const bool have_params =
+                            desc0.len >= sizeof(params) &&
                             dma_read_wire_address(dma_read, desc0.addr, &params, sizeof(params));
+                        if (have_params) {
+                            const uint32_t rate =
+                                (params.rate == kVirtioSndPcmRate44100) ? 44100 : 48000;
+                            const uint8_t ch =
+                                std::max<uint8_t>(1, std::min<uint8_t>(2, params.channels));
+                            HostAudioSink::instance().start(rate, ch);
                         }
-                        const uint32_t rate =
-                            (params.rate == kVirtioSndPcmRate44100) ? 44100 : 48000;
-                        const uint8_t ch =
-                            std::max<uint8_t>(1, std::min<uint8_t>(2, params.channels));
-                        HostAudioSink::instance().start(rate, ch);
 
-                        VirtioSndHdr resp{.code = kVirtioSndSOk};
+                        VirtioSndHdr resp{.code = have_params ? kVirtioSndSOk : kVirtioSndSNotSupp};
                         const uint32_t to_write = std::min<uint32_t>(desc1.len, sizeof(resp));
                         dma_write_wire_address(dma_write, desc1.addr, &resp, to_write);
                         written_len = to_write;
@@ -187,21 +191,39 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
                 status_addr = desc.addr;
                 status_len = desc.len;
             } else {
+                const std::size_t budget = pcm_data.size() < kMaxPcmTransferBytes
+                                               ? kMaxPcmTransferBytes - pcm_data.size()
+                                               : 0;
                 if (is_first) {
                     is_first = false;
                     if (desc.len > sizeof(VirtioSndPcmXfer) &&
                         desc.addr <=
                             std::numeric_limits<uint64_t>::max() - sizeof(VirtioSndPcmXfer)) {
-                        const std::size_t sample_bytes = desc.len - sizeof(VirtioSndPcmXfer);
-                        const std::size_t offset = pcm_data.size();
-                        pcm_data.resize(offset + sample_bytes);
-                        dma_read_wire_address(dma_read, desc.addr + sizeof(VirtioSndPcmXfer),
-                                              pcm_data.data() + offset, sample_bytes);
+                        const std::size_t sample_bytes =
+                            std::min<std::size_t>(desc.len - sizeof(VirtioSndPcmXfer), budget);
+                        const uint64_t payload_addr = desc.addr + sizeof(VirtioSndPcmXfer);
+                        if (sample_bytes > 0 &&
+                            payload_addr <= std::numeric_limits<uint64_t>::max() - sample_bytes) {
+                            const std::size_t offset = pcm_data.size();
+                            pcm_data.resize(offset + sample_bytes);
+                            if (!dma_read_wire_address(dma_read, payload_addr,
+                                                       pcm_data.data() + offset, sample_bytes)) {
+                                pcm_data.resize(offset);
+                                break;
+                            }
+                        }
                     }
-                } else {
-                    const std::size_t offset = pcm_data.size();
-                    pcm_data.resize(offset + desc.len);
-                    dma_read_wire_address(dma_read, desc.addr, pcm_data.data() + offset, desc.len);
+                } else if (desc.len > 0 && budget > 0) {
+                    const std::size_t copy_bytes = std::min<std::size_t>(desc.len, budget);
+                    if (desc.addr <= std::numeric_limits<uint64_t>::max() - copy_bytes) {
+                        const std::size_t offset = pcm_data.size();
+                        pcm_data.resize(offset + copy_bytes);
+                        if (!dma_read_wire_address(dma_read, desc.addr, pcm_data.data() + offset,
+                                                   copy_bytes)) {
+                            pcm_data.resize(offset);
+                            break;
+                        }
+                    }
                 }
             }
 

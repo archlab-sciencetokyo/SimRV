@@ -24,37 +24,58 @@ From the project root:
 
 ```sh
 ACT_DIR="${RISCV_ARCH_TEST_DIR:?Set RISCV_ARCH_TEST_DIR to the riscv-arch-test checkout}"
+ACT_REVISION="$(git -C "$ACT_DIR" rev-parse HEAD)"
+scripts/check-act4-upstream.sh "$ACT_REVISION"
+ACT_WORKDIR="${SIMRV_ACT4_WORKDIR:-$PWD/../../tests/act4/$ACT_REVISION}"
 
 make -C "$ACT_DIR" \
   CONFIG_FILES="$PWD/tests/act4/simrv-rva23s64/test_config.yaml" \
   CERTIFICATE=RVA23 JOBS=12 \
-  WORKDIR="$PWD/build/act4-rva23s64"
+  WORKDIR="$ACT_WORKDIR"
+
+ACT_OUTPUT="$ACT_WORKDIR/rva23s64"
+ELF_COUNT="$(find "$ACT_OUTPUT/elfs" -type f -name '*.elf' | wc -l)"
+{
+  printf 'act_revision=%s\n' "$ACT_REVISION"
+  printf 'profile=RVA23S64\n'
+  printf 'vlen=128\n'
+  printf 'elf_count=%s\n' "$ELF_COUNT"
+  printf 'config_sha256=%s\n' \
+    "$(sha256sum "$PWD/tests/act4/simrv-rva23s64/test_config.yaml" | cut -d ' ' -f 1)"
+} > "$ACT_OUTPUT/simrv-act4-provenance.txt"
 
 simrv-act \
   --simrv build/rv64-debug/simrv \
-  --elf-dir build/act4-rva23s64/simrv-rva23s64/elfs \
-  --report build/act4-rva23s64/simrv-rva23s64/simrv-report.json \
+  --elf-dir "$ACT_OUTPUT/elfs" \
+  --report "$ACT_OUTPUT/simrv-report.json" \
   --jobs 12 --compare-detailed-on-failure
 ```
+
+By default, generated output is stored in the shared workspace test folder
+`../../tests/act4/<ACT commit>`, outside the repository build tree. The ACT
+revision is the only version-specific directory; profile output uses the
+generic `rva23s64` name, without a simulator-specific namespace. Set
+`SIMRV_ACT4_WORKDIR` to override the output directory. Each suite also records
+its upstream commit, RVA23 profile, VLEN, ELF count, and profile configuration
+hash in `simrv-act4-provenance.txt` beside the ELFs and report.
 
 The optional `--compare-detailed-on-failure` flag reruns failed ELFs without instruction batching.
 It helps separate issues in the fast path from behavior shared with instruction-detailed execution;
 the fast-mode result still determines the report totals and exit status.
 
 The generated Sail configuration fixes VLEN at 128 bits; the runner passes the
-same `--vlen 128` setting to SimRV. The generated suite and report belong under
-`build/` and are not committed.
+same `--vlen 128` setting to SimRV. Generated ACT4 ELFs, logs, and reports stay
+in `ACT_WORKDIR`, separate from disposable CMake build output; do not commit the
+generated binaries.
 
-In the current full-suite run, SimRV passes 3138 of 3188 ELFs. The remaining
-50 checks are audited conflicts with the ratified specs: 42 vector tests expect
-successful instructions to retain nonzero `vstart` ([Vector 1.0 requires all
-vector instructions to clear it on completion](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html)),
-and 8 interrupt tests expect VSEI above SEI for HS-mode ([H 1.0 orders SEI above
-VSEI for HS-mode destinations](https://docs.riscv.org/reference/isa/v20260120/priv/hypervisor.html)).
-The runner intentionally reports these as failures; do not change architectural
-behavior to satisfy those expectations. See
+The rc.19 workflow resolves the current upstream `act4` branch head when the run
+starts and checks that it has not moved before and after qualification. The latest locally
+verified head is `1c3e9f2a89e103eeed0a3e6ba1bc699f100fd481` (2026-11-14). Its full
+RVA23S64 suite generated 3202 ELFs at VLEN=128 and passed **3202/3202**, with zero
+failures or timeouts. Release qualification requires every generated ACT4 ELF to
+pass. See
 [`docs/architecture/compliance.md`](../../docs/architecture/compliance.md) for
-qualification scope and status.
+the qualification status and findings.
 
 This test run is useful implementation evidence; it is not RISC-V
 certification.

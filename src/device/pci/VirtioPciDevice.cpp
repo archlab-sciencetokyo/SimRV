@@ -56,18 +56,33 @@ void VirtioPciDevice::reset() {
 
 void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffset offset,
                                   PciBarSize length, uint32_t notify_mult) {
-    const uint8_t cap_offset = static_cast<uint8_t>(next_cap_offset_.raw());
-    uint8_t cap_len = (cap_type == 2) ? 20 : 16;
-    if (cap_offset + cap_len > 0x100) return;
+    const uint8_t cap_len = (cap_type == 2) ? 20 : 16;
+    if (next_cap_offset_.raw() < 0x40 || next_cap_offset_.raw() > config_space_.size() - cap_len) {
+        return;
+    }
+    const auto cap_offset = static_cast<uint8_t>(next_cap_offset_.raw());
 
     if (config_space_[0x34] == 0) {
         config_space_[0x34] = cap_offset;
     } else {
         uint8_t prev = config_space_[0x34];
-        while (config_space_[prev + 1] != 0) {
-            prev = config_space_[prev + 1];
+        constexpr size_t kMaxCapabilityHops = 48;
+        bool linked = false;
+        for (size_t hops = 0; hops < kMaxCapabilityHops; ++hops) {
+            if (prev < 0x40 || static_cast<size_t>(prev) + 2 > config_space_.size()) {
+                return;
+            }
+            const uint8_t next = config_space_[prev + 1];
+            if (next == 0) {
+                config_space_[prev + 1] = cap_offset;
+                linked = true;
+                break;
+            }
+            prev = next;
         }
-        config_space_[prev + 1] = cap_offset;
+        if (!linked) {
+            return;
+        }
     }
 
     config_space_[cap_offset + 0] = 0x09;  // PCI_CAP_ID_VNDR

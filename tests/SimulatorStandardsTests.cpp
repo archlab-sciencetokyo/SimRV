@@ -147,7 +147,8 @@ void test_hypervisor_sv39x4_guest_translation() {
     const auto leaf_index = (kGuestAddress >> 12U) & 0x1FFU;
     store_pte(kRoot + root_index * 8U, (uint64_t{9} << 10U) | 1U);
     store_pte(kMiddle + middle_index * 8U, (uint64_t{10} << 10U) | 1U);
-    constexpr uint64_t kValidReadWriteAccessedDirty = 1U | 2U | 4U | 0x40U | 0x80U;
+    constexpr uint64_t kValidReadWriteAccessedDirty =
+        1U | 2U | 4U | 0x8U | 0x10U | 0x40U | 0x80U | 0x100U;
     const auto leaf_address = kLeaf + leaf_index * 8U;
     store_pte(leaf_address, ((kPhysicalPage >> 12U) << 10U) | kValidReadWriteAccessedDirty);
 
@@ -161,6 +162,18 @@ void test_hypervisor_sv39x4_guest_translation() {
     const auto write_translated = walker.walk_guest_physical(
         simrv::memory::GuestPhysAddr{kGuestAddress}, PteAccess::Write, hgatp, 64);
     TEST_ASSERT(write_translated.has_value());
+
+    constexpr simrv::xlen::Word kSatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
+    const auto hlvx_with_sum = walker.walk(
+        simrv::xlen::VirtAddr{kGuestAddress}, PteAccess::ReadExecute,
+        simrv::xlen::PrivilegeLevel::Supervisor,
+        std::to_underlying(simrv::core::MstatusBit::Sum), kSatp, 64);
+    TEST_ASSERT(hlvx_with_sum.has_value());
+    const auto hlvx_without_sum = walker.walk(
+        simrv::xlen::VirtAddr{kGuestAddress}, PteAccess::ReadExecute,
+        simrv::xlen::PrivilegeLevel::Supervisor, 0, kSatp, 64);
+    TEST_ASSERT(!hlvx_without_sum.has_value());
+    TEST_ASSERT(hlvx_without_sum.error() == simrv::isa::ExceptionCode::LoadPageFault);
 
     store_pte(leaf_address, load_pte(leaf_address) & ~uint64_t{0x80});
     const auto dirty_fault = walker.walk_guest_physical(simrv::memory::GuestPhysAddr{kGuestAddress},
@@ -197,7 +210,7 @@ void test_sha_two_stage_translation_integration() {
         std::memcpy(backing.data() + address, &value, sizeof(value));
     };
     put(kHRoot, (uint64_t{5} << 10U) | 1U);
-    put(kHMiddle, ((kHostBase >> 12U) << 10U) | 0xCFU);
+    put(kHMiddle, ((kHostBase >> 12U) << 10U) | 0xDFU);
     put(kHostBase + kGuestRoot, (uint64_t{2} << 10U) | 1U);
     put(kHostBase + kGuestMiddle, (uint64_t{3} << 10U) | 1U);
     put(kHostBase + kGuestLeaf + 8U, ((kGuestPa >> 12U) << 10U) | 0xCFU);

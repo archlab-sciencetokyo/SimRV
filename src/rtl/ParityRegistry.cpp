@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -289,14 +290,29 @@ auto parse_retirement_trace(std::string_view text) -> std::vector<RetirementEven
 
     for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
         const std::smatch& match = *i;
-        const uint64_t pc = std::stoull(match[3].str(), nullptr, 16);
-        if (!std::in_range<simrv::xlen::Word>(pc)) return {};
+        auto parse_sub = [&](size_t group, auto& out, int base) -> bool {
+            const auto pos = static_cast<size_t>(match.position(group));
+            const auto len = static_cast<size_t>(match.length(group));
+            const char* begin = text_str.data() + pos;
+            const char* end = begin + len;
+            const auto [ptr, ec] = std::from_chars(begin, end, out, base);
+            return ec == std::errc{} && ptr == end;
+        };
+
+        uint64_t cycle = 0;
+        uint64_t inst = 0;
+        uint64_t pc = 0;
+        uint32_t ir = 0;
+        if (!parse_sub(1, cycle, 10) || !parse_sub(2, inst, 10) || !parse_sub(3, pc, 16) ||
+            !parse_sub(4, ir, 16) || !std::in_range<simrv::xlen::Word>(pc)) {
+            return {};
+        }
 
         RetirementEvent ev;
-        ev.cycle = std::stoull(match[1].str());
-        ev.inst = std::stoull(match[2].str());
+        ev.cycle = cycle;
+        ev.inst = inst;
         ev.pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(pc)};
-        ev.ir = static_cast<uint32_t>(std::stoul(match[4].str(), nullptr, 16));
+        ev.ir = ir;
         events.push_back(ev);
     }
     return events;
@@ -337,6 +353,15 @@ auto compare_retirement_traces(std::span<const RetirementEvent> rtl,
 ParityRegistry::ParityRegistry() {
     targets_.push_back(create_rvcomp_target());
     targets_.push_back(create_cfu_pg_target());
+}
+
+ParityRegistry::~ParityRegistry() {
+    targets_.clear();
+    for (void* handle : dl_handles_) {
+        if (handle != nullptr) {
+            ::dlclose(handle);
+        }
+    }
 }
 
 auto ParityRegistry::instance() -> ParityRegistry& {

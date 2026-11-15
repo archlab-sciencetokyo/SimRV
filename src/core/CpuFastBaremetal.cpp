@@ -66,9 +66,17 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         if (simrv::compiler::unlikely(state_.has_active_triggers)) break;
         auto* cached = decode_cache.lookup_aligned(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            // `time` advances at batch boundaries. End the current batch before
-            // a later time read so a guest polling loop can observe elapsed cycles.
-            if (cached_ops != 0 && is_time_counter_csr(*cached)) break;
+            if constexpr (kCopyContext || kInstMix) {
+                // These paths commit cycles in batches and do not execute a
+                // chained fallback. Flush before a counter read in the batch.
+                if (cached_ops != 0 &&
+                    simrv::compiler::unlikely(is_batch_accounted_counter_csr(*cached))) {
+                    break;
+                }
+                // These paths do not chain through RAM accesses. Keep MMIO/device
+                // observations aligned with the cycle accounting at batch edges.
+                if (cached_ops != 0 && is_cached_memory_access(*cached)) break;
+            }
             if constexpr (!kCopyContext && !kInstMix) {
                 const auto execute_fast_chain =
                     [&]<bool kGuestXlen64>(CachedOp* initial_op, uint32_t& b_ref)
@@ -1815,6 +1823,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u ||
                                               state_.lr_reservation_active || !fast_m_ram ||
                                               multi_hart)) {
+                    if (cached_ops != 0 &&
+                        simrv::compiler::unlikely(is_batch_accounted_counter_csr(*cached))) {
+                        break;
+                    }
+                    if (cached_ops != 0 && is_cached_memory_access(*cached)) break;
                     const bool is_csr = is_csr_instruction(cached->op_id);
                     execute_cached_op_fast<false, false>(machine, *cached, ram);
                     ++cached_ops;
@@ -1843,10 +1856,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     record_hpm_event(HpmEvent::Instructions, ops_executed);
                     record_hpm_event(HpmEvent::Cycles, ops_executed);
                     if (fallback_op != nullptr) {
-                        if (cached_ops != 0 && is_time_counter_csr(*fallback_op)) {
-                            // The chain stopped at this CSR with PC still pointing to
-                            // it. Commit preceding cycles first; execute the read in
-                            // the next batch so its value reflects those cycles.
+                        if (simrv::compiler::unlikely(cached_ops != 0 &&
+                                                      is_cached_memory_access(*fallback_op))) {
+                            // A RAM miss may route to MMIO. Commit earlier cycles
+                            // before letting the general memory path observe a device.
+                            b = batch_size;
+                        } else if (cached_ops != 0 &&
+                                   simrv::compiler::unlikely(
+                                       is_batch_accounted_counter_csr(*fallback_op))) {
+                            // Commit preceding cycles before executing a counter CSR.
                             b = batch_size;
                         } else {
                             if (uart != nullptr && uart->has_active_transfer()) {

@@ -64,9 +64,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     const uint8_t active_ctx = decode_cache.active_context();
                     const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
                     const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
-                    const bool satp_en =
-                        (eff_priv != kPrivMachine) &&
-                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen);
+                    const bool satp_en = data_translation_active();
                     const simrv::xlen::Word current_asid =
                         satp_en ? simrv::xlen::satp_asid(active_satp(), active_xlen) : 0;
                     const uint32_t asid_priv_tag =
@@ -170,6 +168,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         chained = hit;
                         return true;
                     };
+
+                    if (simrv::compiler::unlikely(data_pointer_masking_active())) {
+                        fallback_op = cached;
+                        goto os_chain_done;
+                    }
 
                     while (true) {
                         const auto op_tag = chained->fast_op;
@@ -708,6 +711,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         break;
                     }
 
+                os_chain_done:
                     state_.pc = next_pc;
                     cached_ops += chain_size;
                     chunk_cycles += chain_size;
@@ -742,6 +746,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     execute_os_chain.template operator()<false>();
                 }
             } else {
+                if constexpr (kCopyContext || kInstMix) {
+                    if (is_batch_accounted_counter_csr(*cached)) {
+                        // These instrumented paths account timer/cycle state in
+                        // chunks. Flush before a counter read so it observes all
+                        // previously retired instructions just like the chained path.
+                        flush_clint_and_retired();
+                    }
+                }
                 if (cached->has_fast_alu()) {
                     execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
                 } else {

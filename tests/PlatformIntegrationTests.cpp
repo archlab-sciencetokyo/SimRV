@@ -1121,6 +1121,120 @@ void test_timed_page_walk_transitions() {
     std::cout << "[PASS] test_timed_page_walk_transitions\n";
 }
 
+void test_guest_fetch_uses_g_stage_when_vsatp_is_bare() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+    const auto check_fetch = [](bool baremetal_fetch) {
+        ConcreteMachine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.memory().initialize_mmu();
+
+        auto& state = machine.cpu.state();
+        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+        state.priv = simrv::xlen::PrivilegeLevel::User;
+        state.virt = true;
+        state.vsatp = 0;
+        constexpr simrv::xlen::Address root = simrv::memory::kDramBaseAddress.raw() + 0x4000;
+        state.hgatp = static_cast<simrv::xlen::Word>((uint64_t{8} << 60U) | (root >> 12U));
+        state.pc = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress.raw() + 0x100};
+        auto& context = machine.cpu.active_context();
+        context.pending_exception.reset();
+
+        if (baremetal_fetch) {
+            machine.cpu.run_fetch_stage_baremetal(machine);
+        } else {
+            machine.cpu.run_fetch_stage(machine);
+        }
+        check(context.pending_exception == simrv::isa::ExceptionCode::GuestInstructionPageFault,
+              "VS-stage Bare fetch must still walk the active G-stage mapping");
+
+        context.opcode = simrv::isa::Opcode::Load;
+        context.op_id = simrv::isa::LD;
+        context.pending_exception.reset();
+        (void)simrv::memory::MemoryAccess::target_read(machine.memory(), machine.cpu, state.pc,
+                                                       simrv::isa::Funct3::Ld);
+        check(context.pending_exception == simrv::isa::ExceptionCode::GuestLoadPageFault,
+              "VS-stage Bare loads must still walk the active G-stage mapping");
+
+        context.opcode = simrv::isa::Opcode::Store;
+        context.op_id = simrv::isa::SD;
+        context.pending_exception.reset();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), machine.cpu, state.pc, 0,
+                                                  simrv::isa::Funct3::Sd);
+        check(context.pending_exception == simrv::isa::ExceptionCode::GuestStorePageFault,
+              "VS-stage Bare stores must still walk the active G-stage mapping");
+    };
+
+    check_fetch(true);
+    check_fetch(false);
+    std::cout << "[PASS] test_guest_fetch_uses_g_stage_when_vsatp_is_bare\n";
+}
+
+void test_guest_stage_rejects_u_zero_leaf() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+    const auto check_privilege = [](simrv::xlen::PrivilegeLevel privilege) {
+        ConcreteMachine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.memory().initialize_mmu();
+
+        constexpr simrv::xlen::Address base = simrv::memory::kDramBaseAddress.raw();
+        constexpr simrv::xlen::Address root = base + 0x4000;
+        constexpr simrv::xlen::Address level1 = base + 0x8000;
+        constexpr simrv::xlen::Address level0 = base + 0xC000;
+        constexpr simrv::xlen::Address guest_address = base + 0x12008;
+        constexpr simrv::xlen::Address physical_page = base + 0x10000;
+        const auto write_pte = [&](simrv::xlen::Address address, simrv::xlen::Word value) {
+            std::memcpy(ram.data() + (address - base), &value, sizeof(value));
+        };
+        const simrv::xlen::Word root_index = (guest_address >> 30U) & 0x7FFU;
+        const simrv::xlen::Word level1_index = (guest_address >> 21U) & 0x1FFU;
+        const simrv::xlen::Word level0_index = (guest_address >> 12U) & 0x1FFU;
+        write_pte(root + root_index * sizeof(simrv::xlen::Word),
+                  ((level1 >> 12U) << 10U) | simrv::PteFlag::V);
+        write_pte(level1 + level1_index * sizeof(simrv::xlen::Word),
+                  ((level0 >> 12U) << 10U) | simrv::PteFlag::V);
+        constexpr simrv::xlen::Word kLeafFlags =
+            std::to_underlying(simrv::PteFlag::V | simrv::PteFlag::R | simrv::PteFlag::W |
+                               simrv::PteFlag::X | simrv::PteFlag::A | simrv::PteFlag::D);
+        write_pte(level0 + level0_index * sizeof(simrv::xlen::Word),
+                  ((physical_page >> 12U) << 10U) | kLeafFlags);  // U=0 denies G-stage access.
+
+        auto& state = machine.cpu.state();
+        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+        state.priv = privilege;
+        state.virt = true;
+        state.vsatp = 0;
+        state.hgatp = static_cast<simrv::xlen::Word>((uint64_t{8} << 60U) | (root >> 12U));
+        auto& context = machine.cpu.active_context();
+        context.opcode = simrv::isa::Opcode::Store;
+        context.op_id = simrv::isa::SW;
+        context.pending_exception.reset();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), machine.cpu,
+                                                  simrv::xlen::VirtAddr{guest_address}, 0xA5,
+                                                  simrv::isa::Funct3::Sw);
+        check(context.pending_exception == simrv::isa::ExceptionCode::GuestStorePageFault);
+        check(context.pending_tval == guest_address);
+
+        context.opcode = simrv::isa::Opcode::Load;
+        context.op_id = simrv::isa::LW;
+        context.pending_exception.reset();
+        (void)simrv::memory::MemoryAccess::target_read(machine.memory(), machine.cpu,
+                                                       simrv::xlen::VirtAddr{guest_address},
+                                                       simrv::isa::Funct3::Lw);
+        check(context.pending_exception == simrv::isa::ExceptionCode::GuestLoadPageFault);
+        check(context.pending_tval == guest_address);
+    };
+
+    check_privilege(simrv::xlen::PrivilegeLevel::Supervisor);
+    check_privilege(simrv::xlen::PrivilegeLevel::User);
+    std::cout << "[PASS] test_guest_stage_rejects_u_zero_leaf\n";
+}
+
 void test_cycle_kernel_golden_translated_fetch() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -2126,8 +2240,7 @@ void test_wfi_fast_forward_is_single_hart_only() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine single_hart(
-        simrv::core::MachineConfig{.execution = {.appmode = true}});
+    simrv::core::Machine single_hart(simrv::core::MachineConfig{.execution = {.appmode = true}});
     single_hart.cpu.machine_ = &single_hart;
     single_hart.cpu.reset();
     auto& single_clint = single_hart.primary_hart().clint_mmio;
@@ -2153,8 +2266,7 @@ void test_wfi_fast_forward_is_single_hart_only() {
     single_hart.cpu.fast_forward_wfi(single_hart);
     check(single_clint.mtime.load(std::memory_order_relaxed) == 5);
 
-    simrv::core::Machine machine(
-        simrv::core::MachineConfig{.execution = {.appmode = true}});
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = true}});
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
 
@@ -5083,6 +5195,8 @@ int main(int argc, char** argv) {
     test_timed_interconnect_ordering();
     test_timed_interconnect_cancellation();
     test_timed_page_walk_transitions();
+    test_guest_fetch_uses_g_stage_when_vsatp_is_bare();
+    test_guest_stage_rejects_u_zero_leaf();
     test_timed_smp_coherence_ordering();
     test_memory_access_fails_closed_when_request_is_rejected();
     test_modified_line_does_not_refill_stale_shared_data();

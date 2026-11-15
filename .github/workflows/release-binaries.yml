@@ -6,12 +6,12 @@ on:
     paths-ignore:
       - 'docs/**'
       - 'zensical.yml'
-      - 'mkdocs.yml'
       - '.github/requirements-docs.txt'
       - 'pyproject.toml'
       - 'uv.lock'
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,12 +22,11 @@ concurrency:
 
 env:
   RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
-  RISCV_ARCH_TEST_REVISION: act4
 
 jobs:
   guest-architecture-check:
     name: Guest architecture (${{ matrix.arch }})
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -95,26 +94,73 @@ jobs:
       - name: Run GA smoke workflow
         run: build/${{ matrix.arch }}-release/simrv-smoke --simrv build/${{ matrix.arch }}-release/simrv
 
+      - name: Resolve latest ACT4 revision
+        if: matrix.arch == 'rv64'
+        id: resolve-act4
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(git ls-remote --exit-code https://github.com/riscv/riscv-arch-test.git refs/heads/act4 | cut -f1)"
+          if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Could not resolve the upstream ACT4 branch head" >&2
+            exit 1
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "RISCV_ARCH_TEST_REVISION=$revision" >> "$GITHUB_ENV"
+          echo "ACT4 upstream head: $revision" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore ACT4 tool cache
+        if: matrix.arch == 'rv64'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/ruby-3.4.12
+            ${{ runner.temp }}/act-gems
+            ${{ runner.temp }}/act-bundle
+            ${{ runner.temp }}/uv-cache
+            ${{ runner.temp }}/uv-python
+            ${{ runner.temp }}/sail-riscv-0.16
+            ${{ runner.temp }}/riscv-arch-test
+          key: ${{ runner.os }}-${{ runner.arch }}-act4-tools-${{ steps.resolve-act4.outputs.revision }}-ruby3.4.12-sail0.16-uv0.13.4-v1
+
+      - name: Restore generated ACT4 suite
+        if: matrix.arch == 'rv64'
+        uses: actions/cache@v4
+        with:
+          path: |
+            tests/act4/output/rva23s64/elfs
+            tests/act4/output/rva23s64/test_list.md
+            tests/act4/output/rva23s64/simrv-act4-provenance.txt
+            tests/act4/output/rva23s64/.simrv-act4-generated
+          key: ${{ runner.os }}-${{ runner.arch }}-act4-rva23s64-${{ steps.resolve-act4.outputs.revision }}-gcc15.2.0-sail0.16-${{ hashFiles('tests/act4/simrv-rva23s64/**') }}-v1
+
       - name: Install ACT4 prerequisites
         if: matrix.arch == 'rv64'
         run: |
           dnf install -y python3 python3-pip ruby-build-core ruby-build-ruby \
             gcc make bzip2-devel openssl-devel libyaml-devel libffi-devel \
             readline-devel zlib-ng-compat-devel gdbm-devel ncurses-devel jq
-          ruby-build 3.4.12 "$RUNNER_TEMP/ruby-3.4.12"
+          if [[ ! -x "$RUNNER_TEMP/ruby-3.4.12/bin/ruby" ]]; then
+            ruby-build 3.4.12 "$RUNNER_TEMP/ruby-3.4.12"
+          fi
+          mkdir -p "$RUNNER_TEMP/act-gems"
+          echo "GEM_HOME=$RUNNER_TEMP/act-gems" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/act-gems/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/ruby-3.4.12/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/ruby-3.4.12/bin/ruby" --version
           python3 -m venv "$RUNNER_TEMP/act-venv"
-          "$RUNNER_TEMP/act-venv/bin/pip" install uv
+          "$RUNNER_TEMP/act-venv/bin/pip" install uv==0.13.4
           echo "$RUNNER_TEMP/act-venv/bin" >> "$GITHUB_PATH"
-          sail_archive="$RUNNER_TEMP/sail-riscv-Linux-x86_64.tar.gz"
-          curl --fail --location --retry 3 \
-            https://github.com/riscv/sail-riscv/releases/download/0.16/sail-riscv-Linux-x86_64.tar.gz \
-            --output "$sail_archive"
-          echo "f9bb8a32b8f3eddbdf69b3a29d96dff4ba1e77f45877165e0478418367da6bee  $sail_archive" \
-            | sha256sum --check --status
-          mkdir -p "$RUNNER_TEMP/sail-riscv-0.16"
-          tar -xzf "$sail_archive" -C "$RUNNER_TEMP/sail-riscv-0.16"
+          if ! find "$RUNNER_TEMP/sail-riscv-0.16" -type f -name sail_riscv_sim -executable -print -quit 2>/dev/null | grep -q .; then
+            sail_archive="$RUNNER_TEMP/sail-riscv-Linux-x86_64.tar.gz"
+            curl --fail --location --retry 3 \
+              https://github.com/riscv/sail-riscv/releases/download/0.16/sail-riscv-Linux-x86_64.tar.gz \
+              --output "$sail_archive"
+            echo "f9bb8a32b8f3eddbdf69b3a29d96dff4ba1e77f45877165e0478418367da6bee  $sail_archive" \
+              | sha256sum --check --status
+            mkdir -p "$RUNNER_TEMP/sail-riscv-0.16"
+            tar -xzf "$sail_archive" -C "$RUNNER_TEMP/sail-riscv-0.16"
+          fi
           sail_sim="$(find "$RUNNER_TEMP/sail-riscv-0.16" -type f -name sail_riscv_sim -print -quit)"
           test -n "$sail_sim" && test -x "$sail_sim"
           echo "$(dirname "$sail_sim")" >> "$GITHUB_PATH"
@@ -123,50 +169,94 @@ jobs:
 
       - name: Fetch ACT4 and install its tools
         if: matrix.arch == 'rv64'
+        env:
+          BUNDLE_PATH: ${{ runner.temp }}/act-bundle
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+          UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/uv-python
         run: |
-          git clone --branch "$RISCV_ARCH_TEST_REVISION" --depth 1 --recurse-submodules \
-            https://github.com/riscv/riscv-arch-test.git "$RUNNER_TEMP/riscv-arch-test"
-          echo "ACT4 source commit: $(git -C "$RUNNER_TEMP/riscv-arch-test" rev-parse HEAD)" \
+          ACT_DIR="$RUNNER_TEMP/riscv-arch-test"
+          "$GITHUB_WORKSPACE/scripts/check-act4-upstream.sh" "$RISCV_ARCH_TEST_REVISION"
+          if [[ ! -d "$ACT_DIR/.git" ]]; then
+            git clone --branch act4 --depth 1 --recurse-submodules \
+              https://github.com/riscv/riscv-arch-test.git "$ACT_DIR"
+          fi
+          if [[ "$(git -C "$ACT_DIR" rev-parse HEAD)" != "$RISCV_ARCH_TEST_REVISION" ]]; then
+            git -C "$ACT_DIR" fetch --depth 1 origin "$RISCV_ARCH_TEST_REVISION"
+            git -C "$ACT_DIR" checkout --detach "$RISCV_ARCH_TEST_REVISION"
+          fi
+          git -C "$ACT_DIR" submodule update --init --recursive --depth 1
+          echo "ACT4 source commit: $(git -C "$ACT_DIR" rev-parse HEAD)" \
             >> "$GITHUB_STEP_SUMMARY"
-          cd "$RUNNER_TEMP/riscv-arch-test"
-          uv sync
-          gem install bundler
-          cd framework/src/act/data
-          bundle install
+          if [[ ! -x "$ACT_DIR/.venv/bin/act" ]]; then
+            (cd "$ACT_DIR" && uv sync --locked)
+          fi
+          if [[ ! -x "$RUNNER_TEMP/act-gems/bin/bundle" ]]; then
+            GEM_HOME="$RUNNER_TEMP/act-gems" \
+              "$RUNNER_TEMP/ruby-3.4.12/bin/gem" install bundler --version 4.0.24 \
+                --install-dir "$RUNNER_TEMP/act-gems" --no-document
+          fi
+          if ! (cd "$ACT_DIR/framework/src/act/data" && bundle check >/dev/null 2>&1); then
+            (cd "$ACT_DIR/framework/src/act/data" && bundle install)
+          fi
 
       - name: Generate and run full RVA23 ACT4 suite
         if: matrix.arch == 'rv64'
         env:
           ACT_DIR: ${{ runner.temp }}/riscv-arch-test
-          ACT_WORKDIR: ${{ runner.temp }}/act4-rva23s64
+          ACT_WORKDIR: ${{ github.workspace }}/tests/act4/output
+          BUNDLE_PATH: ${{ runner.temp }}/act-bundle
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+          UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/uv-python
         shell: bash
         run: |
           set -euo pipefail
           echo "ACT4 source commit: $(git -C "$ACT_DIR" rev-parse HEAD)"
-          make -C "$ACT_DIR" \
-            CONFIG_FILES="$GITHUB_WORKSPACE/tests/act4/simrv-rva23s64/test_config.yaml" \
-            CERTIFICATE=RVA23 JOBS="$(nproc)" \
-            WORKDIR="$ACT_WORKDIR"
-          report="$ACT_WORKDIR/simrv-rva23s64/simrv-report.json"
+          suite_dir="$ACT_WORKDIR/rva23s64"
+          if [[ ! -f "$suite_dir/.simrv-act4-generated" ]]; then
+            make -C "$ACT_DIR" \
+              CONFIG_FILES="$GITHUB_WORKSPACE/tests/act4/simrv-rva23s64/test_config.yaml" \
+              CERTIFICATE=RVA23 JOBS="$(nproc)" CLEAN_INTERMEDIATES=1 \
+              WORKDIR="$ACT_WORKDIR"
+            test -n "$(find "$suite_dir/elfs" -type f -name '*.elf' -print -quit)"
+            touch "$suite_dir/.simrv-act4-generated"
+          else
+            echo "Using cached ACT4 ELFs for $RISCV_ARCH_TEST_REVISION" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          config="$GITHUB_WORKSPACE/tests/act4/simrv-rva23s64/test_config.yaml"
+          elf_count="$(find "$suite_dir/elfs" -type f -name '*.elf' | wc -l)"
+          test "$elf_count" -gt 0
+          {
+            printf 'act_revision=%s\n' "$RISCV_ARCH_TEST_REVISION"
+            printf 'profile=RVA23S64\n'
+            printf 'vlen=128\n'
+            printf 'elf_count=%s\n' "$elf_count"
+            printf 'config_sha256=%s\n' \
+              "$(sha256sum "$config" | cut -d ' ' -f 1)"
+          } > "$suite_dir/simrv-act4-provenance.txt"
+          cat "$suite_dir/simrv-act4-provenance.txt" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          report="$ACT_WORKDIR/rva23s64/simrv-report.json"
           set +e
           build/rv64-release/simrv-act \
             --simrv build/rv64-release/simrv \
-            --elf-dir "$ACT_WORKDIR/simrv-rva23s64/elfs" \
+            --elf-dir "$ACT_WORKDIR/rva23s64/elfs" \
             --report "$report" --jobs "$(nproc)" --vlen 128 --max-failures 1000 \
             --compare-detailed-on-failure
           act_status=$?
           set -e
-          # The current full suite has 50 documented expectation conflicts with
-          # ratified Vector/H behavior. Require the known baseline so new failures
-          # or a changed suite fail release qualification.
-          if ! jq -e '.total == 3188 and .passed == 3138 and .failed == 50 and .timeouts == 0' \
+          # A release claiming RVA23 compliance must pass the complete ACT4 suite.
+          # Keep the generated count dynamic because the upstream act4 branch evolves.
+          if ! jq -e '.total > 0 and .passed == .total and .failed == 0 and .timeouts == 0' \
             "$report" >/dev/null; then
-            echo "ACT4 report differs from the documented 3138/3188 baseline; failed tests:" >&2
+            echo "ACT4 RVA23 qualification failed; failed tests:" >&2
             jq -r '.tests[] | select(.status != "PASS") | "  - " + .name' "$report" >&2
             exit 1
           fi
-          test "$act_status" -eq 1
-          echo "ACT4 matched the documented 3138/3188 baseline (50 known expectation conflicts)."
+          test "$act_status" -eq 0
+          jq -r '"ACT4 RVA23 qualification passed: \(.passed)/\(.total) ELFs; 0 failures and 0 timeouts."' \
+            "$report" | tee -a "$GITHUB_STEP_SUMMARY"
+          "$GITHUB_WORKSPACE/scripts/check-act4-upstream.sh" "$RISCV_ARCH_TEST_REVISION"
 
       - name: Validate source release metadata
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L release
@@ -183,7 +273,7 @@ jobs:
           fi
 
           VERSION_TAG="v${SIMRV_VERSION}"
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" && "${GITHUB_REF_NAME}" != "${VERSION_TAG}" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" != "${VERSION_TAG}" ]]; then
             echo "Release tag ${GITHUB_REF_NAME} does not match CMake version tag ${VERSION_TAG}" >&2
             exit 1
           fi
@@ -215,7 +305,7 @@ jobs:
         run: |
           set -euo pipefail
           SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
           fi
           test "${SIMRV_VERSION%%.*}" -ge 3
@@ -264,7 +354,7 @@ jobs:
             -DSIMRV_ENABLE_LTO=OFF \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
-          cmake --build --preset rv64-release --parallel 2
+          cmake --build build/rv64-release --target simrv-package-binaries --parallel 2
           if readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'; then
             echo "RHEL 10 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
             readelf -d build/rv64-release/simrv | grep -E 'NEEDED.*(libstdc\+\+|libgcc_s)' >&2
@@ -355,7 +445,7 @@ jobs:
         run: |
           set -euo pipefail
           SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
           fi
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
@@ -413,7 +503,7 @@ jobs:
         run: |
           set -euo pipefail
           SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
           fi
           test "${SIMRV_VERSION%%.*}" -ge 3
@@ -421,14 +511,16 @@ jobs:
           echo "version_tag=v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Configure and build
+        shell: bash
         run: |
+          set -euo pipefail
           cmake --preset rv64-release \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_CXX_FLAGS=-ffat-lto-objects \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
-          cmake --build --preset rv64-release --parallel 2
+          cmake --build build/rv64-release --target simrv-package-binaries --parallel 2
           max_glibc="$(readelf --version-info build/rv64-release/simrv \
             | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
           if [[ -z "$max_glibc" ]]; then

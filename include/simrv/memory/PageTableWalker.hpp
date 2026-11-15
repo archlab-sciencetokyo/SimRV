@@ -161,6 +161,7 @@ struct PageWalkState {
     simrv::xlen::PhysAddr physical_address{0};
     simrv::xlen::Word pte{0};
     simrv::xlen::Word pte_update_mask{0};
+    PtePbmt pbmt = PtePbmt::Pma;
     simrv::xlen::CsrValue mstatus{0};
     PteAccess access = PteAccess::Read;
     simrv::xlen::PrivilegeLevel privilege{};
@@ -183,6 +184,7 @@ struct PageWalkState {
 struct PageWalkResult {
     simrv::xlen::PhysAddr physical_address{0};
     simrv::xlen::Word pte{0};
+    PtePbmt pbmt = PtePbmt::Pma;
 
     [[nodiscard]] constexpr auto raw() const noexcept -> simrv::xlen::Address {
         return physical_address.raw();

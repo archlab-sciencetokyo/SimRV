@@ -1,10 +1,19 @@
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 
 #include <algorithm>
+#include <bit>
 
 #include "simrv/core/Machine.hpp"
 
 namespace simrv::device {
+
+namespace {
+constexpr auto sanitize_ring_size(simrv::xlen::Address size) noexcept -> simrv::xlen::Address {
+    constexpr simrv::xlen::Address kMinRingSize = 64;
+    const auto clamped = std::max(size, kMinRingSize);
+    return std::bit_floor(clamped);
+}
+}  // namespace
 
 class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
    public:
@@ -22,16 +31,45 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override { return label_.c_str(); }
     [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
-    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset) -> uint32_t override {
-        if (kind_ == Kind::Csr) return owner_.read_csr(offset);
-        return owner_.read_buffer(kind_ == Kind::Tx, offset);
+
+    [[nodiscard]] auto read8(simrv::memory::MmioOffset offset)
+        -> simrv::memory::MmioData8 override {
+        return kind_ == Kind::Csr ? 0
+                                  : static_cast<simrv::memory::MmioData8>(
+                                        owner_.read_buffer(kind_ == Kind::Tx, offset, 1));
     }
-    void write32(simrv::memory::MmioOffset offset, uint32_t value) override {
+    [[nodiscard]] auto read16(simrv::memory::MmioOffset offset)
+        -> simrv::memory::MmioData16 override {
+        return kind_ == Kind::Csr ? 0
+                                  : static_cast<simrv::memory::MmioData16>(
+                                        owner_.read_buffer(kind_ == Kind::Tx, offset, 2));
+    }
+    [[nodiscard]] auto read32(simrv::memory::MmioOffset offset)
+        -> simrv::memory::MmioData32 override {
+        if (kind_ == Kind::Csr) return owner_.read_csr(offset);
+        return static_cast<simrv::memory::MmioData32>(
+            owner_.read_buffer(kind_ == Kind::Tx, offset, 4));
+    }
+    [[nodiscard]] auto read64(simrv::memory::MmioOffset offset)
+        -> simrv::memory::MmioData64 override {
+        return kind_ == Kind::Csr ? 0 : owner_.read_buffer(kind_ == Kind::Tx, offset, 8);
+    }
+
+    void write8(simrv::memory::MmioOffset offset, simrv::memory::MmioData8 value) override {
+        if (kind_ != Kind::Csr) owner_.write_buffer(kind_ == Kind::Tx, offset, value, 1);
+    }
+    void write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16 value) override {
+        if (kind_ != Kind::Csr) owner_.write_buffer(kind_ == Kind::Tx, offset, value, 2);
+    }
+    void write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 value) override {
         if (kind_ == Kind::Csr) {
             owner_.write_csr(offset, value);
         } else {
-            owner_.write_buffer(kind_ == Kind::Tx, offset, value);
+            owner_.write_buffer(kind_ == Kind::Tx, offset, value, 4);
         }
+    }
+    void write64(simrv::memory::MmioOffset offset, simrv::memory::MmioData64 value) override {
+        if (kind_ != Kind::Csr) owner_.write_buffer(kind_ == Kind::Tx, offset, value, 8);
     }
 
    private:
@@ -51,12 +89,12 @@ RingBufferEthernetMmio::RingBufferEthernetMmio(
       name_(std::move(name)),
       csr_base_(csr_base),
       csr_size_(csr_size),
-      rx_size_(rx_size),
-      tx_size_(tx_size),
+      rx_size_(sanitize_ring_size(rx_size)),
+      tx_size_(sanitize_ring_size(tx_size)),
       irq_(irq),
       backend_(mode),
-      rx_buffer_(static_cast<size_t>(rx_size)),
-      tx_buffer_(static_cast<size_t>(tx_size)) {
+      rx_buffer_(static_cast<size_t>(rx_size_)),
+      tx_buffer_(static_cast<size_t>(tx_size_)) {
     backend_.set_mac(mac_address);
     csr_window_ =
         std::make_unique<Window>(*this, machine_, Window::Kind::Csr, csr_base_, csr_size_, name_);
@@ -102,22 +140,31 @@ void RingBufferEthernetMmio::write_csr(simrv::memory::MmioOffset offset, uint32_
     }
 }
 
-auto RingBufferEthernetMmio::read_buffer(bool tx, simrv::memory::MmioOffset offset) -> uint32_t {
+auto RingBufferEthernetMmio::read_buffer(bool tx, simrv::memory::MmioOffset offset, uint32_t width)
+    -> uint64_t {
     const auto& buffer = tx ? tx_buffer_ : rx_buffer_;
-    if (offset >= buffer.size() || (offset + 4) > buffer.size()) return 0;
-    return static_cast<uint32_t>(buffer[static_cast<size_t>(offset.raw())]) |
-           (static_cast<uint32_t>(buffer[static_cast<size_t>((offset + 1).raw())]) << 8) |
-           (static_cast<uint32_t>(buffer[static_cast<size_t>((offset + 2).raw())]) << 16) |
-           (static_cast<uint32_t>(buffer[static_cast<size_t>((offset + 3).raw())]) << 24);
+    if ((width != 1U && width != 2U && width != 4U && width != 8U) ||
+        offset.raw() > buffer.size() || width > buffer.size() - offset.raw()) {
+        return 0;
+    }
+    uint64_t val = 0;
+    const auto base = static_cast<size_t>(offset.raw());
+    for (uint32_t byte = 0; byte < width; ++byte) {
+        val |= static_cast<uint64_t>(buffer[base + byte]) << (byte * 8U);
+    }
+    return val;
 }
 
-void RingBufferEthernetMmio::write_buffer(bool tx, simrv::memory::MmioOffset offset,
-                                          uint32_t value) {
+void RingBufferEthernetMmio::write_buffer(bool tx, simrv::memory::MmioOffset offset, uint64_t value,
+                                          uint32_t width) {
     auto& buffer = tx ? tx_buffer_ : rx_buffer_;
-    if (offset >= buffer.size() || (offset + 4) > buffer.size()) return;
-    for (size_t byte = 0; byte < 4; ++byte) {
-        buffer[static_cast<size_t>(offset.raw()) + byte] =
-            static_cast<uint8_t>(value >> (byte * 8));
+    if ((width != 1U && width != 2U && width != 4U && width != 8U) ||
+        offset.raw() > buffer.size() || width > buffer.size() - offset.raw()) {
+        return;
+    }
+    const auto base = static_cast<size_t>(offset.raw());
+    for (uint32_t byte = 0; byte < width; ++byte) {
+        buffer[base + byte] = static_cast<uint8_t>(value >> (byte * 8U));
     }
 }
 
@@ -155,7 +202,11 @@ void RingBufferEthernetMmio::receive_packet(std::span<const uint8_t> packet) {
     const auto aligned_size = (packet.size() + 3U) & ~size_t{3};
     const uint32_t used =
         (end + static_cast<uint32_t>(rx_size_) - start) % static_cast<uint32_t>(rx_size_);
-    const uint32_t free = static_cast<uint32_t>(rx_size_) - used - 4;
+    if (used + 4U >= static_cast<uint32_t>(rx_size_)) {
+        csr_[3] |= 1U;
+        return;
+    }
+    const uint32_t free = static_cast<uint32_t>(rx_size_) - used - 4U;
     if (aligned_size > free) {
         csr_[3] |= 1U;
         return;

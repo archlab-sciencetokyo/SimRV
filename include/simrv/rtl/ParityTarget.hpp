@@ -122,8 +122,9 @@ class ParityRegistry {
 
    private:
     ParityRegistry();
-    std::vector<std::unique_ptr<ParityTarget>> targets_;
+    ~ParityRegistry();
     std::vector<void*> dl_handles_;
+    std::vector<std::unique_ptr<ParityTarget>> targets_;
 };
 
 }  // namespace simrv::rtl

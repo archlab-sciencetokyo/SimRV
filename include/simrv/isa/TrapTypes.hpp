@@ -12,10 +12,13 @@ namespace simrv::isa {
 /// Standard RISC-V interrupt cause codes per Privileged ISA 1.13.
 enum class InterruptCode : uint8_t {
     SupervisorSoftware = 1,
+    VirtualSupervisorSoftware = 2,
     MachineSoftware = 3,
     SupervisorTimer = 5,
+    VirtualSupervisorTimer = 6,
     MachineTimer = 7,
     SupervisorExternal = 9,
+    VirtualSupervisorExternal = 10,
     MachineExternal = 11,
     SupervisorGuestExternal = 12,
     CounterOverflow = 13,
@@ -120,12 +123,20 @@ constexpr auto trap_is_interrupt(simrv::xlen::TrapCause cause) -> bool {
 
 /// Select the highest-priority pending standard interrupt per Privileged ISA 1.13 section 2.1.1.9.
 constexpr auto select_highest_priority_interrupt(simrv::xlen::Word mask) -> simrv::xlen::Word {
-    // Fixed priority: MEI -> MSI -> MTI -> SEI -> SSI -> STI -> LCOFI. Platform interrupt
-    // bits (16+) fall back to descending cause number, SimRV's documented custom ordering.
-    constexpr std::array<InterruptCode, 7> kPriorityOrder = {
-        InterruptCode::MachineExternal,    InterruptCode::MachineSoftware,
-        InterruptCode::MachineTimer,       InterruptCode::SupervisorExternal,
-        InterruptCode::SupervisorSoftware, InterruptCode::SupervisorTimer,
+    // Fixed priority per Privileged ISA (with H-extension and Sscofpmf):
+    // MEI -> MSI -> MTI -> SEI -> SSI -> STI -> SGEI -> VSEI -> VSSI -> VSTI -> LCOFI.
+    // Platform interrupt bits (16+) fall back to descending cause number.
+    constexpr std::array<InterruptCode, 11> kPriorityOrder = {
+        InterruptCode::MachineExternal,
+        InterruptCode::MachineSoftware,
+        InterruptCode::MachineTimer,
+        InterruptCode::SupervisorExternal,
+        InterruptCode::SupervisorSoftware,
+        InterruptCode::SupervisorTimer,
+        InterruptCode::SupervisorGuestExternal,
+        InterruptCode::VirtualSupervisorExternal,
+        InterruptCode::VirtualSupervisorSoftware,
+        InterruptCode::VirtualSupervisorTimer,
         InterruptCode::CounterOverflow,
     };
     for (InterruptCode const irq : kPriorityOrder) {

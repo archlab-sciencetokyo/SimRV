@@ -46,6 +46,8 @@ class PFlash final : public memory::MmioDevice {
            uint32_t sector_size = 128 * 1024, bool read_only = false, std::string name = "pflash");
     ~PFlash() override;
 
+    void reset() override;
+
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
     [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
@@ -78,12 +80,16 @@ class PFlash final : public memory::MmioDevice {
         return storage_.data();
     }
     [[nodiscard]] auto data() const noexcept -> const uint8_t* {
-        const_cast<PFlash*>(this)->ensure_storage();
+        ensure_storage();
         return storage_.data();
     }
 
    private:
-    void ensure_storage();
+    void ensure_storage() const noexcept;
+    [[nodiscard]] auto has_range(simrv::memory::MmioOffset offset, size_t len) const noexcept
+        -> bool {
+        return len <= size_ && offset.raw() <= size_ - len;
+    }
     [[nodiscard]] auto read_cfi(simrv::memory::MmioOffset offset) const -> uint8_t;
     void handle_command(simrv::memory::MmioOffset offset, uint32_t value);
 
@@ -94,7 +100,7 @@ class PFlash final : public memory::MmioDevice {
     bool read_only_;
     std::string name_;
 
-    std::vector<uint8_t> storage_;
+    mutable std::vector<uint8_t> storage_;
     std::filesystem::path backing_path_{};
     bool dirty_{false};
 

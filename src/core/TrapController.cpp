@@ -111,6 +111,7 @@ auto sign_extend_return_pc(const ArchState& state, simrv::xlen::VirtAddr pc) noe
         case csr_addr(Csr::Sip):
         case csr_addr(Csr::Satp):
         case csr_addr(Csr::Senvcfg):
+        case csr_addr(Csr::Stimecmp):
         case csr_addr(Csr::Sstateen0):
         case csr_addr(Csr::Sstateen1):
         case csr_addr(Csr::Sstateen2):
@@ -155,14 +156,20 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
         switch (irq) {
             case InterruptCode::SupervisorSoftware:
                 return "Supervisor software interrupt";
+            case InterruptCode::VirtualSupervisorSoftware:
+                return "Virtual supervisor software interrupt";
             case InterruptCode::MachineSoftware:
                 return "Machine software interrupt";
             case InterruptCode::SupervisorTimer:
                 return "Supervisor timer interrupt";
+            case InterruptCode::VirtualSupervisorTimer:
+                return "Virtual supervisor timer interrupt";
             case InterruptCode::MachineTimer:
                 return "Machine timer interrupt";
             case InterruptCode::SupervisorExternal:
                 return "Supervisor external interrupt";
+            case InterruptCode::VirtualSupervisorExternal:
+                return "Virtual supervisor external interrupt";
             case InterruptCode::MachineExternal:
                 return "Machine external interrupt";
             case InterruptCode::SupervisorGuestExternal:
@@ -580,12 +587,72 @@ auto TrapController::check_privileged_instruction(const ArchState& state,
     return std::nullopt;
 }
 
+[[nodiscard]] auto check_sstc_csr_access(const ArchState& state, uint16_t address,
+                                         unsigned active_xlen) noexcept
+    -> std::optional<simrv::isa::ExceptionCode> {
+    using simrv::isa::ExceptionCode;
+    const bool is_high_half =
+        address == csr_addr(Csr::Stimecmph) || address == csr_addr(Csr::Vstimecmph);
+    if (is_high_half && active_xlen != 32) {
+        return ExceptionCode::IllegalInstruction;
+    }
+    if (!isa::misa_has_extension(state.misa, isa::IsaExtension::S)) {
+        return ExceptionCode::IllegalInstruction;
+    }
+    const bool is_vs_csr =
+        address == csr_addr(Csr::Vstimecmp) || address == csr_addr(Csr::Vstimecmph);
+    if (is_vs_csr && !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
+        return ExceptionCode::IllegalInstruction;
+    }
+    if (state.priv == kPrivMachine) {
+        return std::nullopt;
+    }
+    if ((state.mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
+        return ExceptionCode::IllegalInstruction;
+    }
+    bool mstce = false;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        mstce = (state.menvcfg & (1ULL << 63U)) != 0;
+    } else {
+        mstce = (state.menvcfgh & (1UL << 31U)) != 0;
+    }
+    if (!mstce) {
+        return ExceptionCode::IllegalInstruction;
+    }
+    if (is_vs_csr) {
+        if (state.virt) {
+            return ExceptionCode::VirtualInstruction;
+        }
+        return (state.priv < kPrivSupervisor) ? std::optional{ExceptionCode::IllegalInstruction}
+                                              : std::nullopt;
+    }
+    if (!state.virt) {
+        return (state.priv == kPrivSupervisor) ? std::nullopt
+                                               : std::optional{ExceptionCode::IllegalInstruction};
+    }
+    if (state.priv < kPrivSupervisor) {
+        return ExceptionCode::VirtualInstruction;
+    }
+    const bool htm = (state.hcounteren & (simrv::xlen::CsrValue{1} << 1U)) != 0;
+    const bool hstce =
+        (state.henvcfg & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U)) != 0;
+    if (!htm || !hstce) {
+        return ExceptionCode::VirtualInstruction;
+    }
+    return std::nullopt;
+}
+
 auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNumber csr_number,
                                       bool is_write) noexcept
     -> std::optional<simrv::isa::ExceptionCode> {
     using simrv::isa::ExceptionCode;
     const uint16_t address = csr_number.value();
     const unsigned active_xlen = state.current_xlen();
+
+    if (address == csr_addr(Csr::Stimecmp) || address == csr_addr(Csr::Stimecmph) ||
+        address == csr_addr(Csr::Vstimecmp) || address == csr_addr(Csr::Vstimecmph)) {
+        return check_sstc_csr_access(state, address, active_xlen);
+    }
 
     if (!can_access_csr(state.priv, state.misa, csr_number, is_write, state.virt)) {
         const bool virtual_supervisor_csr =
@@ -699,39 +766,6 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
     if (address == csr_addr(Csr::Henvcfg)) {
         if (state.priv != kPrivMachine && (state.mstateen[0] & kStateenEnvCfgEnable) == 0) {
             return ExceptionCode::IllegalInstruction;
-        }
-    }
-    if (address == csr_addr(Csr::Stimecmp)) {
-        if (state.priv < kPrivMachine) {
-            if ((state.mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
-                return ExceptionCode::IllegalInstruction;
-            }
-            bool stce = false;
-            if constexpr (simrv::xlen::kIsXLen64) {
-                stce = (state.menvcfg & (1ULL << 63U)) != 0;
-            } else {
-                stce = (state.menvcfgh & (1UL << 31U)) != 0;
-            }
-            if (!stce) {
-                return ExceptionCode::IllegalInstruction;
-            }
-            if (state.virt) {
-                if ((state.henvcfg & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U)) == 0 ||
-                    (state.hcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
-                    return ExceptionCode::VirtualInstruction;
-                }
-            }
-        }
-    }
-    if (address == csr_addr(Csr::Stimecmph)) {
-        if (active_xlen != 32) {
-            return ExceptionCode::IllegalInstruction;
-        }
-        if (state.priv < kPrivMachine) {
-            const bool stce = (state.menvcfgh & (1UL << 31U)) != 0;
-            if (!stce) {
-                return ExceptionCode::IllegalInstruction;
-            }
         }
     }
 

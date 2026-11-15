@@ -5,6 +5,7 @@
 #include "simrv/device/pci/PcieRootComplex.hpp"
 
 #include <algorithm>
+#include <limits>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -249,6 +250,21 @@ auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
     resp.corrupt = false;
 
     const auto size = static_cast<PciAccessBytes>(1u << (req.size & 0x3u));
+    if (size == 8) {
+        if (is_write) {
+            rc_->ecam_write(offset, static_cast<PciConfigData>(req.data & 0xFFFFFFFFULL), 4);
+            if (offset <= std::numeric_limits<simrv::xlen::Address>::max() - 4) {
+                rc_->ecam_write(offset + 4, static_cast<PciConfigData>(req.data >> 32), 4);
+            }
+        } else {
+            const uint64_t lo = rc_->ecam_read(offset, 4);
+            const uint64_t hi = offset <= std::numeric_limits<simrv::xlen::Address>::max() - 4
+                                    ? rc_->ecam_read(offset + 4, 4)
+                                    : 0xFFFFFFFFULL;
+            resp.data = lo | (hi << 32);
+        }
+        return true;
+    }
     if (is_write) {
         rc_->ecam_write(offset, static_cast<PciConfigData>(req.data), size);
     } else {

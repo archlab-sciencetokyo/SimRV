@@ -41,12 +41,18 @@ void PlatformBuilder::compose(Machine& machine) {
 
     if (const auto device =
             SoCDeviceRegistry::descriptor(machine.config.soc, SoCDeviceKind::RingBufferEthernet)) {
-        machine.runtime_->ring_buffer_ethernet =
-            std::make_unique<simrv::device::RingBufferEthernetMmio>(
-                machine, device->name, device->base, device->size, device->irq,
-                device->find_region("rxbuf")->base, device->find_region("rxbuf")->size,
-                device->find_region("txbuf")->base, device->find_region("txbuf")->size,
-                device->mac_address, network_mode);
+        const auto default_dev = soc_device_default(SoCDeviceKind::RingBufferEthernet);
+        const auto* rx_region = device->find_region("rxbuf");
+        if (rx_region == nullptr) rx_region = default_dev.find_region("rxbuf");
+        const auto* tx_region = device->find_region("txbuf");
+        if (tx_region == nullptr) tx_region = default_dev.find_region("txbuf");
+        if (rx_region != nullptr && tx_region != nullptr) {
+            machine.runtime_->ring_buffer_ethernet =
+                std::make_unique<simrv::device::RingBufferEthernetMmio>(
+                    machine, device->name, device->base, device->size, device->irq, rx_region->base,
+                    rx_region->size, tx_region->base, tx_region->size, device->mac_address,
+                    network_mode);
+        }
     }
 
     if (composition.pcie) {

@@ -1406,6 +1406,12 @@ void Machine::reset_state() {
     primary_hart().reset();
     bus.coherence_hub().clear();
     if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->reset();
+    for (const auto& ext : runtime_->extension_mmios) {
+        if (ext) ext->reset();
+    }
+    if (runtime_->dma_controller) runtime_->dma_controller->reset();
+    if (runtime_->pflash0) runtime_->pflash0->reset();
+    if (runtime_->pflash1) runtime_->pflash1->reset();
     if (config.bram_prewarm) {
         prewarm_bram_caches();
     }

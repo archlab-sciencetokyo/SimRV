@@ -4,9 +4,11 @@
  */
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <limits>
 
 #include "simrv/device/virtio/VirtioCore.hpp"
 
@@ -39,9 +41,12 @@ void process_console_queue(uint32_t q_idx, QueueState& q, ConsoleBackend& backen
             }
 
             uint32_t written = 0;
-            while (written < desc.len && backend.has_rx()) {
+            while (written < desc.len && backend.has_rx() &&
+                   written <= std::numeric_limits<uint64_t>::max() - desc.addr) {
                 uint8_t b = backend.pop_rx();
-                (void)dma_write(desc.addr + written, &b, 1);
+                if (!dma_write(desc.addr + written, &b, 1)) {
+                    break;
+                }
                 ++written;
             }
 
@@ -71,11 +76,19 @@ void process_console_queue(uint32_t q_idx, QueueState& q, ConsoleBackend& backen
                 break;
             }
 
-            if (desc.len > 0) {
-                std::vector<uint8_t> tx_buf(desc.len);
-                (void)dma_read(desc.addr, tx_buf.data(), desc.len);
-                for (uint8_t ch : tx_buf) {
-                    backend.write_tx(ch);
+            if (desc.len > 0 && desc.len - 1U <= std::numeric_limits<uint64_t>::max() - desc.addr) {
+                constexpr uint32_t kChunkSize = 4096U;
+                std::array<uint8_t, kChunkSize> tx_buf{};
+                uint32_t offset = 0;
+                while (offset < desc.len) {
+                    const uint32_t chunk = std::min(kChunkSize, desc.len - offset);
+                    if (!dma_read(desc.addr + offset, tx_buf.data(), chunk)) {
+                        break;
+                    }
+                    for (uint32_t i = 0; i < chunk; ++i) {
+                        backend.write_tx(tx_buf[i]);
+                    }
+                    offset += chunk;
                 }
             }
 

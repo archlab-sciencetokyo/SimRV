@@ -15,11 +15,20 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
 namespace simrv::device::virtio {
 namespace {
+
+constexpr size_t kMaxOpenHandles = 1024;
+constexpr size_t kMaxTrackedNodes = 16384;
+
+auto valid_file_offset(uint64_t offset, size_t len = 0) noexcept -> bool {
+    constexpr auto kMaxOff = static_cast<uint64_t>(std::numeric_limits<off_t>::max());
+    return offset <= kMaxOff && len <= kMaxOff - offset;
+}
 
 template <typename T>
 void append(std::vector<std::byte>& out, const T& value) {
@@ -148,6 +157,7 @@ auto VirtioFsBackend::allocate_node(const std::filesystem::path& relative) -> ui
             return id;
         }
     }
+    if (nodes_.size() >= kMaxTrackedNodes) return 0;
     uint64_t id = 2;
     while (nodes_.contains(id)) ++id;
     nodes_.emplace(id, relative);
@@ -250,8 +260,13 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
         if (!fd) return false;
         struct stat st{};
         if (::fstat(fd.get(), &st) != 0) return false;
+        const uint64_t nodeid = allocate_node(relative);
+        if (nodeid == 0) {
+            errno = ENOMEM;
+            return false;
+        }
         result = {};
-        result.nodeid = allocate_node(relative);
+        result.nodeid = nodeid;
         result.generation = 1;
         result.entry_valid = 1;
         result.attr_valid = 1;
@@ -329,6 +344,10 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     set_error(ENOENT);
                     break;
                 }
+                if (handles_.size() >= kMaxOpenHandles) {
+                    set_error(EMFILE);
+                    break;
+                }
                 const bool directory = in.opcode == FUSE_OPENDIR;
                 int flags =
                     (op.flags & (O_ACCMODE | O_APPEND | O_TRUNC | O_NONBLOCK | O_SYNC | O_DSYNC)) |
@@ -358,6 +377,10 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     break;
                 }
                 const size_t count = std::min<size_t>(read.size, 1024 * 1024);
+                if (!valid_file_offset(read.offset, count)) {
+                    set_error(EINVAL);
+                    break;
+                }
                 std::vector<std::byte> data(count);
                 const auto n =
                     ::pread(it->second.get(), data.data(), count, static_cast<off_t>(read.offset));
@@ -372,7 +395,8 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
             }
             case FUSE_WRITE: {
                 fuse_write_in write{};
-                if (!input_at(payload, 0, write) || write.size > payload.size() - sizeof(write)) {
+                if (!input_at(payload, 0, write) || write.size > payload.size() - sizeof(write) ||
+                    !valid_file_offset(write.offset, write.size)) {
                     set_error(EINVAL);
                     break;
                 }
@@ -587,6 +611,10 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     break;
                 }
                 const auto relative = *parent / *name;
+                if (handles_.size() >= kMaxOpenHandles) {
+                    set_error(EMFILE);
+                    break;
+                }
                 auto parent_fd = open_beneath(*parent, O_RDONLY | O_DIRECTORY);
                 if (!parent_fd) {
                     set_error(errno);
@@ -641,6 +669,10 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                 }
                 const int target_fd = fd >= 0 ? fd : path_fd.get();
                 if ((attr.valid & FATTR_SIZE) != 0) {
+                    if (!valid_file_offset(attr.size, 0)) {
+                        set_error(EINVAL);
+                        break;
+                    }
                     if (::ftruncate(target_fd, static_cast<off_t>(attr.size)) != 0) {
                         set_error(errno);
                         break;

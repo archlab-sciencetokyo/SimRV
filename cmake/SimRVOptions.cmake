@@ -51,6 +51,47 @@ if(SIMRV_ENABLE_ASAN
                       -fsanitize=${_simrv_sanitizer_flags})
 endif()
 
+if(SIMRV_ENABLE_CXX_PROFILES)
+  if(SIMRV_USE_LIBCXX)
+    target_compile_definitions(
+      simrv-project-options
+      INTERFACE _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST)
+  else()
+    target_compile_definitions(simrv-project-options
+                               INTERFACE _GLIBCXX_ASSERTIONS)
+  endif()
+  check_cxx_compiler_flag("-ftrivial-auto-var-init=zero"
+                          SIMRV_SUPPORTS_TRIVIAL_AUTO_VAR_INIT)
+  if(SIMRV_SUPPORTS_TRIVIAL_AUTO_VAR_INIT)
+    target_compile_options(
+      simrv-project-options
+      INTERFACE
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-ftrivial-auto-var-init=zero>)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+    foreach(_profile_flag IN ITEMS "-Wlifetime-safety" "-Wdangling"
+                                   "-Wdangling-gsl" "-Wreturn-stack-address")
+      string(MAKE_C_IDENTIFIER "SIMRV_SUPPORTS${_profile_flag}" _flag_var)
+      check_cxx_compiler_flag("${_profile_flag}" ${_flag_var})
+      if(${_flag_var})
+        target_compile_options(
+          simrv-project-options
+          INTERFACE $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:${_profile_flag}>)
+      endif()
+    endforeach()
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    foreach(_profile_flag IN ITEMS "-Wdangling-pointer" "-Wdangling-reference")
+      string(MAKE_C_IDENTIFIER "SIMRV_SUPPORTS${_profile_flag}" _flag_var)
+      check_cxx_compiler_flag("${_profile_flag}" ${_flag_var})
+      if(${_flag_var})
+        target_compile_options(
+          simrv-project-options
+          INTERFACE $<$<COMPILE_LANG_AND_ID:CXX,GNU>:${_profile_flag}>)
+      endif()
+    endforeach()
+  endif()
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
    AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang"
    AND CMAKE_BUILD_TYPE STREQUAL "Release"

@@ -32,6 +32,7 @@
 #define STAT_DONE (1U << 0)
 #define STAT_ERROR (1U << 1)
 #define STAT_BUSY (1U << 2)
+#define DMA_MAX_TRANSFER_BYTES (16U * 1024U * 1024U)
 
 typedef struct DmaAccelState {
     const SimRvHostServices* services;
@@ -45,6 +46,8 @@ typedef struct DmaAccelState {
 } DmaAccelState;
 
 static int dma_init(void** out_ctx, const char* args) {
+    if (!out_ctx) return -1;
+    *out_ctx = NULL;
     DmaAccelState* st = (DmaAccelState*)calloc(1, sizeof(DmaAccelState));
     if (!st) return -1;
     st->irq_num = 15; /* Default IRQ line */
@@ -72,11 +75,13 @@ static void dma_reset(void* ctx) {
 
 static void dma_execute_transfer(DmaAccelState* st) {
     if (!st || !st->services || !st->services->dma_read || !st->services->dma_write) {
-        st->status |= STAT_ERROR;
+        if (st) st->status |= STAT_ERROR;
         return;
     }
 
-    if (st->length == 0) {
+    if (st->length == 0 || st->length > DMA_MAX_TRANSFER_BYTES ||
+        st->src_addr > UINT64_MAX - st->length ||
+        (st->dst_addr != 0 && st->dst_addr > UINT64_MAX - st->length)) {
         st->status |= STAT_ERROR;
         return;
     }

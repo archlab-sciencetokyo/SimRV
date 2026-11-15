@@ -136,7 +136,7 @@ virtio::NetBackend::NetBackend(NetBackend&& other) noexcept
     : mode_(other.mode_),
       mac_(other.mac_),
       rx_queue_(std::move(other.rx_queue_)),
-      tx_history_(std::move(other.tx_history_)),
+      tx_packet_count_(std::exchange(other.tx_packet_count_, 0)),
       pending_rx_packets_(other.pending_rx_packets_),
       slirp_(std::move(other.slirp_)) {
     if (slirp_ != nullptr) slirp_->backend = this;
@@ -149,7 +149,7 @@ auto virtio::NetBackend::operator=(NetBackend&& other) noexcept -> NetBackend& {
     mode_ = other.mode_;
     mac_ = other.mac_;
     rx_queue_ = std::move(other.rx_queue_);
-    tx_history_ = std::move(other.tx_history_);
+    tx_packet_count_ = std::exchange(other.tx_packet_count_, 0);
     pending_rx_packets_ = other.pending_rx_packets_;
     slirp_ = std::move(other.slirp_);
     if (slirp_ != nullptr) slirp_->backend = this;
@@ -235,7 +235,8 @@ auto virtio::NetBackend::poll_host_rx() -> std::size_t {
 }
 
 void virtio::NetBackend::send_tx_packet(std::span<const uint8_t> data) {
-    tx_history_.emplace_back(data.begin(), data.end());
+    if (data.empty() || data.size() > kMaxPacketBytes) return;
+    ++tx_packet_count_;
     if (mode_ == Mode::User && data.size() <= INT_MAX) {
         if (slirp_ == nullptr) initialize_user_mode_network();
         if (slirp_ == nullptr || slirp_->stack == nullptr) return;

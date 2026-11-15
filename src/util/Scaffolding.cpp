@@ -41,6 +41,8 @@ auto scaffold_device_plugin(std::string_view name, std::string_view output) -> b
            << "} DeviceState;\n\n"
            << "static int " << name_str << "_init(void** out_ctx, const char* args) {\n"
            << "    (void)args;\n"
+           << "    if (!out_ctx) return -1;\n"
+           << "    *out_ctx = NULL;\n"
            << "    DeviceState* st = (DeviceState*)calloc(1, sizeof(DeviceState));\n"
            << "    if (!st) return -1;\n"
            << "    *out_ctx = st;\n"

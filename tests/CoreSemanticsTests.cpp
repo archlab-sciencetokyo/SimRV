@@ -538,6 +538,16 @@ void test_decode_cache_compact_round_robin() {
     expect(load_op.mem_size == 4, "LW mem_size is 4");
     expect(load_op.align_mask() == 3, "LW align_mask is 3");
 
+    for (const auto op_id : {simrv::isa::VLE64_V, simrv::isa::HLV_W, simrv::isa::CBO_CLEAN}) {
+        simrv::pipeline::DecodedInstruction memory_inst{};
+        memory_inst.op_id = op_id;
+        simrv::core::CachedOp memory_op{};
+        memory_op.copy_from(memory_inst);
+        expect(memory_op.mem_size == 0 &&
+                   memory_op.mem_class == simrv::core::FastMemClass::OtherMemory,
+               "vector, hypervisor, and cache-management memory ops retain a cached boundary tag");
+    }
+
     simrv::pipeline::DecodedInstruction lbu_inst{};
     lbu_inst.op_id = simrv::isa::LBU;
     lbu_inst.traits.is_mem_load = true;

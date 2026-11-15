@@ -1,28 +1,43 @@
+#include <array>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #include "TestHelper.hpp"
+#include "simrv/SafetyProfiles.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/TelemetrySink.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/ExternalFramebufferDevice.h"
 #include "simrv/device/ExternalInputDevice.h"
 #include "simrv/device/ExternalSerialDevice.h"
 #include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/InputDevice.hpp"
+#include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/SerialDevice.hpp"
+#include "simrv/device/pci/PciDevice.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/device/pflash/PFlash.hpp"
+#include "simrv/device/virtio/HostAudioSink.hpp"
+#include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/device/virtio/VirtioRngQueue.hpp"
+#include "simrv/device/virtio/VirtioSoundBackend.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
+#include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/Scaffolding.hpp"
 
 static_assert(std::is_standard_layout_v<SimRvSerialHostServices>);
@@ -35,6 +50,8 @@ static_assert(std::is_standard_layout_v<SimRvHostServices>);
 static_assert(std::is_standard_layout_v<SimRvExternalDevice>);
 static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION == 2);
 static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION_V1 == 1);
+static_assert(!std::is_copy_constructible_v<simrv::device::ExternalMmioDevice>);
+static_assert(!std::is_move_constructible_v<simrv::device::ExternalMmioDevice>);
 
 void test_plugin_host_services_are_per_device() {
     struct Context {
@@ -600,6 +617,515 @@ void test_scaffolding_and_formalized_configs() {
     }
 }
 
+void test_external_mmio_bounds_and_dma_overflow() {
+    struct State {
+        const SimRvHostServices* services = nullptr;
+        uint32_t read_calls = 0;
+        uint32_t write_calls = 0;
+    } state;
+
+    SimRvExternalDevice descriptor{};
+    descriptor.api_version = SIMRV_EXTERNAL_DEVICE_API_VERSION;
+    descriptor.name = "bounds-device";
+    descriptor.compatible = "test,bounds";
+    descriptor.default_base = 0x20010000;
+    descriptor.default_size = 0x100;
+    descriptor.set_host_services = [](void* ctx, const SimRvHostServices* services) {
+        static_cast<State*>(ctx)->services = services;
+    };
+    descriptor.read = [](void* ctx, uint64_t offset, uint32_t, uint64_t* out_val) -> int {
+        auto* st = static_cast<State*>(ctx);
+        ++st->read_calls;
+        *out_val = 0x12345678ULL + offset;
+        return 0;
+    };
+    descriptor.write = [](void* ctx, uint64_t, uint32_t, uint64_t) -> int {
+        ++static_cast<State*>(ctx)->write_calls;
+        return 0;
+    };
+
+    simrv::core::MachineConfig cfg{};
+    cfg.memory.dram_size = 0x100000;
+    simrv::core::Machine machine(cfg);
+    TEST_CHECK(machine.initialize().has_value());
+
+    simrv::device::ExternalMmioDevice mmio_dev(
+        &descriptor, &state, "bounds-device",
+        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(descriptor.default_base)},
+        descriptor.default_size, machine);
+
+    TEST_CHECK(mmio_dev.read32(simrv::memory::MmioOffset{0xFC}) == 0x12345678U + 0xFCU);
+    mmio_dev.write32(simrv::memory::MmioOffset{0xFC}, 0x55);
+    TEST_CHECK(state.read_calls == 1 && state.write_calls == 1);
+
+    // Out-of-bounds accesses must return 0 and avoid forwarding past device size.
+    TEST_CHECK(mmio_dev.read8(simrv::memory::MmioOffset{0x100}) == 0);
+    TEST_CHECK(mmio_dev.read32(simrv::memory::MmioOffset{0xFE}) == 0);
+    TEST_CHECK(mmio_dev.read64(simrv::memory::MmioOffset{0xFC}) == 0);
+    mmio_dev.write8(simrv::memory::MmioOffset{0x100}, 1);
+    mmio_dev.write32(simrv::memory::MmioOffset{0xFE}, 1);
+    mmio_dev.write64(simrv::memory::MmioOffset{0xFC}, 1);
+    TEST_CHECK(state.read_calls == 1 && state.write_calls == 1);
+
+    simrv::memory::TlChannelA req{};
+    simrv::memory::TlChannelD resp{};
+    req.address =
+        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(descriptor.default_base + 0xFE)};
+    req.size = 2;
+    req.opcode = simrv::memory::TlOpcodeA::Get;
+    TEST_CHECK(mmio_dev.handle_request(req, resp) && resp.denied);
+    TEST_CHECK(state.read_calls == 1);
+
+    // DMA callbacks must reject 64-bit address wraparound and null pointers.
+    TEST_CHECK(state.services != nullptr);
+    std::array<uint8_t, 32> buf{};
+    TEST_CHECK(state.services->dma_read(state.services->host_ctx, 0xFFFFFFFFFFFFFFF0ULL, buf.data(),
+                                        buf.size()) != 0);
+    TEST_CHECK(state.services->dma_write(state.services->host_ctx, 0xFFFFFFFFFFFFFFF0ULL,
+                                         buf.data(), buf.size()) != 0);
+    TEST_CHECK(state.services->dma_read(state.services->host_ctx, 0x80001000ULL, nullptr, 4) != 0);
+    TEST_CHECK(state.services->dma_write(state.services->host_ctx, 0x80001000ULL, nullptr, 4) != 0);
+}
+
+void test_ring_buffer_ethernet_subword_and_net_bounds() {
+    simrv::core::Machine machine{};
+    simrv::device::RingBufferEthernetMmio eth(
+        machine, "eth", simrv::xlen::PhysAddr{0x14000000}, 0x1000, 1,
+        simrv::xlen::PhysAddr{0x18000000}, 100, simrv::xlen::PhysAddr{0x1c000000}, 100,
+        {0x52, 0x54, 0x00, 0x12, 0x34, 0x56}, simrv::device::virtio::NetBackend::Mode::None);
+
+    // Non-power-of-two buffer sizes are sanitized to power-of-two >= 64.
+    TEST_CHECK(eth.rx_node()->size() == 64);
+    TEST_CHECK(eth.tx_node()->size() == 64);
+
+    auto* tx_mmio = dynamic_cast<simrv::memory::MmioDevice*>(eth.tx_node());
+    TEST_CHECK(tx_mmio != nullptr);
+    tx_mmio->write8(simrv::memory::MmioOffset{1}, 0xAB);
+    tx_mmio->write16(simrv::memory::MmioOffset{2}, 0x1234);
+    TEST_CHECK(tx_mmio->read8(simrv::memory::MmioOffset{1}) == 0xAB);
+    TEST_CHECK(tx_mmio->read16(simrv::memory::MmioOffset{2}) == 0x1234);
+    TEST_CHECK(tx_mmio->read32(simrv::memory::MmioOffset{0}) == 0x1234AB00U);
+
+    // Out-of-bounds buffer accesses are safely ignored.
+    tx_mmio->write32(simrv::memory::MmioOffset{62}, 0xDEADBEEFU);
+    TEST_CHECK(tx_mmio->read32(simrv::memory::MmioOffset{62}) == 0);
+
+    // NetBackend tracks tx_packet_count without retaining unbounded history and caps rx_queue_.
+    const std::array<uint8_t, 60> valid_frame{};
+    eth.backend().send_tx_packet(valid_frame);
+    TEST_CHECK(eth.backend().tx_packet_count() == 1);
+    const std::vector<uint8_t> oversized_frame(
+        simrv::device::virtio::NetBackend::kMaxPacketBytes + 1, 0x11);
+    eth.backend().send_tx_packet(oversized_frame);
+    TEST_CHECK(eth.backend().tx_packet_count() == 1);
+
+    for (std::size_t i = 0; i < simrv::device::virtio::NetBackend::kMaxRxQueuePackets + 25; ++i) {
+        std::array<uint8_t, 4> pkt{static_cast<uint8_t>(i & 0xFFU), 0, 0, 0};
+        eth.backend().push_rx_packet(pkt);
+    }
+    std::size_t popped = 0;
+    while (eth.backend().has_rx_packet()) {
+        (void)eth.backend().pop_rx_packet();
+        ++popped;
+    }
+    TEST_CHECK(popped == simrv::device::virtio::NetBackend::kMaxRxQueuePackets);
+}
+
+void test_machine_reinitialize_and_reset_cleans_up_devices() {
+    struct State {
+        uint32_t reset_calls = 0;
+        uint64_t ticks = 0;
+    } state;
+
+    SimRvExternalDevice descriptor{};
+    descriptor.api_version = SIMRV_EXTERNAL_DEVICE_API_VERSION;
+    descriptor.name = "reinit-device";
+    descriptor.compatible = "test,reinit";
+    descriptor.default_base = 0x10060000;
+    descriptor.default_size = 0x1000;
+    descriptor.reset = [](void* ctx) { ++static_cast<State*>(ctx)->reset_calls; };
+    descriptor.read = [](void*, uint64_t, uint32_t, uint64_t* out) {
+        *out = 0;
+        return 0;
+    };
+    descriptor.write = [](void*, uint64_t, uint32_t, uint64_t) { return 0; };
+    descriptor.advance_cycles = [](void* ctx, uint64_t cycles) {
+        static_cast<State*>(ctx)->ticks += cycles;
+    };
+
+    simrv::core::MachineConfig cfg{};
+    cfg.tui.enabled = true;
+    simrv::core::SoCDeviceConfig dev{};
+    dev.kind = simrv::core::SoCDeviceKind::CustomMmio;
+    dev.name = "reinit-device";
+    dev.compatible = "test,reinit";
+    dev.base = simrv::xlen::PhysAddr{0x10060000};
+    dev.size = 0x1000;
+    dev.enabled = true;
+    cfg.soc.devices.push_back(dev);
+
+    simrv::core::Machine machine(cfg);
+    TEST_CHECK(machine.device_registry().register_mmio_compatible(
+        dev.compatible,
+        [&descriptor, &state](simrv::core::Machine& m, const simrv::core::SoCDeviceConfig& c)
+            -> std::unique_ptr<simrv::memory::MmioDevice> {
+            return std::make_unique<simrv::device::ExternalMmioDevice>(
+                &descriptor, &state, c.name, simrv::xlen::PhysAddr{c.base}, c.size, m);
+        }));
+
+    TEST_CHECK(machine.initialize().has_value());
+    TEST_CHECK(state.reset_calls == 1);
+    TEST_CHECK(machine.initialize().has_value());
+    TEST_CHECK(state.reset_calls == 2);
+
+    // Re-initialization must replace, not duplicate, ticked extension devices.
+    machine.advance_device_cycles(10);
+    TEST_CHECK(state.ticks == 10);
+
+    machine.reset_state();
+    TEST_CHECK(state.reset_calls == 3);
+}
+
+void test_memory_safety_audit_and_cxx_profiles() {
+    namespace fs = std::filesystem;
+    using namespace simrv::device;
+    using namespace simrv::device::virtio;
+
+    // 1. simrv::profiles helpers: checked_subspan and unaligned scalar load/store.
+    std::array<std::byte, 8> raw_bytes{};
+    auto valid_slice = simrv::profiles::checked_subspan(std::span<std::byte>(raw_bytes), 2, 4);
+    TEST_CHECK(valid_slice.has_value() && valid_slice->size() == 4);
+    TEST_CHECK(!simrv::profiles::checked_subspan(std::span<std::byte>(raw_bytes),
+                                                 std::numeric_limits<std::size_t>::max(), 4)
+                    .has_value());
+    TEST_CHECK(
+        !simrv::profiles::checked_subspan(std::span<std::byte>(raw_bytes), 6, 4).has_value());
+
+    TEST_CHECK(simrv::profiles::write_unaligned<uint32_t>(std::span<std::byte>(raw_bytes), 1,
+                                                          0x11223344U));
+    const auto unaligned_val =
+        simrv::profiles::read_unaligned<uint32_t>(std::span<const std::byte>(raw_bytes), 1);
+    TEST_CHECK(unaligned_val.has_value() && *unaligned_val == 0x11223344U);
+    TEST_CHECK(!simrv::profiles::write_unaligned<uint32_t>(std::span<std::byte>(raw_bytes), 6, 1U));
+    TEST_CHECK(!simrv::profiles::read_unaligned<uint32_t>(std::span<const std::byte>(raw_bytes), 6)
+                    .has_value());
+
+    // 2. RamView span/subspan bounds and SoCConfig lookup.
+    simrv::memory::RamView empty_ram{};
+    TEST_CHECK(empty_ram.span().empty());
+    TEST_CHECK(empty_ram.subspan(simrv::xlen::PhysAddr{0}, 4).empty());
+
+    std::array<simrv::xlen::Byte, 64> ram_backing{};
+    simrv::memory::RamView ram_view(ram_backing, simrv::xlen::PhysAddr{0x80000000});
+    TEST_CHECK(ram_view.span().size() == 64);
+    TEST_CHECK(ram_view.subspan(simrv::xlen::PhysAddr{0x80000010}, 16).size() == 16);
+    TEST_CHECK(ram_view.subspan(simrv::xlen::PhysAddr{0x80000038}, 16).empty());
+    TEST_CHECK(
+        ram_view.subspan(simrv::xlen::PhysAddr{std::numeric_limits<simrv::xlen::Address>::max()}, 8)
+            .empty());
+
+    simrv::core::SoCConfig empty_soc{};
+    TEST_CHECK(empty_soc.find(simrv::core::SoCDeviceKind::Uart) == nullptr);
+
+    // 3. PciDevice config-space bounds, BAR alignment, MSI cap validation, and 64-bit ECAM split.
+    struct TestPciDevice final : PciDevice {
+        TestPciDevice()
+            : PciDevice(PciVendorId{0x1234}, PciDeviceId{0x5678}, PciRevisionId{1},
+                        PciClassCode{0x010000}) {
+            init_bar(0, 0x1000, false, false);
+        }
+    };
+    auto pci_dev = std::make_shared<TestPciDevice>();
+    TEST_CHECK(pci_dev->config_read(PciConfigOffset{0x00}, 0) == 0xFFFFFFFFU);
+    TEST_CHECK(pci_dev->config_read(PciConfigOffset{0x00}, 3) == 0xFFFFFFFFU);
+    TEST_CHECK(pci_dev->config_read(PciConfigOffset{0x00}, 8) == 0xFFFFFFFFU);
+    TEST_CHECK(pci_dev->config_read(PciConfigOffset{0xFF}, 4) == 0xFFFFFFFFU);
+    pci_dev->config_write(PciConfigOffset{0xFF}, 0xAABBCCDDU, 4);
+
+    pci_dev->config_write(PciConfigOffset{0x10}, 0x50001000U, 4);
+    TEST_CHECK(pci_dev->bar_base(0) == simrv::xlen::PhysAddr{0x50001000});
+    pci_dev->config_write(PciConfigOffset{0x10}, 0x1234U, 2);
+    pci_dev->config_write(PciConfigOffset{0x11}, 0x20000000U, 4);
+    TEST_CHECK(pci_dev->bar_base(0) == simrv::xlen::PhysAddr{0x50001000});
+
+    pci_dev->init_msi(PciConfigOffset{0xFC}, true);
+    TEST_CHECK(!pci_dev->is_msi_enabled());
+    TEST_CHECK(pci_dev->msi_address() == simrv::xlen::PhysAddr{0});
+    TEST_CHECK(pci_dev->msi_data() == 0);
+
+    PcieRootComplex rc(nullptr);
+    TEST_CHECK(
+        rc.attach_device(PciBusNumber{0}, PciDeviceNumber{1}, PciFunctionNumber{0}, pci_dev));
+    simrv::memory::TlChannelA ecam_req{};
+    simrv::memory::TlChannelD ecam_resp{};
+    ecam_req.opcode = simrv::memory::TlOpcodeA::Get;
+    ecam_req.size = 3;  // 8-byte access split into two 32-bit ECAM reads
+    ecam_req.address = simrv::xlen::PhysAddr{rc.ecam_node().base_address().raw() + (1U << 15)};
+    TEST_CHECK(rc.ecam_node().handle_request(ecam_req, ecam_resp) && !ecam_resp.denied);
+    TEST_CHECK((ecam_resp.data & 0xFFFFFFFFULL) == ((0x5678ULL << 16U) | 0x1234ULL));
+
+    ecam_req.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    ecam_req.size = 3;
+    ecam_req.address =
+        simrv::xlen::PhysAddr{rc.ecam_node().base_address().raw() + (1U << 15) + 0x10};
+    ecam_req.data = 0x0000000060002000ULL;
+    TEST_CHECK(rc.ecam_node().handle_request(ecam_req, ecam_resp) && !ecam_resp.denied);
+    TEST_CHECK(pci_dev->bar_base(0) == simrv::xlen::PhysAddr{0x60002000});
+
+    ecam_req.opcode = simrv::memory::TlOpcodeA::Get;
+    ecam_req.address = simrv::xlen::PhysAddr{std::numeric_limits<simrv::xlen::Address>::max()};
+    TEST_CHECK(rc.ecam_node().handle_request(ecam_req, ecam_resp) && !ecam_resp.denied &&
+               ecam_resp.data == 0xFFFFFFFFFFFFFFFFULL);
+
+    // 4. HostAudioSink unaligned sample scaling and oversized buffer eviction bounds.
+    auto& audio = HostAudioSink::instance();
+    const float prev_vol = audio.volume();
+    const bool prev_muted = audio.is_muted();
+    audio.set_volume(0.5F);
+    audio.set_muted(false);
+    std::array<uint8_t, 5> odd_pcm{0x01, 0x02, 0x03, 0x04, 0x7F};
+    audio.write_samples(odd_pcm.data(), odd_pcm.size());
+    std::vector<uint8_t> huge_pcm(200000, 0x10);
+    audio.write_samples(huge_pcm.data(), huge_pcm.size());
+    audio.set_muted(true);
+    audio.write_samples(huge_pcm.data(), huge_pcm.size());
+    audio.set_volume(prev_vol);
+    audio.set_muted(prev_muted);
+
+    // 5. VirtioRngQueue chunked DMA bounds and wraparound rejection.
+    std::array<uint8_t, 4096> vq_ram{};
+    auto vq_read = [&](uint64_t addr, void* dst, std::size_t len) -> bool {
+        if (addr > vq_ram.size() || len > vq_ram.size() - static_cast<std::size_t>(addr)) {
+            return false;
+        }
+        std::memcpy(dst, vq_ram.data() + addr, len);
+        return true;
+    };
+    auto vq_write = [&](uint64_t addr, const void* src, std::size_t len) -> bool {
+        if (addr > vq_ram.size() || len > vq_ram.size() - static_cast<std::size_t>(addr)) {
+            return false;
+        }
+        std::memcpy(vq_ram.data() + addr, src, len);
+        return true;
+    };
+    QueueState rng_q{};
+    rng_q.num_max = 4;
+    rng_q.num = 4;
+    rng_q.ready = 1;
+    rng_q.desc_addr = 0x100;
+    rng_q.driver_addr = 0x200;
+    rng_q.device_addr = 0x300;
+    rng_q.last_avail_idx = 0;
+
+    VirtqDesc rng_desc0{.addr = 0x400, .len = 0x100000U, .flags = kVirtqDescFWrite, .next = 0};
+    VirtqDesc rng_desc1{.addr = std::numeric_limits<uint64_t>::max() - 8ULL,
+                        .len = 64,
+                        .flags = kVirtqDescFWrite,
+                        .next = 0};
+    std::memcpy(vq_ram.data() + rng_q.desc_addr, &rng_desc0, sizeof(rng_desc0));
+    std::memcpy(vq_ram.data() + rng_q.desc_addr + sizeof(VirtqDesc), &rng_desc1, sizeof(rng_desc1));
+    uint16_t avail_idx = 2;
+    uint16_t ring0 = 0;
+    uint16_t ring1 = 1;
+    std::memcpy(vq_ram.data() + rng_q.driver_addr + 2, &avail_idx, sizeof(avail_idx));
+    std::memcpy(vq_ram.data() + rng_q.driver_addr + 4, &ring0, sizeof(ring0));
+    std::memcpy(vq_ram.data() + rng_q.driver_addr + 6, &ring1, sizeof(ring1));
+
+    RngBackend rng_backend;
+    int rng_irq_count = 0;
+    process_rng_queue(rng_q, rng_backend, vq_read, vq_write, [&]() { ++rng_irq_count; });
+    TEST_CHECK(rng_irq_count == 1);
+    VirtqUsedElem used0{};
+    VirtqUsedElem used1{};
+    std::memcpy(&used0, vq_ram.data() + rng_q.device_addr + 4, sizeof(used0));
+    std::memcpy(&used1, vq_ram.data() + rng_q.device_addr + 4 + sizeof(VirtqUsedElem),
+                sizeof(used1));
+    TEST_CHECK(used0.len == 3072);
+    TEST_CHECK(used1.len == 0);
+
+    // 6. VirtioSoundBackend controlq & txq DMA read failure handling.
+    std::array<uint8_t, 4096> snd_ram{};
+    auto snd_dma_read = [&](simrv::xlen::PhysAddr addr, void* dst, std::size_t len) -> bool {
+        const auto raw = addr.raw();
+        if (raw > snd_ram.size() || len > snd_ram.size() - static_cast<std::size_t>(raw)) {
+            return false;
+        }
+        std::memcpy(dst, snd_ram.data() + raw, len);
+        return true;
+    };
+    auto snd_dma_write = [&](simrv::xlen::PhysAddr addr, const void* src, std::size_t len) -> bool {
+        const auto raw = addr.raw();
+        if (raw > snd_ram.size() || len > snd_ram.size() - static_cast<std::size_t>(raw)) {
+            return false;
+        }
+        std::memcpy(snd_ram.data() + raw, src, len);
+        return true;
+    };
+    VirtioSoundBackend sound_backend;
+    QueueState ctl_q{};
+    ctl_q.num_max = 4;
+    ctl_q.num = 4;
+    ctl_q.ready = 1;
+    ctl_q.desc_addr = 0x100;
+    ctl_q.driver_addr = 0x200;
+    ctl_q.device_addr = 0x300;
+    VirtioSndPcmSetParams ctl_params{};
+    ctl_params.hdr.hdr.code = kVirtioSndRPcmSetParams;
+    std::memcpy(snd_ram.data() + 0xFFC, &ctl_params.hdr.hdr, sizeof(ctl_params.hdr.hdr));
+    VirtqDesc ctl_desc0{
+        .addr = 0xFFC, .len = sizeof(VirtioSndPcmSetParams), .flags = kVirtqDescFNext, .next = 1};
+    VirtqDesc ctl_desc1{
+        .addr = 0x500, .len = sizeof(VirtioSndHdr), .flags = kVirtqDescFWrite, .next = 0};
+    std::memcpy(snd_ram.data() + ctl_q.desc_addr, &ctl_desc0, sizeof(ctl_desc0));
+    std::memcpy(snd_ram.data() + ctl_q.desc_addr + sizeof(VirtqDesc), &ctl_desc1,
+                sizeof(ctl_desc1));
+    uint16_t ctl_avail_idx = 1;
+    uint16_t ctl_ring0 = 0;
+    std::memcpy(snd_ram.data() + ctl_q.driver_addr + 2, &ctl_avail_idx, sizeof(ctl_avail_idx));
+    std::memcpy(snd_ram.data() + ctl_q.driver_addr + 4, &ctl_ring0, sizeof(ctl_ring0));
+    int snd_irqs = 0;
+    sound_backend.process_controlq(ctl_q, snd_dma_read, snd_dma_write, [&]() { ++snd_irqs; });
+    TEST_CHECK(snd_irqs == 1);
+    VirtioSndHdr ctl_resp{};
+    std::memcpy(&ctl_resp, snd_ram.data() + 0x500, sizeof(ctl_resp));
+    TEST_CHECK(ctl_resp.code == kVirtioSndSNotSupp);
+
+    const uint64_t bytes_before_tx = audio.total_bytes();
+    QueueState tx_q{};
+    tx_q.num_max = 4;
+    tx_q.num = 4;
+    tx_q.ready = 1;
+    tx_q.desc_addr = 0x600;
+    tx_q.driver_addr = 0x700;
+    tx_q.device_addr = 0x800;
+    VirtqDesc tx_desc0{
+        .addr = 0x900, .len = sizeof(VirtioSndPcmXfer), .flags = kVirtqDescFNext, .next = 1};
+    VirtqDesc tx_desc1{.addr = 0xA00, .len = 250000U, .flags = kVirtqDescFNext, .next = 2};
+    VirtqDesc tx_desc2{
+        .addr = 0xB00, .len = sizeof(VirtioSndPcmStatus), .flags = kVirtqDescFWrite, .next = 0};
+    std::memcpy(snd_ram.data() + tx_q.desc_addr, &tx_desc0, sizeof(tx_desc0));
+    std::memcpy(snd_ram.data() + tx_q.desc_addr + sizeof(VirtqDesc), &tx_desc1, sizeof(tx_desc1));
+    std::memcpy(snd_ram.data() + tx_q.desc_addr + 2 * sizeof(VirtqDesc), &tx_desc2,
+                sizeof(tx_desc2));
+    uint16_t tx_avail_idx = 1;
+    uint16_t tx_ring0 = 0;
+    std::memcpy(snd_ram.data() + tx_q.driver_addr + 2, &tx_avail_idx, sizeof(tx_avail_idx));
+    std::memcpy(snd_ram.data() + tx_q.driver_addr + 4, &tx_ring0, sizeof(tx_ring0));
+    sound_backend.process_txq(tx_q, snd_dma_read, snd_dma_write, [&]() { ++snd_irqs; });
+    TEST_CHECK(snd_irqs == 2);
+    TEST_CHECK(audio.total_bytes() == bytes_before_tx);
+
+    // 7. SymbolTable ELF section caps and non-NUL string table hardening.
+    const fs::path tmp_elf_dir = fs::temp_directory_path() / "simrv_memory_safety_elf_tests";
+    fs::create_directories(tmp_elf_dir);
+    struct TempDirCleanup {
+        fs::path path;
+        ~TempDirCleanup() {
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    } cleanup{tmp_elf_dir};
+
+    auto write_file_bytes = [](const fs::path& p, const std::vector<uint8_t>& bytes) {
+        std::ofstream out(p, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+    };
+
+    auto make_elf64_header = [](uint16_t shnum, uint64_t shoff) {
+        simrv::util::elf::Elf64_Ehdr ehdr{};
+        ehdr.e_ident[0] = 0x7f;
+        ehdr.e_ident[1] = 'E';
+        ehdr.e_ident[2] = 'L';
+        ehdr.e_ident[3] = 'F';
+        ehdr.e_ident[4] = simrv::util::elf::kClass64;
+        ehdr.e_shnum = shnum;
+        ehdr.e_shoff = shoff;
+        return ehdr;
+    };
+
+    {
+        const auto ehdr = make_elf64_header(60000, sizeof(simrv::util::elf::Elf64_Ehdr));
+        std::vector<uint8_t> bytes(sizeof(ehdr));
+        std::memcpy(bytes.data(), &ehdr, sizeof(ehdr));
+        const fs::path p = tmp_elf_dir / "excess_sections.elf";
+        write_file_bytes(p, bytes);
+        simrv::debug::SymbolTable sym;
+        TEST_CHECK(!sym.load_from_elf(p.string()));
+    }
+    {
+        const auto ehdr = make_elf64_header(1, sizeof(simrv::util::elf::Elf64_Ehdr));
+        simrv::util::elf::Elf64_Shdr sym_shdr{};
+        sym_shdr.sh_type = simrv::util::elf::kSymbolTable;
+        sym_shdr.sh_link = 99;
+        std::vector<uint8_t> bytes(sizeof(ehdr) + sizeof(sym_shdr));
+        std::memcpy(bytes.data(), &ehdr, sizeof(ehdr));
+        std::memcpy(bytes.data() + sizeof(ehdr), &sym_shdr, sizeof(sym_shdr));
+        const fs::path p = tmp_elf_dir / "bad_link.elf";
+        write_file_bytes(p, bytes);
+        simrv::debug::SymbolTable sym;
+        TEST_CHECK(!sym.load_from_elf(p.string()));
+    }
+    {
+        const uint64_t shoff = sizeof(simrv::util::elf::Elf64_Ehdr);
+        const uint64_t symoff = shoff + 2 * sizeof(simrv::util::elf::Elf64_Shdr);
+        const uint64_t stroff = symoff + sizeof(simrv::util::elf::Elf64_Sym);
+        const auto ehdr = make_elf64_header(2, shoff);
+
+        simrv::util::elf::Elf64_Shdr shdr0{};
+        shdr0.sh_type = simrv::util::elf::kSymbolTable;
+        shdr0.sh_offset = symoff;
+        shdr0.sh_size = sizeof(simrv::util::elf::Elf64_Sym);
+        shdr0.sh_link = 1;
+
+        simrv::util::elf::Elf64_Shdr shdr1{};
+        shdr1.sh_offset = stroff;
+        shdr1.sh_size = 4;
+
+        simrv::util::elf::Elf64_Sym sym_rec{};
+        sym_rec.st_name = 1;
+        sym_rec.st_info = simrv::util::elf::kSymbolFunction;
+        sym_rec.st_value = 0x80001000ULL;
+
+        std::array<char, 4> unterminated{'\0', 'f', 'o', 'o'};
+        std::vector<uint8_t> bytes(stroff + unterminated.size());
+        std::memcpy(bytes.data(), &ehdr, sizeof(ehdr));
+        std::memcpy(bytes.data() + shoff, &shdr0, sizeof(shdr0));
+        std::memcpy(bytes.data() + shoff + sizeof(shdr0), &shdr1, sizeof(shdr1));
+        std::memcpy(bytes.data() + symoff, &sym_rec, sizeof(sym_rec));
+        std::memcpy(bytes.data() + stroff, unterminated.data(), unterminated.size());
+
+        const fs::path p = tmp_elf_dir / "unterminated_strtab.elf";
+        write_file_bytes(p, bytes);
+        simrv::debug::SymbolTable sym;
+        TEST_CHECK(sym.load_from_elf(p.string()));
+        const auto found = sym.lookup_name("fo");
+        TEST_CHECK(found.has_value() && *found == simrv::xlen::VirtAddr{0x80001000});
+    }
+
+    // 8. PFlash reset() controller state restoration and wraparound-safe MMIO bounds.
+    simrv::core::MachineConfig pflash_cfg{};
+    pflash_cfg.memory.dram_size = 0x100000;
+    simrv::core::Machine pflash_machine(pflash_cfg);
+    PFlash pflash(pflash_machine, simrv::xlen::PhysAddr{0x20000000}, 0x10000);
+    pflash.write8(simrv::memory::MmioOffset{0}, 0x40);
+    pflash.reset();
+    TEST_CHECK(pflash.read8(simrv::memory::MmioOffset{0}) == 0xFF);
+
+    constexpr auto kMaxOffset = std::numeric_limits<simrv::xlen::Address>::max();
+    TEST_CHECK(pflash.read16(simrv::memory::MmioOffset{kMaxOffset}) == 0);
+    TEST_CHECK(pflash.read32(simrv::memory::MmioOffset{kMaxOffset}) == 0);
+    TEST_CHECK(pflash.read64(simrv::memory::MmioOffset{kMaxOffset}) == 0);
+    pflash.write8(simrv::memory::MmioOffset{0}, 0x40);
+    pflash.write16(simrv::memory::MmioOffset{kMaxOffset}, 0x1234);
+    pflash.write8(simrv::memory::MmioOffset{0}, 0x40);
+    pflash.write32(simrv::memory::MmioOffset{kMaxOffset}, 0x12345678U);
+    pflash.write8(simrv::memory::MmioOffset{0}, 0x40);
+    pflash.write64(simrv::memory::MmioOffset{kMaxOffset}, 0x123456789ABCDEF0ULL);
+    pflash.reset();
+    TEST_CHECK(!pflash.load_image(tmp_elf_dir / "missing_pflash.bin"));
+}
+
 int main() {
     test_plugin_host_services_are_per_device();
     test_serial_plugin_replaces_builtin();
@@ -615,6 +1141,10 @@ int main() {
     test_v2_cycle_ticking();
     test_v1_compatibility();
     test_scaffolding_and_formalized_configs();
+    test_external_mmio_bounds_and_dma_overflow();
+    test_ring_buffer_ethernet_subword_and_net_bounds();
+    test_machine_reinitialize_and_reset_cleans_up_devices();
+    test_memory_safety_audit_and_cxx_profiles();
 #ifdef TEST_TIMER_PLUGIN_PATH
     test_example_timer_plugin_integration();
     test_timer_plugin_advances_in_fast_baremetal();

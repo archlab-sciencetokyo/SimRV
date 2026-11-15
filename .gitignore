@@ -50,6 +50,7 @@ benchmark_logs/
 perf*.data*
 
 # Generated benchmark/test outputs
+tests/act4/output/
 .bench_tmp/
 .cache/
 .venv/
