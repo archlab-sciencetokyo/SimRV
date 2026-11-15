@@ -357,6 +357,22 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     append_if_enabled(simrv::isa::MultiLetterExtension::Zfbfmin, "zfbfmin");
     append_if_enabled(simrv::isa::MultiLetterExtension::Zvfbfmin, "zvfbfmin");
     append_if_enabled(simrv::isa::MultiLetterExtension::Zvfbfwma, "zvfbfwma");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbkb, "zbkb");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbkc, "zbkc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbkx, "zbkx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zknd, "zknd");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zkne, "zkne");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zknh, "zknh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zksed, "zksed");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zksh, "zksh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvkg, "zvkg");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvkned, "zvkned");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvknha, "zvknha");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvknhb, "zvknhb");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvksed, "zvksed");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvksh, "zvksh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zcmp, "zcmp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zcmt, "zcmt");
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));

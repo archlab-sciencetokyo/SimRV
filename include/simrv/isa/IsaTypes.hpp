@@ -350,6 +350,36 @@ constexpr void add_extension_to_set(ExtensionSet& set, std::string_view name) no
         set.set(MultiLetterExtension::Zvkt);
         return;
     }
+    if (name == "zvkng") {
+        add_extension_to_set(set, "zvkn");
+        set.set(MultiLetterExtension::Zvkg);
+        return;
+    }
+    if (name == "zvknc") {
+        add_extension_to_set(set, "zvkn");
+        set.set(MultiLetterExtension::Zvbc);
+        return;
+    }
+    if (name == "zvksg") {
+        add_extension_to_set(set, "zvks");
+        set.set(MultiLetterExtension::Zvkg);
+        return;
+    }
+    if (name == "zvksc") {
+        add_extension_to_set(set, "zvks");
+        set.set(MultiLetterExtension::Zvbc);
+        return;
+    }
+    if (name == "zvk") {
+        set.set(MultiLetterExtension::Zvkned);
+        set.set(MultiLetterExtension::Zvknhb);
+        set.set(MultiLetterExtension::Zvksed);
+        set.set(MultiLetterExtension::Zvksh);
+        set.set(MultiLetterExtension::Zvkg);
+        set.set(MultiLetterExtension::Zvkb);
+        set.set(MultiLetterExtension::Zvkt);
+        return;
+    }
     if (name == "sha") {
         set.set(MultiLetterExtension::Ssstateen);
         set.set(MultiLetterExtension::Shcounterenw);

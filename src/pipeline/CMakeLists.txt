@@ -3,6 +3,7 @@ simrv_add_component(simrv-isa
   Decompressor.cpp
   ../isa/Zb.cpp
   ../isa/Zk.cpp
+  ../isa/Crypto.cpp
 )
 add_library(simrv::isa ALIAS simrv-isa)
 

@@ -144,6 +144,10 @@ namespace simrv::pipeline::operation {
     return info(op).rv64_only;
 }
 
+[[nodiscard]] constexpr auto requires_rv32(isa::OperationId op) noexcept -> bool {
+    return info(op).rv32_only;
+}
+
 [[nodiscard]] constexpr auto effective_memory_funct3(isa::OperationId op,
                                                      isa::Funct3 funct3) noexcept -> isa::Funct3 {
     const auto inf = info(op);
@@ -269,7 +273,7 @@ consteval auto generate_static_op_traits() {
         dt.is_mem_load = (is_load || is_amo_load) && (inf.operands.rd == RegBank::Integer);
         dt.is_mem_store = is_store || (is_atomic && !is_load);
         dt.is_control = (inf.control != ControlFlowKind::None);
-        const bool vector = (op >= isa::OperationId::VSETVLI && op <= isa::OperationId::VWSLL_VI);
+        const bool vector = isa::is_vector_op(op);
         dt.is_serializing = vector || (inf.side_effects & SideEffectFlags::Serializing);
         dt.is_cfu = (inf.execution_class == ExecutionClass::Cfu);
         table[i] = dt;

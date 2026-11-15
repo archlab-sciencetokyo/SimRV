@@ -183,6 +183,61 @@ constexpr auto is_zvfbfwma_operation(OperationId op_id) noexcept -> bool {
     return op_id == OperationId::VFWMACCBF16_VV || op_id == OperationId::VFWMACCBF16_VF;
 }
 
+constexpr auto is_zvkned_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::VAESEF_VV && op_id <= OperationId::VAESKF2_VI;
+}
+
+constexpr auto is_zvkg_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::VGHSH_VV || op_id == OperationId::VGMUL_VV;
+}
+
+constexpr auto is_zvknh_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::VSHA2MS_VV && op_id <= OperationId::VSHA2CL_VV;
+}
+
+constexpr auto is_zvksed_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::VSM4K_VI && op_id <= OperationId::VSM4R_VS;
+}
+
+constexpr auto is_zvksh_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::VSM3ME_VV || op_id == OperationId::VSM3C_VI;
+}
+
+constexpr auto is_aes64_ks_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::AES64KS1I || op_id == OperationId::AES64KS2;
+}
+
+constexpr auto is_zkne_only_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::AES32ESI || op_id == OperationId::AES32ESMI ||
+           op_id == OperationId::AES64ES || op_id == OperationId::AES64ESM;
+}
+
+constexpr auto is_zknd_only_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::AES32DSI || op_id == OperationId::AES32DSMI ||
+           op_id == OperationId::AES64DS || op_id == OperationId::AES64DSM ||
+           op_id == OperationId::AES64IM;
+}
+
+constexpr auto is_zknh_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::SHA256SIG0 && op_id <= OperationId::SHA512SUM1R;
+}
+
+constexpr auto is_zksed_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::SM4ED || op_id == OperationId::SM4KS;
+}
+
+constexpr auto is_zksh_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::SM3P0 || op_id == OperationId::SM3P1;
+}
+
+constexpr auto is_zcmp_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::CM_PUSH && op_id <= OperationId::CM_MVSA01;
+}
+
+constexpr auto is_zcmt_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::CM_JT || op_id == OperationId::CM_JALT;
+}
+
 /**
  * @brief Verify both single-letter MISA and multi-letter ExtensionSet requirements for an
  *        already decoded instruction.
@@ -218,6 +273,71 @@ constexpr auto instruction_enabled(simrv::xlen::CsrValue misa, ExtensionSet enab
         return instruction_enabled_by_misa(misa, op_id, compressed) &&
                enabled_extensions.has(MultiLetterExtension::Zacas);
     }
+
+    // Track 2A: Vector Cryptography
+    if (is_zvkned_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zvkned);
+    }
+    if (is_zvkg_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zvkg);
+    }
+    if (is_zvknh_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               (enabled_extensions.has(MultiLetterExtension::Zvknha) ||
+                enabled_extensions.has(MultiLetterExtension::Zvknhb));
+    }
+    if (is_zvksed_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zvksed);
+    }
+    if (is_zvksh_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zvksh);
+    }
+
+    // Track 2B: Scalar Cryptography
+    if (is_aes64_ks_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               (enabled_extensions.has(MultiLetterExtension::Zkne) ||
+                enabled_extensions.has(MultiLetterExtension::Zknd));
+    }
+    if (is_zkne_only_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zkne);
+    }
+    if (is_zknd_only_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zknd);
+    }
+    if (is_zknh_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zknh);
+    }
+    if (is_zksed_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zksed);
+    }
+    if (is_zksh_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zksh);
+    }
+
+    // Track 2C: Code-Size (Zcmp / Zcmt)
+    // Mutually exclusive with Zcd (or standard D and C)
+    const bool zcd_active =
+        enabled_extensions.has(MultiLetterExtension::Zcd) ||
+        (misa_has_extension(misa, IsaExtension::D) && misa_has_extension(misa, IsaExtension::C));
+    if (is_zcmp_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zcmp) && !zcd_active;
+    }
+    if (is_zcmt_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zcmt) && !zcd_active;
+    }
+
     if (instruction_enabled_by_misa(misa, op_id, compressed)) {
         return true;
     }

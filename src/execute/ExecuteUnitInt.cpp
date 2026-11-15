@@ -4,6 +4,7 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/execute/ExecuteUnitZb.hpp"
+#include "simrv/execute/ExecuteUnitZk.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Math.hpp"
@@ -121,6 +122,9 @@ auto ExecuteUnitInt::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register i
             break;
 
         default:
+            if (isa::is_zk_op(op_id)) {
+                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, 32);
+            }
             return ExecuteUnitZb::aluIntZb(in1, in2, op_id, 32);
     }
     return static_cast<simrv::xlen::Register>(static_cast<int64_t>(res32));
@@ -211,6 +215,9 @@ auto ExecuteUnitInt::aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2
         }
 
         default:
+            if (isa::is_zk_op(op_id)) {
+                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, xlen);
+            }
             if (isa::is_zb_op(op_id)) {
                 return ExecuteUnitZb::aluIntZb(in1, in2, op_id, xlen);
             }

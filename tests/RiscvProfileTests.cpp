@@ -30,6 +30,7 @@
 #include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/isa/Zk.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
@@ -3425,6 +3426,645 @@ void test_track1c_fp16_bf16() {
             .u32[0] == 0x40800000U);  // 4.0f
 }
 
+void test_track2_aggregate_isa_expansion() {
+    using namespace simrv::isa;
+
+    // =========================================================================
+    // 1. Aggregate Shorthand Expansion: zkn (Scalar NIST Cryptography)
+    //    zkn = Zbkb + Zbkc + Zbkx + Zkne + Zknd + Zknh
+    // =========================================================================
+    {
+        const auto zkn_64 = parse_isa_spec("rv64gc_zkn");
+        TEST_ASSERT(zkn_64.has_value());
+        TEST_ASSERT(zkn_64->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(zkn_64->has_extension(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(zkn_64->has_extension(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(zkn_64->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(zkn_64->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(zkn_64->has_extension(MultiLetterExtension::Zknh));
+        // Must NOT expand into ShangMi or entropy seed extensions
+        TEST_ASSERT(!zkn_64->has_extension(MultiLetterExtension::Zksed));
+        TEST_ASSERT(!zkn_64->has_extension(MultiLetterExtension::Zksh));
+        TEST_ASSERT(!zkn_64->has_extension(MultiLetterExtension::Zkr));
+        TEST_ASSERT(!zkn_64->has_extension(MultiLetterExtension::Zkt));
+
+        const auto zkn_32 = parse_isa_spec("rv32gc_zkn");
+        TEST_ASSERT(zkn_32.has_value());
+        TEST_ASSERT(zkn_32->xlen == 32);
+        TEST_ASSERT(zkn_32->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(zkn_32->has_extension(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(zkn_32->has_extension(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(zkn_32->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(zkn_32->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(zkn_32->has_extension(MultiLetterExtension::Zknh));
+        TEST_ASSERT(!zkn_32->has_extension(MultiLetterExtension::Zksed));
+        TEST_ASSERT(!zkn_32->has_extension(MultiLetterExtension::Zksh));
+    }
+
+    // =========================================================================
+    // 2. Aggregate Shorthand Expansion: zks (Scalar ShangMi Cryptography)
+    //    zks = Zbkb + Zbkc + Zbkx + Zksed + Zksh
+    // =========================================================================
+    {
+        const auto zks_64 = parse_isa_spec("rv64gc_zks");
+        TEST_ASSERT(zks_64.has_value());
+        TEST_ASSERT(zks_64->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(zks_64->has_extension(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(zks_64->has_extension(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(zks_64->has_extension(MultiLetterExtension::Zksed));
+        TEST_ASSERT(zks_64->has_extension(MultiLetterExtension::Zksh));
+        // Must NOT expand into NIST cipher/hash extensions
+        TEST_ASSERT(!zks_64->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(!zks_64->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(!zks_64->has_extension(MultiLetterExtension::Zknh));
+
+        const auto zks_32 = parse_isa_spec("rv32gc_zks");
+        TEST_ASSERT(zks_32.has_value());
+        TEST_ASSERT(zks_32->xlen == 32);
+        TEST_ASSERT(zks_32->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(zks_32->has_extension(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(zks_32->has_extension(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(zks_32->has_extension(MultiLetterExtension::Zksed));
+        TEST_ASSERT(zks_32->has_extension(MultiLetterExtension::Zksh));
+        TEST_ASSERT(!zks_32->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(!zks_32->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(!zks_32->has_extension(MultiLetterExtension::Zknh));
+    }
+
+    // =========================================================================
+    // 3. Aggregate Shorthand Expansion: zvkn (Vector NIST Cryptography)
+    //    zvkn = Zvkned + Zvknhb + Zvkb + Zvkt
+    // =========================================================================
+    {
+        const auto zvkn_64 = parse_isa_spec("rv64gc_zvkn");
+        TEST_ASSERT(zvkn_64.has_value());
+        TEST_ASSERT(zvkn_64->has_extension(MultiLetterExtension::Zvkned));
+        TEST_ASSERT(zvkn_64->has_extension(MultiLetterExtension::Zvknhb));
+        TEST_ASSERT(zvkn_64->has_extension(MultiLetterExtension::Zvkb));
+        TEST_ASSERT(zvkn_64->has_extension(MultiLetterExtension::Zvkt));
+        TEST_ASSERT(!zvkn_64->has_extension(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(!zvkn_64->has_extension(MultiLetterExtension::Zvksh));
+
+        const auto zvkn_32 = parse_isa_spec("rv32gc_zvkn");
+        TEST_ASSERT(zvkn_32.has_value());
+        TEST_ASSERT(zvkn_32->xlen == 32);
+        TEST_ASSERT(zvkn_32->has_extension(MultiLetterExtension::Zvkned));
+        TEST_ASSERT(zvkn_32->has_extension(MultiLetterExtension::Zvknhb));
+        TEST_ASSERT(zvkn_32->has_extension(MultiLetterExtension::Zvkb));
+        TEST_ASSERT(zvkn_32->has_extension(MultiLetterExtension::Zvkt));
+        TEST_ASSERT(!zvkn_32->has_extension(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(!zvkn_32->has_extension(MultiLetterExtension::Zvksh));
+    }
+
+    // =========================================================================
+    // 4. Aggregate Shorthand Expansion: zvks (Vector ShangMi Cryptography)
+    //    zvks = Zvksed + Zvksh + Zvkb + Zvkt
+    // =========================================================================
+    {
+        const auto zvks_64 = parse_isa_spec("rv64gc_zvks");
+        TEST_ASSERT(zvks_64.has_value());
+        TEST_ASSERT(zvks_64->has_extension(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(zvks_64->has_extension(MultiLetterExtension::Zvksh));
+        TEST_ASSERT(zvks_64->has_extension(MultiLetterExtension::Zvkb));
+        TEST_ASSERT(zvks_64->has_extension(MultiLetterExtension::Zvkt));
+        TEST_ASSERT(!zvks_64->has_extension(MultiLetterExtension::Zvkned));
+        TEST_ASSERT(!zvks_64->has_extension(MultiLetterExtension::Zvknhb));
+
+        const auto zvks_32 = parse_isa_spec("rv32gc_zvks");
+        TEST_ASSERT(zvks_32.has_value());
+        TEST_ASSERT(zvks_32->xlen == 32);
+        TEST_ASSERT(zvks_32->has_extension(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(zvks_32->has_extension(MultiLetterExtension::Zvksh));
+        TEST_ASSERT(zvks_32->has_extension(MultiLetterExtension::Zvkb));
+        TEST_ASSERT(zvks_32->has_extension(MultiLetterExtension::Zvkt));
+        TEST_ASSERT(!zvks_32->has_extension(MultiLetterExtension::Zvkned));
+        TEST_ASSERT(!zvks_32->has_extension(MultiLetterExtension::Zvknhb));
+    }
+
+    // =========================================================================
+    // 5. Aggregate Shorthand Expansion: zk (Full Standard Scalar Cryptography)
+    //    zk = zkn + zkr + zkt
+    // =========================================================================
+    {
+        const auto zk_64 = parse_isa_spec("rv64gc_zk");
+        TEST_ASSERT(zk_64.has_value());
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zknh));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zkr));
+        TEST_ASSERT(zk_64->has_extension(MultiLetterExtension::Zkt));
+
+        const auto zk_32 = parse_isa_spec("rv32gc_zk");
+        TEST_ASSERT(zk_32.has_value());
+        TEST_ASSERT(zk_32->xlen == 32);
+        TEST_ASSERT(zk_32->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(zk_32->has_extension(MultiLetterExtension::Zkr));
+        TEST_ASSERT(zk_32->has_extension(MultiLetterExtension::Zkt));
+    }
+
+    // =========================================================================
+    // 6. Individual Wave 2 Extension Parsing via parse_isa_spec
+    // =========================================================================
+    {
+        // Track 2C: Code-Size Extensions
+        const auto zcmp_spec = parse_isa_spec("rv64gc_zcmp");
+        TEST_ASSERT(zcmp_spec.has_value());
+        TEST_ASSERT(zcmp_spec->has_extension(MultiLetterExtension::Zcmp));
+        TEST_ASSERT(!zcmp_spec->has_extension(MultiLetterExtension::Zcmt));
+
+        const auto zcmt_spec = parse_isa_spec("rv64gc_zcmt");
+        TEST_ASSERT(zcmt_spec.has_value());
+        TEST_ASSERT(zcmt_spec->has_extension(MultiLetterExtension::Zcmt));
+        TEST_ASSERT(!zcmt_spec->has_extension(MultiLetterExtension::Zcmp));
+
+        // Track 2A: Vector Cryptography Individual Extensions
+        const auto zvkned_spec = parse_isa_spec("rv64gc_zvkned");
+        TEST_ASSERT(zvkned_spec.has_value() &&
+                    zvkned_spec->has_extension(MultiLetterExtension::Zvkned));
+        TEST_ASSERT(!zvkned_spec->has_extension(MultiLetterExtension::Zvknha));
+
+        const auto zvknhb_spec = parse_isa_spec("rv64gc_zvknhb");
+        TEST_ASSERT(zvknhb_spec.has_value() &&
+                    zvknhb_spec->has_extension(MultiLetterExtension::Zvknhb));
+
+        const auto zvknha_spec = parse_isa_spec("rv64gc_zvknha");
+        TEST_ASSERT(zvknha_spec.has_value() &&
+                    zvknha_spec->has_extension(MultiLetterExtension::Zvknha));
+
+        const auto zvkg_spec = parse_isa_spec("rv64gc_zvkg");
+        TEST_ASSERT(zvkg_spec.has_value() && zvkg_spec->has_extension(MultiLetterExtension::Zvkg));
+
+        const auto zvksed_spec = parse_isa_spec("rv64gc_zvksed");
+        TEST_ASSERT(zvksed_spec.has_value() &&
+                    zvksed_spec->has_extension(MultiLetterExtension::Zvksed));
+
+        const auto zvksh_spec = parse_isa_spec("rv64gc_zvksh");
+        TEST_ASSERT(zvksh_spec.has_value() &&
+                    zvksh_spec->has_extension(MultiLetterExtension::Zvksh));
+
+        // Track 2B: Scalar Cryptography Individual Extensions
+        const auto zknd_spec = parse_isa_spec("rv64gc_zknd");
+        TEST_ASSERT(zknd_spec.has_value() && zknd_spec->has_extension(MultiLetterExtension::Zknd));
+
+        const auto zkne_spec = parse_isa_spec("rv64gc_zkne");
+        TEST_ASSERT(zkne_spec.has_value() && zkne_spec->has_extension(MultiLetterExtension::Zkne));
+
+        const auto zknh_spec = parse_isa_spec("rv64gc_zknh");
+        TEST_ASSERT(zknh_spec.has_value() && zknh_spec->has_extension(MultiLetterExtension::Zknh));
+
+        const auto zksed_spec = parse_isa_spec("rv64gc_zksed");
+        TEST_ASSERT(zksed_spec.has_value() &&
+                    zksed_spec->has_extension(MultiLetterExtension::Zksed));
+
+        const auto zksh_spec = parse_isa_spec("rv64gc_zksh");
+        TEST_ASSERT(zksh_spec.has_value() && zksh_spec->has_extension(MultiLetterExtension::Zksh));
+
+        const auto zbkb_spec = parse_isa_spec("rv64gc_zbkb");
+        TEST_ASSERT(zbkb_spec.has_value() && zbkb_spec->has_extension(MultiLetterExtension::Zbkb));
+
+        const auto zbkc_spec = parse_isa_spec("rv64gc_zbkc");
+        TEST_ASSERT(zbkc_spec.has_value() && zbkc_spec->has_extension(MultiLetterExtension::Zbkc));
+
+        const auto zbkx_spec = parse_isa_spec("rv64gc_zbkx");
+        TEST_ASSERT(zbkx_spec.has_value() && zbkx_spec->has_extension(MultiLetterExtension::Zbkx));
+
+        // RV32 target variants
+        const auto zcmp_32 = parse_isa_spec("rv32gc_zcmp");
+        TEST_ASSERT(zcmp_32.has_value() && zcmp_32->has_extension(MultiLetterExtension::Zcmp));
+
+        const auto zcmt_32 = parse_isa_spec("rv32gc_zcmt");
+        TEST_ASSERT(zcmt_32.has_value() && zcmt_32->has_extension(MultiLetterExtension::Zcmt));
+
+        const auto zknd_32 = parse_isa_spec("rv32imac_zknd_zkne_zknh");
+        TEST_ASSERT(zknd_32.has_value());
+        TEST_ASSERT(zknd_32->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(zknd_32->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(zknd_32->has_extension(MultiLetterExtension::Zknh));
+    }
+
+    // =========================================================================
+    // 7. Compound Combinations & Case Insensitivity
+    // =========================================================================
+    {
+        // Combined Track 2A + 2B + 2C
+        const auto combo1 = parse_isa_spec("rv64gc_zkn_zvkn_zcmp_zcmt");
+        TEST_ASSERT(combo1.has_value());
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zkne));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zknd));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zknh));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zvkned));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zvknhb));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zvkb));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zvkt));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zcmp));
+        TEST_ASSERT(combo1->has_extension(MultiLetterExtension::Zcmt));
+
+        const auto combo2 = parse_isa_spec("rv64gc_zks_zvks_zvkg_zvknha");
+        TEST_ASSERT(combo2.has_value());
+        TEST_ASSERT(combo2->has_extension(MultiLetterExtension::Zksed));
+        TEST_ASSERT(combo2->has_extension(MultiLetterExtension::Zksh));
+        TEST_ASSERT(combo2->has_extension(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(combo2->has_extension(MultiLetterExtension::Zvksh));
+        TEST_ASSERT(combo2->has_extension(MultiLetterExtension::Zvkg));
+        TEST_ASSERT(combo2->has_extension(MultiLetterExtension::Zvknha));
+
+        // Mixed and upper casing
+        const auto upper1 = parse_isa_spec("RV64GC_ZKN");
+        TEST_ASSERT(upper1.has_value() && upper1->has_extension(MultiLetterExtension::Zknd));
+
+        const auto mixed1 = parse_isa_spec("rv64gc_ZkS");
+        TEST_ASSERT(mixed1.has_value() && mixed1->has_extension(MultiLetterExtension::Zksed));
+
+        const auto mixed2 = parse_isa_spec("Rv64Gc_ZvKn");
+        TEST_ASSERT(mixed2.has_value() && mixed2->has_extension(MultiLetterExtension::Zvkned));
+
+        const auto upper2 = parse_isa_spec("RV32GC_ZCMP_ZCMT");
+        TEST_ASSERT(upper2.has_value());
+        TEST_ASSERT(upper2->has_extension(MultiLetterExtension::Zcmp));
+        TEST_ASSERT(upper2->has_extension(MultiLetterExtension::Zcmt));
+
+        // Malformed strings & edge cases
+        const auto trailing = parse_isa_spec("rv64gc_");
+        TEST_ASSERT(trailing.has_value() && trailing->extension_set.empty());
+        TEST_ASSERT(!parse_isa_spec("rv64gc_zkn__zks").has_value());
+        TEST_ASSERT(!parse_isa_spec("invalid_arch").has_value());
+    }
+
+    // =========================================================================
+    // 8. Direct parse_multi_letter_extension Unit Mapping
+    // =========================================================================
+    {
+        TEST_ASSERT(parse_multi_letter_extension("zcmp") == MultiLetterExtension::Zcmp);
+        TEST_ASSERT(parse_multi_letter_extension("zcmt") == MultiLetterExtension::Zcmt);
+        TEST_ASSERT(parse_multi_letter_extension("zvkned") == MultiLetterExtension::Zvkned);
+        TEST_ASSERT(parse_multi_letter_extension("zvknhb") == MultiLetterExtension::Zvknhb);
+        TEST_ASSERT(parse_multi_letter_extension("zvknha") == MultiLetterExtension::Zvknha);
+        TEST_ASSERT(parse_multi_letter_extension("zvkg") == MultiLetterExtension::Zvkg);
+        TEST_ASSERT(parse_multi_letter_extension("zvksed") == MultiLetterExtension::Zvksed);
+        TEST_ASSERT(parse_multi_letter_extension("zvksh") == MultiLetterExtension::Zvksh);
+        TEST_ASSERT(parse_multi_letter_extension("zbkb") == MultiLetterExtension::Zbkb);
+        TEST_ASSERT(parse_multi_letter_extension("zbkc") == MultiLetterExtension::Zbkc);
+        TEST_ASSERT(parse_multi_letter_extension("zbkx") == MultiLetterExtension::Zbkx);
+        TEST_ASSERT(parse_multi_letter_extension("zknd") == MultiLetterExtension::Zknd);
+        TEST_ASSERT(parse_multi_letter_extension("zkne") == MultiLetterExtension::Zkne);
+        TEST_ASSERT(parse_multi_letter_extension("zknh") == MultiLetterExtension::Zknh);
+        TEST_ASSERT(parse_multi_letter_extension("zksed") == MultiLetterExtension::Zksed);
+        TEST_ASSERT(parse_multi_letter_extension("zksh") == MultiLetterExtension::Zksh);
+
+        // Negative cases
+        TEST_ASSERT(parse_multi_letter_extension("zcmpx") == std::nullopt);
+        TEST_ASSERT(parse_multi_letter_extension("zvkn") == std::nullopt);  // aggregate, not single
+        TEST_ASSERT(parse_multi_letter_extension("zks") == std::nullopt);
+        TEST_ASSERT(parse_multi_letter_extension("invalid_name") == std::nullopt);
+        TEST_ASSERT(parse_multi_letter_extension("") == std::nullopt);
+    }
+
+    // =========================================================================
+    // 9. Direct ExtensionSet & add_extension_to_set Unit Operations
+    // =========================================================================
+    {
+        ExtensionSet s{};
+        TEST_ASSERT(s.empty());
+
+        add_extension_to_set(s, "zkn");
+        TEST_ASSERT(!s.empty());
+        TEST_ASSERT(s.has(MultiLetterExtension::Zbkb));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zbkc));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zbkx));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zkne));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zknd));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zknh));
+
+        s.clear(MultiLetterExtension::Zknd);
+        TEST_ASSERT(!s.has(MultiLetterExtension::Zknd));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zkne));
+
+        s.set(MultiLetterExtension::Zcmp);
+        s.set(MultiLetterExtension::Zcmt);
+        TEST_ASSERT(s.has(MultiLetterExtension::Zcmp));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zcmt));
+
+        ExtensionSet s2{};
+        add_extension_to_set(s2, "zvks");
+        TEST_ASSERT(s2.has(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(s2.has(MultiLetterExtension::Zvksh));
+        TEST_ASSERT(!s2.has(MultiLetterExtension::Zcmp));
+
+        s.merge(s2);
+        TEST_ASSERT(s.has(MultiLetterExtension::Zcmp));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zvksed));
+        TEST_ASSERT(s.has(MultiLetterExtension::Zvksh));
+    }
+
+    // =========================================================================
+    // 10. is_zk_extension & add_zk_extension Integration
+    // =========================================================================
+    {
+        TEST_ASSERT(is_zk_extension("zk"));
+        TEST_ASSERT(is_zk_extension("zkn"));
+        TEST_ASSERT(is_zk_extension("zkr"));
+        TEST_ASSERT(is_zk_extension("zks"));
+        TEST_ASSERT(is_zk_extension("zkt"));
+        TEST_ASSERT(is_zk_extension("zknd"));
+        TEST_ASSERT(is_zk_extension("zkne"));
+        TEST_ASSERT(is_zk_extension("zknh"));
+        TEST_ASSERT(is_zk_extension("zksed"));
+        TEST_ASSERT(is_zk_extension("zksh"));
+        TEST_ASSERT(is_zk_extension("ZKND"));
+        TEST_ASSERT(!is_zk_extension("zfoo"));
+        TEST_ASSERT(!is_zk_extension("zvkn"));
+
+        std::vector<std::string> ext_list;
+        add_zk_extension(ext_list, "zk");
+        TEST_ASSERT(std::ranges::find(ext_list, "zkn") != ext_list.end());
+        TEST_ASSERT(std::ranges::find(ext_list, "zkr") != ext_list.end());
+        TEST_ASSERT(std::ranges::find(ext_list, "zkt") != ext_list.end());
+
+        // Deduplication test
+        const auto size_before = ext_list.size();
+        add_zk_extension(ext_list, "zkn");
+        TEST_ASSERT(ext_list.size() == size_before);
+    }
+}
+
+void test_track2_crypto_bitmanip_gating() {
+    using namespace simrv::isa;
+
+    // Zbkb and Zbkc provide scalar cryptographic bit-manipulation primitives:
+    // CLMUL, CLMULH, CLMULR, PACK, PACKW.
+    // They are constituent components of both Zkn and Zks aggregates.
+    const auto no_b_misa = parse_isa_spec("rv64gc")->misa_bits;
+    const auto b_misa = parse_isa_spec("rv64gcb")->misa_bits;
+
+    // 1. When MISA has no B, empty ExtensionSet disables all crypto bitmanip
+    const ExtensionSet empty_set{};
+    TEST_ASSERT(!instruction_enabled(no_b_misa, empty_set, OperationId::CLMUL));
+    TEST_ASSERT(!instruction_enabled(no_b_misa, empty_set, OperationId::CLMULH));
+    TEST_ASSERT(!instruction_enabled(no_b_misa, empty_set, OperationId::CLMULR));
+    TEST_ASSERT(!instruction_enabled(no_b_misa, empty_set, OperationId::PACK));
+    TEST_ASSERT(!instruction_enabled(no_b_misa, empty_set, OperationId::PACKW));
+
+    // 2. Aggregate zkn enables Zbkb and Zbkc -> enables all crypto bitmanip
+    ExtensionSet zkn_set{};
+    add_extension_to_set(zkn_set, "zkn");
+    TEST_ASSERT(instruction_enabled(no_b_misa, zkn_set, OperationId::CLMUL));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zkn_set, OperationId::CLMULH));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zkn_set, OperationId::CLMULR));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zkn_set, OperationId::PACK));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zkn_set, OperationId::PACKW));
+
+    // 3. Aggregate zks enables Zbkb and Zbkc -> enables all crypto bitmanip
+    ExtensionSet zks_set{};
+    add_extension_to_set(zks_set, "zks");
+    TEST_ASSERT(instruction_enabled(no_b_misa, zks_set, OperationId::CLMUL));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zks_set, OperationId::CLMULH));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zks_set, OperationId::CLMULR));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zks_set, OperationId::PACK));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zks_set, OperationId::PACKW));
+
+    // 4. Individual Zbkb enables pack and clmul
+    ExtensionSet zbkb_set{};
+    zbkb_set.set(MultiLetterExtension::Zbkb);
+    TEST_ASSERT(instruction_enabled(no_b_misa, zbkb_set, OperationId::CLMUL));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zbkb_set, OperationId::PACK));
+
+    // 5. Individual Zbkc enables clmul
+    ExtensionSet zbkc_set{};
+    zbkc_set.set(MultiLetterExtension::Zbkc);
+    TEST_ASSERT(instruction_enabled(no_b_misa, zbkc_set, OperationId::CLMUL));
+    TEST_ASSERT(instruction_enabled(no_b_misa, zbkc_set, OperationId::CLMULH));
+
+    // 6. Non-crypto extensions do NOT enable crypto bitmanip when B is absent
+    ExtensionSet other_set{};
+    other_set.set(MultiLetterExtension::Zba);
+    other_set.set(MultiLetterExtension::Zbs);
+    other_set.set(MultiLetterExtension::Zicond);
+    other_set.set(MultiLetterExtension::Zcmp);
+    other_set.set(MultiLetterExtension::Zcmt);
+    TEST_ASSERT(!instruction_enabled(no_b_misa, other_set, OperationId::CLMUL));
+    TEST_ASSERT(!instruction_enabled(no_b_misa, other_set, OperationId::CLMULH));
+    TEST_ASSERT(!instruction_enabled(no_b_misa, other_set, OperationId::PACK));
+
+    // 7. When MISA has B, instruction_enabled returns true regardless of ExtensionSet
+    TEST_ASSERT(instruction_enabled(b_misa, empty_set, OperationId::CLMUL));
+    TEST_ASSERT(instruction_enabled(b_misa, empty_set, OperationId::PACK));
+
+    // 8. Check classification helpers
+    TEST_ASSERT(is_zb_crypto_operation(OperationId::CLMUL));
+    TEST_ASSERT(is_zb_crypto_operation(OperationId::CLMULH));
+    TEST_ASSERT(is_zb_crypto_operation(OperationId::CLMULR));
+    TEST_ASSERT(is_zb_crypto_operation(OperationId::PACK));
+    TEST_ASSERT(is_zb_crypto_operation(OperationId::PACKW));
+    TEST_ASSERT(!is_zb_crypto_operation(OperationId::ADD));
+    TEST_ASSERT(!is_zb_crypto_operation(OperationId::SUB));
+    TEST_ASSERT(!is_zb_crypto_operation(OperationId::AND));
+
+    TEST_ASSERT(is_zkn_operation(OperationId::CLMUL));
+    TEST_ASSERT(is_zkn_operation(OperationId::PACK));
+    TEST_ASSERT(!is_zkn_operation(OperationId::ADD));
+}
+
+void test_track2_mutual_exclusion_and_spec_separation() {
+    using namespace simrv::isa;
+
+    // Track 2C (Zcmp and Zcmt) specifies compressed multi-push/pop, double move,
+    // and jump table dereference. These instructions repurpose Quadrant 2 encodings
+    // that are mutually exclusive with Zcd (or standard C with D: C.FSWSP, C.FLDSP, C.FSDSP).
+    //
+    // Verify that IsaSpec accurately separates Zcd, Zcmp, and Zcmt across architectures.
+
+    // 1. Standard rv64gc has C and D enabled (which implies Zcd), but neither Zcmp nor Zcmt
+    const auto rv64gc = parse_isa_spec("rv64gc");
+    TEST_ASSERT(rv64gc.has_value());
+    TEST_ASSERT(rv64gc->has(IsaExtension::C));
+    TEST_ASSERT(rv64gc->has(IsaExtension::D));
+    TEST_ASSERT(!rv64gc->has_extension(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(!rv64gc->has_extension(MultiLetterExtension::Zcmt));
+
+    // 2. rv64g_zcmp has D but not C, and has Zcmp
+    const auto rv64g_zcmp = parse_isa_spec("rv64g_zcmp");
+    TEST_ASSERT(rv64g_zcmp.has_value());
+    TEST_ASSERT(!rv64g_zcmp->has(IsaExtension::C));
+    TEST_ASSERT(rv64g_zcmp->has(IsaExtension::D));
+    TEST_ASSERT(rv64g_zcmp->has_extension(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(!rv64g_zcmp->has_extension(MultiLetterExtension::Zcmt));
+
+    // 3. rv64g_zcmt has D but not C, and has Zcmt
+    const auto rv64g_zcmt = parse_isa_spec("rv64g_zcmt");
+    TEST_ASSERT(rv64g_zcmt.has_value());
+    TEST_ASSERT(!rv64g_zcmt->has(IsaExtension::C));
+    TEST_ASSERT(rv64g_zcmt->has_extension(MultiLetterExtension::Zcmt));
+    TEST_ASSERT(!rv64g_zcmt->has_extension(MultiLetterExtension::Zcmp));
+
+    // 4. rv64g_zcmp_zcmt has both Zcmp and Zcmt
+    const auto rv64g_both = parse_isa_spec("rv64g_zcmp_zcmt");
+    TEST_ASSERT(rv64g_both.has_value());
+    TEST_ASSERT(rv64g_both->has_extension(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(rv64g_both->has_extension(MultiLetterExtension::Zcmt));
+
+    // 5. Dual-architecture RV32 parity
+    const auto rv32gc = parse_isa_spec("rv32gc");
+    TEST_ASSERT(rv32gc.has_value());
+    TEST_ASSERT(rv32gc->has(IsaExtension::C));
+    TEST_ASSERT(rv32gc->has(IsaExtension::D));
+    TEST_ASSERT(!rv32gc->has_extension(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(!rv32gc->has_extension(MultiLetterExtension::Zcmt));
+
+    const auto rv32g_both = parse_isa_spec("rv32g_zcmp_zcmt");
+    TEST_ASSERT(rv32g_both.has_value());
+    TEST_ASSERT(rv32g_both->has_extension(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(rv32g_both->has_extension(MultiLetterExtension::Zcmt));
+
+    // 6. ExtensionSet independence between Zcd, Zcmp, and Zcmt
+    ExtensionSet ext{};
+    ext.set(MultiLetterExtension::Zcmp);
+    TEST_ASSERT(ext.has(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(!ext.has(MultiLetterExtension::Zcmt));
+    TEST_ASSERT(!ext.has(MultiLetterExtension::Zcd));
+
+    ext.clear(MultiLetterExtension::Zcmp);
+    ext.set(MultiLetterExtension::Zcmt);
+    TEST_ASSERT(!ext.has(MultiLetterExtension::Zcmp));
+    TEST_ASSERT(ext.has(MultiLetterExtension::Zcmt));
+    TEST_ASSERT(!ext.has(MultiLetterExtension::Zcd));
+
+    ext.set(MultiLetterExtension::Zcd);
+    TEST_ASSERT(ext.has(MultiLetterExtension::Zcd));
+    TEST_ASSERT(ext.has(MultiLetterExtension::Zcmt));
+    TEST_ASSERT(!ext.has(MultiLetterExtension::Zcmp));
+}
+
+void test_track2b_scalar_crypto_gating() {
+    using namespace simrv::isa;
+    using enum OperationId;
+
+    const auto misa = parse_isa_spec("rv64gc")->misa_bits;
+    const ExtensionSet empty_set{};
+
+    // All 29 scalar crypto operations must be disabled when ExtensionSet is empty
+    const std::array<OperationId, 29> kAllZkOps = {
+        AES32DSI,    AES32DSMI,   AES32ESI,    AES32ESMI,   AES64DS,     AES64DSM,
+        AES64ES,     AES64ESM,    AES64IM,     AES64KS1I,   AES64KS2,    SHA256SIG0,
+        SHA256SIG1,  SHA256SUM0,  SHA256SUM1,  SHA512SIG0,  SHA512SIG1,  SHA512SUM0,
+        SHA512SUM1,  SHA512SIG0L, SHA512SIG0H, SHA512SIG1L, SHA512SIG1H, SHA512SUM0R,
+        SHA512SUM1R, SM4ED,       SM4KS,       SM3P0,       SM3P1};
+
+    for (const auto op : kAllZkOps) {
+        TEST_ASSERT(!instruction_enabled(misa, empty_set, op));
+    }
+
+    // 1. Zkne enables encrypt and key schedule
+    ExtensionSet zkne_set{};
+    zkne_set.set(MultiLetterExtension::Zkne);
+    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES32ESI));
+    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES32ESMI));
+    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64ES));
+    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64ESM));
+    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64KS1I));
+    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64KS2));
+    TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64DS));
+    TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64IM));
+    TEST_ASSERT(!instruction_enabled(misa, zkne_set, SHA256SIG0));
+
+    // 2. Zknd enables decrypt and key schedule
+    ExtensionSet zknd_set{};
+    zknd_set.set(MultiLetterExtension::Zknd);
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES32DSI));
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES32DSMI));
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64DS));
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64DSM));
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64IM));
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64KS1I));
+    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64KS2));
+    TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64ES));
+
+    // 3. Zknh enables SHA-256 and SHA-512
+    ExtensionSet zknh_set{};
+    zknh_set.set(MultiLetterExtension::Zknh);
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SIG0));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SIG1));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SUM0));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SUM1));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG1));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SUM0));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SUM1));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0L));
+    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0H));
+    TEST_ASSERT(!instruction_enabled(misa, zknh_set, SM4ED));
+
+    // 4. Zksed enables SM4
+    ExtensionSet zksed_set{};
+    zksed_set.set(MultiLetterExtension::Zksed);
+    TEST_ASSERT(instruction_enabled(misa, zksed_set, SM4ED));
+    TEST_ASSERT(instruction_enabled(misa, zksed_set, SM4KS));
+    TEST_ASSERT(!instruction_enabled(misa, zksed_set, SM3P0));
+
+    // 5. Zksh enables SM3
+    ExtensionSet zksh_set{};
+    zksh_set.set(MultiLetterExtension::Zksh);
+    TEST_ASSERT(instruction_enabled(misa, zksh_set, SM3P0));
+    TEST_ASSERT(instruction_enabled(misa, zksh_set, SM3P1));
+    TEST_ASSERT(!instruction_enabled(misa, zksh_set, SM4ED));
+
+    // 6. Compound Zkn enables Zkne, Zknd, Zknh
+    ExtensionSet zkn_set{};
+    add_extension_to_set(zkn_set, "zkn");
+    TEST_ASSERT(instruction_enabled(misa, zkn_set, AES64ES));
+    TEST_ASSERT(instruction_enabled(misa, zkn_set, AES64DS));
+    TEST_ASSERT(instruction_enabled(misa, zkn_set, SHA256SIG0));
+    TEST_ASSERT(!instruction_enabled(misa, zkn_set, SM4ED));
+    TEST_ASSERT(!instruction_enabled(misa, zkn_set, SM3P0));
+
+    // 7. Compound Zks enables Zksed, Zksh
+    ExtensionSet zks_set{};
+    add_extension_to_set(zks_set, "zks");
+    TEST_ASSERT(instruction_enabled(misa, zks_set, SM4ED));
+    TEST_ASSERT(instruction_enabled(misa, zks_set, SM3P0));
+    TEST_ASSERT(!instruction_enabled(misa, zks_set, AES64ES));
+
+    // 8. Compound Zk enables both Zkn and Zks
+    ExtensionSet zk_set{};
+    add_extension_to_set(zk_set, "zk");
+    TEST_ASSERT(instruction_enabled(misa, zk_set, AES64ES));
+    TEST_ASSERT(instruction_enabled(misa, zk_set, AES64DS));
+    TEST_ASSERT(instruction_enabled(misa, zk_set, SHA256SIG0));
+    TEST_ASSERT(instruction_enabled(misa, zk_set, SM4ED));
+    TEST_ASSERT(instruction_enabled(misa, zk_set, SM3P0));
+
+    // 9. Check width requirements (requires_rv64 and requires_rv32)
+    namespace op_traits = simrv::pipeline::operation;
+
+    const std::array<OperationId, 11> kRv64OnlyOps = {AES64ES,    AES64ESM,   AES64DS,   AES64DSM,
+                                                      AES64IM,    AES64KS1I,  AES64KS2,  SHA512SIG0,
+                                                      SHA512SIG1, SHA512SUM0, SHA512SUM1};
+    for (const auto op : kRv64OnlyOps) {
+        TEST_ASSERT(op_traits::requires_rv64(op));
+        TEST_ASSERT(!op_traits::requires_rv32(op));
+    }
+
+    const std::array<OperationId, 10> kRv32OnlyOps = {
+        AES32ESI,    AES32ESMI,   AES32DSI,    AES32DSMI,   SHA512SIG0L,
+        SHA512SIG0H, SHA512SIG1L, SHA512SIG1H, SHA512SUM0R, SHA512SUM1R};
+    for (const auto op : kRv32OnlyOps) {
+        TEST_ASSERT(op_traits::requires_rv32(op));
+        TEST_ASSERT(!op_traits::requires_rv64(op));
+    }
+
+    const std::array<OperationId, 8> kDualWidthOps = {
+        SHA256SIG0, SHA256SIG1, SHA256SUM0, SHA256SUM1, SM4ED, SM4KS, SM3P0, SM3P1};
+    for (const auto op : kDualWidthOps) {
+        TEST_ASSERT(!op_traits::requires_rv64(op));
+        TEST_ASSERT(!op_traits::requires_rv32(op));
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -3611,6 +4251,22 @@ int main() {
     std::cout << "[RUN] test_track1c_fp16_bf16" << std::endl;
     test_track1c_fp16_bf16();
     std::cout << "[PASS] test_track1c_fp16_bf16" << std::endl;
+
+    std::cout << "[RUN] test_track2_aggregate_isa_expansion" << std::endl;
+    test_track2_aggregate_isa_expansion();
+    std::cout << "[PASS] test_track2_aggregate_isa_expansion" << std::endl;
+
+    std::cout << "[RUN] test_track2_crypto_bitmanip_gating" << std::endl;
+    test_track2_crypto_bitmanip_gating();
+    std::cout << "[PASS] test_track2_crypto_bitmanip_gating" << std::endl;
+
+    std::cout << "[RUN] test_track2_mutual_exclusion_and_spec_separation" << std::endl;
+    test_track2_mutual_exclusion_and_spec_separation();
+    std::cout << "[PASS] test_track2_mutual_exclusion_and_spec_separation" << std::endl;
+
+    std::cout << "[RUN] test_track2b_scalar_crypto_gating" << std::endl;
+    test_track2b_scalar_crypto_gating();
+    std::cout << "[PASS] test_track2b_scalar_crypto_gating" << std::endl;
 
     std::cout << "\nAll RVA23 Profile unit tests passed successfully!\n";
     return simrv::test::failures() == 0 ? 0 : 1;

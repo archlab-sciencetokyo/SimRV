@@ -79,6 +79,7 @@ struct OperationInfo {
     simrv::isa::Funct3 mem_funct3{simrv::isa::Funct3::Lb};
     bool has_fixed_mem_funct3{false};
     bool rv64_only{false};
+    bool rv32_only{false};
 };
 
 [[nodiscard]] consteval auto compute_operation_misa_mask(isa::OperationId op_id) noexcept
@@ -273,6 +274,15 @@ struct OperationInfo {
         }
         return required;
     }
+    if (in_range(OperationId::VAESEF_VV, OperationId::VSM4R_VS)) {
+        return misa_extension_bit(IsaExtension::V);
+    }
+    if (in_range(OperationId::AES32DSI, OperationId::SM3P1)) {
+        return misa_extension_bit(IsaExtension::I);
+    }
+    if (in_range(OperationId::CM_PUSH, OperationId::CM_JALT)) {
+        return misa_extension_bit(IsaExtension::C);
+    }
     return misa_extension_bit(IsaExtension::I);
 }
 
@@ -318,6 +328,36 @@ struct OperationInfo {
         case VLOXEI64_V:
         case VSUXEI64_V:
         case VSOXEI64_V:
+        case AES64DS:
+        case AES64DSM:
+        case AES64ES:
+        case AES64ESM:
+        case AES64IM:
+        case AES64KS1I:
+        case AES64KS2:
+        case SHA512SIG0:
+        case SHA512SIG1:
+        case SHA512SUM0:
+        case SHA512SUM1:
+            return true;
+        default:
+            return false;
+    }
+}
+
+[[nodiscard]] consteval auto compute_operation_rv32_only(isa::OperationId op_id) noexcept -> bool {
+    using enum isa::OperationId;
+    switch (op_id) {
+        case AES32DSI:
+        case AES32DSMI:
+        case AES32ESI:
+        case AES32ESMI:
+        case SHA512SIG0L:
+        case SHA512SIG0H:
+        case SHA512SIG1L:
+        case SHA512SIG1H:
+        case SHA512SUM0R:
+        case SHA512SUM1R:
             return true;
         default:
             return false;
@@ -508,6 +548,7 @@ consteval auto generate_operation_info() {
     constexpr auto ctrl_jump = ControlFlowKind::Jump;
     constexpr auto ctrl_jalr = ControlFlowKind::Jalr;
 
+    constexpr auto side_none = SideEffectFlags::None;
     constexpr auto side_fence = SideEffectFlags::Fence | SideEffectFlags::Serializing;
     constexpr auto side_csr = SideEffectFlags::Csr | SideEffectFlags::Serializing;
     constexpr auto side_sys = SideEffectFlags::System | SideEffectFlags::Serializing;
@@ -813,11 +854,53 @@ consteval auto generate_operation_info() {
 
     set_props({CFU}, ExecutionClass::Cfu, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none});
 
+    // Track 2A: Vector Cryptography
+    set_props({VAESEF_VV, VAESDF_VV, VAESEM_VV, VAESDM_VV, VGHSH_VV, VGMUL_VV, VSHA2MS_VV,
+               VSHA2CH_VV, VSHA2CL_VV, VSM3ME_VV, VSM4R_VV},
+              exec_def, {.rd = b_vec, .rs1 = b_vec, .rs2 = b_vec, .rs3 = b_none}, mem_none,
+              ctrl_none, side_serial);
+
+    set_props({VAESEF_VS, VAESDF_VS, VAESEM_VS, VAESDM_VS, VAESZ_VS, VSM4R_VS}, exec_def,
+              {.rd = b_vec, .rs1 = b_vec, .rs2 = b_vec, .rs3 = b_none}, mem_none, ctrl_none,
+              side_serial);
+
+    set_props({VAESKF1_VI, VAESKF2_VI, VSM3C_VI, VSM4K_VI}, exec_def,
+              {.rd = b_vec, .rs1 = b_none, .rs2 = b_vec, .rs3 = b_none}, mem_none, ctrl_none,
+              side_serial);
+
+    // Track 2B: Scalar Cryptography
+    set_props({AES32DSI, AES32DSMI, AES32ESI, AES32ESMI, AES64DS, AES64DSM, AES64ES, AES64ESM,
+               AES64KS2, SM4ED, SM4KS, SHA512SIG0L, SHA512SIG0H, SHA512SIG1L, SHA512SIG1H,
+               SHA512SUM0R, SHA512SUM1R},
+              exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_none,
+              ctrl_none, side_none);
+
+    set_props({AES64IM, AES64KS1I, SHA256SIG0, SHA256SIG1, SHA256SUM0, SHA256SUM1, SHA512SIG0,
+               SHA512SIG1, SHA512SUM0, SHA512SUM1, SM3P0, SM3P1},
+              exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_none,
+              ctrl_none, side_none);
+
+    // Track 2C: Code-Size (Zcmp / Zcmt)
+    set_props({CM_PUSH}, exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
+              mem_store, ctrl_none, side_serial);
+    set_props({CM_POP}, exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
+              mem_load, ctrl_none, side_serial);
+    set_props({CM_POPRET, CM_POPRETZ}, exec_def,
+              {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load, ctrl_jump,
+              side_serial);
+    set_props({CM_MVA01S, CM_MVSA01}, exec_def,
+              {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_none, ctrl_none,
+              side_none);
+    set_props({CM_JT, CM_JALT}, exec_def,
+              {.rd = b_int, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_load, ctrl_jump,
+              side_serial);
+
     for (std::size_t i = 0; i < isa::kOperationIdCount; ++i) {
         const auto op = static_cast<isa::OperationId>(i);
         auto& entry = info[i];
         entry.required_misa = compute_operation_misa_mask(op);
         entry.rv64_only = compute_operation_rv64_only(op);
+        entry.rv32_only = compute_operation_rv32_only(op);
         entry.mem_access_bytes = compute_operation_mem_bytes(op);
         simrv::isa::Funct3 fixed_f3 = simrv::isa::Funct3::Lb;
         if (compute_operation_fixed_funct3(op, fixed_f3)) {

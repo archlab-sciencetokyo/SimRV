@@ -496,6 +496,23 @@ auto parse_isa_spec_cli(std::string_view value) -> std::expected<ParsedIsaSpec, 
                 if (supported_extension("svpbmt")) return 1ULL << 41;
                 if (supported_extension("sscofpmf")) return 1ULL << 42;
 
+                // Wave 2 Cryptography & Code Size
+                if (supported_extension("zvkned")) return 1ULL << 43;
+                if (supported_extension("zvknha")) return 1ULL << 44;
+                if (supported_extension("zvknhb")) return 1ULL << 45;
+                if (supported_extension("zvkg")) return 1ULL << 46;
+                if (supported_extension("zvksed")) return 1ULL << 47;
+                if (supported_extension("zvksh")) return 1ULL << 48;
+                if (supported_extension("zvkn")) return 1ULL << 49;
+                if (supported_extension("zvks")) return 1ULL << 50;
+                if (supported_extension("zcmp")) return 1ULL << 51;
+                if (supported_extension("zcmt")) return 1ULL << 52;
+                if (supported_extension("zvkng")) return 1ULL << 53;
+                if (supported_extension("zvknc")) return 1ULL << 54;
+                if (supported_extension("zvksg")) return 1ULL << 55;
+                if (supported_extension("zvksc")) return 1ULL << 56;
+                if (supported_extension("zvk")) return 1ULL << 57;
+
                 return 0ULL;
             }();
             if (extension_id == 0) {
@@ -506,10 +523,18 @@ auto parse_isa_spec_cli(std::string_view value) -> std::expected<ParsedIsaSpec, 
             }
             seen_extensions |= extension_id;
 
+            if (std::ranges::find(parsed->spec.extensions, extension) ==
+                parsed->spec.extensions.end()) {
+                parsed->spec.extensions.emplace_back(extension);
+            }
+            isa::add_extension_to_set(parsed->spec.extension_set, extension);
+
             if (extension_id >= (1ULL << 4) && extension_id <= (1ULL << 21)) {
                 has_zb = true;
             }
-            if (extension_id >= (1ULL << 22) && extension_id <= (1ULL << 32)) {
+            if ((extension_id >= (1ULL << 22) && extension_id <= (1ULL << 32)) ||
+                (extension_id >= (1ULL << 43) && extension_id <= (1ULL << 50)) ||
+                (extension_id >= (1ULL << 53) && extension_id <= (1ULL << 57))) {
                 has_v = true;
             }
 
