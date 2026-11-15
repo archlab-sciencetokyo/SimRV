@@ -4029,14 +4029,14 @@ void test_track2b_scalar_crypto_gating() {
     TEST_ASSERT(instruction_enabled(misa, zks_set, SM3P0));
     TEST_ASSERT(!instruction_enabled(misa, zks_set, AES64ES));
 
-    // 8. Compound Zk enables both Zkn and Zks
+    // 8. Compound Zk enables Zkn + Zkr + Zkt (not Zks)
     ExtensionSet zk_set{};
     add_extension_to_set(zk_set, "zk");
     TEST_ASSERT(instruction_enabled(misa, zk_set, AES64ES));
     TEST_ASSERT(instruction_enabled(misa, zk_set, AES64DS));
     TEST_ASSERT(instruction_enabled(misa, zk_set, SHA256SIG0));
-    TEST_ASSERT(instruction_enabled(misa, zk_set, SM4ED));
-    TEST_ASSERT(instruction_enabled(misa, zk_set, SM3P0));
+    TEST_ASSERT(!instruction_enabled(misa, zk_set, SM4ED));
+    TEST_ASSERT(!instruction_enabled(misa, zk_set, SM3P0));
 
     // 9. Check width requirements (requires_rv64 and requires_rv32)
     namespace op_traits = simrv::pipeline::operation;
@@ -4063,6 +4063,207 @@ void test_track2b_scalar_crypto_gating() {
         TEST_ASSERT(!op_traits::requires_rv64(op));
         TEST_ASSERT(!op_traits::requires_rv32(op));
     }
+}
+
+void test_track2a_vector_crypto() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+    using simrv::xlen::CsrValue;
+
+    auto encode_opp = [](uint32_t funct6, uint32_t vm, uint32_t vs2, uint32_t vs1, uint32_t vd) {
+        return (funct6 << 26U) | (vm << 25U) | (vs2 << 20U) | (vs1 << 15U) | (2U << 12U) |
+               (vd << 7U) | 0x77U;
+    };
+
+    // 1. Decode checks for all 21 Track 2A instructions + vm=0 ILLEGAL check
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 1U, 2U, 0x00U, 4U)) ==
+                OperationId::VAESDM_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 1U, 2U, 0x01U, 4U)) ==
+                OperationId::VAESDF_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 1U, 2U, 0x02U, 4U)) ==
+                OperationId::VAESEM_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 1U, 2U, 0x03U, 4U)) ==
+                OperationId::VAESEF_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 1U, 2U, 0x10U, 4U)) ==
+                OperationId::VSM4R_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 1U, 2U, 0x11U, 4U)) ==
+                OperationId::VGMUL_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x29U, 1U, 2U, 0x00U, 4U)) ==
+                OperationId::VAESDM_VS);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x29U, 1U, 2U, 0x01U, 4U)) ==
+                OperationId::VAESDF_VS);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x29U, 1U, 2U, 0x02U, 4U)) ==
+                OperationId::VAESEM_VS);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x29U, 1U, 2U, 0x03U, 4U)) ==
+                OperationId::VAESEF_VS);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x29U, 1U, 2U, 0x07U, 4U)) ==
+                OperationId::VAESZ_VS);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x29U, 1U, 2U, 0x10U, 4U)) ==
+                OperationId::VSM4R_VS);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x22U, 1U, 2U, 1U, 4U)) ==
+                OperationId::VAESKF1_VI);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x2AU, 1U, 2U, 2U, 4U)) ==
+                OperationId::VAESKF2_VI);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x2CU, 1U, 2U, 1U, 4U)) ==
+                OperationId::VGHSH_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x2DU, 1U, 2U, 1U, 4U)) ==
+                OperationId::VSHA2MS_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x2EU, 1U, 2U, 1U, 4U)) ==
+                OperationId::VSHA2CH_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x2FU, 1U, 2U, 1U, 4U)) ==
+                OperationId::VSHA2CL_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x20U, 1U, 2U, 1U, 4U)) ==
+                OperationId::VSM3ME_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x2BU, 1U, 2U, 0U, 4U)) ==
+                OperationId::VSM3C_VI);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x21U, 1U, 2U, 0U, 4U)) ==
+                OperationId::VSM4K_VI);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_opp(0x28U, 0U, 2U, 0x02U, 4U)) ==
+                OperationId::ILLEGAL);
+
+    // 2. Execution & gating tests
+    constexpr simrv::xlen::Address kCodeAddr = 0x80001000ULL;
+    std::array<simrv::xlen::Byte, 0x4000> ram{};
+    Machine machine;
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+
+    auto& cpu = machine.primary_hart();
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    cpu.state().misa = kMisaDefault | misa_extension_bit(IsaExtension::V);
+    cpu.state().mstatus |= MstatusBit::Vs;
+    cpu.state().mtvec = 0x80003000ULL;
+    cpu.state().vtype = 2U << 3U;  // SEW=32, LMUL=1
+    cpu.state().vl = 4;
+    cpu.state().vstart = 0;
+
+    uint32_t pc_off = 0;
+    auto run_insn = [&](uint32_t insn) {
+        std::memcpy(ram.data() + 0x1000 + pc_off, &insn, sizeof(insn));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + pc_off};
+        pc_off += 4U;
+        cpu.state().mcause = 0;
+        cpu.run_cycle(machine);
+    };
+    auto vec_reg = [&](uint32_t idx) -> auto& {
+        return cpu.state().regs.read_vector(
+            simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(idx)));
+    };
+
+    // Negative gating: disabled Zvkned -> IllegalInstruction
+    cpu.state().enabled_extensions = ExtensionSet{};
+    run_insn(encode_opp(0x28U, 1U, 2U, 0x02U, 4U));
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // Positive Zvkned: FIPS-197 Appendix B AES-128 full 10 rounds
+    ExtensionSet zvk_ext{};
+    zvk_ext.set(MultiLetterExtension::Zvkned);
+    zvk_ext.set(MultiLetterExtension::Zvknhb);
+    zvk_ext.set(MultiLetterExtension::Zvkg);
+    zvk_ext.set(MultiLetterExtension::Zvksed);
+    zvk_ext.set(MultiLetterExtension::Zvksh);
+    zvk_ext.set(MultiLetterExtension::Zvkb);
+    zvk_ext.set(MultiLetterExtension::Zvkt);
+    cpu.state().enabled_extensions = zvk_ext;
+
+    // Key: 2b7e1516 28aed2a6 abf71588 09cf4f3c (little-endian words)
+    vec_reg(2).u32[0] = 0x16157e2bU;
+    vec_reg(2).u32[1] = 0xa6d2ae28U;
+    vec_reg(2).u32[2] = 0x8815f7abU;
+    vec_reg(2).u32[3] = 0x3c4fcf09U;
+    // Plaintext: 3243f6a8 885a308d 313198a2 e0370734
+    vec_reg(4).u32[0] = 0xa8f64332U;
+    vec_reg(4).u32[1] = 0x8d305a88U;
+    vec_reg(4).u32[2] = 0xa2983131U;
+    vec_reg(4).u32[3] = 0x340737e0U;
+
+    run_insn(encode_opp(0x29U, 1U, 2U, 0x07U, 4U));  // vaesz.vs v4, v2
+    TEST_ASSERT(cpu.state().mcause == 0);
+    for (uint32_t r = 1U; r <= 10U; ++r) {
+        run_insn(encode_opp(0x22U, 1U, 2U, r, 2U));  // vaeskf1.vi v2, v2, r
+        TEST_ASSERT(cpu.state().mcause == 0);
+        if (r < 10U) {
+            run_insn(encode_opp(0x29U, 1U, 2U, 0x02U, 4U));  // vaesem.vs v4, v2
+        } else {
+            run_insn(encode_opp(0x29U, 1U, 2U, 0x03U, 4U));  // vaesef.vs v4, v2
+        }
+        TEST_ASSERT(cpu.state().mcause == 0);
+    }
+    // Expected FIPS-197 Appendix B ciphertext: 3925841d 02dc09fb dc118597 196a0b32
+    TEST_ASSERT(vec_reg(4).u32[0] == 0x1d842539U);
+    TEST_ASSERT(vec_reg(4).u32[1] == 0xfb09dc02U);
+    TEST_ASSERT(vec_reg(4).u32[2] == 0x978511dcU);
+    TEST_ASSERT(vec_reg(4).u32[3] == 0x320b6a19U);
+
+    // Zvkg: vgmul.vv & vghsh.vv with GCM multiplicative identity H = 1 (byte 0 = 0x80)
+    vec_reg(2).u32[0] = 0x00000080U;
+    vec_reg(2).u32[1] = 0U;
+    vec_reg(2).u32[2] = 0U;
+    vec_reg(2).u32[3] = 0U;
+    vec_reg(4).u32[0] = 0x11223344U;
+    vec_reg(4).u32[1] = 0x55667788U;
+    vec_reg(4).u32[2] = 0x99aabbccU;
+    vec_reg(4).u32[3] = 0xddeeff00U;
+    run_insn(encode_opp(0x28U, 1U, 2U, 0x11U, 4U));  // vgmul.vv v4, v2
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(vec_reg(4).u32[0] == 0x11223344U);
+    TEST_ASSERT(vec_reg(4).u32[3] == 0xddeeff00U);
+
+    vec_reg(1).u32[0] = 0x00000001U;
+    vec_reg(1).u32[1] = 0U;
+    vec_reg(1).u32[2] = 0U;
+    vec_reg(1).u32[3] = 0U;
+    run_insn(encode_opp(0x2CU, 1U, 2U, 1U, 4U));  // vghsh.vv v4, v2, v1
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(vec_reg(4).u32[0] == 0x11223345U);
+
+    // Zvknha vs Zvknhb at SEW=64 (LMUL=2 -> 256-bit EGW)
+    ExtensionSet zvknha_only{};
+    zvknha_only.set(MultiLetterExtension::Zvknha);
+    cpu.state().enabled_extensions = zvknha_only;
+    cpu.state().vtype = (3U << 3U) | 1U;  // SEW=64, LMUL=2
+    cpu.state().vl = 4;
+    run_insn(encode_opp(0x2DU, 1U, 2U, 6U, 4U));  // vsha2ms.vv v4, v2, v6
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    cpu.state().enabled_extensions = zvk_ext;  // includes Zvknhb
+    run_insn(encode_opp(0x2DU, 1U, 2U, 6U, 4U));
+    TEST_ASSERT(cpu.state().mcause == 0);
+
+    // Zvksh: vsm3me.vv requires EGW=256 (LMUL*VLEN >= 256 -> LMUL=1 at VLEN=128 must trap)
+    cpu.state().vtype = (2U << 3U) | 0U;  // SEW=32, LMUL=1
+    cpu.state().vl = 4;
+    run_insn(encode_opp(0x20U, 1U, 2U, 6U, 4U));
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    cpu.state().vtype = (2U << 3U) | 1U;  // SEW=32, LMUL=2
+    cpu.state().vl = 8;
+    run_insn(encode_opp(0x20U, 1U, 2U, 6U, 4U));
+    TEST_ASSERT(cpu.state().mcause == 0);
+
+    // Zvksed: SM4 32-round GB/T 32907-2016 Appendix A.1 test vector
+    cpu.state().vtype = (2U << 3U) | 0U;  // SEW=32, LMUL=1
+    cpu.state().vl = 4;
+    vec_reg(2).u32[0] = 0x01234567U ^ 0xa3b1bac6U;
+    vec_reg(2).u32[1] = 0x89abcdefU ^ 0x56aa3350U;
+    vec_reg(2).u32[2] = 0xfedcba98U ^ 0x677d9197U;
+    vec_reg(2).u32[3] = 0x76543210U ^ 0xb27022dcU;
+    vec_reg(4).u32[0] = 0x01234567U;
+    vec_reg(4).u32[1] = 0x89abcdefU;
+    vec_reg(4).u32[2] = 0xfedcba98U;
+    vec_reg(4).u32[3] = 0x76543210U;
+    for (uint32_t rnd = 0; rnd < 8U; ++rnd) {
+        run_insn(encode_opp(0x21U, 1U, 2U, rnd, 2U));  // vsm4k.vi v2, v2, rnd
+        TEST_ASSERT(cpu.state().mcause == 0);
+        run_insn(encode_opp(0x29U, 1U, 2U, 0x10U, 4U));  // vsm4r.vs v4, v2
+        TEST_ASSERT(cpu.state().mcause == 0);
+    }
+    // GB/T 32907-2016 Appendix A.1 ciphertext: 681edf34 d206965e 86b3e94f 536e4246
+    TEST_ASSERT(vec_reg(4).u32[3] == 0x681edf34U);
+    TEST_ASSERT(vec_reg(4).u32[2] == 0xd206965eU);
+    TEST_ASSERT(vec_reg(4).u32[1] == 0x86b3e94fU);
+    TEST_ASSERT(vec_reg(4).u32[0] == 0x536e4246U);
 }
 
 }  // namespace
@@ -4263,6 +4464,10 @@ int main() {
     std::cout << "[RUN] test_track2_mutual_exclusion_and_spec_separation" << std::endl;
     test_track2_mutual_exclusion_and_spec_separation();
     std::cout << "[PASS] test_track2_mutual_exclusion_and_spec_separation" << std::endl;
+
+    std::cout << "[RUN] test_track2a_vector_crypto" << std::endl;
+    test_track2a_vector_crypto();
+    std::cout << "[PASS] test_track2a_vector_crypto" << std::endl;
 
     std::cout << "[RUN] test_track2b_scalar_crypto_gating" << std::endl;
     test_track2b_scalar_crypto_gating();

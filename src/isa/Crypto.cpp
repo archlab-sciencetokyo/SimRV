@@ -295,4 +295,315 @@ void ghash_multiply(const uint64_t h[2], const uint64_t x[2], uint64_t out[2]) n
 #pragma GCC diagnostic pop
 #endif
 
+namespace {
+
+constexpr std::array<uint32_t, 32> kSm4Ck = {
+    0x00070e15U, 0x1c232a31U, 0x383f464dU, 0x545b6269U, 0x70777e85U, 0x8c939aa1U, 0xa8afb6bdU,
+    0xc4cbd2d9U, 0xe0e7eef5U, 0xfc030a11U, 0x181f262dU, 0x343b4249U, 0x50575e65U, 0x6c737a81U,
+    0x888f969dU, 0xa4abb2b9U, 0xc0c7ced5U, 0xdce3eaf1U, 0xf8ff060dU, 0x141b2229U, 0x30373e45U,
+    0x4c535a61U, 0x686f767dU, 0x848b9299U, 0xa0a7aeb5U, 0xbcc3cad1U, 0xd8dfe6edU, 0xf4fb0209U,
+    0x10171e25U, 0x2c333a41U, 0x484f565dU, 0x646b7279U};
+
+constexpr auto byte_at(uint32_t w, unsigned idx) noexcept -> uint8_t {
+    return static_cast<uint8_t>((w >> (idx * 8U)) & 0xffU);
+}
+
+constexpr auto pack_bytes(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3) noexcept -> uint32_t {
+    return static_cast<uint32_t>(b0) | (static_cast<uint32_t>(b1) << 8U) |
+           (static_cast<uint32_t>(b2) << 16U) | (static_cast<uint32_t>(b3) << 24U);
+}
+
+void aes_sub_shift_fwd(const uint32_t in[4], uint32_t out[4]) noexcept {
+    uint32_t sb[4];
+    for (unsigned c = 0; c < 4U; ++c) sb[c] = aes_sub_word(in[c]);
+    for (unsigned c = 0; c < 4U; ++c) {
+        out[c] = pack_bytes(byte_at(sb[c], 0U), byte_at(sb[(c + 1U) & 3U], 1U),
+                            byte_at(sb[(c + 2U) & 3U], 2U), byte_at(sb[(c + 3U) & 3U], 3U));
+    }
+}
+
+void aes_inv_shift_sub(const uint32_t in[4], uint32_t out[4]) noexcept {
+    uint32_t sb[4];
+    for (unsigned c = 0; c < 4U; ++c) sb[c] = aes_inv_sub_word(in[c]);
+    for (unsigned c = 0; c < 4U; ++c) {
+        out[c] = pack_bytes(byte_at(sb[c], 0U), byte_at(sb[(c + 3U) & 3U], 1U),
+                            byte_at(sb[(c + 2U) & 3U], 2U), byte_at(sb[(c + 1U) & 3U], 3U));
+    }
+}
+
+constexpr auto brev8_u32(uint32_t x) noexcept -> uint32_t {
+    x = ((x & 0x55555555U) << 1U) | ((x >> 1U) & 0x55555555U);
+    x = ((x & 0x33333333U) << 2U) | ((x >> 2U) & 0x33333333U);
+    x = ((x & 0x0F0F0F0FU) << 4U) | ((x >> 4U) & 0x0F0F0F0FU);
+    return x;
+}
+
+constexpr auto sm4_tau(uint32_t a) noexcept -> uint32_t {
+    return pack_bytes(kSm4SBox[byte_at(a, 0U)], kSm4SBox[byte_at(a, 1U)], kSm4SBox[byte_at(a, 2U)],
+                      kSm4SBox[byte_at(a, 3U)]);
+}
+
+constexpr auto sm4_l_cipher(uint32_t b) noexcept -> uint32_t {
+    return b ^ std::rotl(b, 2) ^ std::rotl(b, 10) ^ std::rotl(b, 18) ^ std::rotl(b, 24);
+}
+
+constexpr auto sm4_l_key(uint32_t b) noexcept -> uint32_t {
+    return b ^ std::rotl(b, 13) ^ std::rotl(b, 23);
+}
+
+constexpr auto sm3_ff(uint32_t x, uint32_t y, uint32_t z, unsigned j) noexcept -> uint32_t {
+    return j < 16U ? (x ^ y ^ z) : ((x & y) | (x & z) | (y & z));
+}
+
+constexpr auto sm3_gg(uint32_t x, uint32_t y, uint32_t z, unsigned j) noexcept -> uint32_t {
+    return j < 16U ? (x ^ y ^ z) : ((x & y) | ((~x) & z));
+}
+
+}  // namespace
+
+void vaes_encrypt_mid(uint32_t state[4], const uint32_t rkey[4]) noexcept {
+    uint32_t tmp[4];
+    aes_sub_shift_fwd(state, tmp);
+    for (unsigned c = 0; c < 4U; ++c) state[c] = aes_mix_columns(tmp[c]) ^ rkey[c];
+}
+
+void vaes_encrypt_final(uint32_t state[4], const uint32_t rkey[4]) noexcept {
+    uint32_t tmp[4];
+    aes_sub_shift_fwd(state, tmp);
+    for (unsigned c = 0; c < 4U; ++c) state[c] = tmp[c] ^ rkey[c];
+}
+
+void vaes_decrypt_mid(uint32_t state[4], const uint32_t rkey[4]) noexcept {
+    uint32_t tmp[4];
+    aes_inv_shift_sub(state, tmp);
+    for (unsigned c = 0; c < 4U; ++c) state[c] = aes_inv_mix_columns(tmp[c]) ^ rkey[c];
+}
+
+void vaes_decrypt_final(uint32_t state[4], const uint32_t rkey[4]) noexcept {
+    uint32_t tmp[4];
+    aes_inv_shift_sub(state, tmp);
+    for (unsigned c = 0; c < 4U; ++c) state[c] = tmp[c] ^ rkey[c];
+}
+
+void vaes_kf1(const uint32_t prev[4], unsigned rnd, uint32_t out[4]) noexcept {
+    const unsigned r = (rnd >= 1U && rnd <= 10U) ? rnd : ((rnd & 0xFU) % 10U + 1U);
+    const uint32_t rot = std::rotr(prev[3], 8);
+    const uint32_t temp = aes_sub_word(rot) ^ static_cast<uint32_t>(kAesRcon[r - 1U]);
+    out[0] = prev[0] ^ temp;
+    out[1] = prev[1] ^ out[0];
+    out[2] = prev[2] ^ out[1];
+    out[3] = prev[3] ^ out[2];
+}
+
+void vaes_kf2(const uint32_t prev2[4], const uint32_t prev1[4], unsigned rnd,
+              uint32_t out[4]) noexcept {
+    const unsigned r = (rnd >= 2U && rnd <= 14U) ? rnd : 2U;
+    uint32_t temp = 0;
+    if ((r & 1U) == 0U) {
+        const uint32_t rot = std::rotr(prev1[3], 8);
+        temp = aes_sub_word(rot) ^ static_cast<uint32_t>(kAesRcon[(r >> 1U) - 1U]);
+    } else {
+        temp = aes_sub_word(prev1[3]);
+    }
+    out[0] = prev2[0] ^ temp;
+    out[1] = prev2[1] ^ out[0];
+    out[2] = prev2[2] ^ out[1];
+    out[3] = prev2[3] ^ out[2];
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+
+void zvkg_gmul(const uint32_t a[4], const uint32_t b[4], uint32_t out[4]) noexcept {
+    auto load_brev8 = [](const uint32_t w[4]) -> unsigned __int128 {
+        unsigned __int128 res = 0;
+        for (unsigned i = 0; i < 4U; ++i) {
+            res |= static_cast<unsigned __int128>(brev8_u32(w[i])) << (i * 32U);
+        }
+        return res;
+    };
+    const unsigned __int128 Y = load_brev8(a);
+    unsigned __int128 H = load_brev8(b);
+    unsigned __int128 Z = 0;
+    for (unsigned i = 0; i < 128U; ++i) {
+        if (((Y >> i) & 1U) != 0U) Z ^= H;
+        const bool msb = ((H >> 127U) & 1U) != 0U;
+        H = (H << 1U) ^
+            (msb ? static_cast<unsigned __int128>(0x87U) : static_cast<unsigned __int128>(0U));
+    }
+    for (unsigned i = 0; i < 4U; ++i) {
+        out[i] = brev8_u32(static_cast<uint32_t>(Z >> (i * 32U)));
+    }
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+void zvkg_ghsh(uint32_t y[4], const uint32_t h[4], const uint32_t x[4]) noexcept {
+    uint32_t sum[4];
+    for (unsigned i = 0; i < 4U; ++i) sum[i] = y[i] ^ x[i];
+    zvkg_gmul(sum, h, y);
+}
+
+void vsha256_ms(uint32_t w0_3[4], const uint32_t w4_11[4], const uint32_t w12_15[4]) noexcept {
+    const uint32_t w16 = sha256_sig1(w12_15[2]) + w4_11[1] + sha256_sig0(w0_3[1]) + w0_3[0];
+    const uint32_t w17 = sha256_sig1(w12_15[3]) + w4_11[2] + sha256_sig0(w0_3[2]) + w0_3[1];
+    const uint32_t w18 = sha256_sig1(w16) + w4_11[3] + sha256_sig0(w0_3[3]) + w0_3[2];
+    const uint32_t w19 = sha256_sig1(w17) + w12_15[0] + sha256_sig0(w4_11[0]) + w0_3[3];
+    w0_3[0] = w16;
+    w0_3[1] = w17;
+    w0_3[2] = w18;
+    w0_3[3] = w19;
+}
+
+void vsha256_compress(uint32_t cdgh[4], const uint32_t abef[4],
+                      const uint32_t wk_pair[2]) noexcept {
+    uint32_t f = abef[0];
+    uint32_t e = abef[1];
+    uint32_t b = abef[2];
+    uint32_t a = abef[3];
+    uint32_t h = cdgh[0];
+    uint32_t g = cdgh[1];
+    uint32_t d = cdgh[2];
+    uint32_t c = cdgh[3];
+
+    for (unsigned r = 0; r < 2U; ++r) {
+        const uint32_t ch = (e & f) ^ ((~e) & g);
+        const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        const uint32_t t1 = h + sha256_sum1(e) + ch + wk_pair[r];
+        const uint32_t t2 = sha256_sum0(a) + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+    }
+
+    cdgh[0] = e;
+    cdgh[1] = f;
+    cdgh[2] = b;
+    cdgh[3] = a;
+}
+
+void vsha512_ms(uint64_t w0_3[4], const uint64_t w4_11[4], const uint64_t w12_15[4]) noexcept {
+    const uint64_t w16 = sha512_sig1(w12_15[2]) + w4_11[1] + sha512_sig0(w0_3[1]) + w0_3[0];
+    const uint64_t w17 = sha512_sig1(w12_15[3]) + w4_11[2] + sha512_sig0(w0_3[2]) + w0_3[1];
+    const uint64_t w18 = sha512_sig1(w16) + w4_11[3] + sha512_sig0(w0_3[3]) + w0_3[2];
+    const uint64_t w19 = sha512_sig1(w17) + w12_15[0] + sha512_sig0(w4_11[0]) + w0_3[3];
+    w0_3[0] = w16;
+    w0_3[1] = w17;
+    w0_3[2] = w18;
+    w0_3[3] = w19;
+}
+
+void vsha512_compress(uint64_t cdgh[4], const uint64_t abef[4],
+                      const uint64_t wk_pair[2]) noexcept {
+    uint64_t f = abef[0];
+    uint64_t e = abef[1];
+    uint64_t b = abef[2];
+    uint64_t a = abef[3];
+    uint64_t h = cdgh[0];
+    uint64_t g = cdgh[1];
+    uint64_t d = cdgh[2];
+    uint64_t c = cdgh[3];
+
+    for (unsigned r = 0; r < 2U; ++r) {
+        const uint64_t ch = (e & f) ^ ((~e) & g);
+        const uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
+        const uint64_t t1 = h + sha512_sum1(e) + ch + wk_pair[r];
+        const uint64_t t2 = sha512_sum0(a) + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+    }
+
+    cdgh[0] = e;
+    cdgh[1] = f;
+    cdgh[2] = b;
+    cdgh[3] = a;
+}
+
+void vsm3_me(const uint32_t w0_7[8], const uint32_t w8_15[8], uint32_t out[8]) noexcept {
+    uint32_t w[24];
+    for (unsigned i = 0; i < 8U; ++i) {
+        w[i] = std::byteswap(w0_7[i]);
+        w[8U + i] = std::byteswap(w8_15[i]);
+    }
+    for (unsigned i = 16U; i < 24U; ++i) {
+        const uint32_t tmp = w[i - 16U] ^ w[i - 9U] ^ std::rotl(w[i - 3U], 15);
+        w[i] = sm3_p1(tmp) ^ std::rotl(w[i - 13U], 7) ^ w[i - 6U];
+        out[i - 16U] = std::byteswap(w[i]);
+    }
+}
+
+void vsm3_compress(uint32_t state[8], const uint32_t w_eg[8], unsigned rnds) noexcept {
+    uint32_t A = std::byteswap(state[0]);
+    uint32_t B = std::byteswap(state[1]);
+    uint32_t C = std::byteswap(state[2]);
+    uint32_t D = std::byteswap(state[3]);
+    uint32_t E = std::byteswap(state[4]);
+    uint32_t F = std::byteswap(state[5]);
+    uint32_t G = std::byteswap(state[6]);
+    uint32_t H = std::byteswap(state[7]);
+
+    for (unsigned k = 0; k < 2U; ++k) {
+        const unsigned j = 2U * (rnds & 0x1FU) + k;
+        const uint32_t t = j < 16U ? 0x79cc4519U : 0x7a879d8aU;
+        const uint32_t w_j = std::byteswap(w_eg[k]);
+        const uint32_t wp_j = w_j ^ std::byteswap(w_eg[4U + k]);
+        const uint32_t ss1 = std::rotl(std::rotl(A, 12) + E + std::rotl(t, j & 31U), 7);
+        const uint32_t ss2 = ss1 ^ std::rotl(A, 12);
+        const uint32_t tt1 = sm3_ff(A, B, C, j) + D + ss2 + wp_j;
+        const uint32_t tt2 = sm3_gg(E, F, G, j) + H + ss1 + w_j;
+        D = C;
+        C = std::rotl(B, 9);
+        B = A;
+        A = tt1;
+        H = G;
+        G = std::rotl(F, 19);
+        F = E;
+        E = sm3_p0(tt2);
+    }
+
+    state[0] = std::byteswap(A);
+    state[1] = std::byteswap(B);
+    state[2] = std::byteswap(C);
+    state[3] = std::byteswap(D);
+    state[4] = std::byteswap(E);
+    state[5] = std::byteswap(F);
+    state[6] = std::byteswap(G);
+    state[7] = std::byteswap(H);
+}
+
+void vsm4_key_schedule(const uint32_t prev[4], unsigned rnd, uint32_t out[4]) noexcept {
+    uint32_t k[4] = {prev[0], prev[1], prev[2], prev[3]};
+    const unsigned base = (rnd & 7U) * 4U;
+    for (unsigned i = 0; i < 4U; ++i) {
+        const uint32_t b =
+            k[(i + 1U) & 3U] ^ k[(i + 2U) & 3U] ^ k[(i + 3U) & 3U] ^ kSm4Ck[base + i];
+        k[i] ^= sm4_l_key(sm4_tau(b));
+        out[i] = k[i];
+    }
+}
+
+void vsm4_rounds(uint32_t state[4], const uint32_t rk[4]) noexcept {
+    uint32_t x[4] = {state[0], state[1], state[2], state[3]};
+    for (unsigned i = 0; i < 4U; ++i) {
+        const uint32_t b = x[(i + 1U) & 3U] ^ x[(i + 2U) & 3U] ^ x[(i + 3U) & 3U] ^ rk[i];
+        x[i] ^= sm4_l_cipher(sm4_tau(b));
+        state[i] = x[i];
+    }
+}
+
 }  // namespace simrv::crypto

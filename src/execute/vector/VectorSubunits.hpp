@@ -37,4 +37,9 @@ void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, simrv::xlen:
                             simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm, uint32_t vl,
                             uint32_t sew, simrv::xlen::Register rs1_val, int32_t simm5);
 
+[[nodiscard]] auto execute_vector_crypto(core::CPU& cpu, isa::OperationId op_id,
+                                         simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                                         simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                         uint32_t uimm5) -> bool;
+
 }  // namespace simrv::execute::vector

@@ -37,6 +37,7 @@ enum class Opcode : uint8_t {
     MiscMem = 0x0F,  ///< RV32I/RV64I: Miscellaneous memory instructions (FENCE, FENCE.I)
     System = 0x73,   ///< RV32I/RV64I: System instructions (privilege calls, CSR access)
     OpV = 0x57,      ///< RISC-V Vector Extension: Vector instructions
+    OpP = 0x77,      ///< RISC-V Vector Cryptography / Packed-SIMD (OP-P)
     Custom0 = 0x0B,  ///< RISC-V Custom/Non-standard Opcode Space 0
     Custom1 = 0x2B,  ///< RISC-V Custom/Non-standard Opcode Space 1
     Custom2 = 0x5B,  ///< RISC-V Custom/Non-standard Opcode Space 2

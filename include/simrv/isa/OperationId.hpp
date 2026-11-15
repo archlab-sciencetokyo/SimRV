@@ -924,6 +924,10 @@ constexpr OperationId kOpRangeCodeSizeEnd = CM_JALT;
            (op_id >= kOpRangeVectorCryptoBegin && op_id <= kOpRangeVectorCryptoEnd);
 }
 
+[[nodiscard]] constexpr auto is_vector_crypto_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeVectorCryptoBegin && op_id <= kOpRangeVectorCryptoEnd;
+}
+
 [[nodiscard]] constexpr auto is_zk_op(OperationId op_id) noexcept -> bool {
     return op_id >= kOpRangeScalarCryptoBegin && op_id <= kOpRangeScalarCryptoEnd;
 }

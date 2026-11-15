@@ -145,6 +145,32 @@ namespace simrv::crypto {
 
 void ghash_multiply(const uint64_t h[2], const uint64_t x[2], uint64_t out[2]) noexcept;
 
+// =============================================================================
+// Vector Cryptography Primitives (Zvk*: Zvkned, Zvkg, Zvknha/b, Zvksh, Zvksed)
+// =============================================================================
+
+void vaes_encrypt_mid(uint32_t state[4], const uint32_t rkey[4]) noexcept;
+void vaes_encrypt_final(uint32_t state[4], const uint32_t rkey[4]) noexcept;
+void vaes_decrypt_mid(uint32_t state[4], const uint32_t rkey[4]) noexcept;
+void vaes_decrypt_final(uint32_t state[4], const uint32_t rkey[4]) noexcept;
+void vaes_kf1(const uint32_t prev[4], unsigned rnd, uint32_t out[4]) noexcept;
+void vaes_kf2(const uint32_t prev2[4], const uint32_t prev1[4], unsigned rnd,
+              uint32_t out[4]) noexcept;
+
+void zvkg_gmul(const uint32_t a[4], const uint32_t b[4], uint32_t out[4]) noexcept;
+void zvkg_ghsh(uint32_t y[4], const uint32_t h[4], const uint32_t x[4]) noexcept;
+
+void vsha256_ms(uint32_t w0_3[4], const uint32_t w4_11[4], const uint32_t w12_15[4]) noexcept;
+void vsha256_compress(uint32_t cdgh[4], const uint32_t abef[4], const uint32_t wk_pair[2]) noexcept;
+void vsha512_ms(uint64_t w0_3[4], const uint64_t w4_11[4], const uint64_t w12_15[4]) noexcept;
+void vsha512_compress(uint64_t cdgh[4], const uint64_t abef[4], const uint64_t wk_pair[2]) noexcept;
+
+void vsm3_me(const uint32_t w0_7[8], const uint32_t w8_15[8], uint32_t out[8]) noexcept;
+void vsm3_compress(uint32_t state[8], const uint32_t w_eg[8], unsigned rnds) noexcept;
+
+void vsm4_key_schedule(const uint32_t prev[4], unsigned rnd, uint32_t out[4]) noexcept;
+void vsm4_rounds(uint32_t state[4], const uint32_t rk[4]) noexcept;
+
 }  // namespace simrv::crypto
 
 namespace simrv::isa::crypto {

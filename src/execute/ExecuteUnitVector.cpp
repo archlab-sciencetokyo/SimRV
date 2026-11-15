@@ -1421,8 +1421,14 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
             break;
 
         default:
-            if (!execute_vector_integer(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
-                                        cpu.state().regs.read(rs1), simm5)) {
+            if (isa::is_vector_crypto_op(op_id)) {
+                const uint32_t uimm5 = (ir >> 15U) & 0x1FU;
+                if (!execute_vector_crypto(cpu, op_id, rd, rs1, rs2, vm, vl, sew, uimm5)) {
+                    cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
+                    cpu.active_context().pending_tval = ir;
+                }
+            } else if (!execute_vector_integer(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
+                                               cpu.state().regs.read(rs1), simm5)) {
                 cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
                 cpu.active_context().pending_tval = ir;
             }

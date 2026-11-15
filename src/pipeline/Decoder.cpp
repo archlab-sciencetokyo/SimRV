@@ -1266,6 +1266,69 @@ auto decode_vector_whole_register_move(simrv::xlen::Instruction ir) -> Operation
 
 }  // namespace
 
+auto decode_ext_op_p(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
+    const bool vm = (ir & (1u << 25)) != 0;
+    if (funct3 != 2U || !vm) return OperationId::ILLEGAL;
+    const uint32_t f6 = funct7 >> 1U;
+    const uint32_t vs1 = (ir >> 15U) & 0x1FU;
+    switch (f6) {
+        case 0x20U:
+            return OperationId::VSM3ME_VV;
+        case 0x21U:
+            return OperationId::VSM4K_VI;
+        case 0x22U:
+            return OperationId::VAESKF1_VI;
+        case 0x28U:
+            switch (vs1) {
+                case 0x00U:
+                    return OperationId::VAESDM_VV;
+                case 0x01U:
+                    return OperationId::VAESDF_VV;
+                case 0x02U:
+                    return OperationId::VAESEM_VV;
+                case 0x03U:
+                    return OperationId::VAESEF_VV;
+                case 0x10U:
+                    return OperationId::VSM4R_VV;
+                case 0x11U:
+                    return OperationId::VGMUL_VV;
+                default:
+                    return OperationId::ILLEGAL;
+            }
+        case 0x29U:
+            switch (vs1) {
+                case 0x00U:
+                    return OperationId::VAESDM_VS;
+                case 0x01U:
+                    return OperationId::VAESDF_VS;
+                case 0x02U:
+                    return OperationId::VAESEM_VS;
+                case 0x03U:
+                    return OperationId::VAESEF_VS;
+                case 0x07U:
+                    return OperationId::VAESZ_VS;
+                case 0x10U:
+                    return OperationId::VSM4R_VS;
+                default:
+                    return OperationId::ILLEGAL;
+            }
+        case 0x2AU:
+            return OperationId::VAESKF2_VI;
+        case 0x2BU:
+            return OperationId::VSM3C_VI;
+        case 0x2CU:
+            return OperationId::VGHSH_VV;
+        case 0x2DU:
+            return OperationId::VSHA2MS_VV;
+        case 0x2EU:
+            return OperationId::VSHA2CH_VV;
+        case 0x2FU:
+            return OperationId::VSHA2CL_VV;
+        default:
+            return OperationId::ILLEGAL;
+    }
+}
+
 auto decode_ext_v(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
     if (funct3 == 7) {
         if ((ir & (1u << 31)) == 0) {
@@ -1475,6 +1538,9 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
     }
     if (op == Opcode::OpV) {
         return decode_ext_v(funct3, funct7, ir);
+    }
+    if (op == Opcode::OpP) {
+        return decode_ext_op_p(funct3, funct7, ir);
     }
     if (op == Opcode::Custom0) {
         return OperationId::CFU;
