@@ -96,14 +96,16 @@
         },
         {
             "name": "rv64-dev",
-            "displayName": "RV64 Fast Dev Release (No LTO, Ninja)",
+            "displayName": "RV64 Fast Dev Release (No LTO, -g1, Ninja)",
             "inherits": [
                 "simrv-release",
                 "simrv-rv64"
             ],
             "binaryDir": "${sourceDir}/build/rv64-dev",
             "cacheVariables": {
-                "SIMRV_ENABLE_LTO": "OFF"
+                "SIMRV_ENABLE_LTO": "OFF",
+                "CMAKE_C_FLAGS": "-g1",
+                "CMAKE_CXX_FLAGS": "-g1"
             }
         },
         {
