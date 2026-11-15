@@ -55,7 +55,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install clang-format
-        run: dnf install -y git clang-tools-extra
+        run: dnf install -y --setopt=install_weak_deps=False git clang-tools-extra
       - name: Check formatting
         shell: bash
         run: |
@@ -90,8 +90,15 @@ jobs:
 
       - name: Install build tools
         run: |
-          dnf install -y git cmake ninja-build boost-devel libslirp-devel \
-            gcc gcc-c++ clang clang-tools-extra ccache curl tar xz autoconf make which golang
+          EXTRA_PKGS=()
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            EXTRA_PKGS+=(clang)
+          else
+            EXTRA_PKGS+=(golang)
+          fi
+          dnf install -y --setopt=install_weak_deps=False \
+            git cmake ninja-build boost-devel libslirp-devel \
+            gcc gcc-c++ mold ccache curl tar xz autoconf make which "${EXTRA_PKGS[@]}"
 
       - name: Setup ccache
         uses: ./.github/actions/setup-ccache
@@ -110,8 +117,11 @@ jobs:
 
       - name: Show toolchain versions
         run: |
-          g++ --version
-          clang++ --version
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            clang++ --version
+          else
+            g++ --version
+          fi
           riscv-none-elf-gcc --version
           cmake --version
           ninja --version
@@ -122,24 +132,24 @@ jobs:
           RISCV_TESTS_DIR: ${{ steps.riscv-tests.outputs.riscv-tests-dir }}
         shell: bash
         run: |
+          EXTRA_ARGS=()
           if [[ "${{ matrix.compiler }}" == "clang" ]]; then
             CC=clang
             CXX=clang++
           else
             CC=gcc
             CXX=g++
-          fi
-          VECTOR_ARGS=()
-          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
-            VECTOR_ARGS+=("-DSIMRV_VECTOR_TESTS_DIR=${{ steps.riscv-tests.outputs.vector-tests-dir }}")
+            EXTRA_ARGS+=("-DSIMRV_ENABLE_LTO=OFF")
+            EXTRA_ARGS+=("-DSIMRV_VECTOR_TESTS_DIR=${{ steps.riscv-tests.outputs.vector-tests-dir }}")
           fi
           cmake --preset ${{ matrix.arch }}-release \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_LINKER_TYPE=MOLD \
             -DSIMRV_WARNINGS_AS_ERRORS=ON \
-            "${VECTOR_ARGS[@]}"
+            "${EXTRA_ARGS[@]}"
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
@@ -215,8 +225,9 @@ jobs:
 
       - name: Install sanitizer build tools
         run: |
-          dnf install -y cmake ninja-build boost-devel libslirp-devel \
-            gcc gcc-c++ libasan libtsan libubsan ccache util-linux
+          dnf install -y --setopt=install_weak_deps=False \
+            cmake ninja-build boost-devel libslirp-devel \
+            gcc gcc-c++ mold libasan libtsan libubsan ccache util-linux
 
       - name: Setup ccache
         uses: ./.github/actions/setup-ccache
@@ -229,6 +240,7 @@ jobs:
           cmake --preset ${{ matrix.preset }}
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_LINKER_TYPE=MOLD
           ${{ matrix.cmake_extra }}
 
       - name: Build ${{ matrix.sanitizer }}
@@ -290,7 +302,7 @@ jobs:
             -DSIMRV_ENABLE_LTO=OFF
 
       - name: Build simulator and gate tests
-        run: cmake --build build/macos --parallel 2
+        run: cmake --build build/macos --parallel "$(sysctl -n hw.ncpu)"
 
       - name: Run macOS smoke and gate tests
         run: |
@@ -318,7 +330,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install native build tools
-        run: dnf install -y cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ ccache
+        run: dnf install -y --setopt=install_weak_deps=False cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ mold ccache
 
       - name: Setup ccache
         uses: ./.github/actions/setup-ccache
@@ -330,11 +342,13 @@ jobs:
           cmake --preset rv64-gcc-release
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_LINKER_TYPE=MOLD
+          -DSIMRV_ENABLE_LTO=OFF
           -DSIMRV_WARNINGS_AS_ERRORS=ON
           -DSIMRV_NATIVE_HOST_OPTIMIZATIONS=ON
 
       - name: Build native ARM64 simulator
-        run: cmake --build --preset rv64-gcc-release --parallel 3
+        run: cmake --build --preset rv64-gcc-release
 
       - name: Run native ARM64 smoke and gate tests
         run: |

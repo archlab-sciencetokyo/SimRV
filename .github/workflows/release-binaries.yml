@@ -37,8 +37,9 @@ jobs:
 
       - name: Install build tools
         run: |
-          dnf install -y git cmake ninja-build boost-devel libslirp-devel \
-            gcc gcc-c++ clang-tools-extra ccache curl tar xz autoconf make which
+          dnf install -y --setopt=install_weak_deps=False \
+            git cmake ninja-build boost-devel libslirp-devel \
+            gcc gcc-c++ mold ccache curl tar xz autoconf make which
 
       - name: Setup ccache
         uses: ./.github/actions/setup-ccache
@@ -67,6 +68,8 @@ jobs:
           -DCMAKE_CXX_COMPILER=g++
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_LINKER_TYPE=MOLD
+          -DSIMRV_ENABLE_LTO=OFF
           -DSIMRV_WARNINGS_AS_ERRORS=ON
 
       - name: Build
@@ -95,19 +98,29 @@ jobs:
           echo "RISCV_ARCH_TEST_REVISION=$revision" >> "$GITHUB_ENV"
           echo "ACT4 upstream head: $revision" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Restore ACT4 tool cache
+      - name: Restore static ACT4 toolchain cache
         if: matrix.arch == 'rv64'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/ruby-3.4.12
+            ${{ runner.temp }}/sail-riscv-0.16
+            ${{ runner.temp }}/act-venv
+          key: ${{ runner.os }}-${{ runner.arch }}-act4-static-ruby3.4.12-sail0.16-uv0.13.4-v1
+
+      - name: Restore ACT4 repo and package cache
+        if: matrix.arch == 'rv64'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
             ${{ runner.temp }}/act-gems
             ${{ runner.temp }}/act-bundle
             ${{ runner.temp }}/uv-cache
             ${{ runner.temp }}/uv-python
-            ${{ runner.temp }}/sail-riscv-0.16
             ${{ runner.temp }}/riscv-arch-test
-          key: ${{ runner.os }}-${{ runner.arch }}-act4-tools-${{ steps.resolve-act4.outputs.revision }}-ruby3.4.12-sail0.16-uv0.13.4-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-act4-repo-${{ steps.resolve-act4.outputs.revision }}-v1
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-act4-repo-
 
       - name: Restore generated ACT4 suite
         if: matrix.arch == 'rv64'
@@ -123,10 +136,11 @@ jobs:
       - name: Install ACT4 prerequisites
         if: matrix.arch == 'rv64'
         run: |
-          dnf install -y python3 python3-pip ruby-build-core ruby-build-ruby \
-            gcc make bzip2-devel openssl-devel libyaml-devel libffi-devel \
-            readline-devel zlib-ng-compat-devel gdbm-devel ncurses-devel jq
+          dnf install -y --setopt=install_weak_deps=False python3 python3-pip jq
           if [[ ! -x "$RUNNER_TEMP/ruby-3.4.12/bin/ruby" ]]; then
+            dnf install -y --setopt=install_weak_deps=False ruby-build-core ruby-build-ruby \
+              make bzip2-devel openssl-devel libyaml-devel libffi-devel \
+              readline-devel zlib-ng-compat-devel gdbm-devel ncurses-devel
             ruby-build 3.4.12 "$RUNNER_TEMP/ruby-3.4.12"
           fi
           mkdir -p "$RUNNER_TEMP/act-gems"
@@ -134,8 +148,10 @@ jobs:
           echo "$RUNNER_TEMP/act-gems/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/ruby-3.4.12/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/ruby-3.4.12/bin/ruby" --version
-          python3 -m venv "$RUNNER_TEMP/act-venv"
-          "$RUNNER_TEMP/act-venv/bin/pip" install uv==0.13.4
+          if [[ ! -x "$RUNNER_TEMP/act-venv/bin/uv" ]]; then
+            python3 -m venv "$RUNNER_TEMP/act-venv"
+            "$RUNNER_TEMP/act-venv/bin/pip" install uv==0.13.4
+          fi
           echo "$RUNNER_TEMP/act-venv/bin" >> "$GITHUB_PATH"
           if ! find "$RUNNER_TEMP/sail-riscv-0.16" -type f -name sail_riscv_sim -executable -print -quit 2>/dev/null | grep -q .; then
             sail_archive="$RUNNER_TEMP/sail-riscv-Linux-x86_64.tar.gz"
@@ -263,14 +279,21 @@ jobs:
       - name: Validate release tag
         id: names
         uses: ./.github/actions/resolve-simrv-version
+      - name: Cache Boost 1.83 headers
+        id: cache-boost
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /opt/boost-1.83
+          key: rocky10-boost-1.83.0-v1
       - name: Install build tools
         shell: bash
         run: |
           set -euo pipefail
-          dnf install -y dnf-plugins-core
+          dnf install -y --setopt=install_weak_deps=False dnf-plugins-core
           dnf config-manager --set-enabled crb
-          dnf install -y epel-release
-          dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
+          dnf install -y --setopt=install_weak_deps=False epel-release
+          dnf install -y --setopt=install_weak_deps=False \
+            gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
             libslirp-devel make python3-pip rpm-build rpmlint findutils binutils \
             bzip2-devel pkgconf-pkg-config wget which ccache
@@ -283,14 +306,16 @@ jobs:
           for tool in cmake ninja ctest; do
             command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
           done
-          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 \
-            -O /tmp/boost_1_83_0.tar.bz2
-          echo '6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e  /tmp/boost_1_83_0.tar.bz2' \
-            | sha256sum --check
-          tar -xjf /tmp/boost_1_83_0.tar.bz2 -C /tmp
-          cd /tmp/boost_1_83_0
-          ./bootstrap.sh
-          ./b2 --with-headers install --prefix=/opt/boost-1.83
+          if [[ "${{ steps.cache-boost.outputs.cache-hit }}" != "true" ]]; then
+            wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 \
+              -O /tmp/boost_1_83_0.tar.bz2
+            echo '6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e  /tmp/boost_1_83_0.tar.bz2' \
+              | sha256sum --check
+            tar -xjf /tmp/boost_1_83_0.tar.bz2 -C /tmp
+            cd /tmp/boost_1_83_0
+            ./bootstrap.sh
+            ./b2 --with-headers install --prefix=/opt/boost-1.83
+          fi
           echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
@@ -311,7 +336,7 @@ jobs:
             -DSIMRV_ENABLE_LTO=OFF \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
-          cmake --build build/rv64-release --target simrv-package-binaries --parallel 2
+          cmake --build build/rv64-release --target simrv-package-binaries --parallel "$(nproc)"
           if readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'; then
             echo "RHEL 10 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
             readelf -d build/rv64-release/simrv | grep -E 'NEEDED.*(libstdc\+\+|libgcc_s)' >&2
@@ -400,6 +425,15 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           require-major-v3: 'false'
+      - name: Cache Alpine libslirp and ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/musl-usr-local
+            ${{ runner.temp }}/musl-ccache
+          key: musl-${{ matrix.arch }}-libslirp4.9.5-${{ github.sha }}
+          restore-keys: |
+            musl-${{ matrix.arch }}-libslirp4.9.5-
       - name: Build static musl archive inside Alpine
         shell: bash
         env:
@@ -407,12 +441,16 @@ jobs:
           SIMRV_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/musl-usr-local" "$RUNNER_TEMP/musl-ccache"
           SIMRV_HOST_UID="$(id -u)"
           SIMRV_HOST_GID="$(id -g)"
           export SIMRV_HOST_UID SIMRV_HOST_GID
           docker run --rm \
             -e SIMRV_ASSET_BASE -e SIMRV_ARCH -e SIMRV_HOST_UID -e SIMRV_HOST_GID \
-            -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$RUNNER_TEMP/musl-usr-local:/usr/local" \
+            -v "$RUNNER_TEMP/musl-ccache:/ccache" \
+            -w /workspace \
             alpine:edge sh .github/scripts/portable-musl-release.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -429,6 +467,11 @@ jobs:
       # stock Noble without requiring the toolchain PPA at runtime.
       image: ubuntu:24.04
     steps:
+      - name: Cache pip wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /root/.cache/pip
+          key: ubuntu2404-pip-cmake4.3.0-ninja-v1
       - name: Install package build tools
         shell: bash
         run: |
@@ -463,7 +506,7 @@ jobs:
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
-          cmake --build build/rv64-release --target simrv-package-binaries --parallel 2
+          cmake --build build/rv64-release --target simrv-package-binaries --parallel "$(nproc)"
           max_glibc="$(readelf --version-info build/rv64-release/simrv \
             | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
           if [[ -z "$max_glibc" ]]; then
