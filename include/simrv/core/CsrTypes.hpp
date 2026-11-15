@@ -30,8 +30,10 @@ enum class MstatusBit : simrv::xlen::CsrValue {
     Tvm = (1u << 20),
     Tw = (1u << 21),
     Tsr = (1u << 22),
+    Sdt = (1u << 24),
     Gva = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 38U),
     Mpv = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 39U),
+    Mdt = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 42U),
 };
 
 constexpr auto operator|(MstatusBit lhs, MstatusBit rhs) noexcept -> simrv::xlen::CsrValue {
@@ -242,11 +244,13 @@ constexpr auto mip_rmw_base(simrv::xlen::CsrValue visible_mip, bool seip_softwar
 constexpr simrv::xlen::CsrValue kMstatusMask =
     (MstatusBit::Sie | MstatusBit::Mie | MstatusBit::Spie | MstatusBit::Mpie | MstatusBit::Spp |
      MstatusBit::Mpp | MstatusBit::Fs | MstatusBit::Vs | MstatusBit::Mprv | MstatusBit::Sum |
-     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Mpv |
-     (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0xF) << 32) : 0));
+     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Sdt |
+     MstatusBit::Mpv |
+     (simrv::xlen::kIsXLen64 ? ((static_cast<simrv::xlen::CsrValue>(0xF) << 32) | MstatusBit::Mdt)
+                             : 0));
 constexpr simrv::xlen::CsrValue kSstatusMask =
     (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
-     MstatusBit::Sum | MstatusBit::Mxr |
+     MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Sdt |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0x3) << 32) : 0));
 constexpr simrv::xlen::CsrValue kMstatusFsDirty = std::to_underlying(MstatusBit::Fs);
 constexpr simrv::xlen::CsrValue kMstatusGva = std::to_underlying(MstatusBit::Gva);
@@ -296,11 +300,12 @@ constexpr auto mstatus_with_sd(simrv::xlen::CsrValue mstatus) -> simrv::xlen::Cs
  * SimRV chooses the permitted read-only-zero behavior for absent F and V state.
  */
 constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v,
-                                     bool has_h = false) -> simrv::xlen::CsrValue {
+                                     bool has_h = false, bool has_sdbltrp = false,
+                                     bool has_mdbltrp = false) -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = kMstatusMask;
     if (!has_s) {
         mask &= ~(MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Sum |
-                  MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tsr);
+                  MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tsr | MstatusBit::Sdt);
         if constexpr (simrv::xlen::kIsXLen64) {
             mask &= ~(static_cast<simrv::xlen::CsrValue>(0x3U) << 34U);  // SXL
         }
@@ -315,6 +320,10 @@ constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool ha
     if (!has_f) mask &= ~MstatusBit::Fs;
     if (!has_v) mask &= ~MstatusBit::Vs;
     if (!has_h) mask &= ~MstatusBit::Mpv;
+    if (!has_sdbltrp) mask &= ~MstatusBit::Sdt;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (!has_mdbltrp) mask &= ~MstatusBit::Mdt;
+    }
     return mask;
 }
 
@@ -627,6 +636,7 @@ enum class Csr : uint16_t {
     Vxrm = 0x00A,
     Vcsr = 0x00F,
     Seed = 0x015,
+    Jvt = 0x017,
     Pmpcfg0 = 0x3A0,
     Pmpaddr0 = 0x3B0,
     Cycle = 0xC00,
@@ -659,8 +669,22 @@ enum class Csr : uint16_t {
     Stval = 0x143,
     Sip = 0x144,
     Stimecmp = 0x14D,
+    Siselect = 0x150,
+    Sireg = 0x151,
+    Sireg2 = 0x152,
+    Sireg3 = 0x153,
+    Sireg4 = 0x154,
+    Sireg5 = 0x155,
+    Sireg6 = 0x156,
     Stimecmph = 0x15D,
     Vstimecmp = 0x24D,
+    Vsiselect = 0x250,
+    Vsireg = 0x251,
+    Vsireg2 = 0x252,
+    Vsireg3 = 0x253,
+    Vsireg4 = 0x254,
+    Vsireg5 = 0x255,
+    Vsireg6 = 0x256,
     Vstimecmph = 0x25D,
     Scountovf = 0xDA0,
     Satp = 0x180,
@@ -713,6 +737,17 @@ enum class Csr : uint16_t {
     Mip = 0x344,
     Mtinst = 0x34A,
     Mtval2 = 0x34B,
+    Miselect = 0x350,
+    Mireg = 0x351,
+    Mireg2 = 0x352,
+    Mireg3 = 0x353,
+    Mireg4 = 0x354,
+    Mireg5 = 0x355,
+    Mireg6 = 0x356,
+    Mnscratch = 0x740,
+    Mnepc = 0x741,
+    Mncause = 0x742,
+    Mnstatus = 0x744,
     Mseccfg = 0x747,
     Mseccfgh = 0x757,
     Tselect = 0x7A0,

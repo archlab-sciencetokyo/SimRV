@@ -756,15 +756,21 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
     simrv::pipeline::Decoder dec_org(ctx.ir_org);
     bool const w_compressed = dec_org.is_compressed();
-    simrv::xlen::Instruction const w_ir_tmp =
-        w_compressed
-            ? simrv::pipeline::decompressInstruction(ctx.ir_org, state_.current_xlen() == 64)
-            : ctx.ir_org;
-
-    const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
     auto effective_extensions = state_.enabled_extensions;
     if (cpu_model_config.has_isa_extension("zkn")) {
         add_extension_to_set(effective_extensions, "zkn");
+    }
+    isa::OperationId op_id = isa::ILLEGAL;
+    simrv::xlen::Instruction w_ir_tmp = ctx.ir_org;
+    if (w_compressed && ((ctx.ir_org & 0xE003U) == 0xA002U) &&
+        (effective_extensions.has(isa::MultiLetterExtension::Zcmp) ||
+         effective_extensions.has(isa::MultiLetterExtension::Zcmt))) {
+        op_id = simrv::pipeline::decode_compressed_op(static_cast<uint16_t>(ctx.ir_org & 0xFFFFU));
+    } else {
+        w_ir_tmp = w_compressed ? simrv::pipeline::decompressInstruction(
+                                      ctx.ir_org, state_.current_xlen() == 64)
+                                : ctx.ir_org;
+        op_id = simrv::pipeline::decoder(w_ir_tmp);
     }
     bool is_valid = instruction_enabled(state_.misa, effective_extensions, op_id, w_compressed);
     if (is_valid && misa_has_extension(state_.misa, isa::IsaExtension::E) &&
@@ -837,7 +843,11 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                 is_valid = false;
             }
         } else if (is_fp_op) {
-            if (simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Fs))) {
+            const bool zfinx_active = effective_extensions.has(isa::MultiLetterExtension::Zfinx) &&
+                                      !misa_has_extension(state_.misa, isa::IsaExtension::F) &&
+                                      !misa_has_extension(state_.misa, isa::IsaExtension::D);
+            if (!zfinx_active &&
+                simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Fs))) {
                 is_valid = false;
             }
         }

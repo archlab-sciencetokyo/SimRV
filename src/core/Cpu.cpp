@@ -254,6 +254,20 @@ void CPU::sret() {
     }
 }
 
+void CPU::mnret() {
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
+    const auto old_mstatus = state_.mstatus;
+    TrapController::mnret(state_);
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen ||
+                                  (((old_mstatus | state_.mstatus) & MstatusBit::Mprv) != 0 &&
+                                   ((old_mstatus ^ state_.mstatus) & MstatusBit::Mpv) != 0))) {
+        TLB_flush();
+    } else {
+        sync_decode_context();
+    }
+}
+
 void CPU::plic_update_mip() { plic_mmio.update_mip(); }
 
 void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, simrv::xlen::IrqLevel state) {

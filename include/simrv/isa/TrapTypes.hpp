@@ -47,6 +47,7 @@ enum class ExceptionCode : uint8_t {
     FetchPageFault = 0xc,
     LoadPageFault = 0xd,
     StorePageFault = 0xf,
+    DoubleTrap = 0x10,
     GuestInstructionPageFault = 0x14,
     GuestLoadPageFault = 0x15,
     VirtualInstruction = 0x16,

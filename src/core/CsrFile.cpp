@@ -218,7 +218,12 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
                                          (mod & MstatusBit::Mpv) != 0)) {
         cpu_.flush_data_tlb();
     }
-    const simrv::xlen::CsrValue mask = mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h);
+    const bool has_sdbltrp =
+        cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp);
+    const bool has_mdbltrp =
+        cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp);
+    const simrv::xlen::CsrValue mask =
+        mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h, has_sdbltrp, has_mdbltrp);
     cpu_.state().mstatus = (cpu_.state().mstatus & ~mask) | (wdata & mask);
     // Read-only-zero fields must not retain reset/profile state internally,
     // otherwise SD and effective-XLEN calculations could observe absent state.
@@ -339,6 +344,115 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             rcsr = static_cast<simrv::xlen::CsrValue>(0x80000000U | (z & 0xFFFFU));
             break;
         }
+        case csr_addr(Csr::Jvt):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zcmt)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.jvt;
+            break;
+        case csr_addr(Csr::Miselect):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.miselect;
+            break;
+        case csr_addr(Csr::Mireg):
+        case csr_addr(Csr::Mireg2):
+        case csr_addr(Csr::Mireg3):
+        case csr_addr(Csr::Mireg4):
+        case csr_addr(Csr::Mireg5):
+        case csr_addr(Csr::Mireg6): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto slot = static_cast<size_t>(addr.value() - csr_addr(Csr::Mireg));
+            rcsr = 0;
+            for (const auto& entry : state.mireg_bank) {
+                if (entry.valid && entry.select == state.miselect) {
+                    rcsr = entry.regs[slot];
+                    break;
+                }
+            }
+            break;
+        }
+        case csr_addr(Csr::Siselect):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Sscsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.virt ? state.vsiselect : state.siselect;
+            break;
+        case csr_addr(Csr::Sireg):
+        case csr_addr(Csr::Sireg2):
+        case csr_addr(Csr::Sireg3):
+        case csr_addr(Csr::Sireg4):
+        case csr_addr(Csr::Sireg5):
+        case csr_addr(Csr::Sireg6): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Sscsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto slot = static_cast<size_t>(addr.value() - csr_addr(Csr::Sireg));
+            const auto& bank = state.virt ? state.vsireg_bank : state.sireg_bank;
+            const auto sel = state.virt ? state.vsiselect : state.siselect;
+            rcsr = 0;
+            for (const auto& entry : bank) {
+                if (entry.valid && entry.select == sel) {
+                    rcsr = entry.regs[slot];
+                    break;
+                }
+            }
+            break;
+        }
+        case csr_addr(Csr::Vsiselect):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Sscsrind) ||
+                !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.vsiselect;
+            break;
+        case csr_addr(Csr::Vsireg):
+        case csr_addr(Csr::Vsireg2):
+        case csr_addr(Csr::Vsireg3):
+        case csr_addr(Csr::Vsireg4):
+        case csr_addr(Csr::Vsireg5):
+        case csr_addr(Csr::Vsireg6): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Sscsrind) ||
+                !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto slot = static_cast<size_t>(addr.value() - csr_addr(Csr::Vsireg));
+            rcsr = 0;
+            for (const auto& entry : state.vsireg_bank) {
+                if (entry.valid && entry.select == state.vsiselect) {
+                    rcsr = entry.regs[slot];
+                    break;
+                }
+            }
+            break;
+        }
+        case csr_addr(Csr::Mnscratch):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.mnscratch;
+            break;
+        case csr_addr(Csr::Mnepc):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = isa::epc_read_value(state.mnepc, state.misa);
+            break;
+        case csr_addr(Csr::Mncause):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.mncause;
+            break;
+        case csr_addr(Csr::Mnstatus):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.mnstatus;
+            break;
         case csr_addr(Csr::Vl):
             return require_vector().transform([&state]() { return state.vl; });
         case csr_addr(Csr::Vtype):
@@ -1011,6 +1125,159 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             }
             cpu_.state().zkr_entropy_state += 0x9E3779B97F4A7C15ULL;
             break;
+        case csr_addr(Csr::Jvt):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zcmt)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            // WARL: mode [5:0] == 0 (table jump mode), base [XLEN-1:6] 64-byte aligned
+            cpu_.state().jvt = wdata & ~static_cast<simrv::xlen::CsrValue>(0x3FU);
+            break;
+        case csr_addr(Csr::Miselect):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().miselect = wdata;
+            break;
+        case csr_addr(Csr::Mireg):
+        case csr_addr(Csr::Mireg2):
+        case csr_addr(Csr::Mireg3):
+        case csr_addr(Csr::Mireg4):
+        case csr_addr(Csr::Mireg5):
+        case csr_addr(Csr::Mireg6): {
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto slot = static_cast<size_t>(addr.value() - csr_addr(Csr::Mireg));
+            const auto sel = cpu_.state().miselect;
+            auto& bank = cpu_.state().mireg_bank;
+            size_t target = 0;
+            bool found = false;
+            for (size_t i = 0; i < bank.size(); ++i) {
+                if (bank[i].valid && bank[i].select == sel) {
+                    target = i;
+                    found = true;
+                    break;
+                }
+                if (!bank[i].valid && !found) {
+                    target = i;
+                    found = true;
+                }
+            }
+            bank[target].valid = true;
+            bank[target].select = sel;
+            bank[target].regs[slot] = wdata;
+            break;
+        }
+        case csr_addr(Csr::Siselect):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sscsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            if (cpu_.state().virt) {
+                cpu_.state().vsiselect = wdata;
+            } else {
+                cpu_.state().siselect = wdata;
+            }
+            break;
+        case csr_addr(Csr::Sireg):
+        case csr_addr(Csr::Sireg2):
+        case csr_addr(Csr::Sireg3):
+        case csr_addr(Csr::Sireg4):
+        case csr_addr(Csr::Sireg5):
+        case csr_addr(Csr::Sireg6): {
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sscsrind)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto slot = static_cast<size_t>(addr.value() - csr_addr(Csr::Sireg));
+            const auto sel = cpu_.state().virt ? cpu_.state().vsiselect : cpu_.state().siselect;
+            auto& bank = cpu_.state().virt ? cpu_.state().vsireg_bank : cpu_.state().sireg_bank;
+            size_t target = 0;
+            bool found = false;
+            for (size_t i = 0; i < bank.size(); ++i) {
+                if (bank[i].valid && bank[i].select == sel) {
+                    target = i;
+                    found = true;
+                    break;
+                }
+                if (!bank[i].valid && !found) {
+                    target = i;
+                    found = true;
+                }
+            }
+            bank[target].valid = true;
+            bank[target].select = sel;
+            bank[target].regs[slot] = wdata;
+            break;
+        }
+        case csr_addr(Csr::Vsiselect):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sscsrind) ||
+                !isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vsiselect = wdata;
+            break;
+        case csr_addr(Csr::Vsireg):
+        case csr_addr(Csr::Vsireg2):
+        case csr_addr(Csr::Vsireg3):
+        case csr_addr(Csr::Vsireg4):
+        case csr_addr(Csr::Vsireg5):
+        case csr_addr(Csr::Vsireg6): {
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sscsrind) ||
+                !isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto slot = static_cast<size_t>(addr.value() - csr_addr(Csr::Vsireg));
+            const auto sel = cpu_.state().vsiselect;
+            auto& bank = cpu_.state().vsireg_bank;
+            size_t target = 0;
+            bool found = false;
+            for (size_t i = 0; i < bank.size(); ++i) {
+                if (bank[i].valid && bank[i].select == sel) {
+                    target = i;
+                    found = true;
+                    break;
+                }
+                if (!bank[i].valid && !found) {
+                    target = i;
+                    found = true;
+                }
+            }
+            bank[target].valid = true;
+            bank[target].select = sel;
+            bank[target].regs[slot] = wdata;
+            break;
+        }
+        case csr_addr(Csr::Mnscratch):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().mnscratch = wdata;
+            break;
+        case csr_addr(Csr::Mnepc):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().mnepc = wdata & ~static_cast<simrv::xlen::CsrValue>(1);
+            break;
+        case csr_addr(Csr::Mncause):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().mncause = wdata;
+            break;
+        case csr_addr(Csr::Mnstatus): {
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smrnmi)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            // NMIE (bit 3) can be set by software (only cleared by hardware on RNMI),
+            // MNPV (bit 7), MNPP (bits [12:11]).
+            constexpr simrv::xlen::CsrValue kNmieBit = simrv::xlen::CsrValue{1} << 3U;
+            constexpr simrv::xlen::CsrValue kMnpvBit = simrv::xlen::CsrValue{1} << 7U;
+            constexpr simrv::xlen::CsrValue kMnppMask = simrv::xlen::CsrValue{3} << 11U;
+            const auto writable = (wdata & (kMnpvBit | kMnppMask)) |
+                                  (cpu_.state().mnstatus & kNmieBit) | (wdata & kNmieBit);
+            cpu_.state().mnstatus = writable;
+            break;
+        }
         case csr_addr(Csr::Vl):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vl = wdata;
@@ -1320,6 +1587,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
                                                            ~(uint64_t{1} << 61U));
             }
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp)) {
+                wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
+                                                           ~(uint64_t{1} << 59U));
+            }
             cpu_.state().menvcfg = wdata;
             if ((wdata & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U)) == 0) {
                 cpu_.state().henvcfg &= ~static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
@@ -1336,7 +1607,11 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                     cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Svadu)
                         ? simrv::xlen::CsrValue{0}
                         : (simrv::xlen::CsrValue{1} << 29U);
-                cpu_.state().menvcfgh = wdata & ~adue_mask;
+                const simrv::xlen::CsrValue dte_mask =
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp)
+                        ? simrv::xlen::CsrValue{0}
+                        : (simrv::xlen::CsrValue{1} << 27U);
+                cpu_.state().menvcfgh = wdata & ~(adue_mask | dte_mask);
                 if constexpr (simrv::xlen::kIsXLen64) {
                     cpu_.state().menvcfg = (cpu_.state().menvcfg & 0x00000000FFFFFFFFULL) |
                                            (static_cast<uint64_t>(cpu_.state().menvcfgh) << 32U);
@@ -1491,8 +1766,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                         const uint64_t upper = static_cast<uint64_t>(wdata) << 32U;
                         setMstatus(static_cast<simrv::xlen::CsrValue>(lower | upper));
                     } else {
-                        constexpr simrv::xlen::CsrValue kMstatushWritableMask =
-                            (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | (1U << 10U);
+                        const simrv::xlen::CsrValue mdt_bit =
+                            cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp)
+                                ? (simrv::xlen::CsrValue{1} << 10U)
+                                : simrv::xlen::CsrValue{0};
+                        const simrv::xlen::CsrValue kMstatushWritableMask =
+                            (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | mdt_bit;
                         cpu_.state().mstatush = wdata & kMstatushWritableMask;
                     }
                     return {};

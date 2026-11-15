@@ -74,6 +74,7 @@ enum OperationId : uint16_t {
     URET,
     SRET,
     MRET,
+    MNRET,
     WFI,
     SFENCE_VMA,
     HFENCE_VVMA,

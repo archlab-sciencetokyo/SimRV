@@ -82,8 +82,7 @@ auto execute_dram_cas(T* mem_ptr, T expected, T desired) -> T {
 }
 
 inline auto execute_dram_cas128(uint64_t* mem_ptr, uint64_t exp_lo, uint64_t exp_hi,
-                                uint64_t des_lo, uint64_t des_hi)
-    -> std::pair<uint64_t, uint64_t> {
+                                uint64_t des_lo, uint64_t des_hi) -> std::pair<uint64_t, uint64_t> {
     static std::mutex cas128_mutex;
     std::scoped_lock lock(cas128_mutex);
     const uint64_t old_lo = mem_ptr[0];
@@ -813,7 +812,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         return;
     }
 
-    if (is_vector_op(ctx.op_id)) {
+    if (is_vector_op(ctx.op_id) || isa::is_code_size_op(ctx.op_id)) {
         return;
     }
 
@@ -826,9 +825,9 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     const auto funct5 = ctx.funct5;
     const auto addr = ctx.mem_addr;
     const simrv::xlen::PhysAddr paddr{addr.raw()};
-    const size_t access_size =
-        (opcode == Opcode::Amo) ? isa::amo_operand_bytes(ctx.funct3)
-                                : (size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u));
+    const size_t access_size = (opcode == Opcode::Amo)
+                                   ? isa::amo_operand_bytes(ctx.funct3)
+                                   : (size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u));
     ctx.mem_paddr = paddr;
 
     if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Lr || funct5 == Funct5Amo::Sc)) {
@@ -899,8 +898,9 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                             ctx.mem_rdata_hi =
                                 static_cast<simrv::xlen::Word>(static_cast<uint32_t>(prev >> 32U));
                         } else {
-                            const uint64_t prev = execute_dram_cas<uint64_t>(
-                                ptr, static_cast<uint64_t>(ctx.rrd), static_cast<uint64_t>(ctx.rrs2));
+                            const uint64_t prev =
+                                execute_dram_cas<uint64_t>(ptr, static_cast<uint64_t>(ctx.rrd),
+                                                           static_cast<uint64_t>(ctx.rrs2));
                             ctx.mem_rdata = static_cast<simrv::xlen::Word>(prev);
                         }
                         ctx.wb_data = ctx.mem_rdata;
@@ -976,8 +976,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                                                                         addr + 4, Funct3::Lw);
                 ctx.cas_matched =
                     (static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrd)) &&
-                    (static_cast<uint32_t>(ctx.mem_rdata_hi) ==
-                     static_cast<uint32_t>(ctx.rrd_hi));
+                    (static_cast<uint32_t>(ctx.mem_rdata_hi) == static_cast<uint32_t>(ctx.rrd_hi));
             } else {
                 ctx.mem_rdata =
                     simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);

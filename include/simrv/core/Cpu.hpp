@@ -102,6 +102,24 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue menvcfgh{};  ///< Machine Environment Configuration High (RV32, 0x31A)
     simrv::xlen::CsrValue mseccfg{};   ///< Machine Security Configuration (Smepmp, 0x747)
     simrv::xlen::CsrValue mseccfgh{};  ///< Machine Security Configuration High (RV32, 0x757)
+    simrv::xlen::CsrValue jvt{};       ///< Jump Vector Table (Zcmt, 0x017)
+
+    /* Indirect CSR Access (Smcsrind / Sscsrind) & RNMI (Smrnmi) */
+    struct IndirectRegEntry {
+        simrv::xlen::CsrValue select{};
+        std::array<simrv::xlen::CsrValue, 6> regs{};
+        bool valid{false};
+    };
+    simrv::xlen::CsrValue miselect{};
+    simrv::xlen::CsrValue siselect{};
+    simrv::xlen::CsrValue vsiselect{};
+    std::array<IndirectRegEntry, 16> mireg_bank{};
+    std::array<IndirectRegEntry, 16> sireg_bank{};
+    std::array<IndirectRegEntry, 16> vsireg_bank{};
+    simrv::xlen::CsrValue mnscratch{};
+    simrv::xlen::CsrValue mnepc{};
+    simrv::xlen::CsrValue mncause{};
+    simrv::xlen::CsrValue mnstatus{simrv::xlen::CsrValue{1} << 3U};  ///< NMIE=1 at reset
 
     /* Supervisor Mode CSRs */
     simrv::xlen::CsrValue
@@ -649,6 +667,12 @@ class CPU {
      * Restores privilege level and interrupt enable bits from `sstatus`.
      */
     void sret();
+
+    /**
+     * @brief Handles execution return from a resumable non-maskable interrupt (MNRET instruction).
+     * Restores privilege level, virtualization mode, and NMIE from `mnstatus`.
+     */
+    void mnret();
 
     /**
      * @brief Recomputes the MIP (Machine Interrupt Pending) register based on currently active

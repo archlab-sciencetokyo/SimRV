@@ -4266,6 +4266,333 @@ void test_track2a_vector_crypto() {
     TEST_ASSERT(vec_reg(4).u32[0] == 0x536e4246U);
 }
 
+void test_track2c_zcmp_zcmt() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+    using simrv::xlen::Byte;
+    using simrv::xlen::CsrValue;
+    using simrv::xlen::RegId;
+    using simrv::xlen::Word;
+
+    // 1. Direct compressed decoder checks
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xB862U) == CM_PUSH);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xBA62U) == CM_POP);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xBC62U) == CM_POPRETZ);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xBE62U) == CM_POPRET);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xAC66U) == CM_MVA01S);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xAC26U) == CM_MVSA01);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xAC22U) == ILLEGAL);  // r1s == r2s
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xB832U) == ILLEGAL);  // rlist < 4
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xA002U) == CM_JT);
+    TEST_ASSERT(simrv::pipeline::decode_compressed_op(0xA082U) == CM_JALT);
+
+    // 2. Machine execution of Zcmp + Zcmt + jvt CSR
+    constexpr Word kDramBase = 0x80000000ULL;
+    Machine machine;
+    std::array<Byte, 65536> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    auto& cpu = machine.primary_hart();
+    cpu.state().priv = kPrivMachine;
+    cpu.state().mtvec = kDramBase + 0x4000U;
+
+    Word next_off = 0x1000U;
+    const auto run_16 = [&](uint16_t insn16, Word custom_off = 0U) {
+        const Word off = (custom_off != 0U) ? custom_off : next_off;
+        if (custom_off == 0U) next_off += 4U;
+        std::memcpy(backing.data() + off, &insn16, sizeof(insn16));
+        cpu.state().pc = simrv::xlen::VirtAddr{kDramBase + off};
+        cpu.state().mcause = 0;
+        cpu.run_cycle(machine);
+    };
+    const auto run_32 = [&](uint32_t insn32, Word custom_off = 0U) {
+        const Word off = (custom_off != 0U) ? custom_off : next_off;
+        if (custom_off == 0U) next_off += 4U;
+        std::memcpy(backing.data() + off, &insn32, sizeof(insn32));
+        cpu.state().pc = simrv::xlen::VirtAddr{kDramBase + off};
+        cpu.state().mcause = 0;
+        cpu.run_cycle(machine);
+    };
+
+    // Negative gating: Zcmp/Zcmt disabled (with D disabled) -> IllegalInstruction
+    cpu.state().misa &= ~(static_cast<CsrValue>(1ULL << ('D' - 'A')));
+    cpu.state().enabled_extensions = ExtensionSet{};
+    run_16(0xAC66U);  // cm.mva01s s0, s1
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // Enable Zcmp + Zcmt
+    ExtensionSet zc_ext{};
+    zc_ext.set(MultiLetterExtension::Zcmp);
+    zc_ext.set(MultiLetterExtension::Zcmt);
+    cpu.state().enabled_extensions = zc_ext;
+
+    // cm.mva01s s0, s1 (r1s=0, r2s=1 -> 0xAC66)
+    cpu.state().regs.write(RegId::S0, 0x11223344U);
+    cpu.state().regs.write(RegId::S1, 0x55667788U);
+    run_16(0xAC66U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(cpu.state().regs.read(RegId::A0) == 0x11223344U);
+    TEST_ASSERT(cpu.state().regs.read(RegId::A1) == 0x55667788U);
+
+    // cm.mvsa01 s0, s1 (r1s=0, r2s=1 -> 0xAC26)
+    cpu.state().regs.write(RegId::A0, 0xAABBCCDDU);
+    cpu.state().regs.write(RegId::A1, 0x99887766U);
+    run_16(0xAC26U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(cpu.state().regs.read(RegId::S0) == 0xAABBCCDDU);
+    TEST_ASSERT(cpu.state().regs.read(RegId::S1) == 0x99887766U);
+
+    // cm.push {ra, s0, s1}, -16 (rlist=6, spimm=0 -> 0xB862) and cm.popretz
+    cpu.state().regs.write(RegId::Sp, kDramBase + 0x8000U);
+    cpu.state().regs.write(RegId::Ra, kDramBase + 0x2200U);
+    cpu.state().regs.write(RegId::S0, 0x12345678U);
+    cpu.state().regs.write(RegId::S1, 0x87654321U);
+    run_16(0xB862U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(cpu.state().regs.read(RegId::Sp) < kDramBase + 0x8000U);
+
+    // Clobber registers then cm.popretz {ra, s0, s1} (0xBC62)
+    cpu.state().regs.write(RegId::Ra, 0U);
+    cpu.state().regs.write(RegId::S0, 0U);
+    cpu.state().regs.write(RegId::S1, 0U);
+    cpu.state().regs.write(RegId::A0, 0xDEADBEEFU);
+    run_16(0xBC62U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(cpu.state().regs.read(RegId::Sp) == kDramBase + 0x8000U);
+    TEST_ASSERT(cpu.state().regs.read(RegId::Ra) == kDramBase + 0x2200U);
+    TEST_ASSERT(cpu.state().regs.read(RegId::S0) == 0x12345678U);
+    TEST_ASSERT(cpu.state().regs.read(RegId::S1) == 0x87654321U);
+    TEST_ASSERT(cpu.state().regs.read(RegId::A0) == 0U);
+    TEST_ASSERT(cpu.state().pc.raw() == kDramBase + 0x2200U);
+
+    // jvt CSR (0x017) WARL alignment + cm.jalt 32 (0xA082)
+    cpu.state().regs.write(RegId::T0, kDramBase + 0x4005U);
+    // csrrw x0, jvt(0x017), t0(x5) -> (0x017<<20)|(5<<15)|(1<<12)|0x73
+    run_32((0x017U << 20U) | (5U << 15U) | (1U << 12U) | 0x73U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(cpu.state().jvt == kDramBase + 0x4000U);  // low 6 bits cleared (WARL)
+
+    const uint32_t elem_bytes = cpu.state().regs.xlen / 8U;
+    const Word target_addr = kDramBase + 0x3450U;
+    std::memcpy(backing.data() + 0x4000U + (32U * elem_bytes), &target_addr, elem_bytes);
+    run_16(0xA082U, 0x1100U);  // cm.jalt 32
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(cpu.state().regs.read(RegId::Ra) == kDramBase + 0x1102U);
+    TEST_ASSERT(cpu.state().pc.raw() == target_addr);
+}
+
+void test_track3a_zfinx_zdinx_zhinx() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+    using simrv::xlen::Byte;
+    using simrv::xlen::CsrValue;
+    using simrv::xlen::RegId;
+    using simrv::xlen::Word;
+
+    constexpr Word kDramBase = 0x80000000ULL;
+    Machine machine;
+    std::array<Byte, 65536> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+
+    auto& cpu = machine.primary_hart();
+    cpu.state().priv = kPrivMachine;
+    cpu.state().mtvec = kDramBase + 0x4000U;
+    // Clear F and D in misa and clear mstatus.FS
+    cpu.state().misa &=
+        ~(static_cast<CsrValue>(1ULL << ('F' - 'A')) | static_cast<CsrValue>(1ULL << ('D' - 'A')));
+    cpu.state().mstatus &= ~MstatusBit::Fs;
+
+    ExtensionSet zinx_ext{};
+    zinx_ext.set(MultiLetterExtension::Zfinx);
+    zinx_ext.set(MultiLetterExtension::Zdinx);
+    zinx_ext.set(MultiLetterExtension::Zhinx);
+    cpu.state().enabled_extensions = zinx_ext;
+
+    Word next_off = 0x1000U;
+    const auto run_32 = [&](uint32_t insn32) {
+        const Word off = next_off;
+        next_off += 4U;
+        std::memcpy(backing.data() + off, &insn32, sizeof(insn32));
+        cpu.state().pc = simrv::xlen::VirtAddr{kDramBase + off};
+        cpu.state().mcause = 0;
+        cpu.run_cycle(machine);
+    };
+
+    // 1. Zfinx fadd.s x12, x10, x11 (1.5f + 2.25f = 3.75f -> 0x40700000)
+    // fadd.s: funct7=0x00, rm=0, opcode=0x53
+    cpu.state().regs.write(RegId::A0, 0x3FC00000U);  // 1.5f
+    cpu.state().regs.write(RegId::A1, 0x40100000U);  // 2.25f
+    run_32((0x00U << 25U) | (11U << 20U) | (10U << 15U) | (0U << 12U) | (12U << 7U) | 0x53U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT((cpu.state().regs.read(RegId::A2) & 0xFFFFFFFFU) == 0x40700000U);
+
+    // 2. Sign-extension on RV64 for negative float (-1.0f = 0xBF800000) + x0 (0.0f)
+    cpu.state().regs.write(RegId::A0, 0xBF800000U);
+    run_32((0x00U << 25U) | (0U << 20U) | (10U << 15U) | (0U << 12U) | (12U << 7U) | 0x53U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(cpu.state().regs.read(RegId::A2) == 0xFFFFFFFFBF800000ULL);
+    } else {
+        TEST_ASSERT(cpu.state().regs.read(RegId::A2) == 0xBF800000U);
+    }
+
+    // 3. FPR-only instructions (flw / fmv.x.w) must trap under Zfinx
+    run_32((10U << 15U) | (2U << 12U) | (12U << 7U) | 0x07U);  // flw f12, 0(a0)
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+    run_32((0x70U << 25U) | (10U << 15U) | (12U << 7U) | 0x53U);  // fmv.x.w a2, f10
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // 4. Zhinx fadd.h x12, x10, x11 (1.5 + 2.5 = 4.0 -> 0x4400)
+    cpu.state().regs.write(RegId::A0, 0x3E00U);  // 1.5h
+    cpu.state().regs.write(RegId::A1, 0x4100U);  // 2.5h
+    run_32((0x02U << 25U) | (11U << 20U) | (10U << 15U) | (0U << 12U) | (12U << 7U) | 0x53U);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT((cpu.state().regs.read(RegId::A2) & 0xFFFFU) == 0x4400U);
+
+    // 5. Zdinx fadd.d (1.5 + 2.5 = 4.0 -> 0x4010000000000000ULL)
+    if constexpr (simrv::xlen::kIsXLen64) {
+        cpu.state().regs.write(RegId::A0, 0x3FF8000000000000ULL);  // 1.5
+        cpu.state().regs.write(RegId::A1, 0x4004000000000000ULL);  // 2.5
+        run_32((0x01U << 25U) | (11U << 20U) | (10U << 15U) | (0U << 12U) | (12U << 7U) | 0x53U);
+        TEST_ASSERT(cpu.state().mcause == 0);
+        TEST_ASSERT(cpu.state().regs.read(RegId::A2) == 0x4010000000000000ULL);
+    } else {
+        // RV32 even/odd GPR pair: (x10,x11) + (x12,x13) -> (x14,x15)
+        cpu.state().regs.write(RegId::A0, 0x00000000U);
+        cpu.state().regs.write(RegId::A1, 0x3FF80000U);  // 1.5
+        cpu.state().regs.write(RegId::A2, 0x00000000U);
+        cpu.state().regs.write(RegId::A3, 0x40040000U);  // 2.5
+        run_32((0x01U << 25U) | (12U << 20U) | (10U << 15U) | (0U << 12U) | (14U << 7U) | 0x53U);
+        TEST_ASSERT(cpu.state().mcause == 0);
+        TEST_ASSERT(cpu.state().regs.read(RegId::A4) == 0x00000000U);
+        TEST_ASSERT(cpu.state().regs.read(RegId::A5) == 0x40100000U);
+
+        // Odd GPR index (x11) must raise IllegalInstruction on RV32 Zdinx
+        run_32((0x01U << 25U) | (12U << 20U) | (11U << 15U) | (0U << 12U) | (14U << 7U) | 0x53U);
+        TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+    }
+}
+
+void test_track3b_priv_completeness() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+    using simrv::xlen::Byte;
+    using simrv::xlen::CsrValue;
+    using simrv::xlen::PrivilegeLevel;
+    using simrv::xlen::RegId;
+    using simrv::xlen::Word;
+
+    // 1. Smcsrind / Sscsrind indirect CSR access
+    {
+        Machine machine;
+        std::array<Byte, 4096> ram{};
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        CPU& cpu = machine.primary_hart();
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Smcsrind);
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Sscsrind);
+        cpu.state().priv = PrivilegeLevel::Machine;
+
+        auto res = cpu.write_csr(csr_num(Csr::Miselect), 0x30U);
+        TEST_ASSERT(res.has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mireg), 0x1234U).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mireg6), 0xABCDU).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Miselect), 0x31U).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mireg), 0x5678U).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Miselect), 0x30U).has_value());
+        auto r1 = cpu.read_csr(csr_num(Csr::Mireg));
+        auto r6 = cpu.read_csr(csr_num(Csr::Mireg6));
+        TEST_ASSERT(r1.has_value() && *r1 == 0x1234U);
+        TEST_ASSERT(r6.has_value() && *r6 == 0xABCDU);
+
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Siselect), 0x10U).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Sireg2), 0x9999U).has_value());
+        auto sr2 = cpu.read_csr(csr_num(Csr::Sireg2));
+        TEST_ASSERT(sr2.has_value() && *sr2 == 0x9999U);
+    }
+
+    // 2. Ssdbltrp / Smdbltrp double-trap escalation and MRET/SRET clearing
+    {
+        Machine machine;
+        std::array<Byte, 4096> ram{};
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        CPU& cpu = machine.primary_hart();
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Ssdbltrp);
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Smdbltrp);
+        cpu.state().medeleg = (CsrValue{1} << 2U);  // Delegate IllegalInstruction to S-mode
+        cpu.state().stvec = 0x100U;
+        cpu.state().mtvec = 0x200U;
+        if constexpr (simrv::xlen::kIsXLen64) {
+            TEST_ASSERT(
+                cpu.write_csr(csr_num(Csr::Menvcfg), static_cast<CsrValue>(uint64_t{1} << 59U))
+                    .has_value());
+        } else {
+            TEST_ASSERT(cpu.write_csr(csr_num(Csr::Menvcfgh), CsrValue{1} << 27U).has_value());
+        }
+
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().pc = simrv::xlen::VirtAddr{0x800U};
+        cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::IllegalInstruction),
+                            0);
+        TEST_ASSERT(cpu.state().priv == PrivilegeLevel::Supervisor);
+        TEST_ASSERT(cpu.state().scause ==
+                    static_cast<simrv::xlen::TrapCause>(ExceptionCode::IllegalInstruction));
+        TEST_ASSERT((cpu.state().mstatus & MstatusBit::Sdt) != 0);
+
+        // Second trap while SDT==1 escalates to M-mode with mcause=16 (DoubleTrap) and sets MDT=1
+        cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::IllegalInstruction),
+                            0);
+        TEST_ASSERT(cpu.state().priv == PrivilegeLevel::Machine);
+        TEST_ASSERT(cpu.state().mcause ==
+                    static_cast<simrv::xlen::TrapCause>(ExceptionCode::DoubleTrap));
+        if constexpr (simrv::xlen::kIsXLen64) {
+            TEST_ASSERT((cpu.state().mstatus & MstatusBit::Mdt) != 0);
+        } else {
+            TEST_ASSERT((cpu.state().mstatush & (CsrValue{1} << 10U)) != 0);
+        }
+
+        // MRET clears MDT
+        cpu.mret();
+        if constexpr (simrv::xlen::kIsXLen64) {
+            TEST_ASSERT((cpu.state().mstatus & MstatusBit::Mdt) == 0);
+        } else {
+            TEST_ASSERT((cpu.state().mstatush & (CsrValue{1} << 10U)) == 0);
+        }
+    }
+
+    // 3. Smrnmi CSRs and MNRET instruction
+    {
+        constexpr Word kDramBase = 0x80000000ULL;
+        Machine machine;
+        std::array<Byte, 65536> ram{};
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+        CPU& cpu = machine.primary_hart();
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Smrnmi);
+        cpu.state().priv = PrivilegeLevel::Machine;
+        cpu.state().pc = simrv::xlen::VirtAddr{kDramBase + 0x1000U};
+
+        const uint32_t mnret_insn = 0x70200073U;  // MNRET
+        std::memcpy(ram.data() + 0x1000U, &mnret_insn, sizeof(mnret_insn));
+
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mnscratch), 0xCAFEBABEU).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mnepc), kDramBase + 0x400U).has_value());
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mncause), 0x10U).has_value());
+        // MNPP = Supervisor (1 << 11)
+        TEST_ASSERT(cpu.write_csr(csr_num(Csr::Mnstatus), CsrValue{1} << 11U).has_value());
+
+        cpu.run_cycle(machine);
+        TEST_ASSERT(cpu.state().pc.raw() == kDramBase + 0x400U);
+        TEST_ASSERT(cpu.state().priv == PrivilegeLevel::Supervisor);
+        TEST_ASSERT((cpu.state().mnstatus & (CsrValue{1} << 3U)) != 0);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -4300,6 +4627,18 @@ int main() {
     std::cout << "[RUN] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
     test_ziccif_atomic_instruction_fetch_under_smp_store();
     std::cout << "[PASS] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
+
+    std::cout << "[RUN] test_track2c_zcmp_zcmt" << std::endl;
+    test_track2c_zcmp_zcmt();
+    std::cout << "[PASS] test_track2c_zcmp_zcmt" << std::endl;
+
+    std::cout << "[RUN] test_track3a_zfinx_zdinx_zhinx" << std::endl;
+    test_track3a_zfinx_zdinx_zhinx();
+    std::cout << "[PASS] test_track3a_zfinx_zdinx_zhinx" << std::endl;
+
+    std::cout << "[RUN] test_track3b_priv_completeness" << std::endl;
+    test_track3b_priv_completeness();
+    std::cout << "[PASS] test_track3b_priv_completeness" << std::endl;
 #if SIMRV_XLEN == 64
     std::cout << "[RUN] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
     test_svpbmt_noncacheable_and_io_accesses();

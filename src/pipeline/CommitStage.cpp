@@ -47,7 +47,10 @@ void CPU::writeback_registers(Machine& machine) {
         }
         state_.regs.write_fp(effects.floating_write.destination, effects.floating_write.value);
     }
-    if (effects.marks_floating_point_dirty) state_.mark_extension_dirty(MstatusBit::Fs);
+    if (effects.marks_floating_point_dirty &&
+        !state_.enabled_extensions.has(isa::MultiLetterExtension::Zfinx)) {
+        state_.mark_extension_dirty(MstatusBit::Fs);
+    }
     if (effects.integer_write.enabled) {
         state_.regs.write_branchless(effects.integer_write.destination,
                                      effects.integer_write.value);
@@ -101,6 +104,16 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                 }
                 case Funct12Priv::Mret: {
                     mret();
+                    ctx.jmp_pc = state_.pc;
+                    if (!xret_target_aligned(state_, ctx.jmp_pc)) {
+                        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                        ctx.pending_tval = ctx.jmp_pc.raw();
+                        break;
+                    }
+                    break;
+                }
+                case Funct12Priv::Mnret: {
+                    mnret();
                     ctx.jmp_pc = state_.pc;
                     if (!xret_target_aligned(state_, ctx.jmp_pc)) {
                         ctx.pending_exception = ExceptionCode::MisalignedFetch;

@@ -348,4 +348,33 @@ auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::
     }
 }
 
+auto decode_compressed_op(uint16_t ir16) noexcept -> isa::OperationId {
+    using enum isa::OperationId;
+    if ((ir16 & 0xE003U) != 0xA002U) {
+        return ILLEGAL;
+    }
+    if ((ir16 & 0xFC03U) == 0xA002U) {
+        const uint32_t index = (ir16 >> 2U) & 0xFFU;
+        return (index < 32U) ? CM_JT : CM_JALT;
+    }
+    if ((ir16 & 0xFC63U) == 0xAC62U) {
+        return CM_MVA01S;
+    }
+    if ((ir16 & 0xFC63U) == 0xAC22U) {
+        const uint32_t r1s = (ir16 >> 7U) & 7U;
+        const uint32_t r2s = (ir16 >> 2U) & 7U;
+        return (r1s != r2s) ? CM_MVSA01 : ILLEGAL;
+    }
+    const uint32_t rlist = (ir16 >> 4U) & 0xFU;
+    if (rlist < 4U) {
+        return ILLEGAL;
+    }
+    const uint32_t op_tag = ir16 & 0xFF03U;
+    if (op_tag == 0xB802U) return CM_PUSH;
+    if (op_tag == 0xBA02U) return CM_POP;
+    if (op_tag == 0xBC02U) return CM_POPRETZ;
+    if (op_tag == 0xBE02U) return CM_POPRET;
+    return ILLEGAL;
+}
+
 }  // namespace simrv::pipeline

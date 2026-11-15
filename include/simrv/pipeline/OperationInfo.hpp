@@ -623,7 +623,7 @@ consteval auto generate_operation_info() {
 
     // Privileged & System Extensions (Zimop, Zawrs, Svinval, Hypervisor)
     set_props({MOP}, exec_def, {.rd = b_int, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none});
-    set_props({URET, SRET, MRET, WFI}, exec_def,
+    set_props({URET, SRET, MRET, MNRET, WFI}, exec_def,
               {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,
               side_sys);
     set_props({WRS_NTO, WRS_STO}, exec_def,

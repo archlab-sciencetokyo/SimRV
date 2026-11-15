@@ -62,9 +62,19 @@ struct WritebackEffects {
                opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
                opcode == isa::Opcode::Op32 || opcode == isa::Opcode::OpImm32 ||
                opcode == isa::Opcode::Custom0 ||
-               (opcode == isa::Opcode::OpFp && context.int_wb_from_fp)) {
+               ((opcode == isa::Opcode::OpFp || opcode == isa::Opcode::MAdd ||
+                 opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||
+                 opcode == isa::Opcode::NMSub) &&
+                context.int_wb_from_fp)) {
         integer.value = context.wb_data;
         integer.enabled = true;
+        if (context.int_wb_from_fp && context.int_wb_pair &&
+            context.rd != simrv::xlen::RegId::Zero) {
+            effects.integer_write_hi.destination =
+                static_cast<simrv::xlen::RegId>(std::to_underlying(context.rd) + 1U);
+            effects.integer_write_hi.value = context.mem_rdata_hi;
+            effects.integer_write_hi.enabled = true;
+        }
     }
 
     auto& floating = effects.floating_write;

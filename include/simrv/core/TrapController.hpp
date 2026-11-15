@@ -76,6 +76,11 @@ class TrapController {
     static void sret(ArchState& state);
 
     /**
+     * @brief Performs an architectural RNMI return (MNRET) transition on `state`.
+     */
+    static void mnret(ArchState& state);
+
+    /**
      * @brief Dispatches a structured architectural trap through the formal TrapController pipeline.
      *
      * Performs host interception filtering (SBI ecalls), unrecoverable trap and recursive loop

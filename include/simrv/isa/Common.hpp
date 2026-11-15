@@ -244,6 +244,40 @@ constexpr auto is_zcmt_operation(OperationId op_id) noexcept -> bool {
  */
 constexpr auto instruction_enabled(simrv::xlen::CsrValue misa, ExtensionSet enabled_extensions,
                                    OperationId op_id, bool compressed = false) -> bool {
+    if (op_id == OperationId::MNRET) {
+        return enabled_extensions.has(MultiLetterExtension::Smrnmi);
+    }
+    const bool zfinx_active = enabled_extensions.has(MultiLetterExtension::Zfinx) &&
+                              !misa_has_extension(misa, IsaExtension::F) &&
+                              !misa_has_extension(misa, IsaExtension::D);
+    if (zfinx_active) {
+        if (op_id == OperationId::FLW || op_id == OperationId::FSW || op_id == OperationId::FLD ||
+            op_id == OperationId::FSD || op_id == OperationId::FLH || op_id == OperationId::FSH ||
+            op_id == OperationId::FMV_X_W || op_id == OperationId::FMV_W_X ||
+            op_id == OperationId::FMV_X_D || op_id == OperationId::FMV_D_X ||
+            op_id == OperationId::FMV_X_H || op_id == OperationId::FMV_H_X) {
+            return false;
+        }
+        if (is_zfh_operation(op_id)) {
+            if (!enabled_extensions.has(MultiLetterExtension::Zhinx)) {
+                return false;
+            }
+            if ((op_id == OperationId::FCVT_D_H || op_id == OperationId::FCVT_H_D) &&
+                !enabled_extensions.has(MultiLetterExtension::Zdinx)) {
+                return false;
+            }
+            return !compressed || misa_has_extension(misa, IsaExtension::C);
+        }
+        const auto req = required_misa_extensions(op_id, compressed);
+        if ((req & misa_extension_bit(IsaExtension::D)) != 0U) {
+            return enabled_extensions.has(MultiLetterExtension::Zdinx) &&
+                   (!compressed || misa_has_extension(misa, IsaExtension::C));
+        }
+        if ((req & misa_extension_bit(IsaExtension::F)) != 0U) {
+            return !compressed || misa_has_extension(misa, IsaExtension::C);
+        }
+    }
+
     if (is_zfh_operation(op_id)) {
         return instruction_enabled_by_misa(misa, op_id, compressed) &&
                enabled_extensions.has(MultiLetterExtension::Zfh);

@@ -19,7 +19,7 @@ using namespace simrv::isa;
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
-    if (isa::is_vector_op(active_context().op_id)) {
+    if (isa::is_vector_op(active_context().op_id) || isa::is_code_size_op(active_context().op_id)) {
         return;
     }
     auto& ctx = active_context();

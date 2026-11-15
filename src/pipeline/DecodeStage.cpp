@@ -108,6 +108,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         : (funct12 == Funct12Priv::Uret)  ? csr_num(Csr::Uepc)
         : (funct12 == Funct12Priv::Sret)  ? csr_num(Csr::Sepc)
         : (funct12 == Funct12Priv::Mret)  ? csr_num(Csr::Mepc)
+        : (funct12 == Funct12Priv::Mnret) ? csr_num(Csr::Mnepc)
                                           : simrv::xlen::CsrNumber{0};
 
     if (funct3 == Funct3::Priv) {

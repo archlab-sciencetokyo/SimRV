@@ -21,6 +21,7 @@ enum class Funct12Priv : uint16_t {
     Uret = 0x002,           ///< User-mode Trap Return
     Sret = 0x102,           ///< Supervisor-mode Trap Return
     Mret = 0x302,           ///< Machine-mode Trap Return
+    Mnret = 0x702,          ///< Resumable Non-Maskable Interrupt Return (Smrnmi)
     Wfi = 0x105,            ///< Wait for Interrupt (stalls CPU until a pending interrupt is served)
     SfenceWInval = 0x180,   ///< Svinval SFENCE.W.INVAL
     SfenceInvalIr = 0x181,  ///< Svinval SFENCE.INVAL.IR
