@@ -1,0 +1,39 @@
+name: Setup RISC-V GCC Toolchain
+description: Restore or download, verify, and expose the prebuilt xPack RISC-V GCC toolchain.
+
+inputs:
+  version:
+    description: xPack riscv-none-elf-gcc release version
+    required: false
+    default: 15.2.0-1
+  sha256:
+    description: Expected SHA-256 digest for the xPack Linux x64 archive
+    required: false
+    default: aaaa8060c914851a3e5ee1ba82cc3d6f80972f90638a05c6e823a37557a33758
+
+runs:
+  using: composite
+  steps:
+    - name: Cache RISC-V GCC toolchain
+      id: cache-toolchain
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: /opt/riscv
+        key: riscv-toolchain-${{ inputs.version }}-${{ inputs.sha256 }}
+
+    - name: Download and verify toolchain
+      if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive="/tmp/riscv-toolchain.tar.gz"
+        url="https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v${{ inputs.version }}/xpack-riscv-none-elf-gcc-${{ inputs.version }}-linux-x64.tar.gz"
+        curl --fail --location --silent --show-error --retry 3 "$url" -o "$archive"
+        echo "${{ inputs.sha256 }}  $archive" | sha256sum --check --status
+        mkdir -p /opt/riscv
+        tar -xzf "$archive" -C /opt/riscv --strip-components=1
+        rm -f "$archive"
+
+    - name: Add toolchain to PATH
+      shell: bash
+      run: echo "/opt/riscv/bin" >> "$GITHUB_PATH"

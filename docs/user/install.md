@@ -43,7 +43,7 @@ cmake --build build/macos --target SimRV --parallel 2
 build/macos/SimRV --help
 ```
 
-The [SimRV CI workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
+The [Build and Test workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml)
 uploads separate `arm64` and `x86_64` artifacts after successful non-PR builds and smoke tests.
 Graphical guest display uses Kitty graphics when detected, then SIXEL when available; support
 depends on the terminal emulator, not just the host OS. The TUI falls back to text when neither is

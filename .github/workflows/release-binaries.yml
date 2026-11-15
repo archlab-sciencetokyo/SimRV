@@ -20,67 +20,53 @@ concurrency:
   group: release-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
-
 jobs:
   guest-architecture-check:
     name: Guest architecture (${{ matrix.arch }})
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    permissions:
-      contents: read
     container:
       image: fedora:44
-
     strategy:
       fail-fast: false
       matrix:
         arch: [rv32, rv64]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install build tools
         run: |
-          dnf update -y
-          dnf install -y git cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
+          dnf install -y git cmake ninja-build boost-devel libslirp-devel \
+            gcc gcc-c++ clang-tools-extra ccache curl tar xz autoconf make which
 
-      - name: Fetch and compile riscv-tests
-        run: |
-          # Download and extract prebuilt xPack RISC-V GCC toolchain
-          wget -q https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz -O /tmp/riscv-toolchain.tar.gz
-          mkdir -p /opt/riscv
-          tar -xzf /tmp/riscv-toolchain.tar.gz -C /opt/riscv --strip-components=1
-          
-          # Add toolchain bin directory to GITHUB_PATH for subsequent steps
-          echo "/opt/riscv/bin" >> $GITHUB_PATH
-          
-          # Expose in current execution path
-          export PATH="/opt/riscv/bin:$PATH"
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: release-fedora44-${{ matrix.arch }}
 
-          # Clone and build riscv-tests
-          git clone https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
-          cd "$RUNNER_TEMP/riscv-tests"
-          git checkout --detach "$RISCV_TESTS_REVISION"
-          git submodule update --init --recursive
-          autoconf
-          ./configure
-          ARCH="${{ matrix.arch }}"
-          make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN="${ARCH#rv}"
-          if [[ "${ARCH}" == "rv64" ]]; then
-            make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN=32
-          fi
+      - name: Setup RISC-V GCC toolchain
+        uses: ./.github/actions/setup-riscv-toolchain
+
+      - name: Setup RISC-V tests
+        id: riscv-tests
+        uses: ./.github/actions/setup-riscv-tests
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Resolve release version
+        id: names
+        uses: ./.github/actions/resolve-simrv-version
 
       - name: Configure
         env:
-          RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
+          RISCV_TESTS_DIR: ${{ steps.riscv-tests.outputs.riscv-tests-dir }}
         run: >-
           cmake --preset ${{ matrix.arch }}-release
           -DCMAKE_C_COMPILER=gcc
           -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DSIMRV_WARNINGS_AS_ERRORS=ON
 
       - name: Build
@@ -88,7 +74,7 @@ jobs:
 
       - name: Run CTest gate suite
         env:
-          RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
+          RISCV_TESTS_DIR: ${{ steps.riscv-tests.outputs.riscv-tests-dir }}
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
       - name: Run GA smoke workflow
@@ -111,7 +97,7 @@ jobs:
 
       - name: Restore ACT4 tool cache
         if: matrix.arch == 'rv64'
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/ruby-3.4.12
@@ -125,7 +111,7 @@ jobs:
 
       - name: Restore generated ACT4 suite
         if: matrix.arch == 'rv64'
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             tests/act4/output/rva23s64/elfs
@@ -261,34 +247,9 @@ jobs:
       - name: Validate source release metadata
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L release
 
-      - name: Compute asset names
-        id: names
-        shell: bash
-        run: |
-          set -euo pipefail
-          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ -z "${SIMRV_VERSION}" ]]; then
-            echo "Failed to parse SIMRV_VERSION from CMakeLists.txt" >&2
-            exit 1
-          fi
-
-          VERSION_TAG="v${SIMRV_VERSION}"
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" != "${VERSION_TAG}" ]]; then
-            echo "Release tag ${GITHUB_REF_NAME} does not match CMake version tag ${VERSION_TAG}" >&2
-            exit 1
-          fi
-
-          ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"
-          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
-          echo "tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
-
   rpm-packages:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    permissions:
-      contents: read
     container:
       # Rocky Linux 10 is the supported RPM baseline. GCC Toolset 15 supplies
       # the C++23 library; the executable statically links that runtime.
@@ -298,19 +259,10 @@ jobs:
       - name: Install checkout tools
         shell: bash
         run: dnf install -y git tar
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate release tag
         id: names
-        shell: bash
-        run: |
-          set -euo pipefail
-          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
-          fi
-          test "${SIMRV_VERSION%%.*}" -ge 3
-          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/resolve-simrv-version
       - name: Install build tools
         shell: bash
         run: |
@@ -321,7 +273,7 @@ jobs:
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             gcc-toolset-15-libstdc++-devel gcc gcc-c++ \
             libslirp-devel make python3-pip rpm-build rpmlint findutils binutils \
-            bzip2-devel pkgconf-pkg-config wget which
+            bzip2-devel pkgconf-pkg-config wget which ccache
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
           for path in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin \
@@ -342,6 +294,10 @@ jobs:
           echo "Boost_DIR=/opt/boost-1.83/lib/cmake/Boost-1.83.0" >> "$GITHUB_ENV"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: rockylinux10-rpm
       - name: Configure and build RHEL 10 baseline
         shell: bash
         run: |
@@ -350,6 +306,7 @@ jobs:
           # this package job checks the RHEL 10 runtime and RPM consumer baseline.
           cmake --preset rv64-release \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DSIMRV_ENABLE_LTO=OFF \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
@@ -417,7 +374,7 @@ jobs:
             echo "simrv-devel remained installed after removal" >&2
             exit 1
           fi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.names.outputs.asset_base }}-rpm
           path: packages/*.rpm
@@ -427,8 +384,6 @@ jobs:
     name: Portable Linux archive (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -438,18 +393,13 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: aarch64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate release tag
         id: names
-        shell: bash
-        run: |
-          set -euo pipefail
-          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
-          fi
-          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=SimRV-linux-${{ matrix.arch }}-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/resolve-simrv-version
+        with:
+          arch: ${{ matrix.arch }}
+          require-major-v3: 'false'
       - name: Build static musl archive inside Alpine
         shell: bash
         env:
@@ -464,7 +414,7 @@ jobs:
             -e SIMRV_ASSET_BASE -e SIMRV_ARCH -e SIMRV_HOST_UID -e SIMRV_HOST_GID \
             -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
             alpine:edge sh .github/scripts/portable-musl-release.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.names.outputs.asset_base }}
           path: ${{ steps.names.outputs.asset_base }}.tar.gz
@@ -473,8 +423,6 @@ jobs:
   debian-packages:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    permissions:
-      contents: read
     container:
       # Build against Noble's glibc baseline. GCC 15 provides std::flat_map and
       # std::flat_set; static C++ runtime linkage keeps the package runnable on
@@ -488,7 +436,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git software-properties-common \
             libboost1.83-dev libglib2.0-dev libslirp-dev make binutils pkg-config \
-            python3 python3-pip dpkg-dev xz-utils lintian
+            python3 python3-pip dpkg-dev xz-utils lintian ccache
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           apt-get install -y --no-install-recommends gcc-15 g++-15
@@ -496,26 +444,21 @@ jobs:
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
           echo "CC=gcc-15" >> "$GITHUB_ENV"
           echo "CXX=g++-15" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate release tag
         id: names
-        shell: bash
-        run: |
-          set -euo pipefail
-          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
-          fi
-          test "${SIMRV_VERSION%%.*}" -ge 3
-          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "version_tag=v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/resolve-simrv-version
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ubuntu2404-deb
       - name: Configure and build
         shell: bash
         run: |
           set -euo pipefail
           cmake --preset rv64-release \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_FLAGS=-ffat-lto-objects \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
@@ -595,7 +538,7 @@ jobs:
             exit 1
           fi
           test ! -e /usr/include/simrv/core/MachineConfig.hpp
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.names.outputs.asset_base }}-deb
           path: packages/*.deb
@@ -605,8 +548,6 @@ jobs:
     needs: [rpm-packages, debian-packages, portable-musl]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -632,7 +573,7 @@ jobs:
     container:
       image: ${{ matrix.image }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: SimRV-linux-x86_64-v*
           path: staging
@@ -674,13 +615,18 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve release version
+        id: names
+        uses: ./.github/actions/resolve-simrv-version
       - name: Install native repository tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends createrepo-c dpkg-dev
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: SimRV-linux-*-v*
           path: staging
@@ -689,8 +635,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
-          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          VERSION="${{ steps.names.outputs.simrv_version }}"
           mkdir -p dist rpm-packages deb-packages
           find staging -type f -name '*.rpm' -exec cp {} rpm-packages/ \;
           find staging -type f -name '*.deb' -exec cp {} deb-packages/ \;
@@ -711,13 +656,17 @@ jobs:
           cp staging/SimRV-linux-x86_64-v${VERSION}.tar.gz dist/
           cp staging/SimRV-linux-aarch64-v${VERSION}.tar.gz dist/
           test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: SimRV-release-assets
           path: dist/*.tar.gz
           retention-days: 14
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
       - name: Upload curated release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist/*.tar.gz
           prerelease: ${{ contains(github.ref_name, '-') }}

@@ -1,0 +1,50 @@
+name: Resolve SimRV Version
+description: Extract SIMRV_VERSION from CMakeLists.txt, validate tag pushes, and compute release asset names.
+
+inputs:
+  arch:
+    description: Target host architecture for asset naming
+    required: false
+    default: x86_64
+  require-major-v3:
+    description: Enforce SIMRV_VERSION major version >= 3
+    required: false
+    default: 'true'
+
+outputs:
+  simrv_version:
+    description: Parsed SIMRV_VERSION value
+    value: ${{ steps.resolve.outputs.simrv_version }}
+  version_tag:
+    description: Tag string v<SIMRV_VERSION>
+    value: ${{ steps.resolve.outputs.version_tag }}
+  asset_base:
+    description: Base archive name SimRV-linux-<arch>-v<SIMRV_VERSION>
+    value: ${{ steps.resolve.outputs.asset_base }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse and validate SIMRV_VERSION
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
+        if [[ -z "${SIMRV_VERSION}" ]]; then
+          echo "Failed to parse SIMRV_VERSION from CMakeLists.txt" >&2
+          exit 1
+        fi
+        if [[ "${{ inputs.require-major-v3 }}" == "true" ]]; then
+          test "${SIMRV_VERSION%%.*}" -ge 3
+        fi
+        VERSION_TAG="v${SIMRV_VERSION}"
+        if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" != "${VERSION_TAG}" ]]; then
+          echo "Release tag ${GITHUB_REF_NAME} does not match CMake version tag ${VERSION_TAG}" >&2
+          exit 1
+        fi
+        {
+          echo "simrv_version=${SIMRV_VERSION}"
+          echo "version_tag=${VERSION_TAG}"
+          echo "asset_base=SimRV-linux-${{ inputs.arch }}-${VERSION_TAG}"
+        } >> "$GITHUB_OUTPUT"

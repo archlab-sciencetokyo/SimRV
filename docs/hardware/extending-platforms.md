@@ -472,7 +472,5 @@ target_link_libraries(my-plugin PRIVATE SimRV::simrv-devel)
 - Check that the supplied guest device tree and SoC manifest agree with registered runtime devices.
 - Exercise register side effects, invalid accesses, interrupts, reset, and DMA boundaries as
   applicable.
-- Run the relevant unit and integration tests plus RV32/RV64 release gates. See the
-  [Developer Guide](../development/contributing.md#5-adding-regression-tests) for gate commands.
 
 For the existing platform syntax and RVComp map, see [Microarchitectural Models & Tuning](models.md).

@@ -1,0 +1,76 @@
+name: Setup RISC-V ISA and Vector Tests
+description: Restore or build pinned riscv-tests and optional riscv-vector-tests suites.
+
+inputs:
+  arch:
+    description: Target architecture (rv32 or rv64)
+    required: true
+  riscv-tests-rev:
+    description: Pinned riscv-tests commit SHA
+    required: false
+    default: 933a897d8631773f385d45938facc466dddc7514
+  with-vector-tests:
+    description: Whether to also fetch and build riscv-vector-tests
+    required: false
+    default: 'false'
+  vector-tests-rev:
+    description: Pinned riscv-vector-tests commit SHA
+    required: false
+    default: f76bff121dce91b6b23e1d37be77a5e44af914c3
+
+outputs:
+  riscv-tests-dir:
+    description: Path to compiled riscv-tests directory
+    value: ${{ runner.temp }}/riscv-tests
+  vector-tests-dir:
+    description: Path to riscv-vector-tests directory
+    value: ${{ runner.temp }}/riscv-vector-tests
+
+runs:
+  using: composite
+  steps:
+    - name: Cache compiled riscv-tests
+      id: cache-riscv-tests
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/riscv-tests
+        key: riscv-tests-${{ inputs.riscv-tests-rev }}-${{ inputs.arch }}
+
+    - name: Fetch and compile riscv-tests
+      if: steps.cache-riscv-tests.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        export PATH="/opt/riscv/bin:$PATH"
+        git clone https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+        cd "$RUNNER_TEMP/riscv-tests"
+        git checkout --detach "${{ inputs.riscv-tests-rev }}"
+        git submodule update --init --recursive
+        autoconf
+        ./configure
+        ARCH="${{ inputs.arch }}"
+        make -C isa -j"$(nproc)" RISCV_PREFIX=riscv-none-elf- XLEN="${ARCH#rv}"
+        if [[ "${ARCH}" == "rv64" ]]; then
+          make -C isa -j"$(nproc)" RISCV_PREFIX=riscv-none-elf- XLEN=32
+        fi
+
+    - name: Cache pinned riscv-vector-tests
+      if: inputs.with-vector-tests == 'true'
+      id: cache-vector-tests
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/riscv-vector-tests
+        key: riscv-vector-tests-${{ inputs.vector-tests-rev }}
+
+    - name: Fetch and build pinned riscv-vector-tests
+      if: inputs.with-vector-tests == 'true' && steps.cache-vector-tests.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        git clone https://github.com/chipsalliance/riscv-vector-tests.git "$RUNNER_TEMP/riscv-vector-tests"
+        cd "$RUNNER_TEMP/riscv-vector-tests"
+        git checkout --detach "${{ inputs.vector-tests-rev }}"
+        git submodule update --init --recursive
+        mkdir -p bin
+        (cd generator && CGO_ENABLED=0 go build -o ../bin/riscv-vector-tests-generator .)
+        chmod +x bin/riscv-vector-tests-generator

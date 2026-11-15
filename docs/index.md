@@ -14,7 +14,7 @@
 </section>
 
 <div class="simrv-badges" aria-label="Project status">
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="SimRV CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml/badge.svg?branch=dev" alt="Build and Test"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <a href="architecture/compliance/"><img src="https://img.shields.io/badge/profile-RVA23%20Target-blue.svg" alt="Profile RVA23 Target"/></a>

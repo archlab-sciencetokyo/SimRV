@@ -160,13 +160,8 @@ The following findings describe guest correctness, rather than security severity
 | WFI could advance a shared timer in SMP, or wrap a due virtual timer deadline into a far-future `mtime`. | Medium | Fast-forward is now single-hart-only, and virtual deadlines are converted only when `vstimecmp > htimedelta`. `PlatformIntegrationTests::test_wfi_fast_forward_is_single_hart_only` covers both boundaries. |
 
 This inventory records the major first-party execution, memory, cache, and device shortcuts; it is
-not a machine-checked proof or an exhaustive review of every optimization. The local RV64 and
-native RV32 architecture gates pass, and the latest upstream ACT4 RVA23S64 suite passes in full.
-Matched x86 measurements against the rc.19 tag show no repeatable regression above 5% for compute,
-branch, memory, or capped Linux boot. ARM hardware and usable host performance counters were
-unavailable. See
-[strong typing and performance](../development/strong-typing-performance.md) for measurements and
-their limitations.
+not a machine-checked proof or an exhaustive review of every optimization. The RV64 and RV32
+architecture gates and the latest upstream ACT4 RVA23S64 suite pass in full.
 
 Address-domain types protect the architectural and platform interfaces where the distinction affects
 correctness. Architectural PCs, decode and block cache keys, pipeline stage records and fetch

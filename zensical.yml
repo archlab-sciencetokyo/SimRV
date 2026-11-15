@@ -87,7 +87,6 @@ markdown_extensions:
       generic: true
 
 extra_javascript:
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 extra_css:
@@ -99,20 +98,18 @@ nav:
       - Installation: user/install.md
       - Quickstart & CLI: user/index.md
       - Interactive TUI Workbench: user/tui.md
-      - Release Validation: user/ga-workflow.md
       - Bare-Metal & Embedded: user/baremetal.md
       - Full-System Linux & SMP: user/linux.md
       - Student Reference Guide: user/classroom.md
+      - Release Validation: user/ga-workflow.md
+      - Migrating from 2.x to 3.0: development/migration.md
   - Architecture:
       - System & Pipeline Overview: architecture/overview.md
       - Memory & TileLink-C Coherence: architecture/tilelink.md
       - ISA Compliance & Boundaries: architecture/compliance.md
-  - Hardware & Models:
+  - Models & Extensions:
       - Microarchitectural Models & Tuning: hardware/models.md
       - HPM Counters & Telemetry Events: hardware/hpm.md
-      - Extending CPU Presets and MMIO Platforms: hardware/extending-platforms.md
+      - Custom Extensions & CFU Plugins: hardware/extensions.md
+      - Extending CPU Presets & MMIO Platforms: hardware/extending-platforms.md
       - RTL Parity Verification: hardware/rtl_parity.md
-      - Custom Extensions & CFU: hardware/extensions.md
-  - Development & Contributing:
-      - Developer Guide & Standards: development/contributing.md
-      - Version Migration (2.x to 3.0): development/migration.md
