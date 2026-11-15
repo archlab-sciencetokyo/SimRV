@@ -20,6 +20,12 @@ namespace simrv::core {
     return op >= isa::CSRRW && op <= isa::CSRRCI;
 }
 
+[[nodiscard]] constexpr auto is_time_counter_csr(const CachedOp& op) noexcept -> bool {
+    if (!is_csr_instruction(op.op_id)) return false;
+    const auto csr = op.funct12();
+    return csr == csr_addr(Csr::Time) || csr == csr_addr(Csr::Timeh);
+}
+
 template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
 SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op) -> bool {
     return execute_cached_alu_fast_xlen<kGuestXlen64, kCopyContext, kInstMix, kDeferAluCommit>(

@@ -1885,6 +1885,38 @@ void test_zicntr_base_counter_values_and_access() {
     TEST_ASSERT(cpu.active_context().rcsr == 0x1234);
 }
 
+void test_fast_time_csr_polling_advances_between_batches() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+
+        constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress.raw();
+        constexpr uint32_t read_time_x5 = (0xC01U << 20U) | (2U << 12U) | (5U << 7U) | 0x73U;
+        constexpr uint32_t read_time_x6 = (0xC01U << 20U) | (2U << 12U) | (6U << 7U) | 0x73U;
+        constexpr std::array<uint32_t, 6> program = {
+            read_time_x5,  // Initial time value.
+            read_time_x6,  // Poll until the platform time changes.
+            0x00138393U,   // addi x7, x7, 1 (bound the guest-side polling count).
+            0xFE628CE3U,   // beq x5, x6, -8
+            0x00100413U,   // addi x8, x0, 1 (observed time change).
+            0x0000006FU,   // jal x0, 0
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+
+        auto& cpu = machine.primary_hart();
+        cpu.state().pc = simrv::xlen::VirtAddr{pc};
+        for (unsigned batch = 0; batch < 32 && cpu.state().regs.read(simrv::xlen::RegId::S0) == 0;
+             ++batch) {
+            TEST_ASSERT(machine.execute_fast_batch_for_testing(65536));
+        }
+
+        TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::S0) == 1);
+        TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::T2) < 100);
+    }
+}
+
 void test_zcb_decompression() {
     struct Encoding {
         uint16_t match;
@@ -2451,6 +2483,10 @@ int main() {
     std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
     test_zicntr_base_counter_values_and_access();
     std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;
+
+    std::cout << "[RUN] test_fast_time_csr_polling_advances_between_batches" << std::endl;
+    test_fast_time_csr_polling_advances_between_batches();
+    std::cout << "[PASS] test_fast_time_csr_polling_advances_between_batches" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();
