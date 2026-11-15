@@ -160,8 +160,9 @@ int main() {
         expect(docs_wf.find("uv.lock") == std::string::npos);
         expect(docs_wf.find("pyproject.toml") == std::string::npos);
 
-        const auto ci_wf = read_file_string(root / ".github/workflows/c-cpp.yml");
-        expect(ci_wf.find("name: SimRV CI") != std::string::npos);
+        const auto ci_wf = read_file_string(root / ".github/workflows/build-and-test.yml");
+        expect(!ci_wf.empty());
+        expect(ci_wf.find("name: Build and Test") != std::string::npos);
         expect(ci_wf.find("runner: macos-26") != std::string::npos);
         expect(ci_wf.find("runner: macos-26-intel") != std::string::npos);
     };
