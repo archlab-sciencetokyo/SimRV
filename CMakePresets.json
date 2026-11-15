@@ -95,6 +95,18 @@
             }
         },
         {
+            "name": "rv64-dev",
+            "displayName": "RV64 Fast Dev Release (No LTO, Ninja)",
+            "inherits": [
+                "simrv-release",
+                "simrv-rv64"
+            ],
+            "binaryDir": "${sourceDir}/build/rv64-dev",
+            "cacheVariables": {
+                "SIMRV_ENABLE_LTO": "OFF"
+            }
+        },
+        {
             "name": "rv64-native-release",
             "displayName": "RV64 Native-Host Release (Ninja)",
             "inherits": "simrv-base",
@@ -104,7 +116,8 @@
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",
                 "SIMRV_XLEN": "64",
-                "SIMRV_NATIVE_HOST_OPTIMIZATIONS": "ON"
+                "SIMRV_NATIVE_HOST_OPTIMIZATIONS": "ON",
+                "BUILD_TESTING": "OFF"
             }
         },
         {
@@ -196,6 +209,11 @@
             "inherits": "simrv-build-base"
         },
         {
+            "name": "rv64-dev",
+            "configurePreset": "rv64-dev",
+            "inherits": "simrv-build-base"
+        },
+        {
             "name": "rv64-native-release",
             "configurePreset": "rv64-native-release",
             "inherits": "simrv-build-base"
@@ -230,6 +248,18 @@
         {
             "name": "rv64-gate",
             "configurePreset": "rv64-release",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "gate"
+                }
+            }
+        },
+        {
+            "name": "rv64-dev-gate",
+            "configurePreset": "rv64-dev",
             "output": {
                 "outputOnFailure": true
             },
