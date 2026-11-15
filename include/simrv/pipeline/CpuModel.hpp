@@ -95,7 +95,7 @@ struct CfuConfig {
 
 struct CpuModelConfig {
     CpuModelPreset preset = CpuModelPreset::Balanced;
-    isa::IsaPreset isa_preset = isa::IsaPreset::GCV;
+    isa::IsaSpec isa{};
     std::string name = "balanced";
     std::string description{};
     uint8_t supported_xlen = 0;  // 0 = any/both 32 and 64, 32 = RV32 only, 64 = RV64 only
@@ -151,7 +151,7 @@ struct CpuModelConfig {
     switch (preset) {
         case CpuModelPreset::Tiny:
             result.description = "Minimal 3-stage microcontroller core";
-            result.isa_preset = isa::IsaPreset::IMAC;
+            result.isa = *isa::parse_isa_spec("imac");
             result.pipeline.pipeline_type = PipelineType::ThreeStage;
             result.pipeline.enable_forwarding = false;
             result.pipeline.branch_predictor.type = BranchPredictorType::Static;
@@ -165,7 +165,7 @@ struct CpuModelConfig {
             break;
         case CpuModelPreset::Balanced:
             result.description = "Default balanced 5-stage general-purpose core";
-            result.isa_preset = isa::IsaPreset::GCV;
+            result.isa = *isa::parse_isa_spec("gcv");
             result.isa_extensions = {"zba", "zbb", "zbc", "zbs"};
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
@@ -179,7 +179,7 @@ struct CpuModelConfig {
             break;
         case CpuModelPreset::Performance:
             result.description = "High-throughput 5-stage core with aggressive prediction";
-            result.isa_preset = isa::IsaPreset::GCV;
+            result.isa = *isa::parse_isa_spec("gcv");
             result.isa_extensions = {"zba", "zbb", "zbc", "zbs"};
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;

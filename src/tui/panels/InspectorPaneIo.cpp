@@ -9,8 +9,9 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/device/Uart.hpp"
+#include "simrv/memory/Bus.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
@@ -259,7 +260,25 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
             width);
     }
     if (logical_row == 16) {
-        return section_line("TileLink-C Channels (A-E) & Fabric State", width);
+        const char* label = "TileLink-C";
+        switch (machine_.memory().system_bus().protocol()) {
+            case simrv::memory::BusProtocol::TileLinkC:
+                label = "TileLink-C";
+                break;
+            case simrv::memory::BusProtocol::TileLinkUH:
+                label = "TileLink-UH";
+                break;
+            case simrv::memory::BusProtocol::TileLinkUL:
+                label = "TileLink-UL";
+                break;
+            case simrv::memory::BusProtocol::Axi4:
+                label = "AXI4";
+                break;
+            case simrv::memory::BusProtocol::Axi4Lite:
+                label = "AXI4-Lite";
+                break;
+        }
+        return section_line(std::format("{} Channels & Fabric State", label), width);
     }
     if (logical_row == 17) {
         auto const& bus = machine_.memory().system_bus();

@@ -92,7 +92,8 @@ struct OperationInfo {
     if (in_range(OperationId::MUL, OperationId::REMUW)) {
         return misa_extension_bit(IsaExtension::M);
     }
-    if (in_range(OperationId::LR_W, OperationId::AMOMAXU_D) || op_id == OperationId::WRS_NTO ||
+    if (in_range(OperationId::LR_W, OperationId::AMOMAXU_D) ||
+        in_range(OperationId::AMOSWAP_B, OperationId::AMOCAS_Q) || op_id == OperationId::WRS_NTO ||
         op_id == OperationId::WRS_STO) {
         return misa_extension_bit(IsaExtension::A);
     }
@@ -108,6 +109,12 @@ struct OperationInfo {
             return required | misa_extension_bit(IsaExtension::D);
         }
         return required;
+    }
+    if (in_range(OperationId::FMADD_H, OperationId::FCVT_BF16_S)) {
+        return misa_extension_bit(IsaExtension::F);
+    }
+    if (in_range(OperationId::VFWCVTBF16_F_F_V, OperationId::VFWMACCBF16_VF)) {
+        return misa_extension_bit(IsaExtension::V) | misa_extension_bit(IsaExtension::F);
     }
     switch (op_id) {
         case OperationId::FLI_S:
@@ -301,6 +308,10 @@ struct OperationInfo {
         case FCVT_LU_D:
         case FCVT_D_L:
         case FCVT_D_LU:
+        case FCVT_L_H:
+        case FCVT_LU_H:
+        case FCVT_H_L:
+        case FCVT_H_LU:
         case FMV_X_D:
         case FMV_D_X:
         case VLUXEI64_V:
@@ -323,6 +334,16 @@ struct OperationInfo {
         case HLV_B:
         case HLV_BU:
         case HSV_B:
+        case AMOSWAP_B:
+        case AMOADD_B:
+        case AMOXOR_B:
+        case AMOAND_B:
+        case AMOOR_B:
+        case AMOMIN_B:
+        case AMOMAX_B:
+        case AMOMINU_B:
+        case AMOMAXU_B:
+        case AMOCAS_B:
             return 1;
         case LH:
         case LHU:
@@ -333,6 +354,16 @@ struct OperationInfo {
         case HLV_HU:
         case HLVX_HU:
         case HSV_H:
+        case AMOSWAP_H:
+        case AMOADD_H:
+        case AMOXOR_H:
+        case AMOAND_H:
+        case AMOOR_H:
+        case AMOMIN_H:
+        case AMOMAX_H:
+        case AMOMINU_H:
+        case AMOMAXU_H:
+        case AMOCAS_H:
             return 2;
         case LW:
         case LWU:
@@ -354,6 +385,7 @@ struct OperationInfo {
         case AMOMAX_W:
         case AMOMINU_W:
         case AMOMAXU_W:
+        case AMOCAS_W:
             return 4;
         case LD:
         case SD:
@@ -372,7 +404,10 @@ struct OperationInfo {
         case AMOMAX_D:
         case AMOMINU_D:
         case AMOMAXU_D:
+        case AMOCAS_D:
             return 8;
+        case AMOCAS_Q:
+            return 16;
         case CBO_ZERO:
             return 64;
         default:
@@ -570,10 +605,13 @@ consteval auto generate_operation_info() {
     // A Extension (Atomics)
     set_props({LR_W, LR_D}, exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
               mem_atomic);
-    set_props({SC_W,     SC_D,     AMOSWAP_W, AMOADD_W,  AMOXOR_W,  AMOAND_W, AMOOR_W,
-               AMOMIN_W, AMOMAX_W, AMOMINU_W, AMOMAXU_W, AMOSWAP_D, AMOADD_D, AMOXOR_D,
-               AMOAND_D, AMOOR_D,  AMOMIN_D,  AMOMAX_D,  AMOMINU_D, AMOMAXU_D},
-              exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_atomic);
+    set_props(
+        {SC_W,      SC_D,      AMOSWAP_W, AMOADD_W, AMOXOR_W, AMOAND_W, AMOOR_W, AMOMIN_W, AMOMAX_W,
+         AMOMINU_W, AMOMAXU_W, AMOSWAP_D, AMOADD_D, AMOXOR_D, AMOAND_D, AMOOR_D, AMOMIN_D, AMOMAX_D,
+         AMOMINU_D, AMOMAXU_D, AMOSWAP_B, AMOADD_B, AMOXOR_B, AMOAND_B, AMOOR_B, AMOMIN_B, AMOMAX_B,
+         AMOMINU_B, AMOMAXU_B, AMOSWAP_H, AMOADD_H, AMOXOR_H, AMOAND_H, AMOOR_H, AMOMIN_H, AMOMAX_H,
+         AMOMINU_H, AMOMAXU_H, AMOCAS_B,  AMOCAS_H, AMOCAS_W, AMOCAS_D, AMOCAS_Q},
+        exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_atomic);
 
     // F Extension (Single-Precision Floating Point)
     set_props({FLH}, exec_def, {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load);
@@ -612,8 +650,20 @@ consteval auto generate_operation_info() {
               {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
     set_props({FMV_X_H}, exec_fpalu, {.rd = b_int, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
     set_props({FMV_H_X}, exec_fpalu, {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none});
-    set_props({FCVT_S_H, FCVT_H_S, FCVT_D_H, FCVT_H_D}, exec_fpalu,
+    set_props({FCVT_S_H, FCVT_H_S, FCVT_D_H, FCVT_H_D, FCVT_S_BF16, FCVT_BF16_S}, exec_fpalu,
               {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FADD_H, FSUB_H, FMUL_H, FSGNJ_H, FSGNJN_H, FSGNJX_H, FMIN_H, FMAX_H}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_fp});
+    set_props({FDIV_H}, exec_fpdiv, {.rd = b_fp, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FSQRT_H}, exec_fpdiv, {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FEQ_H, FLT_H, FLE_H}, exec_fpalu,
+              {.rd = b_int, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FCLASS_H, FCVT_W_H, FCVT_WU_H, FCVT_L_H, FCVT_LU_H}, exec_fpalu,
+              {.rd = b_int, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FCVT_H_W, FCVT_H_WU, FCVT_H_L, FCVT_H_LU}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none});
     set_props({FLI_S}, exec_fpalu, {.rd = b_fp, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none});
     set_props({FMINM_S, FMAXM_S}, exec_fpalu,
               {.rd = b_fp, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
@@ -641,6 +691,10 @@ consteval auto generate_operation_info() {
     set_props({VSETVLI, VSETIVLI, VSETVL}, exec_def,
               {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_none, ctrl_none,
               side_serial);
+    set_props({VFWMACCBF16_VV}, exec_def, {.rd = b_vec, .rs1 = b_vec, .rs2 = b_vec, .rs3 = b_none},
+              mem_none, ctrl_none, side_serial);
+    set_props({VFWMACCBF16_VF}, exec_def, {.rd = b_vec, .rs1 = b_fp, .rs2 = b_vec, .rs3 = b_none},
+              mem_none, ctrl_none, side_serial);
     set_props({VLE8_V,     VLE16_V,    VLE32_V,    VLE64_V,   VLE8FF_V,   VLE16FF_V,  VLE32FF_V,
                VLE64FF_V,  VLM_V,      VLSE8_V,    VLSE16_V,  VLSE32_V,   VLSE64_V,   VLUXEI8_V,
                VLUXEI16_V, VLUXEI32_V, VLUXEI64_V, VLOXEI8_V, VLOXEI16_V, VLOXEI32_V, VLOXEI64_V,
@@ -737,18 +791,18 @@ consteval auto generate_operation_info() {
 
     // RVV unary encodings select the operation with rs1; their vector input is vs2.
     // Keep the physical operand banks accurate for scoreboard dependencies.
-    set_props({VSEXT_VF2,        VSEXT_VF4,       VSEXT_VF8,        VZEXT_VF2,
-               VZEXT_VF4,        VZEXT_VF8,       VCLZ_V,           VCTZ_V,
-               VCPOP_V,          VBREV_V,         VBREV8_V,         VREV8_V,
-               VFSQRT_V,         VFRSQRT7_V,      VFREC7_V,         VFCLASS_V,
-               VFCVT_XU_F_V,     VFCVT_X_F_V,     VFCVT_F_XU_V,     VFCVT_F_X_V,
-               VFCVT_RTZ_XU_F_V, VFCVT_RTZ_X_F_V, VFWCVT_XU_F_V,    VFWCVT_X_F_V,
-               VFWCVT_F_XU_V,    VFWCVT_F_X_V,    VFWCVT_F_F_V,     VFWCVT_RTZ_XU_F_V,
-               VFWCVT_RTZ_X_F_V, VFNCVT_XU_F_W,   VFNCVT_X_F_W,     VFNCVT_F_XU_W,
-               VFNCVT_F_X_W,     VFNCVT_F_F_W,    VFNCVT_ROD_F_F_W, VFNCVT_RTZ_XU_F_W,
-               VFNCVT_RTZ_X_F_W, VIOTA_M,         VMSBF_M,          VMSIF_M,
-               VMSOF_M,          VMV1R_V,         VMV2R_V,          VMV4R_V,
-               VMV8R_V},
+    set_props({VSEXT_VF2,        VSEXT_VF4,        VSEXT_VF8,        VZEXT_VF2,
+               VZEXT_VF4,        VZEXT_VF8,        VCLZ_V,           VCTZ_V,
+               VCPOP_V,          VBREV_V,          VBREV8_V,         VREV8_V,
+               VFSQRT_V,         VFRSQRT7_V,       VFREC7_V,         VFCLASS_V,
+               VFCVT_XU_F_V,     VFCVT_X_F_V,      VFCVT_F_XU_V,     VFCVT_F_X_V,
+               VFCVT_RTZ_XU_F_V, VFCVT_RTZ_X_F_V,  VFWCVT_XU_F_V,    VFWCVT_X_F_V,
+               VFWCVT_F_XU_V,    VFWCVT_F_X_V,     VFWCVT_F_F_V,     VFWCVT_RTZ_XU_F_V,
+               VFWCVT_RTZ_X_F_V, VFNCVT_XU_F_W,    VFNCVT_X_F_W,     VFNCVT_F_XU_W,
+               VFNCVT_F_X_W,     VFNCVT_F_F_W,     VFNCVT_ROD_F_F_W, VFNCVT_RTZ_XU_F_W,
+               VFNCVT_RTZ_X_F_W, VFWCVTBF16_F_F_V, VFNCVTBF16_F_F_W, VIOTA_M,
+               VMSBF_M,          VMSIF_M,          VMSOF_M,          VMV1R_V,
+               VMV2R_V,          VMV4R_V,          VMV8R_V},
               exec_def, {.rd = b_vec, .rs1 = b_none, .rs2 = b_vec, .rs3 = b_none}, mem_none,
               ctrl_none, side_serial);
     set_props({VMV_X_S, VFIRST_M, VCPOP_M}, exec_def,

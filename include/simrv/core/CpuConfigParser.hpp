@@ -16,11 +16,13 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/SoCConfig.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/PipelineTopology.hpp"
 
 namespace simrv::core {
 
@@ -58,43 +60,6 @@ inline auto parse_bool(std::string_view val) -> std::optional<bool> {
     }
     if (iequals(val, "false") || iequals(val, "0") || iequals(val, "no") || iequals(val, "off")) {
         return false;
-    }
-    return std::nullopt;
-}
-
-inline auto parse_isa_preset_string(std::string_view val) -> std::optional<simrv::isa::IsaPreset> {
-    val = unquote(val);
-    if (iequals(val, "i") || iequals(val, "rv32i") || iequals(val, "rv64i")) {
-        return simrv::isa::IsaPreset::I;
-    }
-    if (iequals(val, "e") || iequals(val, "rv32e")) {
-        return simrv::isa::IsaPreset::E;
-    }
-    if (iequals(val, "em") || iequals(val, "rv32em")) {
-        return simrv::isa::IsaPreset::EM;
-    }
-    if (iequals(val, "emac") || iequals(val, "rv32emac")) {
-        return simrv::isa::IsaPreset::EMAC;
-    }
-    if (iequals(val, "im") || iequals(val, "rv32im") || iequals(val, "rv64im")) {
-        return simrv::isa::IsaPreset::IM;
-    }
-    if (iequals(val, "ima") || iequals(val, "rv32ima") || iequals(val, "rv64ima")) {
-        return simrv::isa::IsaPreset::IMA;
-    }
-    if (iequals(val, "imac") || iequals(val, "rv32imac") || iequals(val, "rv64imac")) {
-        return simrv::isa::IsaPreset::IMAC;
-    }
-    if (iequals(val, "g") || iequals(val, "rv32g") || iequals(val, "rv64g")) {
-        return simrv::isa::IsaPreset::G;
-    }
-    if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc") ||
-        iequals(val, "gczb") || iequals(val, "rv32gczb") || iequals(val, "rv64gczb")) {
-        return simrv::isa::IsaPreset::GC;
-    }
-    if (iequals(val, "gcv") || iequals(val, "rv32gcv") || iequals(val, "rv64gcv") ||
-        iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv")) {
-        return simrv::isa::IsaPreset::GCV;
     }
     return std::nullopt;
 }
@@ -149,32 +114,6 @@ inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> 
     } catch (const std::exception&) {
         return std::nullopt;
     }
-}
-
-inline auto isa_preset_name(simrv::isa::IsaPreset preset) -> std::string_view {
-    switch (preset) {
-        case simrv::isa::IsaPreset::E:
-            return "e";
-        case simrv::isa::IsaPreset::EM:
-            return "em";
-        case simrv::isa::IsaPreset::EMAC:
-            return "emac";
-        case simrv::isa::IsaPreset::I:
-            return "i";
-        case simrv::isa::IsaPreset::IM:
-            return "im";
-        case simrv::isa::IsaPreset::IMA:
-            return "ima";
-        case simrv::isa::IsaPreset::IMAC:
-            return "imac";
-        case simrv::isa::IsaPreset::G:
-            return "g";
-        case simrv::isa::IsaPreset::GC:
-            return "gc";
-        case simrv::isa::IsaPreset::GCV:
-            return "gcv";
-    }
-    return "gcv";
 }
 
 }  // namespace detail
@@ -282,13 +221,71 @@ inline auto resolve_cpu_model_path(std::string_view name_or_path) -> std::option
     return std::nullopt;
 }
 
+struct DiscoveredCpuModel {
+    std::string name;
+    std::string path;
+};
+
+/**
+ * @brief Dynamically discover all CPU model `.cfg` presets across standard search roots.
+ */
+inline auto discover_cpu_models() -> std::vector<DiscoveredCpuModel> {
+    std::vector<DiscoveredCpuModel> models;
+    std::vector<std::filesystem::path> dirs;
+    for (const auto& root : {std::filesystem::path("."), std::filesystem::path(".."),
+                             std::filesystem::path("../..")}) {
+        dirs.push_back(root / "configs" / "models");
+    }
+#if defined(__linux__)
+    std::error_code exe_ec;
+    const std::filesystem::path exe_path = std::filesystem::read_symlink("/proc/self/exe", exe_ec);
+    if (!exe_ec && !exe_path.empty()) {
+        const auto exe_dir = exe_path.parent_path();
+        for (const auto& root :
+             {exe_dir, exe_dir.parent_path(), exe_dir.parent_path().parent_path()}) {
+            dirs.push_back(root / "configs" / "models");
+            dirs.push_back(root / "share" / "SimRV" / "models");
+        }
+    }
+#endif
+    dirs.emplace_back("/usr/share/SimRV/models");
+    dirs.emplace_back("/usr/local/share/SimRV/models");
+    if (const char* env_dir = std::getenv("SIMRV_CONFIG_DIR");
+        env_dir != nullptr && *env_dir != '\0') {
+        const std::filesystem::path env_root(env_dir);
+        dirs.push_back(env_root / "models");
+        dirs.push_back(env_root);
+    }
+
+    std::error_code ec;
+    for (const auto& dir : dirs) {
+        if (!std::filesystem::is_directory(dir, ec)) continue;
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            if (ec || !entry.is_regular_file(ec)) continue;
+            if (entry.path().extension() != ".cfg") continue;
+            const std::string stem = entry.path().stem().string();
+            const bool already = std::ranges::any_of(
+                models, [&](const DiscoveredCpuModel& m) { return m.name == stem; });
+            if (!already) {
+                models.push_back({.name = stem, .path = entry.path().string()});
+            }
+        }
+    }
+    std::ranges::sort(models, {}, &DiscoveredCpuModel::name);
+    return models;
+}
+
+inline auto load_cpu_config_impl(std::string_view file_path,
+                                 simrv::pipeline::CpuModelConfig& config, unsigned int depth)
+    -> bool;
+
 /**
  * @brief Parse CPU model configuration from text stream supporting sections and flat keys.
  *
  * Performs syntactic and model parsing without enforcing simulator architecture validation.
  */
-inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config)
-    -> bool {
+inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config,
+                                    unsigned int depth = 0) -> bool {
     enum class Section {
         Global,
         Cpu,
@@ -400,6 +397,26 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
 
         try {
             // 1. CPU Section & Presets
+            if (key == "extends") {
+                if (depth >= 4) {
+                    simrv::log::warn("CPU model inheritance depth exceeded for '{}'", val_str);
+                    return false;
+                }
+                if (const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
+                    parsed && *parsed != simrv::pipeline::CpuModelPreset::Custom) {
+                    config = simrv::pipeline::make_cpu_model_preset(*parsed);
+                    continue;
+                }
+                if (const auto base_path = resolve_cpu_model_path(val_str)) {
+                    if (!load_cpu_config_impl(*base_path, config, depth + 1)) {
+                        simrv::log::warn("Failed to load extended CPU model '{}'", *base_path);
+                        return false;
+                    }
+                    continue;
+                }
+                simrv::log::warn("Unknown extended CPU model '{}'", val_str);
+                return false;
+            }
             if (key == "preset" || key == "cpu_preset") {
                 const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
                 if (!parsed || *parsed == simrv::pipeline::CpuModelPreset::Custom) {
@@ -423,37 +440,25 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 config.supported_xlen = static_cast<uint8_t>(std::stoul(std::string(val_str)));
                 continue;
             }
-            if (key == "isa_preset") {
-                const auto parsed = detail::parse_isa_preset_string(val_str);
-                const auto separator = val_str.find_first_of("_ ,\t");
-                const auto base = val_str.substr(0, separator);
-                const auto base_preset = detail::parse_isa_preset_string(base);
-                if (parsed.has_value()) {
-                    config.isa_preset = *parsed;
-                } else {
-                    // Accept strings such as "im_zkn_zkt" while retaining the base
-                    // ISA preset for the single-letter portion.
-                    if (base_preset.has_value()) {
-                        config.isa_preset = *base_preset;
-                    } else if (detail::iequals(val_str, "gcbv") ||
-                               detail::iequals(val_str, "rv32gcbv") ||
-                               detail::iequals(val_str, "rv64gcbv") ||
-                               detail::iequals(val_str, "gcb") ||
-                               detail::iequals(val_str, "rv32gcb") ||
-                               detail::iequals(val_str, "rv64gcb")) {
-                        simrv::log::warn(
-                            "Legacy draft ISA shorthand '{}' is deprecated and retired in 3.0; use "
-                            "ratified preset 'gczbv' or 'gczb' instead",
-                            val_str);
-                    } else {
-                        simrv::log::warn("Unknown ISA preset '{}'", val_str);
-                    }
-                    if (separator != std::string_view::npos) {
-                        detail::parse_isa_extensions(config.isa_extensions,
-                                                     val_str.substr(separator + 1));
-                    }
-                }
+            if (key == "isa_preset" || key == "isa") {
                 const auto unquoted = detail::unquote(val_str);
+                if (const auto parsed_isa = simrv::isa::parse_isa_spec(unquoted)) {
+                    config.isa = *parsed_isa;
+                    for (const auto& ext : parsed_isa->extensions) {
+                        detail::add_isa_extension(config.isa_extensions, ext);
+                    }
+                } else if (detail::iequals(val_str, "gcbv") ||
+                           detail::iequals(val_str, "rv32gcbv") ||
+                           detail::iequals(val_str, "rv64gcbv") ||
+                           detail::iequals(val_str, "gcb") || detail::iequals(val_str, "rv32gcb") ||
+                           detail::iequals(val_str, "rv64gcb")) {
+                    simrv::log::warn(
+                        "Legacy draft ISA shorthand '{}' is deprecated and retired in 3.0; use "
+                        "ratified preset 'gczbv' or 'gczb' instead",
+                        val_str);
+                } else {
+                    simrv::log::warn("Unknown ISA specification '{}'", val_str);
+                }
                 if (detail::iequals(unquoted, "gczb") || detail::iequals(unquoted, "rv32gczb") ||
                     detail::iequals(unquoted, "rv64gczb") || detail::iequals(unquoted, "gczbv") ||
                     detail::iequals(unquoted, "rv32gczbv") ||
@@ -466,9 +471,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     }
                 }
                 if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
-                    (base_preset.has_value() && (*base_preset == simrv::isa::IsaPreset::E ||
-                                                 *base_preset == simrv::isa::IsaPreset::EM ||
-                                                 *base_preset == simrv::isa::IsaPreset::EMAC))) {
+                    config.isa.has(simrv::isa::IsaExtension::E)) {
                     if (config.supported_xlen == 0) config.supported_xlen = 32;
                 } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
                     if (config.supported_xlen == 0) config.supported_xlen = 64;
@@ -897,7 +900,19 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
 
 /** Parse the platform portion of a combined CPU/SoC preset file. */
 inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
-    enum class Section { Global, Soc, Pcie, Memory, Boot, Device, Smp, SmpCluster, SmpL3, Plugins };
+    enum class Section {
+        Global,
+        Soc,
+        Bus,
+        Pcie,
+        Memory,
+        Boot,
+        Device,
+        Smp,
+        SmpCluster,
+        SmpL3,
+        Plugins
+    };
     Section section = Section::Global;
     simrv::core::SoCDeviceConfig* device = nullptr;
     simrv::core::SmpClusterConfig* cluster = nullptr;
@@ -922,6 +937,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 return false;
             } else if (detail::iequals(name, "soc")) {
                 section = Section::Soc;
+            } else if (detail::iequals(name, "bus")) {
+                section = Section::Bus;
             } else if (detail::iequals(name, "plugins")) {
                 section = Section::Plugins;
             } else if (detail::iequals(name, "pcie")) {
@@ -1106,6 +1123,16 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             } else if (key == "bram_prewarm") {
                 if (const auto parsed = detail::parse_bool(value)) {
                     config.bram_prewarm = *parsed;
+                }
+            } else if (key == "bus_protocol" || key == "bus") {
+                if (const auto* entry = simrv::memory::find_bus_catalog_entry(value)) {
+                    config.bus_protocol = entry->protocol;
+                }
+            }
+        } else if (section == Section::Bus) {
+            if (key == "protocol" || key == "bus_protocol" || key == "type") {
+                if (const auto* entry = simrv::memory::find_bus_catalog_entry(value)) {
+                    config.bus_protocol = entry->protocol;
                 }
             }
         } else if (section == Section::Pcie) {
@@ -1327,6 +1354,16 @@ inline auto parse_cpu_config(const std::string& path, simrv::pipeline::CpuModelC
 /**
  * @brief Load CPU configuration from a stream and validate against the current simulator.
  */
+inline auto load_cpu_config_impl(std::string_view file_path,
+                                 simrv::pipeline::CpuModelConfig& config, unsigned int depth)
+    -> bool {
+    std::ifstream file{std::filesystem::path{file_path}};
+    if (!file.is_open()) {
+        return false;
+    }
+    return parse_cpu_config_stream(file, config, depth);
+}
+
 inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config)
     -> bool {
     if (!parse_cpu_config_stream(stream, config)) {
@@ -1392,7 +1429,7 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     if (config.supported_xlen != 0) {
         out << "xlen = " << static_cast<unsigned int>(config.supported_xlen) << "\n";
     }
-    out << "isa_preset = \"" << detail::isa_preset_name(config.isa_preset) << "\"\n";
+    out << "isa_preset = \"" << config.isa.canonical_string() << "\"\n";
     out << "\n";
 
     if (!config.isa_extensions.empty()) {
@@ -1416,11 +1453,15 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "interface = \"" << config.cfu.interface << "\"\n\n";
 
     out << "[pipeline]\n";
-    out << "type = \""
-        << (config.pipeline.pipeline_type == simrv::pipeline::PipelineType::ThreeStage
-                ? "three-stage"
-                : "five-stage")
-        << "\"\n";
+    out << "type = \"";
+    if (config.pipeline.pipeline_type == simrv::pipeline::PipelineType::ThreeStage) {
+        out << "three-stage";
+    } else if (config.pipeline.pipeline_type == simrv::pipeline::PipelineType::FiveStage) {
+        out << "five-stage";
+    } else {
+        out << simrv::pipeline::topology_entry(config.pipeline.pipeline_type).cli_name;
+    }
+    out << "\"\n";
     out << "enable_forwarding = " << (config.pipeline.enable_forwarding ? "true" : "false") << "\n";
     out << "divider_early_out = " << (config.pipeline.divider_early_out ? "true" : "false") << "\n";
     out << "mul_latency = " << config.pipeline.mul_latency << "\n";

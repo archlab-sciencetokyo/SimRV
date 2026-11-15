@@ -253,52 +253,76 @@ class BaseCache {
         return nullptr;
     }
 
-    [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx,
-                                                    simrv::memory::CacheTag tag) noexcept
-        -> std::pair<uint32_t, CacheLine*> {
-        if (simrv::compiler::unlikely(set_idx >= active_sets_)) return {0xFFFFFFFF, nullptr};
-        auto* line_ptr = &lines_[set_idx * active_ways_];
-
-        // Direct MRU fast path: check last hit way first when accessing the same set.
-        if (last_access_was_hit_ && set_idx == last_accessed_set_ && last_hit_way_ < active_ways_) {
-            auto& l = line_ptr[last_hit_way_];
+    template <uint32_t ActiveWays>
+    [[nodiscard]] constexpr auto find_matching_line_impl(this auto& self, uint32_t set_idx,
+                                                         simrv::memory::CacheTag tag) noexcept {
+        using LinePtr = decltype(&self.lines_[0]);
+        if (simrv::compiler::unlikely(set_idx >= self.active_sets_)) {
+            return std::pair<uint32_t, LinePtr>{0xFFFFFFFF, nullptr};
+        }
+        if constexpr (ActiveWays == 1) {
+            auto& l = self.lines_[set_idx];
             if (simrv::compiler::likely(l.valid && l.tag == tag &&
                                         l.state != simrv::memory::MesiState::Invalid)) {
-                return {last_hit_way_, &l};
+                return std::pair<uint32_t, LinePtr>{0u, &l};
             }
-        }
+            return std::pair<uint32_t, LinePtr>{0xFFFFFFFF, nullptr};
+        } else {
+            auto* line_ptr = &self.lines_[set_idx * ActiveWays];
+            // Direct MRU fast path: check last hit way first when accessing the same set.
+            if (self.last_access_was_hit_ && set_idx == self.last_accessed_set_ &&
+                self.last_hit_way_ < ActiveWays) {
+                auto& l = line_ptr[self.last_hit_way_];
+                if (simrv::compiler::likely(l.valid && l.tag == tag &&
+                                            l.state != simrv::memory::MesiState::Invalid)) {
+                    return std::pair<uint32_t, LinePtr>{self.last_hit_way_, &l};
+                }
+            }
 
-        for (uint32_t w = 0; w < active_ways_; ++w) {
-            auto& l = line_ptr[w];
-            if (l.valid && l.tag == tag && l.state != simrv::memory::MesiState::Invalid) {
-                return {w, &l};
+            for (uint32_t w = 0; w < ActiveWays; ++w) {
+                auto& l = line_ptr[w];
+                if (l.valid && l.tag == tag && l.state != simrv::memory::MesiState::Invalid) {
+                    return std::pair<uint32_t, LinePtr>{w, &l};
+                }
             }
+            return std::pair<uint32_t, LinePtr>{0xFFFFFFFF, nullptr};
         }
-        return {0xFFFFFFFF, nullptr};
     }
 
-    [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx,
-                                                    simrv::memory::CacheTag tag) const noexcept
-        -> std::pair<uint32_t, const CacheLine*> {
-        if (simrv::compiler::unlikely(set_idx >= active_sets_)) return {0xFFFFFFFF, nullptr};
-        const auto* line_ptr = &lines_[set_idx * active_ways_];
-
-        // Direct MRU fast path: check last hit way first when accessing the same set.
-        if (last_access_was_hit_ && set_idx == last_accessed_set_ && last_hit_way_ < active_ways_) {
-            const auto& l = line_ptr[last_hit_way_];
-            if (simrv::compiler::likely(l.valid && l.tag == tag &&
-                                        l.state != simrv::memory::MesiState::Invalid)) {
-                return {last_hit_way_, &l};
-            }
+    [[nodiscard]] constexpr auto find_matching_line(this auto& self, uint32_t set_idx,
+                                                    simrv::memory::CacheTag tag) noexcept {
+        switch (self.active_ways_) {
+            case 1:
+                if constexpr (1 <= kWays)
+                    return self.template find_matching_line_impl<1>(set_idx, tag);
+                break;
+            case 2:
+                if constexpr (2 <= kWays)
+                    return self.template find_matching_line_impl<2>(set_idx, tag);
+                break;
+            case 4:
+                if constexpr (4 <= kWays)
+                    return self.template find_matching_line_impl<4>(set_idx, tag);
+                break;
+            case 8:
+                if constexpr (8 <= kWays)
+                    return self.template find_matching_line_impl<8>(set_idx, tag);
+                break;
+            default:
+                break;
         }
-
-        for (uint32_t w = 0; w < active_ways_; ++w) {
-            const auto& l = line_ptr[w];
+        using LinePtr = decltype(&self.lines_[0]);
+        if (simrv::compiler::unlikely(set_idx >= self.active_sets_)) {
+            return std::pair<uint32_t, LinePtr>{0xFFFFFFFF, nullptr};
+        }
+        auto* line_ptr = &self.lines_[set_idx * self.active_ways_];
+        for (uint32_t w = 0; w < self.active_ways_; ++w) {
+            auto& l = line_ptr[w];
             if (l.valid && l.tag == tag && l.state != simrv::memory::MesiState::Invalid) {
-                return {w, &l};
+                return std::pair<uint32_t, LinePtr>{w, &l};
             }
         }
-        return {0xFFFFFFFF, nullptr};
+        return std::pair<uint32_t, LinePtr>{0xFFFFFFFF, nullptr};
     }
 
     [[nodiscard]] constexpr auto find_way(uint32_t set_idx,

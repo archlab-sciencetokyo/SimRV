@@ -4,8 +4,10 @@
  */
 #include <array>
 #include <atomic>
+#include <mutex>
 #include <shared_mutex>
 #include <string_view>
+#include <utility>
 
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
@@ -69,6 +71,28 @@ auto execute_dram_amo(T* mem_ptr, simrv::xlen::Word rs2_val, Funct5Amo funct5) -
         default:
             return atomic_mem.load(std::memory_order_relaxed);
     }
+}
+
+template <typename T>
+auto execute_dram_cas(T* mem_ptr, T expected, T desired) -> T {
+    std::atomic_ref<T> atomic_mem(*mem_ptr);
+    atomic_mem.compare_exchange_strong(expected, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire);
+    return expected;
+}
+
+inline auto execute_dram_cas128(uint64_t* mem_ptr, uint64_t exp_lo, uint64_t exp_hi,
+                                uint64_t des_lo, uint64_t des_hi)
+    -> std::pair<uint64_t, uint64_t> {
+    static std::mutex cas128_mutex;
+    std::scoped_lock lock(cas128_mutex);
+    const uint64_t old_lo = mem_ptr[0];
+    const uint64_t old_hi = mem_ptr[1];
+    if (old_lo == exp_lo && old_hi == exp_hi) {
+        mem_ptr[0] = des_lo;
+        mem_ptr[1] = des_hi;
+    }
+    return {old_lo, old_hi};
 }
 }  // namespace
 
@@ -242,19 +266,38 @@ void CPU::run_cycle(Machine& machine) {
     machine.record_retired_instructions(e_icount - retired_before);
 }
 
-void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired_before) {
-    run_ca_pipeline_cycle(machine);
-    const bool record_snapshots =
-        pipeline_sim.config.record_snapshots &&
-        (!machine.tui_enabled() || captures_tui_execution_detail(machine));
-    const bool three_stage =
-        pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
+template <CPU::CaPolicySpec Policy>
+void CPU::execute_ca_cycle_stages_impl(Machine& machine, simrv::xlen::Counter retired_before) {
+    constexpr auto Spec = Policy.topology;
+    run_ca_pipeline_cycle_impl<Spec>(machine);
+    const bool capture_tui = Policy.observable ? captures_tui_execution_detail(machine) : false;
+    const bool record_snapshots = Policy.observable && pipeline_sim.config.record_snapshots &&
+                                  (!machine.tui_enabled() || capture_tui);
+    constexpr bool kHasMemoryStage = (Spec.memory_stages >= 1);
+    const auto& exec_slot = [&]() -> const pipeline::CycleInstructionSlot& {
+        if constexpr (Spec.has_execute) {
+            return *ca_pipeline.execute;
+        } else if constexpr (Spec.has_decode) {
+            return *ca_pipeline.decode;
+        } else {
+            return *ca_pipeline.writeback;
+        }
+    }();
+    const bool exec_or_mem_latency = [&]() {
+        if constexpr (Spec.memory_stages == 2) {
+            return exec_slot.remaining_latency != 0 || ca_pipeline.memory->remaining_latency != 0 ||
+                   ca_pipeline.memory2->remaining_latency != 0;
+        } else if constexpr (Spec.memory_stages == 1) {
+            return exec_slot.remaining_latency != 0 || ca_pipeline.memory->remaining_latency != 0;
+        } else if constexpr (Spec.has_decode) {
+            return ca_pipeline.decode->remaining_latency != 0;
+        } else {
+            return false;
+        }
+    }();
     const bool has_events_or_stalls =
         ca_pipeline.data_hazard_stall || ca_pipeline.control_flush ||
-        ca_pipeline.fetch->remaining_latency != 0 ||
-        (three_stage ? ca_pipeline.decode->remaining_latency
-                     : (ca_pipeline.execute->remaining_latency != 0 ||
-                        ca_pipeline.memory->remaining_latency != 0)) ||
+        ca_pipeline.fetch->remaining_latency != 0 || exec_or_mem_latency ||
         ca_pipeline.writeback->remaining_latency != 0 || ca_pipeline.fetch->icache_miss ||
         ca_pipeline.memory->dcache_miss || ca_pipeline.writeback->dcache_miss ||
         ca_pipeline.retired->dcache_miss || ca_pipeline.fetch->tlb_miss ||
@@ -262,8 +305,9 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         ca_state.instruction_fill.active || ca_state.data_transfer.active ||
         ca_state.instruction_walk.active || ca_state.data_walk.active ||
         ca_state.waiting_for_interconnect ||
-        simrv::compiler::unlikely(machine.trace().is_architecture_trace_enabled()) ||
-        simrv::compiler::unlikely(record_snapshots);
+        (Policy.observable &&
+         (simrv::compiler::unlikely(machine.trace().is_architecture_trace_enabled()) ||
+          simrv::compiler::unlikely(record_snapshots)));
 
     if (simrv::compiler::likely(!has_events_or_stalls)) {
         pipeline_sim.record_clean_cycle();
@@ -273,15 +317,15 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         const bool data_walk = ca_state.data_walk.active;
         const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
                                    ca_state.instruction_fill.active || instruction_walk;
-        const bool decode_stalled = !three_stage && ca_pipeline.data_hazard_stall;
-        const bool execute_stalled = (three_stage ? ca_pipeline.decode->remaining_latency
-                                                  : ca_pipeline.execute->remaining_latency) != 0 ||
-                                     ca_pipeline.data_hazard_stall;
-        const bool memory_stalled = !three_stage && (ca_pipeline.memory->remaining_latency != 0 ||
-                                                     ca_state.data_transfer.active || data_walk);
+        const bool decode_stalled = Spec.has_decode && ca_pipeline.data_hazard_stall;
+        const bool execute_stalled =
+            (Spec.has_decode && exec_slot.remaining_latency != 0) || ca_pipeline.data_hazard_stall;
+        const bool memory_stalled =
+            kHasMemoryStage && (ca_pipeline.memory->remaining_latency != 0 ||
+                                ca_state.data_transfer.active || data_walk);
         const bool writeback_stalled =
             ca_pipeline.writeback->remaining_latency != 0 ||
-            (three_stage && (ca_state.data_transfer.active || data_walk));
+            (!kHasMemoryStage && (ca_state.data_transfer.active || data_walk));
         const bool any_stall = fetch_stalled || decode_stalled || execute_stalled ||
                                memory_stalled || writeback_stalled ||
                                ca_state.waiting_for_interconnect;
@@ -289,94 +333,7 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         if (ca_pipeline.data_hazard_stall) record_hpm_event(HpmEvent::DataHazardStall);
         if (any_stall && !ca_pipeline.data_hazard_stall)
             record_hpm_event(HpmEvent::StructuralStall);
-        if (machine.trace().is_architecture_trace_enabled()) {
-            std::array<simrv::core::PipelineStallRecord, 5> stall_storage{};
-            size_t stall_count = 0;
-            const auto add_stall = [&stall_storage, &stall_count](
-                                       std::string_view stage,
-                                       const pipeline::CycleInstructionSlot& slot, bool stalled,
-                                       std::string_view reason) {
-                if (!stalled) return;
-                stall_storage[stall_count++] = {.stage = stage,
-                                                .pc = slot.context.cpc,
-                                                .remaining_cycles = slot.remaining_latency,
-                                                .reason = reason};
-            };
-            add_stall("fetch", *ca_pipeline.fetch, fetch_stalled,
-                      ca_pipeline.fetch->remaining_latency != 0
-                          ? "latency"
-                          : (ca_state.instruction_fill.active ? "instruction_fill" : "page_walk"));
-            if (!three_stage) {
-                add_stall("decode", *ca_pipeline.decode, decode_stalled, "data_hazard");
-            }
-            add_stall("execute", three_stage ? *ca_pipeline.decode : *ca_pipeline.execute,
-                      execute_stalled,
-                      ca_pipeline.data_hazard_stall
-                          ? "data_hazard"
-                          : ((three_stage ? ca_pipeline.decode->remaining_latency
-                                          : ca_pipeline.execute->remaining_latency) != 0
-                                 ? "latency"
-                                 : "downstream_backpressure"));
-            if (!three_stage) {
-                add_stall("memory", *ca_pipeline.memory, memory_stalled,
-                          data_walk
-                              ? "page_walk"
-                              : (ca_state.data_transfer.active ? "data_transfer" : "latency"));
-            }
-            add_stall("writeback",
-                      ca_pipeline.writeback->valid ? *ca_pipeline.writeback : *ca_pipeline.retired,
-                      writeback_stalled,
-                      data_walk ? "page_walk"
-                                : (ca_state.data_transfer.active ? "data_transfer" : "latency"));
-            machine.trace().log_pipeline_stalls(
-                *this, std::span<const simrv::core::PipelineStallRecord>(stall_storage.data(),
-                                                                         stall_count));
-        }
-        if (simrv::compiler::unlikely(record_snapshots)) {
-            const bool icache_miss =
-                ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;
-            const bool dcache_miss = ca_pipeline.memory->dcache_miss ||
-                                     ca_pipeline.writeback->dcache_miss ||
-                                     ca_pipeline.retired->dcache_miss;
-            const bool tlb_miss = instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
-                                  ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss;
-            auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
-                return pipeline::PipelineStageEvent{
-                    .instruction = {.pc = slot.context.cpc,
-                                    .opcode = slot.context.opcode,
-                                    .rd = slot.context.rd,
-                                    .rs1 = slot.context.rs1,
-                                    .rs2 = slot.context.rs2,
-                                    .op_id = slot.context.op_id,
-                                    .branched = slot.context.tkn,
-                                    .is_branch = slot.context.opcode == Opcode::Branch,
-                                    .is_jump = slot.context.opcode == Opcode::Jal ||
-                                               slot.context.opcode == Opcode::Jalr,
-                                    .target_pc = slot.context.jmp_pc},
-                    .remaining_latency = slot.remaining_latency,
-                    .valid = slot.valid,
-                    .stalled = stalled,
-                };
-            };
-            pipeline_sim.advance_cycle({
-                .fetch = stage_event(*ca_pipeline.fetch, fetch_stalled),
-                .decode = three_stage ? pipeline::PipelineStageEvent{}
-                                      : stage_event(*ca_pipeline.decode, decode_stalled),
-                .execute = stage_event(three_stage ? *ca_pipeline.decode : *ca_pipeline.execute,
-                                       execute_stalled),
-                .memory = three_stage ? pipeline::PipelineStageEvent{}
-                                      : stage_event(*ca_pipeline.memory, memory_stalled),
-                .writeback = stage_event(
-                    ca_pipeline.writeback->valid ? *ca_pipeline.writeback : *ca_pipeline.retired,
-                    writeback_stalled),
-                .retired = ca_pipeline.retired_this_cycle,
-                .icache_miss = icache_miss,
-                .dcache_miss = dcache_miss,
-                .tlb_miss = tlb_miss,
-                .data_hazard_stall = ca_pipeline.data_hazard_stall,
-                .control_flush = ca_pipeline.control_flush,
-            });
-        } else {
+        const auto emit_cycle_stats = [&]() {
             pipeline_sim.record_cycle_stats(
                 fetch_stalled, decode_stalled, execute_stalled, memory_stalled, writeback_stalled,
                 ca_pipeline.data_hazard_stall, ca_pipeline.control_flush,
@@ -385,39 +342,151 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
                     ca_pipeline.retired->dcache_miss,
                 instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
                     ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss);
+        };
+        if constexpr (Policy.observable) {
+            if (machine.trace().is_architecture_trace_enabled()) {
+                std::array<simrv::core::PipelineStallRecord, 5> stall_storage{};
+                size_t stall_count = 0;
+                const auto add_stall = [&stall_storage, &stall_count](
+                                           std::string_view stage,
+                                           const pipeline::CycleInstructionSlot& slot, bool stalled,
+                                           std::string_view reason) {
+                    if (!stalled) return;
+                    stall_storage[stall_count++] = {.stage = stage,
+                                                    .pc = slot.context.cpc,
+                                                    .remaining_cycles = slot.remaining_latency,
+                                                    .reason = reason};
+                };
+                add_stall(
+                    "fetch", *ca_pipeline.fetch, fetch_stalled,
+                    ca_pipeline.fetch->remaining_latency != 0
+                        ? "latency"
+                        : (ca_state.instruction_fill.active ? "instruction_fill" : "page_walk"));
+                if constexpr (Spec.has_decode) {
+                    add_stall("decode", *ca_pipeline.decode, decode_stalled, "data_hazard");
+                }
+                add_stall("execute", exec_slot, execute_stalled,
+                          ca_pipeline.data_hazard_stall
+                              ? "data_hazard"
+                              : (exec_slot.remaining_latency != 0 ? "latency"
+                                                                  : "downstream_backpressure"));
+                if constexpr (kHasMemoryStage) {
+                    add_stall("memory", *ca_pipeline.memory, memory_stalled,
+                              data_walk
+                                  ? "page_walk"
+                                  : (ca_state.data_transfer.active ? "data_transfer" : "latency"));
+                }
+                add_stall(
+                    "writeback",
+                    ca_pipeline.writeback->valid ? *ca_pipeline.writeback : *ca_pipeline.retired,
+                    writeback_stalled,
+                    data_walk ? "page_walk"
+                              : (ca_state.data_transfer.active ? "data_transfer" : "latency"));
+                machine.trace().log_pipeline_stalls(
+                    *this, std::span<const simrv::core::PipelineStallRecord>(stall_storage.data(),
+                                                                             stall_count));
+            }
+            if (simrv::compiler::unlikely(record_snapshots)) {
+                const bool icache_miss =
+                    ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;
+                const bool dcache_miss = ca_pipeline.memory->dcache_miss ||
+                                         ca_pipeline.writeback->dcache_miss ||
+                                         ca_pipeline.retired->dcache_miss;
+                const bool tlb_miss = instruction_walk || data_walk ||
+                                      ca_pipeline.fetch->tlb_miss || ca_pipeline.memory->tlb_miss ||
+                                      ca_pipeline.writeback->tlb_miss;
+                auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
+                    return pipeline::PipelineStageEvent{
+                        .instruction = {.pc = slot.context.cpc,
+                                        .opcode = slot.context.opcode,
+                                        .rd = slot.context.rd,
+                                        .rs1 = slot.context.rs1,
+                                        .rs2 = slot.context.rs2,
+                                        .op_id = slot.context.op_id,
+                                        .branched = slot.context.tkn,
+                                        .is_branch = slot.context.opcode == Opcode::Branch,
+                                        .is_jump = slot.context.opcode == Opcode::Jal ||
+                                                   slot.context.opcode == Opcode::Jalr,
+                                        .target_pc = slot.context.jmp_pc},
+                        .remaining_latency = slot.remaining_latency,
+                        .valid = slot.valid,
+                        .stalled = stalled,
+                    };
+                };
+                pipeline_sim.advance_cycle({
+                    .fetch = stage_event(*ca_pipeline.fetch, fetch_stalled),
+                    .decode = Spec.has_decode ? stage_event(*ca_pipeline.decode, decode_stalled)
+                                              : pipeline::PipelineStageEvent{},
+                    .execute = stage_event(exec_slot, execute_stalled),
+                    .memory = kHasMemoryStage ? stage_event(*ca_pipeline.memory, memory_stalled)
+                                              : pipeline::PipelineStageEvent{},
+                    .writeback = stage_event(ca_pipeline.writeback->valid ? *ca_pipeline.writeback
+                                                                          : *ca_pipeline.retired,
+                                             writeback_stalled),
+                    .retired = ca_pipeline.retired_this_cycle,
+                    .icache_miss = icache_miss,
+                    .dcache_miss = dcache_miss,
+                    .tlb_miss = tlb_miss,
+                    .data_hazard_stall = ca_pipeline.data_hazard_stall,
+                    .control_flush = ca_pipeline.control_flush,
+                });
+            } else {
+                emit_cycle_stats();
+            }
+        } else {
+            emit_cycle_stats();
         }
     }
     const auto retired_pc = state_.pc;
-    const bool capture_tui = captures_tui_execution_detail(machine);
-    const bool retain_retiring_context = capture_tui || machine.trace().needs_retiring_context();
-    if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && retain_retiring_context)) {
+    const bool retired_now = ca_pipeline.retired_this_cycle;
+    const bool needs_trace_ctx =
+        retired_now && simrv::compiler::unlikely(machine.trace().needs_retiring_context());
+    const bool retain_retiring_context = retired_now && (capture_tui || needs_trace_ctx);
+    if (simrv::compiler::unlikely(retain_retiring_context)) {
         std::swap(pipeline_context, ca_pipeline.retired->context);
         if (capture_tui) record_trace_for_tui(machine);
     }
-    tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
-    if (ca_pipeline.retired_this_cycle) {
-        if (e_icount != retired_before &&
-            simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
+    tick_cycle_clock(machine, retired_now);
+    if (retired_now) {
+        if (e_icount != retired_before && simrv::compiler::unlikely(needs_trace_ctx)) {
             machine.trace().log_architecture_retirement(*this, pipeline_context);
         }
         if (retain_retiring_context) {
             std::swap(pipeline_context, ca_pipeline.retired->context);
         }
-    }
-    if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
-        machine.memory().system_bus().cancel_source(
-            simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
-        ca_pipeline.reset();
-        ca_pipeline.initialized = true;
-        ca_pipeline.fetch_pc = state_.pc;
-        ca_state.instruction_fill.reset();
-        ca_state.data_transfer.reset();
-        ca_state.instruction_walk.reset();
-        ca_state.data_walk.reset();
-    }
-    if (ca_pipeline.retired_this_cycle) {
+        if (simrv::compiler::unlikely(state_.pc != retired_pc)) {
+            machine.memory().system_bus().cancel_source(
+                simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
+            ca_pipeline.reset();
+            ca_pipeline.initialized = true;
+            ca_pipeline.fetch_pc = state_.pc;
+            ca_state.instruction_fill.reset();
+            ca_state.data_transfer.reset();
+            ca_state.instruction_walk.reset();
+            ca_state.data_walk.reset();
+        }
         machine.record_retired_instructions(e_icount - retired_before);
     }
+}
+
+void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired_before) {
+    using DispatchFn = void (CPU::*)(Machine&, simrv::xlen::Counter);
+    constexpr size_t kNumTopologies = pipeline::kPipelineCatalog.size();
+    static constexpr auto kDispatchTable = []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::array<DispatchFn, sizeof...(Is)>{
+            &CPU::execute_ca_cycle_stages_impl<CaPolicySpec{
+                .topology = pipeline::kPipelineCatalog[Is / 2].spec,
+                .observable = (Is % 2) != 0,
+            }>...};
+    }(std::make_index_sequence<kNumTopologies * 2>{});
+
+    const auto topo_idx = static_cast<size_t>(pipeline_sim.config.pipeline_type);
+    const size_t safe_topo_idx = topo_idx < kNumTopologies ? topo_idx : 2;
+    const bool observable = pipeline_sim.config.record_snapshots ||
+                            machine.trace().is_architecture_trace_enabled() ||
+                            machine.tui_enabled();
+    const auto fn = kDispatchTable[safe_topo_idx * 2 + static_cast<size_t>(observable)];
+    (this->*fn)(machine, retired_before);
 }
 
 void CPU::run_ca_cycle_fast(Machine& machine) {
@@ -757,7 +826,9 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     const auto funct5 = ctx.funct5;
     const auto addr = ctx.mem_addr;
     const simrv::xlen::PhysAddr paddr{addr.raw()};
-    const size_t access_size = size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u);
+    const size_t access_size =
+        (opcode == Opcode::Amo) ? isa::amo_operand_bytes(ctx.funct3)
+                                : (size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u));
     ctx.mem_paddr = paddr;
 
     if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Lr || funct5 == Funct5Amo::Sc)) {
@@ -782,23 +853,150 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         }
         // Atomic DRAM AMO Execution (non-LR, non-SC)
         if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, access_size))) {
-            if (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Lw) {
-                auto* ptr = reinterpret_cast<uint32_t*>(machine.ram_view().unchecked_ptr(paddr));
-                const auto prev = execute_dram_amo<uint32_t>(ptr, ctx.rrs2, funct5);
-                ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int32_t>(prev));
-                ctx.wb_data = ctx.mem_rdata;
-            } else if constexpr (simrv::xlen::kIsXLen64) {
-                if (ctx.funct3 == Funct3::Sd || ctx.funct3 == Funct3::Ld) {
-                    auto* ptr =
-                        reinterpret_cast<uint64_t*>(machine.ram_view().unchecked_ptr(paddr));
-                    const auto prev = execute_dram_amo<uint64_t>(ptr, ctx.rrs2, funct5);
-                    ctx.mem_rdata = prev;
-                    ctx.wb_data = ctx.mem_rdata;
+            const auto f3 = std::to_underlying(ctx.funct3);
+            if (funct5 == Funct5Amo::Cas) {
+                switch (f3) {
+                    case 0: {  // AMOCAS.B
+                        auto* ptr =
+                            reinterpret_cast<uint8_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        const auto prev = execute_dram_cas<uint8_t>(
+                            ptr, static_cast<uint8_t>(ctx.rrd), static_cast<uint8_t>(ctx.rrs2));
+                        ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int8_t>(prev));
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 1: {  // AMOCAS.H
+                        auto* ptr =
+                            reinterpret_cast<uint16_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        const auto prev = execute_dram_cas<uint16_t>(
+                            ptr, static_cast<uint16_t>(ctx.rrd), static_cast<uint16_t>(ctx.rrs2));
+                        ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int16_t>(prev));
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 2: {  // AMOCAS.W
+                        auto* ptr =
+                            reinterpret_cast<uint32_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        const auto prev = execute_dram_cas<uint32_t>(
+                            ptr, static_cast<uint32_t>(ctx.rrd), static_cast<uint32_t>(ctx.rrs2));
+                        ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int32_t>(prev));
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 3: {  // AMOCAS.D
+                        auto* ptr =
+                            reinterpret_cast<uint64_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        if (state_.regs.xlen == 32) {
+                            const uint64_t exp =
+                                (static_cast<uint64_t>(static_cast<uint32_t>(ctx.rrd_hi)) << 32U) |
+                                static_cast<uint32_t>(ctx.rrd);
+                            const uint64_t des =
+                                (static_cast<uint64_t>(static_cast<uint32_t>(ctx.rrs2_hi)) << 32U) |
+                                static_cast<uint32_t>(ctx.rrs2);
+                            const uint64_t prev = execute_dram_cas<uint64_t>(ptr, exp, des);
+                            ctx.mem_rdata =
+                                static_cast<simrv::xlen::Word>(static_cast<uint32_t>(prev));
+                            ctx.mem_rdata_hi =
+                                static_cast<simrv::xlen::Word>(static_cast<uint32_t>(prev >> 32U));
+                        } else {
+                            const uint64_t prev = execute_dram_cas<uint64_t>(
+                                ptr, static_cast<uint64_t>(ctx.rrd), static_cast<uint64_t>(ctx.rrs2));
+                            ctx.mem_rdata = static_cast<simrv::xlen::Word>(prev);
+                        }
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 4: {  // AMOCAS.Q (RV64)
+                        if constexpr (simrv::xlen::kIsXLen64) {
+                            auto* ptr = reinterpret_cast<uint64_t*>(
+                                machine.ram_view().unchecked_ptr(paddr));
+                            const auto [old_lo, old_hi] = execute_dram_cas128(
+                                ptr, ctx.rrd, ctx.rrd_hi, ctx.rrs2, ctx.rrs2_hi);
+                            ctx.mem_rdata = old_lo;
+                            ctx.mem_rdata_hi = old_hi;
+                            ctx.wb_data = ctx.mem_rdata;
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            } else {
+                switch (f3) {
+                    case 0: {  // AMO*B (Zabha)
+                        auto* ptr =
+                            reinterpret_cast<uint8_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        const auto prev = execute_dram_amo<uint8_t>(ptr, ctx.rrs2, funct5);
+                        ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int8_t>(prev));
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 1: {  // AMO*H (Zabha)
+                        auto* ptr =
+                            reinterpret_cast<uint16_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        const auto prev = execute_dram_amo<uint16_t>(ptr, ctx.rrs2, funct5);
+                        ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int16_t>(prev));
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 2: {  // AMO*W
+                        auto* ptr =
+                            reinterpret_cast<uint32_t*>(machine.ram_view().unchecked_ptr(paddr));
+                        const auto prev = execute_dram_amo<uint32_t>(ptr, ctx.rrs2, funct5);
+                        ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int32_t>(prev));
+                        ctx.wb_data = ctx.mem_rdata;
+                        break;
+                    }
+                    case 3: {  // AMO*D
+                        if constexpr (simrv::xlen::kIsXLen64) {
+                            auto* ptr = reinterpret_cast<uint64_t*>(
+                                machine.ram_view().unchecked_ptr(paddr));
+                            const auto prev = execute_dram_amo<uint64_t>(ptr, ctx.rrs2, funct5);
+                            ctx.mem_rdata = prev;
+                            ctx.wb_data = ctx.mem_rdata;
+                        }
+                        break;
+                    }
+                    default:
+                        break;
                 }
             }
         } else {
-            ctx.mem_rdata =
-                simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
+            if (funct5 == Funct5Amo::Cas && ctx.op_id == OperationId::AMOCAS_Q) {
+                ctx.mem_rdata =
+                    simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, Funct3::Ld);
+                ctx.mem_rdata_hi = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                        addr + 8, Funct3::Ld);
+                ctx.cas_matched = (ctx.mem_rdata == ctx.rrd) && (ctx.mem_rdata_hi == ctx.rrd_hi);
+            } else if (funct5 == Funct5Amo::Cas && ctx.op_id == OperationId::AMOCAS_D &&
+                       state_.regs.xlen == 32) {
+                ctx.mem_rdata =
+                    simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, Funct3::Lw);
+                ctx.mem_rdata_hi = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                        addr + 4, Funct3::Lw);
+                ctx.cas_matched =
+                    (static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrd)) &&
+                    (static_cast<uint32_t>(ctx.mem_rdata_hi) ==
+                     static_cast<uint32_t>(ctx.rrd_hi));
+            } else {
+                ctx.mem_rdata =
+                    simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
+                if (funct5 == Funct5Amo::Cas) {
+                    const auto f3 = std::to_underlying(ctx.funct3);
+                    if (f3 == 0) {
+                        ctx.cas_matched =
+                            static_cast<uint8_t>(ctx.mem_rdata) == static_cast<uint8_t>(ctx.rrd);
+                    } else if (f3 == 1) {
+                        ctx.cas_matched =
+                            static_cast<uint16_t>(ctx.mem_rdata) == static_cast<uint16_t>(ctx.rrd);
+                    } else if (f3 == 2) {
+                        ctx.cas_matched =
+                            static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrd);
+                    } else {
+                        ctx.cas_matched = (ctx.mem_rdata == ctx.rrd);
+                    }
+                }
+            }
             ctx.wb_data = ctx.mem_rdata;
         }
     }
@@ -857,9 +1055,10 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     // Prepare Store Data
-    ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
+    ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc || funct5 == Funct5Amo::Cas)
                         ? ctx.rrs2
                         : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
+    ctx.mem_wdata_hi = ctx.rrs2_hi;
 
     if (opcode == Opcode::StoreFp) {
         ctx.mem_wdata = static_cast<simrv::xlen::Register>(
@@ -914,8 +1113,27 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc &&
                !machine.memory_geometry().contains(paddr, access_size)) {
-        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
-                                              ctx.funct3);
+        if (funct5 == Funct5Amo::Cas) {
+            if (ctx.cas_matched) {
+                if (ctx.op_id == OperationId::AMOCAS_Q) {
+                    simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr,
+                                                          ctx.mem_wdata, Funct3::Sd);
+                    simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr + 8,
+                                                          ctx.mem_wdata_hi, Funct3::Sd);
+                } else if (ctx.op_id == OperationId::AMOCAS_D && state_.regs.xlen == 32) {
+                    simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr,
+                                                          ctx.mem_wdata, Funct3::Sw);
+                    simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr + 4,
+                                                          ctx.mem_wdata_hi, Funct3::Sw);
+                } else {
+                    simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr,
+                                                          ctx.mem_wdata, ctx.funct3);
+                }
+            }
+        } else {
+            simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
+                                                  ctx.funct3);
+        }
     }
 
     if (opcode == Opcode::StoreFp) {

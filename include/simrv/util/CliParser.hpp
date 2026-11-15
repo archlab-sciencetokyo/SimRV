@@ -12,6 +12,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -79,7 +80,7 @@ struct RuntimeOptions {
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = 0UL;
     simrv::xlen::Address isatest_tohost = 0x80001000;
-    isa::IsaPreset isa_preset = isa::IsaPreset::GCV;
+    isa::IsaSpec isa_spec = isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
     isa::ArchitectureProfile profile = isa::kDefaultArchitectureProfile;
     bool has_zb_extensions = false;
     std::vector<std::string> isa_extensions{};
@@ -114,6 +115,7 @@ struct RuntimeOptions {
     bool high_contrast = false;
     std::string mission;
     std::string pipeline_type = "5stage";
+    std::optional<simrv::memory::BusProtocol> bus_protocol;
     bool disable_forwarding = false;
     bool divider_early_out = false;
     std::string bpred_type;

@@ -106,6 +106,7 @@ struct DebugConfig {
 struct IsaConfig {
     simrv::xlen::Address isatest_tohost = 0x80001000;
     simrv::xlen::CsrValue isa_preset = isa::kMisaDefault;
+    isa::ExtensionSet enabled_extensions{};
     bool misa_override = false;
     unsigned int misa_xlen = 0;
     unsigned int vlen = 0;

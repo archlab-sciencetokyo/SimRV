@@ -30,6 +30,7 @@
 #include "simrv/device/Aclint.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/rtl/ParityTarget.hpp"

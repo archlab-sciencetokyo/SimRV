@@ -18,7 +18,9 @@
 
 #include "simrv/SafetyProfiles.hpp"
 #include "simrv/core/InterruptTopology.hpp"
+#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/core/PlatformMap.h"
+#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -389,6 +391,7 @@ struct SoCConfig {
     std::vector<std::string> plugins{};
     bool mmio_console_redirect = false;
     bool bram_prewarm = false;
+    simrv::memory::BusProtocol bus_protocol = simrv::memory::BusProtocol::TileLinkC;
 
     [[nodiscard]] static auto virt_pcie() -> SoCConfig {
         return {.name = "virt-pcie",

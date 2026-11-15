@@ -99,7 +99,9 @@ consteval auto make_vector_fp_table() {
              isa::OperationId::VFWMACC_VF,       isa::OperationId::VFWNMACC_VV,
              isa::OperationId::VFWNMACC_VF,      isa::OperationId::VFWMSAC_VV,
              isa::OperationId::VFWMSAC_VF,       isa::OperationId::VFWNMSAC_VV,
-             isa::OperationId::VFWNMSAC_VF,
+             isa::OperationId::VFWNMSAC_VF,      isa::OperationId::VFWCVTBF16_F_F_V,
+             isa::OperationId::VFNCVTBF16_F_F_W, isa::OperationId::VFWMACCBF16_VV,
+             isa::OperationId::VFWMACCBF16_VF,
          }) {
         table[static_cast<size_t>(op)] = true;
     }
@@ -157,6 +159,10 @@ constexpr auto uses_wide_fp_element(isa::OperationId op_id) -> bool {
         case isa::OperationId::VFNCVT_ROD_F_F_W:
         case isa::OperationId::VFNCVT_RTZ_XU_F_W:
         case isa::OperationId::VFNCVT_RTZ_X_F_W:
+        case isa::OperationId::VFWCVTBF16_F_F_V:
+        case isa::OperationId::VFNCVTBF16_F_F_W:
+        case isa::OperationId::VFWMACCBF16_VV:
+        case isa::OperationId::VFWMACCBF16_VF:
             return true;
         default:
             return false;
@@ -646,6 +652,10 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFNCVT_ROD_F_F_W:
         case isa::OperationId::VFNCVT_RTZ_XU_F_W:
         case isa::OperationId::VFNCVT_RTZ_X_F_W:
+        case isa::OperationId::VFWCVTBF16_F_F_V:
+        case isa::OperationId::VFNCVTBF16_F_F_W:
+        case isa::OperationId::VFWMACCBF16_VV:
+        case isa::OperationId::VFWMACCBF16_VF:
             layout = Layout::NarrowConvert;
             break;
         case isa::OperationId::VSEXT_VF2:
@@ -1134,15 +1144,30 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
             op_id == isa::OperationId::VFNCVT_F_XU_W || op_id == isa::OperationId::VFNCVT_F_X_W ||
             op_id == isa::OperationId::VFNCVT_RTZ_XU_F_W ||
             op_id == isa::OperationId::VFNCVT_RTZ_X_F_W;
-        const bool scalar_fp_enabled =
-            (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
-            (sew == 64 && has_f && has_d) ||
-            (sew == 16 && has_f && (zvfhmin_conversion || sew16_fp32_integer_conversion));
+        const bool has_zvfh = cpu.state().enabled_extensions.has(isa::MultiLetterExtension::Zvfh);
+        const bool is_zvfbfmin = op_id == isa::OperationId::VFWCVTBF16_F_F_V ||
+                                 op_id == isa::OperationId::VFNCVTBF16_F_F_W;
+        const bool is_zvfbfwma =
+            op_id == isa::OperationId::VFWMACCBF16_VV || op_id == isa::OperationId::VFWMACCBF16_VF;
+        bool scalar_fp_enabled = false;
+        if (is_zvfbfmin) {
+            scalar_fp_enabled =
+                (sew == 16 && has_f &&
+                 cpu.state().enabled_extensions.has(isa::MultiLetterExtension::Zvfbfmin));
+        } else if (is_zvfbfwma) {
+            scalar_fp_enabled =
+                (sew == 16 && has_f &&
+                 cpu.state().enabled_extensions.has(isa::MultiLetterExtension::Zvfbfwma));
+        } else {
+            scalar_fp_enabled = (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
+                                (sew == 64 && has_f && has_d) ||
+                                (sew == 16 && has_f &&
+                                 (has_zvfh || zvfhmin_conversion || sew16_fp32_integer_conversion));
+        }
         const bool fs_enabled = cpu.state().extension_state_enabled(core::MstatusBit::Fs);
         const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
         if (!scalar_fp_enabled || !fs_enabled ||
             (is_vector_fp_arithmetic(op_id) && !isa::is_valid_rounding_mode(frm))) {
-            // SEW=16 vector FP is limited to the two conversions in Zvfhmin.
             cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
             cpu.active_context().pending_tval = ir;
             return;
@@ -1256,6 +1281,10 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
         case isa::OperationId::VFNCVT_ROD_F_F_W:
         case isa::OperationId::VFNCVT_RTZ_XU_F_W:
         case isa::OperationId::VFNCVT_RTZ_X_F_W:
+        case isa::OperationId::VFWCVTBF16_F_F_V:
+        case isa::OperationId::VFNCVTBF16_F_F_W:
+        case isa::OperationId::VFWMACCBF16_VV:
+        case isa::OperationId::VFWMACCBF16_VF:
         case isa::OperationId::VFSGNJ_VV:
         case isa::OperationId::VFSGNJ_VF:
         case isa::OperationId::VFSGNJN_VV:

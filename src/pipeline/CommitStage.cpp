@@ -52,6 +52,10 @@ void CPU::writeback_registers(Machine& machine) {
         state_.regs.write_branchless(effects.integer_write.destination,
                                      effects.integer_write.value);
     }
+    if (effects.integer_write_hi.enabled) {
+        state_.regs.write_branchless(effects.integer_write_hi.destination,
+                                     effects.integer_write_hi.value);
+    }
 }
 
 // ==========================================

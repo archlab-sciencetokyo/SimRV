@@ -42,6 +42,7 @@
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/PipelineTopology.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -73,6 +74,9 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue mtval2{};   ///< Machine Second Trap Value (H extension)
     simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
     simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
+    isa::ExtensionSet enabled_extensions{};          ///< Multi-letter ISA extensions bitset
+    uint64_t zkr_entropy_state =
+        0x9E3779B97F4A7C15ULL;  ///< Per-hart deterministic PRNG state for Zkr seed CSR
     simrv::xlen::Word fetch_align_mask =
         (isa::kMisaDefault & (simrv::xlen::CsrValue{1} << 2)) != 0
             ? 1u
@@ -739,7 +743,7 @@ class CPU {
     template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
     SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast(CachedOp& op) -> bool;
 
-    template <bool kCopyContext, bool kInstMix, int kHpmClassMode>
+    template <FastKernelSpec Spec>
     SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
                                                        const simrv::memory::RamView& ram,
                                                        bool poll_pause) -> uint32_t;
@@ -753,7 +757,7 @@ class CPU {
     void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
                                   const FastBatchPolicy& policy);
 
-    template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
+    template <FastKernelSpec Spec>
     SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size,
                                                 const simrv::memory::RamView& ram) -> uint32_t;
 
@@ -1225,6 +1229,19 @@ class CPU {
     PerformanceCounters perf_counters{};
     std::array<simrv::xlen::Counter, isa::OperationIdCount>
         e_instmix{};  // Instruction-mix statistics
+
+   private:
+    struct CaPolicySpec {
+        simrv::pipeline::PipelineTopologySpec topology{};
+        bool observable = false;
+        friend auto operator==(const CaPolicySpec&, const CaPolicySpec&) -> bool = default;
+    };
+
+    template <simrv::pipeline::PipelineTopologySpec Spec>
+    void run_ca_pipeline_cycle_impl(Machine& machine);
+
+    template <CaPolicySpec Policy>
+    void execute_ca_cycle_stages_impl(Machine& machine, simrv::xlen::Counter retired_before);
 };
 
 }  // namespace simrv::core

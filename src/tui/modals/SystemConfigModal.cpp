@@ -18,8 +18,10 @@ namespace {
 
 [[nodiscard]] constexpr auto to_pipeline_type(uint8_t raw) noexcept
     -> simrv::pipeline::PipelineType {
-    if (raw == static_cast<uint8_t>(simrv::pipeline::PipelineType::ThreeStage)) {
-        return simrv::pipeline::PipelineType::ThreeStage;
+    for (const auto& entry : simrv::pipeline::kPipelineCatalog) {
+        if (static_cast<uint8_t>(entry.id) == raw) {
+            return entry.id;
+        }
     }
     return simrv::pipeline::PipelineType::FiveStage;
 }
@@ -143,10 +145,17 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
     if (!draft.cycle_accurate) return;
     if (index == 0) {
         const auto current_type = to_pipeline_type(draft.pipeline_type);
-        draft.pipeline_type =
-            static_cast<uint8_t>(current_type == simrv::pipeline::PipelineType::FiveStage
-                                     ? simrv::pipeline::PipelineType::ThreeStage
-                                     : simrv::pipeline::PipelineType::FiveStage);
+        constexpr auto kCount = static_cast<int>(simrv::pipeline::kPipelineCatalog.size());
+        int current_idx = 0;
+        for (int i = 0; i < kCount; ++i) {
+            if (simrv::pipeline::kPipelineCatalog[static_cast<size_t>(i)].id == current_type) {
+                current_idx = i;
+                break;
+            }
+        }
+        const int next_idx = ((current_idx + dir) % kCount + kCount) % kCount;
+        draft.pipeline_type = static_cast<uint8_t>(
+            simrv::pipeline::kPipelineCatalog[static_cast<size_t>(next_idx)].id);
         return;
     }
     if (index == 12) {

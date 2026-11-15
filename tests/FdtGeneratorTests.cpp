@@ -317,8 +317,8 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
     fdt.end_node();
 
     const auto original = fdt.serialize();
-    const auto incompatible_isa = simrv::util::validate_fdt_isa(
-        original, simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC));
+    const auto gc_bits = simrv::isa::parse_isa_spec("gc").value().misa_bits;
+    const auto incompatible_isa = simrv::util::validate_fdt_isa(original, gc_bits);
     expect(!incompatible_isa && incompatible_isa.error().find("extension 'b'") != std::string::npos,
            "FDT ISA validation rejects base extensions disabled by the selected ISA");
     const auto invalid_timebase =
@@ -455,7 +455,7 @@ void test_generated_fdt_uses_explicit_soc_devices() {
 void test_explicit_gc_fdt_does_not_advertise_rva23_extensions() {
     simrv::core::MachineConfig cfg{};
     cfg.isa.misa_override = true;
-    cfg.isa.isa_preset = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
+    cfg.isa.isa_preset = simrv::isa::parse_isa_spec("gc").value().misa_bits;
 
     const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
     const auto compatible_isa = simrv::util::validate_fdt_isa(blob, cfg.isa.isa_preset);

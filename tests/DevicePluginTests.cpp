@@ -33,10 +33,11 @@
 #include "simrv/device/pflash/PFlash.hpp"
 #include "simrv/device/virtio/HostAudioSink.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/device/virtio/VirtioRngQueue.hpp"
 #include "simrv/device/virtio/VirtioSoundBackend.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/TileLinkBus.hpp"
+#include "simrv/memory/Bus.hpp"
 #include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/Scaffolding.hpp"
 

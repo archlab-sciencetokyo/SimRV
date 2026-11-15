@@ -654,6 +654,25 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
         return check_sstc_csr_access(state, address, active_xlen);
     }
 
+    if (address == csr_addr(Csr::Seed)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zkr) || !is_write) {
+            return ExceptionCode::IllegalInstruction;
+        }
+        const bool sseed = (static_cast<uint64_t>(state.mseccfg) & (uint64_t{1} << 9U)) != 0;
+        const bool useed = (static_cast<uint64_t>(state.mseccfg) & (uint64_t{1} << 8U)) != 0;
+        if (state.virt) {
+            if (!sseed) return ExceptionCode::IllegalInstruction;
+            return ExceptionCode::VirtualInstruction;
+        }
+        if (state.priv == kPrivSupervisor && !sseed) {
+            return ExceptionCode::IllegalInstruction;
+        }
+        if (state.priv == kPrivUser && !useed) {
+            return ExceptionCode::IllegalInstruction;
+        }
+        return std::nullopt;
+    }
+
     if (!can_access_csr(state.priv, state.misa, csr_number, is_write, state.virt)) {
         const bool virtual_supervisor_csr =
             address == csr_addr(Csr::Vsstatus) || address == csr_addr(Csr::Vsie) ||

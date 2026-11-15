@@ -93,7 +93,14 @@ struct PipelineCycleEvent {
     bool control_flush = false;
 };
 
-enum class PipelineType : uint8_t { FiveStage = 0, ThreeStage = 1 };
+enum class PipelineType : uint8_t {
+    TwoStage = 0,
+    ThreeStage = 1,
+    FiveStage = 2,
+    SixStageIssue = 3,
+    SixStageFetch = 4,
+    SixStageMem = 5,
+};
 
 struct CpuConfig {
     // Additional execution stalls after an operation issues into EX.
@@ -125,9 +132,12 @@ struct PipelineCycleSnapshot {
         bool stalled = false;
     };
     StageInfo f;
+    StageInfo f2;
     StageInfo d;
+    StageInfo i;
     StageInfo e;
     StageInfo m;
+    StageInfo m2;
     StageInfo w;
 };
 
@@ -260,7 +270,7 @@ class PipelineSim {
     }
 
     bool ca_kernel_active_ = false;
-    std::array<PipelineReg, 5> ca_regs_{};
+    std::array<PipelineReg, 8> ca_regs_{};
     PipelineStats ca_stats_{};
     static constexpr size_t kCaHistoryCapacity = PipelineHistoryView::kCapacity;
     std::array<PipelineCycleSnapshot, kCaHistoryCapacity> ca_history_{};

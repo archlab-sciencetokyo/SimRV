@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "simrv/CompilerHints.hpp"
@@ -27,6 +28,64 @@ enum class BranchPredictorType : uint8_t {
     Tournament = 3,  ///< Hybrid chooser selecting between Bimodal and GShare
     Disabled = 4     ///< Always fetch sequentially; all taken control transfers mispredict
 };
+
+/**
+ * @struct BranchPredictorSpec
+ * @brief Structural compile-time descriptor for specializing BranchPredictor hot paths.
+ */
+struct BranchPredictorSpec {
+    BranchPredictorType type = BranchPredictorType::GShare;
+    bool registered_btb_read = false;
+    bool predict_non_control = false;
+    bool untagged_btb = false;
+
+    [[nodiscard]] consteval auto is_valid() const noexcept -> bool {
+        if (type == BranchPredictorType::Disabled || type == BranchPredictorType::Static) {
+            return !registered_btb_read && !predict_non_control && !untagged_btb;
+        }
+        if (predict_non_control && (type != BranchPredictorType::Bimodal || !untagged_btb)) {
+            return false;
+        }
+        return true;
+    }
+
+    friend auto operator==(const BranchPredictorSpec&, const BranchPredictorSpec&)
+        -> bool = default;
+};
+
+inline constexpr std::array<BranchPredictorSpec, 16> kBranchPredictorCatalog = {{
+    {BranchPredictorType::Disabled, false, false, false},
+    {BranchPredictorType::Static, false, false, false},
+    {BranchPredictorType::Bimodal, false, false, false},
+    {BranchPredictorType::Bimodal, false, false, true},
+    {BranchPredictorType::Bimodal, true, false, false},
+    {BranchPredictorType::Bimodal, true, false, true},
+    {BranchPredictorType::Bimodal, false, true, true},
+    {BranchPredictorType::Bimodal, true, true, true},
+    {BranchPredictorType::GShare, false, false, false},
+    {BranchPredictorType::GShare, false, false, true},
+    {BranchPredictorType::GShare, true, false, false},
+    {BranchPredictorType::GShare, true, false, true},
+    {BranchPredictorType::Tournament, false, false, false},
+    {BranchPredictorType::Tournament, false, false, true},
+    {BranchPredictorType::Tournament, true, false, false},
+    {BranchPredictorType::Tournament, true, false, true},
+}};
+
+namespace detail {
+consteval auto verify_branch_predictor_catalog() -> bool {
+    for (size_t i = 0; i < kBranchPredictorCatalog.size(); ++i) {
+        if (!kBranchPredictorCatalog[i].is_valid()) return false;
+        for (size_t j = i + 1; j < kBranchPredictorCatalog.size(); ++j) {
+            if (kBranchPredictorCatalog[i] == kBranchPredictorCatalog[j]) return false;
+        }
+    }
+    return true;
+}
+}  // namespace detail
+
+static_assert(detail::verify_branch_predictor_catalog(),
+              "All kBranchPredictorCatalog entries must be unique and valid");
 
 [[nodiscard]] auto parse_branch_predictor_type(std::string_view name)
     -> std::optional<BranchPredictorType>;
@@ -228,6 +287,12 @@ class BranchPredictor {
 
     SIMRV_ALWAYS_INLINE void predict(simrv::xlen::VirtAddr pc, const DecodedInstruction& inst,
                                      BranchPrediction& pred) noexcept {
+        (this->*predict_fn_)(pc, inst, pred);
+    }
+
+    template <BranchPredictorSpec Spec>
+    void predict_impl(simrv::xlen::VirtAddr pc, const DecodedInstruction& inst,
+                      BranchPrediction& pred) noexcept {
         const auto opcode = inst.opcode;
         const bool is_branch = (opcode == isa::Opcode::Branch);
         const bool is_jal = (opcode == isa::Opcode::Jal);
@@ -235,23 +300,33 @@ class BranchPredictor {
 
         if (simrv::compiler::likely(!is_branch && !is_jal && !is_jalr)) {
             pred.reset();
-            if (simrv::compiler::unlikely(config_.predict_non_control &&
-                                          config_.type == BranchPredictorType::Bimodal &&
-                                          config_.enable_btb && config_.untagged_btb)) {
-                pred.bht_index = get_bht_index(pc, ghr_);
-                const auto& entry =
-                    config_.registered_btb_read
-                        ? registered_btb_entry_
-                        : btb_[static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_];
-                const uint8_t counter =
-                    config_.registered_btb_read ? registered_bht_counter_ : bht_[pred.bht_index];
-                if (entry.valid && is_taken_prediction(counter)) {
-                    pred.is_control = true;
-                    pred.is_branch = true;
-                    pred.predicted_taken = true;
-                    pred.predicted_target = entry.target;
-                    pred.btb_hit = true;
-                    pred.false_control_alias = true;
+            if constexpr (Spec.predict_non_control && Spec.type == BranchPredictorType::Bimodal &&
+                          Spec.untagged_btb) {
+                if (config_.enable_btb) {
+                    pred.bht_index = get_bht_index_impl<Spec>(pc, ghr_);
+                    const auto& entry = [&]() -> const BtbEntry& {
+                        if constexpr (Spec.registered_btb_read) {
+                            return registered_btb_entry_;
+                        } else {
+                            return btb_[static_cast<uint32_t>(pc.raw() >> config_.pc_shift) &
+                                        btb_mask_];
+                        }
+                    }();
+                    const uint8_t counter = [&]() -> uint8_t {
+                        if constexpr (Spec.registered_btb_read) {
+                            return registered_bht_counter_;
+                        } else {
+                            return bht_[pred.bht_index];
+                        }
+                    }();
+                    if (entry.valid && is_taken_prediction(counter)) {
+                        pred.is_control = true;
+                        pred.is_branch = true;
+                        pred.predicted_taken = true;
+                        pred.predicted_target = entry.target;
+                        pred.btb_hit = true;
+                        pred.false_control_alias = true;
+                    }
                 }
             }
             return;
@@ -263,93 +338,107 @@ class BranchPredictor {
         pred.is_jump = is_jal || is_jalr;
         pred.ghr_snapshot = ghr_;
 
-        if (config_.type == BranchPredictorType::Disabled) {
+        if constexpr (Spec.type == BranchPredictorType::Disabled) {
             pred.predicted_taken = false;
             pred.predicted_target = pc + (inst.cinsn != 0u ? 2 : 4);
             return;
-        }
+        } else {
+            const simrv::xlen::Address inst_len = (inst.cinsn != 0u ? 2 : 4);
+            const simrv::xlen::VirtAddr ret_addr = pc + inst_len;
 
-        const simrv::xlen::Address inst_len = (inst.cinsn != 0u ? 2 : 4);
-        const simrv::xlen::VirtAddr ret_addr = pc + inst_len;
+            // Detect RISC-V function calls and returns based on link registers
+            if (is_jal || is_jalr) {
+                pred.is_call =
+                    (inst.rd == simrv::xlen::RegId::Ra || inst.rd == simrv::xlen::RegId::T0);
+                pred.is_return =
+                    is_jalr &&
+                    (inst.rd != simrv::xlen::RegId::Ra && inst.rd != simrv::xlen::RegId::T0) &&
+                    (inst.rs1 == simrv::xlen::RegId::Ra || inst.rs1 == simrv::xlen::RegId::T0);
+            }
 
-        // Detect RISC-V function calls and returns based on link registers
-        if (is_jal || is_jalr) {
-            pred.is_call = (inst.rd == simrv::xlen::RegId::Ra || inst.rd == simrv::xlen::RegId::T0);
-            pred.is_return =
-                is_jalr &&
-                (inst.rd != simrv::xlen::RegId::Ra && inst.rd != simrv::xlen::RegId::T0) &&
-                (inst.rs1 == simrv::xlen::RegId::Ra || inst.rs1 == simrv::xlen::RegId::T0);
-        }
-
-        if (is_jal) {
-            pred.predicted_target = pc + static_cast<simrv::xlen::Address>(inst.imm);
-            if (config_.untagged_btb) {
-                const uint32_t btb_idx =
-                    static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
-                const auto& entry = config_.registered_btb_read && !config_.jump_uses_current_btb
-                                        ? registered_btb_entry_
-                                        : btb_[btb_idx];
-                const auto counter = config_.registered_btb_read ? registered_bht_counter_
-                                                                 : bht_[get_bht_index(pc, ghr_)];
-                pred.predicted_taken = entry.valid && (!config_.jump_uses_direction_counter ||
-                                                       is_taken_prediction(counter));
-                if (pred.predicted_taken) {
-                    pred.predicted_target = entry.target;
-                    pred.btb_hit = true;
+            if (is_jal) {
+                pred.predicted_target = pc + static_cast<simrv::xlen::Address>(inst.imm);
+                if constexpr (Spec.untagged_btb) {
+                    const uint32_t btb_idx =
+                        static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
+                    const auto& entry = [&]() -> const BtbEntry& {
+                        if constexpr (Spec.registered_btb_read) {
+                            return !config_.jump_uses_current_btb ? registered_btb_entry_
+                                                                  : btb_[btb_idx];
+                        } else {
+                            return btb_[btb_idx];
+                        }
+                    }();
+                    const auto counter = [&]() -> uint8_t {
+                        if constexpr (Spec.registered_btb_read) {
+                            return registered_bht_counter_;
+                        } else {
+                            return bht_[get_bht_index_impl<Spec>(pc, ghr_)];
+                        }
+                    }();
+                    pred.predicted_taken = entry.valid && (!config_.jump_uses_direction_counter ||
+                                                           is_taken_prediction(counter));
+                    if (pred.predicted_taken) {
+                        pred.predicted_target = entry.target;
+                        pred.btb_hit = true;
+                    } else {
+                        pred.predicted_target = ret_addr;
+                        pred.btb_hit = false;
+                    }
                 } else {
-                    pred.predicted_target = ret_addr;
-                    pred.btb_hit = false;
+                    pred.predicted_taken = true;
+                    pred.btb_hit = true;
+                }
+                if (pred.is_call && config_.enable_ras) {
+                    ras_push(ret_addr);
+                }
+                return;
+            }
+
+            if (is_jalr) {
+                pred.predicted_taken = true;
+                if (pred.is_return && config_.enable_ras) {
+                    if (auto top = ras_pop()) {
+                        pred.predicted_target = *top;
+                        pred.ras_hit = true;
+                        return;
+                    }
+                }
+                if (pred.is_call && config_.enable_ras) {
+                    ras_push(ret_addr);
+                }
+                // Check BTB for JALR target
+                if (config_.enable_btb && !btb_.empty()) {
+                    const uint32_t btb_idx =
+                        static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
+                    const auto& entry = btb_[btb_idx];
+                    if (entry.valid && (Spec.untagged_btb || entry.tag == pc)) {
+                        pred.predicted_target = entry.target;
+                        pred.btb_hit = true;
+                        return;
+                    }
+                }
+                pred.predicted_target =
+                    simrv::xlen::VirtAddr{};  // Unknown target until execute/decode
+                pred.btb_hit = false;
+                return;
+            }
+
+            // Conditional Branch
+            pred.predicted_taken = predict_direction_impl<Spec>(pc, inst, pred.bht_index);
+            if (pred.predicted_taken) {
+                if constexpr (Spec.registered_btb_read) {
+                    pred.predicted_target = registered_btb_entry_.target;
+                } else {
+                    pred.predicted_target = pc + static_cast<simrv::xlen::Address>(inst.imm);
                 }
             } else {
-                pred.predicted_taken = true;
-                pred.btb_hit = true;
+                pred.predicted_target = ret_addr;
             }
-            if (pred.is_call && config_.enable_ras) {
-                ras_push(ret_addr);
-            }
-            return;
-        }
 
-        if (is_jalr) {
-            pred.predicted_taken = true;
-            if (pred.is_return && config_.enable_ras) {
-                if (auto top = ras_pop()) {
-                    pred.predicted_target = *top;
-                    pred.ras_hit = true;
-                    return;
-                }
-            }
-            if (pred.is_call && config_.enable_ras) {
-                ras_push(ret_addr);
-            }
-            // Check BTB for JALR target
-            if (config_.enable_btb && !btb_.empty()) {
-                const uint32_t btb_idx =
-                    static_cast<uint32_t>(pc.raw() >> config_.pc_shift) & btb_mask_;
-                const auto& entry = btb_[btb_idx];
-                if (entry.valid && (config_.untagged_btb || entry.tag == pc)) {
-                    pred.predicted_target = entry.target;
-                    pred.btb_hit = true;
-                    return;
-                }
-            }
-            pred.predicted_target = simrv::xlen::VirtAddr{};  // Unknown target until execute/decode
-            pred.btb_hit = false;
-            return;
+            // Speculative GHR shift for conditional branches
+            ghr_ = ((ghr_ << 1) | (pred.predicted_taken ? 1u : 0u)) & ghr_mask_;
         }
-
-        // Conditional Branch
-        pred.predicted_taken = predict_direction(pc, inst, pred.bht_index);
-        if (pred.predicted_taken) {
-            pred.predicted_target = config_.registered_btb_read
-                                        ? registered_btb_entry_.target
-                                        : pc + static_cast<simrv::xlen::Address>(inst.imm);
-        } else {
-            pred.predicted_target = ret_addr;
-        }
-
-        // Speculative GHR shift for conditional branches
-        ghr_ = ((ghr_ << 1) | (pred.predicted_taken ? 1u : 0u)) & ghr_mask_;
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict(simrv::xlen::VirtAddr pc,
@@ -401,6 +490,18 @@ class BranchPredictor {
         }
     }
 
+    template <BranchPredictorSpec Spec>
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index_impl(simrv::xlen::VirtAddr pc,
+                                                              uint32_t ghr_val) const noexcept
+        -> uint32_t {
+        const auto pc_idx = static_cast<uint32_t>(pc.raw() >> config_.pc_shift);
+        if constexpr (Spec.type == BranchPredictorType::GShare) {
+            return (pc_idx ^ ghr_val) & bht_mask_;
+        } else {
+            return pc_idx & bht_mask_;
+        }
+    }
+
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(simrv::xlen::VirtAddr pc,
                                                          uint32_t ghr_val) const noexcept
         -> uint32_t {
@@ -411,16 +512,14 @@ class BranchPredictor {
         return pc_idx & bht_mask_;
     }
 
-    SIMRV_ALWAYS_INLINE void update_direction(const BranchFeedback& feedback) {
-        if (config_.type == BranchPredictorType::Disabled ||
-            config_.type == BranchPredictorType::Static) {
+    template <BranchPredictorSpec Spec>
+    SIMRV_ALWAYS_INLINE void update_direction_impl(const BranchFeedback& feedback) {
+        if constexpr (Spec.type == BranchPredictorType::Disabled ||
+                      Spec.type == BranchPredictorType::Static) {
             return;
-        }
-
-        const simrv::xlen::VirtAddr pc = feedback.pc;
-        const bool actual_taken = feedback.actual_taken;
-
-        if (simrv::compiler::unlikely(config_.type == BranchPredictorType::Tournament)) {
+        } else if constexpr (Spec.type == BranchPredictorType::Tournament) {
+            const simrv::xlen::VirtAddr pc = feedback.pc;
+            const bool actual_taken = feedback.actual_taken;
             const uint32_t gshare_idx =
                 (static_cast<uint32_t>(pc.raw() >> 1) ^ feedback.prediction.ghr_snapshot) &
                 bht_mask_;
@@ -436,16 +535,20 @@ class BranchPredictor {
 
             bht_[gshare_idx] = saturate(bht_[gshare_idx], actual_taken);
             bimodal_bht_[bimodal_idx] = saturate(bimodal_bht_[bimodal_idx], actual_taken);
-            return;
-        }
-
-        const uint32_t bht_idx = feedback.prediction.bht_index;
-        if (simrv::compiler::likely(bht_idx < bht_.size())) {
-            bht_[bht_idx] = saturate(bht_[bht_idx], actual_taken);
+        } else {
+            const uint32_t bht_idx = feedback.prediction.bht_index;
+            if (simrv::compiler::likely(bht_idx < bht_.size())) {
+                bht_[bht_idx] = saturate(bht_[bht_idx], feedback.actual_taken);
+            }
         }
     }
 
     SIMRV_ALWAYS_INLINE void update(const BranchFeedback& feedback) {
+        (this->*update_fn_)(feedback);
+    }
+
+    template <BranchPredictorSpec Spec>
+    void update_impl(const BranchFeedback& feedback) {
         if (!feedback.prediction.is_control) {
             return;
         }
@@ -463,7 +566,7 @@ class BranchPredictor {
             stats_.direction_hits += dir_match;
             stats_.direction_misses += !dir_match;
 
-            update_direction(feedback);
+            update_direction_impl<Spec>(feedback);
 
             if (feedback.prediction.false_control_alias) {
                 return;
@@ -475,7 +578,8 @@ class BranchPredictor {
         } else if (feedback.opcode == isa::Opcode::Jal) {
             ++stats_.direct_jumps;
             if (config_.jump_uses_direction_counter && !bht_.empty()) {
-                const auto index = get_bht_index(feedback.pc, feedback.prediction.ghr_snapshot);
+                const auto index =
+                    get_bht_index_impl<Spec>(feedback.pc, feedback.prediction.ghr_snapshot);
                 bht_[index] = saturate_up(bht_[index]);
             }
             update_btb(feedback.pc, feedback.actual_target);
@@ -498,34 +602,32 @@ class BranchPredictor {
     }
 
    private:
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict_direction(simrv::xlen::VirtAddr pc,
-                                                             const DecodedInstruction& inst,
-                                                             uint32_t& bht_idx) noexcept -> bool {
-        if (config_.type == BranchPredictorType::Disabled) {
+    template <BranchPredictorSpec Spec>
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict_direction_impl(simrv::xlen::VirtAddr pc,
+                                                                  const DecodedInstruction& inst,
+                                                                  uint32_t& bht_idx) noexcept
+        -> bool {
+        if constexpr (Spec.type == BranchPredictorType::Disabled) {
             bht_idx = 0;
             return false;
-        }
-        if (config_.type == BranchPredictorType::Static) {
+        } else if constexpr (Spec.type == BranchPredictorType::Static) {
             // BTFNT: Backward Taken, Forward Not Taken
             bht_idx = 0;
             return inst.imm < 0;
-        }
-
-        if (config_.registered_btb_read && config_.type == BranchPredictorType::Bimodal) {
-            bht_idx = get_bht_index(pc, ghr_);
+        } else if constexpr (Spec.registered_btb_read &&
+                             Spec.type == BranchPredictorType::Bimodal) {
+            bht_idx = get_bht_index_impl<Spec>(pc, ghr_);
             return is_taken_prediction(registered_bht_counter_);
-        }
-
-        if (config_.type == BranchPredictorType::Tournament) {
+        } else if constexpr (Spec.type == BranchPredictorType::Tournament) {
             const uint32_t gshare_idx = (static_cast<uint32_t>(pc.raw() >> 1) ^ ghr_) & bht_mask_;
             const uint32_t bimodal_idx = static_cast<uint32_t>(pc.raw() >> 1) & bht_mask_;
             const bool use_gshare = is_taken_prediction(chooser_table_[gshare_idx]);
             bht_idx = use_gshare ? gshare_idx : bimodal_idx;
             return is_taken_prediction(use_gshare ? bht_[gshare_idx] : bimodal_bht_[bimodal_idx]);
+        } else {
+            bht_idx = get_bht_index_impl<Spec>(pc, ghr_);
+            return is_taken_prediction(bht_[bht_idx]);
         }
-
-        bht_idx = get_bht_index(pc, ghr_);
-        return is_taken_prediction(bht_[bht_idx]);
     }
 
     SIMRV_ALWAYS_INLINE void ras_push(simrv::xlen::VirtAddr return_addr) noexcept {
@@ -569,6 +671,12 @@ class BranchPredictor {
     std::vector<simrv::xlen::VirtAddr> ras_{};
     size_t ras_head_ = 0;
     size_t ras_count_ = 0;
+
+    using PredictFn = void (BranchPredictor::*)(simrv::xlen::VirtAddr, const DecodedInstruction&,
+                                                BranchPrediction&) noexcept;
+    using UpdateFn = void (BranchPredictor::*)(const BranchFeedback&);
+    PredictFn predict_fn_ = &BranchPredictor::predict_impl<kBranchPredictorCatalog[8]>;
+    UpdateFn update_fn_ = &BranchPredictor::update_impl<kBranchPredictorCatalog[8]>;
 };
 
 }  // namespace simrv::pipeline

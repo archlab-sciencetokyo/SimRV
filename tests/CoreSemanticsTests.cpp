@@ -162,7 +162,7 @@ static_assert(SharedCacheAddress<simrv::xlen::PhysAddr>);
 static_assert(!SharedCacheAddress<simrv::xlen::VirtAddr>);
 static_assert(!SharedCacheAddress<simrv::xlen::Address>);
 static_assert(std::same_as<simrv::memory::LineAddress, simrv::xlen::PhysAddr>);
-static_assert(std::same_as<decltype(simrv::memory::TileLinkBus::TlTransactionRecord::address),
+static_assert(std::same_as<decltype(simrv::memory::Bus::TlTransactionRecord::address),
                            simrv::xlen::PhysAddr>);
 static_assert(
     std::same_as<decltype(simrv::pipeline::DataTransferState::address), simrv::xlen::PhysAddr>);
@@ -3540,11 +3540,11 @@ void test_satp_modes() {
 }
 
 void test_named_isa_presets() {
-    const simrv::xlen::CsrValue im = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IM);
-    const simrv::xlen::CsrValue ima = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IMA);
-    const simrv::xlen::CsrValue g = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::G);
-    const simrv::xlen::CsrValue gc = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
-    const simrv::xlen::CsrValue gcv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCV);
+    const simrv::xlen::CsrValue im = simrv::isa::parse_isa_spec("im").value().misa_bits;
+    const simrv::xlen::CsrValue ima = simrv::isa::parse_isa_spec("ima").value().misa_bits;
+    const simrv::xlen::CsrValue g = simrv::isa::parse_isa_spec("g").value().misa_bits;
+    const simrv::xlen::CsrValue gc = simrv::isa::parse_isa_spec("gc").value().misa_bits;
+    const simrv::xlen::CsrValue gcv = simrv::isa::parse_isa_spec("gcv").value().misa_bits;
 
     expect(simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::I) &&
                simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::M) &&
@@ -3838,7 +3838,10 @@ void test_fp_decode_legality() {
         }
     }
     expect(
-        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 2)) == simrv::isa::OperationId::ILLEGAL,
+        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 2)) == simrv::isa::OperationId::FMADD_H,
+        "half-precision fused-operation format decodes as FMADD_H");
+    expect(
+        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 3)) == simrv::isa::OperationId::ILLEGAL,
         "reserved fused-operation formats do not alias single precision");
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 0)) == simrv::isa::OperationId::FCVT_D_S,

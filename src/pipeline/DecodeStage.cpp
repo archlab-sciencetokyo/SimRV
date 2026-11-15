@@ -56,6 +56,28 @@ void CPU::fetch_operands(Machine& /*machine*/) {
 
     ctx.rrs1 = state_.regs.read(ctx.rs1);
     ctx.rrs2 = state_.regs.read(ctx.rs2);
+    ctx.rrd = 0;
+    ctx.rrs2_hi = 0;
+    ctx.rrd_hi = 0;
+    ctx.int_wb_pair = false;
+    ctx.cas_matched = false;
+
+    if (opcode == Opcode::Amo && ctx.funct5 == isa::Funct5Amo::Cas) {
+        ctx.rrd = state_.regs.read(ctx.rd);
+        const bool is_pair = (ctx.op_id == isa::OperationId::AMOCAS_Q) ||
+                             (ctx.op_id == isa::OperationId::AMOCAS_D && state_.regs.xlen == 32);
+        if (is_pair) {
+            if (ctx.rd != simrv::xlen::RegId::Zero) {
+                ctx.rrd_hi = state_.regs.read(
+                    static_cast<simrv::xlen::RegId>(std::to_underlying(ctx.rd) + 1U));
+                ctx.int_wb_pair = true;
+            }
+            if (ctx.rs2 != simrv::xlen::RegId::Zero) {
+                ctx.rrs2_hi = state_.regs.read(
+                    static_cast<simrv::xlen::RegId>(std::to_underlying(ctx.rs2) + 1U));
+            }
+        }
+    }
 
     if (ctx.op_id == isa::MOP) {
         // MOPs have no source dependency until redefined by another extension.

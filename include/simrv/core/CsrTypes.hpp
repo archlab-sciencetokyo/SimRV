@@ -626,6 +626,7 @@ enum class Csr : uint16_t {
     Vxsat = 0x009,
     Vxrm = 0x00A,
     Vcsr = 0x00F,
+    Seed = 0x015,
     Pmpcfg0 = 0x3A0,
     Pmpaddr0 = 0x3B0,
     Cycle = 0xC00,

@@ -126,8 +126,7 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     out << "  \"cpu\": {\n";
     out << "    \"name\": " << quoted(cpu.name) << ",\n";
     out << "    \"xlen\": " << static_cast<unsigned int>(cpu.supported_xlen) << ",\n";
-    out << "    \"misa\": " << quoted(simrv::core::detail::isa_preset_name(cpu.isa_preset))
-        << ",\n";
+    out << "    \"misa\": " << quoted(cpu.isa.canonical_string()) << ",\n";
     out << "    \"extensions\": [";
     for (size_t i = 0; i < cpu.isa_extensions.size(); ++i) {
         if (i != 0) out << ", ";

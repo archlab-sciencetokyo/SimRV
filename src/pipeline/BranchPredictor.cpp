@@ -81,6 +81,36 @@ void BranchPredictor::configure(const BranchPredictorConfig& config) {
     ras_head_ = 0;
     ras_count_ = 0;
 
+    const BranchPredictorSpec target_spec{
+        .type = config_.type,
+        .registered_btb_read = (config_.type != BranchPredictorType::Disabled &&
+                                config_.type != BranchPredictorType::Static) &&
+                               config_.registered_btb_read,
+        .predict_non_control = (config_.type == BranchPredictorType::Bimodal &&
+                                config_.untagged_btb && config_.predict_non_control),
+        .untagged_btb = (config_.type != BranchPredictorType::Disabled &&
+                         config_.type != BranchPredictorType::Static) &&
+                        config_.untagged_btb,
+    };
+    static constexpr auto kPredictTable = []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::array<PredictFn, sizeof...(Is)>{
+            &BranchPredictor::predict_impl<kBranchPredictorCatalog[Is]>...};
+    }(std::make_index_sequence<kBranchPredictorCatalog.size()>{});
+    static constexpr auto kUpdateTable = []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::array<UpdateFn, sizeof...(Is)>{
+            &BranchPredictor::update_impl<kBranchPredictorCatalog[Is]>...};
+    }(std::make_index_sequence<kBranchPredictorCatalog.size()>{});
+
+    size_t matched_idx = 8;  // GShare default
+    for (size_t i = 0; i < kBranchPredictorCatalog.size(); ++i) {
+        if (kBranchPredictorCatalog[i] == target_spec) {
+            matched_idx = i;
+            break;
+        }
+    }
+    predict_fn_ = kPredictTable[matched_idx];
+    update_fn_ = kUpdateTable[matched_idx];
+
     reset();
 }
 

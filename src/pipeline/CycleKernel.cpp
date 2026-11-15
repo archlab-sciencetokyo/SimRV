@@ -78,12 +78,45 @@ namespace {
 
 const bool g_retire_trace = std::getenv("SIMRV_RETIRE_TRACE") != nullptr;
 const bool g_cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
+
+void populate_exec_latency(pipeline::CycleInstructionSlot& slot, const pipeline::CpuConfig& config,
+                           execute::CfuUnit& cfu_unit, unsigned xlen) {
+    const auto exec_class = pipeline::operation::info(slot.context.op_id).execution_class;
+    if (simrv::compiler::unlikely(slot.context.traits.is_serializing ||
+                                  exec_class != pipeline::operation::ExecutionClass::Default)) {
+        using pipeline::operation::ExecutionClass;
+        switch (exec_class) {
+            case ExecutionClass::Multiply:
+                slot.remaining_latency = config.mul_latency;
+                break;
+            case ExecutionClass::DivideOrRemainder:
+                slot.remaining_latency = compute_div_latency(slot.context, config, xlen);
+                break;
+            case ExecutionClass::FpDivideOrSqrt:
+                slot.remaining_latency = config.fp_div_latency;
+                break;
+            case ExecutionClass::FpAlu:
+                slot.remaining_latency = config.fp_alu_latency;
+                break;
+            case ExecutionClass::Cfu:
+                slot.remaining_latency = cfu_unit.query_stall_cycles(
+                    slot.context.funct7, std::to_underlying(slot.context.funct3));
+                break;
+            default:
+                if (slot.context.opcode == isa::Opcode::System) {
+                    slot.remaining_latency = config.csr_flush_penalty;
+                } else if (slot.context.opcode == isa::Opcode::MiscMem) {
+                    slot.remaining_latency = config.fence_flush_penalty;
+                }
+                break;
+        }
+    }
+}
 }  // namespace
 
-void CPU::run_ca_pipeline_cycle(Machine& machine) {
+template <pipeline::PipelineTopologySpec Spec>
+void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
     auto& pipe = ca_pipeline;
-    const bool three_stage =
-        pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
     // The retired slot is presentation state: fast CA only consumes the retirement bit, while
     // Observable snapshots, TUI tracing, and architectural tracing need the full retiring
     // instruction context. Avoid copying a complete PipelineContext on every retirement when
@@ -199,7 +232,64 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     return true;
                 });
             }
-            if (ready && (three_stage || writeback->serializing) && !writeback->memory_complete) {
+            if constexpr (!Spec.has_decode && !Spec.has_execute) {
+                if (!writeback->executed && !writeback->serializing) {
+                    ready = run_with_context(*writeback, [&] {
+                        fetch_operands(machine);
+                        apply_forwarding(active_context());
+                        if (active_context().pending_exception.has_value()) return false;
+                        return execute_stage(machine);
+                    });
+                    writeback->executed = true;
+                    if (writeback->context.traits.is_mem_load ||
+                        is_store_conditional(writeback->context)) {
+                        writeback->wb_valid = false;
+                    } else if (writeback->writes_int &&
+                               writeback->wb_dest != simrv::xlen::RegId::Zero) {
+                        writeback->wb_val = (writeback->context.opcode == isa::Opcode::System &&
+                                             writeback->context.funct3 != isa::Funct3::Priv)
+                                                ? writeback->context.rcsr
+                                                : writeback->context.wb_data;
+                        writeback->wb_valid = true;
+                    }
+                    if (writeback->context.traits.is_control ||
+                        writeback->prediction.false_control_alias) {
+                        const simrv::xlen::VirtAddr sequential =
+                            writeback->context.cpc + (writeback->context.cinsn != 0u ? 2 : 4);
+                        const simrv::xlen::VirtAddr target =
+                            writeback->context.tkn ? writeback->context.jmp_pc : sequential;
+                        const simrv::pipeline::BranchFeedback feedback{
+                            .pc = writeback->context.cpc,
+                            .actual_taken = writeback->context.tkn,
+                            .actual_target = target,
+                            .opcode = writeback->context.opcode,
+                            .op_id = writeback->context.op_id,
+                            .rd = writeback->context.rd,
+                            .rs1 = writeback->context.rs1,
+                            .prediction = writeback->prediction,
+                        };
+                        branch_predictor.update(feedback);
+                        const bool dir_mispredict =
+                            (writeback->context.tkn != writeback->prediction.predicted_taken);
+                        const bool target_mispredict =
+                            writeback->context.tkn &&
+                            (target != writeback->prediction.predicted_target);
+                        if (dir_mispredict || target_mispredict) {
+                            record_hpm_event(HpmEvent::BranchMispredict);
+                            branch_predictor.restore_speculation(writeback->prediction);
+                            pipe.fetch->invalidate();
+                            pipe.control_flush = true;
+                            pipe.fetch_pc = target;
+                            cancel_port(simrv::memory::TlPort::Instruction);
+                            ca_state.instruction_fill.reset();
+                            ca_state.instruction_walk.reset();
+                            pipe.frontend_blocked = false;
+                        }
+                    }
+                }
+            }
+            if (ready && (Spec.memory_stages == 0 || writeback->serializing) &&
+                !writeback->memory_complete) {
                 const auto misses_before = dcache.miss_count();
                 ready = run_with_context(*writeback, [&] {
                     if (!memory_stage(machine)) return false;
@@ -270,354 +360,384 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         }
     }
 
+    // Second memory stage (for split-memory topologies such as SixStageMem).
+    if constexpr (Spec.memory_stages == 2) {
+        auto* memory2 = pipe.memory2;
+        if (memory2->valid && !pipe.writeback->valid) {
+            if (memory2->remaining_latency > 0) {
+                --memory2->remaining_latency;
+            } else {
+                std::swap(pipe.writeback, pipe.memory2);
+                pipe.memory2->invalidate();
+            }
+        }
+    }
+
     // Memory stage owns the single per-hart data transaction until completion.
-    auto* memory = pipe.memory;
-    if (!three_stage && memory->valid && !pipe.writeback->valid) {
-        if (memory->serializing) {
-            std::swap(pipe.writeback, pipe.memory);
-            pipe.memory->invalidate();
-        } else if (memory->remaining_latency > 0) {
-            --memory->remaining_latency;
-        } else {
-            if (!memory->memory_complete) {
-                const auto mem_op = memory->context.opcode;
-                const bool is_mem_op = memory->context.traits.is_mem_load ||
-                                       memory->context.traits.is_mem_store ||
-                                       mem_op == isa::Opcode::LoadFp ||
-                                       mem_op == isa::Opcode::StoreFp || mem_op == isa::Opcode::Amo;
-                if (simrv::compiler::likely(!is_mem_op)) {
-                    memory->memory_complete = true;
-                    if (simrv::compiler::unlikely(memory->context.traits.is_cfu)) {
-                        memory->wb_val = memory->context.wb_data;
-                        memory->wb_valid =
-                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                    }
-                } else {
-                    const auto misses_before = dcache.miss_count();
-                    const bool success =
-                        run_with_context(*memory, [&] { return memory_stage(machine); });
-                    if (dcache.miss_count() != misses_before) {
-                        memory->dcache_miss = true;
-                    }
-                    if (ca_state.waiting_for_interconnect) return;
-                    memory->memory_complete = true;
-                    if (memory->context.traits.is_mem_load) {
-                        memory->wb_val = memory->context.mem_rdata;
-                        memory->wb_valid =
-                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                    } else if (memory->context.traits.is_cfu) {
-                        memory->wb_val = memory->context.wb_data;
-                        memory->wb_valid =
-                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                    } else if (is_store_conditional(memory->context)) {
-                        memory->wb_val = memory->context.wb_data;
-                        memory->wb_valid =
-                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                    }
-                    if (!success && !memory->context.pending_exception.has_value()) {
-                        memory->context.pending_exception = ExceptionCode::FaultLoad;
+    if constexpr (Spec.memory_stages >= 1) {
+        auto* memory = pipe.memory;
+        auto*& next_mem_stage = [&]() -> auto*& {
+            if constexpr (Spec.memory_stages == 2) {
+                return pipe.memory2;
+            } else {
+                return pipe.writeback;
+            }
+        }();
+        if (memory->valid && !next_mem_stage->valid) {
+            if (memory->serializing) {
+                std::swap(next_mem_stage, pipe.memory);
+                pipe.memory->invalidate();
+            } else if (memory->remaining_latency > 0) {
+                --memory->remaining_latency;
+            } else {
+                if (!memory->memory_complete) {
+                    const auto mem_op = memory->context.opcode;
+                    const bool is_mem_op =
+                        memory->context.traits.is_mem_load || memory->context.traits.is_mem_store ||
+                        mem_op == isa::Opcode::LoadFp || mem_op == isa::Opcode::StoreFp ||
+                        mem_op == isa::Opcode::Amo;
+                    if (simrv::compiler::likely(!is_mem_op)) {
+                        memory->memory_complete = true;
+                        if (simrv::compiler::unlikely(memory->context.traits.is_cfu)) {
+                            memory->wb_val = memory->context.wb_data;
+                            memory->wb_valid =
+                                (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                        }
+                    } else {
+                        const auto misses_before = dcache.miss_count();
+                        const bool success =
+                            run_with_context(*memory, [&] { return memory_stage(machine); });
+                        if (dcache.miss_count() != misses_before) {
+                            memory->dcache_miss = true;
+                        }
+                        if (ca_state.waiting_for_interconnect) return;
+                        memory->memory_complete = true;
+                        if (memory->context.traits.is_mem_load) {
+                            memory->wb_val = memory->context.mem_rdata;
+                            memory->wb_valid =
+                                (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                        } else if (memory->context.traits.is_cfu) {
+                            memory->wb_val = memory->context.wb_data;
+                            memory->wb_valid =
+                                (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                        } else if (is_store_conditional(memory->context)) {
+                            memory->wb_val = memory->context.wb_data;
+                            memory->wb_valid =
+                                (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                        }
+                        if (!success && !memory->context.pending_exception.has_value()) {
+                            memory->context.pending_exception = ExceptionCode::FaultLoad;
+                        }
                     }
                 }
-            }
-            if (memory->remaining_latency == 0) {
-                std::swap(pipe.writeback, pipe.memory);
-                pipe.memory->invalidate();
+                if (memory->remaining_latency == 0) {
+                    std::swap(next_mem_stage, pipe.memory);
+                    pipe.memory->invalidate();
+                }
             }
         }
     }
 
     // Execute is side-effect-free for non-serializing instructions.
-    auto* execute = pipe.execute;
-    if (!three_stage && execute->valid && !pipe.memory->valid) {
-        if (simrv::compiler::unlikely(execute->remaining_latency > 0)) {
-            --execute->remaining_latency;
-        } else {
-            if (!execute->serializing && !execute->executed) {
-                auto& ctx = execute->context;
-                bool executed_fast = false;
-                switch (ctx.opcode) {
-                    case isa::Opcode::OpImm:
-                        ctx.tkn = false;
-                        ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id,
-                                                                   state_.regs.xlen);
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Op:
-                        ctx.tkn = false;
-                        ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id,
-                                                                   state_.regs.xlen);
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::OpImm32:
-                        ctx.tkn = false;
-                        ctx.wb_data = execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.imm, ctx.op_id);
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Op32:
-                        ctx.tkn = false;
-                        ctx.wb_data = execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.rrs2, ctx.op_id);
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Lui:
-                        ctx.tkn = false;
-                        ctx.wb_data = ctx.imm;
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Auipc:
-                        ctx.tkn = false;
-                        ctx.wb_data = (ctx.cpc + ctx.imm).raw();
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Load:
-                    case isa::Opcode::Store:
-                        ctx.tkn = false;
-                        ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1 + ctx.imm};
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Branch:
-                        ctx.tkn = execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3,
-                                                                    state_.regs.xlen);
-                        ctx.jmp_pc = ctx.cpc + ctx.imm;
-                        if (state_.regs.xlen == 32) {
-                            ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
-                                static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
-                        }
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Jal:
-                        ctx.tkn = true;
-                        ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
-                        ctx.jmp_pc = ctx.cpc + ctx.imm;
-                        executed_fast = true;
-                        break;
-                    case isa::Opcode::Jalr:
-                        ctx.tkn = true;
-                        ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
-                        ctx.jmp_pc = simrv::xlen::VirtAddr{(ctx.rrs1 + ctx.imm) &
-                                                           ~static_cast<simrv::xlen::Register>(1)};
-                        if (state_.regs.xlen == 32) {
-                            ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
-                                static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
-                        }
-                        executed_fast = true;
-                        break;
-                    default:
-                        break;
-                }
-                if (!executed_fast) {
-                    const auto saved_pc = state_.pc;
-                    state_.pc = execute->context.cpc;
-                    (void)run_with_context(*execute, [&] { return execute_stage(machine); });
-                    state_.pc = saved_pc;
-                }
-                execute->executed = true;
-                if (simrv::compiler::unlikely(execute->context.traits.is_mem_load ||
-                                              execute->context.traits.is_cfu ||
-                                              is_store_conditional(execute->context))) {
-                    execute->wb_valid = false;
-                } else if (execute->writes_int && execute->wb_dest != simrv::xlen::RegId::Zero) {
-                    execute->wb_val =
-                        simrv::compiler::unlikely(execute->context.opcode == isa::Opcode::System &&
-                                                  execute->context.funct3 != isa::Funct3::Priv)
-                            ? execute->context.rcsr
-                            : execute->context.wb_data;
-                    execute->wb_valid = true;
-                }
-
-                if (simrv::compiler::unlikely(execute->context.traits.is_control ||
-                                              execute->prediction.false_control_alias)) {
-                    const simrv::xlen::VirtAddr sequential =
-                        execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4);
-                    const simrv::xlen::VirtAddr target = execute->context.tkn
-                                                             ? execute->context.jmp_pc
-                                                             : simrv::xlen::VirtAddr{sequential};
-
-                    const simrv::pipeline::BranchFeedback feedback{
-                        .pc = execute->context.cpc,
-                        .actual_taken = execute->context.tkn,
-                        .actual_target = target,
-                        .opcode = execute->context.opcode,
-                        .op_id = execute->context.op_id,
-                        .rd = execute->context.rd,
-                        .rs1 = execute->context.rs1,
-                        .prediction = execute->prediction,
-                    };
-                    branch_predictor.update(feedback);
-
-                    const bool dir_mispredict =
-                        (execute->context.tkn != execute->prediction.predicted_taken);
-                    const bool target_mispredict =
-                        execute->context.tkn && (target != execute->prediction.predicted_target);
-                    const bool mispredict = dir_mispredict || target_mispredict;
-
-                    if (mispredict) {
-                        record_hpm_event(HpmEvent::BranchMispredict);
-                        branch_predictor.restore_speculation(execute->prediction);
-                        flush_to(target);
+    if constexpr (Spec.has_execute) {
+        auto* execute = pipe.execute;
+        if (execute->valid && !pipe.memory->valid) {
+            if (simrv::compiler::unlikely(execute->remaining_latency > 0)) {
+                --execute->remaining_latency;
+            } else {
+                if (!execute->serializing && !execute->executed) {
+                    auto& ctx = execute->context;
+                    bool executed_fast = false;
+                    switch (ctx.opcode) {
+                        case isa::Opcode::OpImm:
+                            ctx.tkn = false;
+                            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id,
+                                                                       state_.regs.xlen);
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Op:
+                            ctx.tkn = false;
+                            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2,
+                                                                       ctx.op_id, state_.regs.xlen);
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::OpImm32:
+                            ctx.tkn = false;
+                            ctx.wb_data =
+                                execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.imm, ctx.op_id);
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Op32:
+                            ctx.tkn = false;
+                            ctx.wb_data =
+                                execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.rrs2, ctx.op_id);
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Lui:
+                            ctx.tkn = false;
+                            ctx.wb_data = ctx.imm;
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Auipc:
+                            ctx.tkn = false;
+                            ctx.wb_data = (ctx.cpc + ctx.imm).raw();
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Load:
+                        case isa::Opcode::Store:
+                            ctx.tkn = false;
+                            ctx.mem_addr = simrv::xlen::VirtAddr{ctx.rrs1 + ctx.imm};
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Branch:
+                            ctx.tkn = execute::ExecuteUnit::branchTaken(
+                                ctx.rrs1, ctx.rrs2, ctx.funct3, state_.regs.xlen);
+                            ctx.jmp_pc = ctx.cpc + ctx.imm;
+                            if (state_.regs.xlen == 32) {
+                                ctx.jmp_pc = simrv::xlen::VirtAddr{
+                                    static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+                                        static_cast<int32_t>(ctx.jmp_pc.raw())))};
+                            }
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Jal:
+                            ctx.tkn = true;
+                            ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+                            ctx.jmp_pc = ctx.cpc + ctx.imm;
+                            executed_fast = true;
+                            break;
+                        case isa::Opcode::Jalr:
+                            ctx.tkn = true;
+                            ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+                            ctx.jmp_pc = simrv::xlen::VirtAddr{
+                                (ctx.rrs1 + ctx.imm) & ~static_cast<simrv::xlen::Register>(1)};
+                            if (state_.regs.xlen == 32) {
+                                ctx.jmp_pc = simrv::xlen::VirtAddr{
+                                    static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+                                        static_cast<int32_t>(ctx.jmp_pc.raw())))};
+                            }
+                            executed_fast = true;
+                            break;
+                        default:
+                            break;
                     }
-                }
-            }
-            std::swap(pipe.memory, pipe.execute);
-            pipe.execute->invalidate();
-            if (simrv::compiler::unlikely(cpu_model_config.data_cache.hit_latency > 1) &&
-                pipe.memory->valid &&
-                (pipe.memory->context.traits.is_mem_load ||
-                 pipe.memory->context.opcode == isa::Opcode::LoadFp ||
-                 pipe.memory->context.traits.is_mem_store ||
-                 pipe.memory->context.opcode == isa::Opcode::StoreFp)) {
-                pipe.memory->remaining_latency = cpu_model_config.data_cache.hit_latency - 1;
-            }
-        }
-    }
+                    if (!executed_fast) {
+                        const auto saved_pc = state_.pc;
+                        state_.pc = execute->context.cpc;
+                        (void)run_with_context(*execute, [&] { return execute_stage(machine); });
+                        state_.pc = saved_pc;
+                    }
+                    execute->executed = true;
+                    if (simrv::compiler::unlikely(execute->context.traits.is_mem_load ||
+                                                  execute->context.traits.is_cfu ||
+                                                  is_store_conditional(execute->context))) {
+                        execute->wb_valid = false;
+                    } else if (execute->writes_int &&
+                               execute->wb_dest != simrv::xlen::RegId::Zero) {
+                        execute->wb_val = simrv::compiler::unlikely(
+                                              execute->context.opcode == isa::Opcode::System &&
+                                              execute->context.funct3 != isa::Funct3::Priv)
+                                              ? execute->context.rcsr
+                                              : execute->context.wb_data;
+                        execute->wb_valid = true;
+                    }
 
-    // Decode waits for unresolved producers using the register scoreboard.
-    auto* decode = pipe.decode;
-    if (decode->valid && !pipe.execute->valid) {
-        pipe.sync_scoreboard(/*include_decode=*/false);
-        const bool hazard =
-            pipe.scoreboard.has_raw_hazard(decode->context, pipeline_sim.config.enable_forwarding);
-        pipe.data_hazard_stall = hazard;
-        const bool serial_wait =
-            decode->serializing && (pipe.memory->valid || pipe.writeback->valid);
-        if (!hazard && !serial_wait) {
-            if (three_stage) {
-                if (!decode->executed && !decode->serializing) {
-                    (void)run_with_context(*decode, [&] {
-                        fetch_operands(machine);
-                        apply_forwarding(active_context());
-                        if (active_context().pending_exception.has_value()) return false;
-                        return execute_stage(machine);
-                    });
-                    decode->executed = true;
-                    if (decode->context.traits.is_mem_load ||
-                        is_store_conditional(decode->context)) {
-                        decode->wb_valid = false;
-                    } else if (decode->writes_int && decode->wb_dest != simrv::xlen::RegId::Zero) {
-                        decode->wb_val = (decode->context.opcode == isa::Opcode::System &&
-                                          decode->context.funct3 != isa::Funct3::Priv)
-                                             ? decode->context.rcsr
-                                             : decode->context.wb_data;
-                        decode->wb_valid = true;
-                    }
-                    const auto exec_class =
-                        pipeline::operation::info(decode->context.op_id).execution_class;
-                    if (exec_class == pipeline::operation::ExecutionClass::Multiply) {
-                        decode->remaining_latency = pipeline_sim.config.mul_latency;
-                    } else if (exec_class ==
-                               pipeline::operation::ExecutionClass::DivideOrRemainder) {
-                        decode->remaining_latency = compute_div_latency(
-                            decode->context, pipeline_sim.config, state_.regs.xlen);
-                    } else if (decode->context.traits.is_cfu) {
-                        decode->remaining_latency = cfu_unit.query_stall_cycles(
-                            decode->context.funct7, std::to_underlying(decode->context.funct3));
-                    }
-                    if (decode->context.traits.is_control ||
-                        decode->prediction.false_control_alias) {
+                    if (simrv::compiler::unlikely(execute->context.traits.is_control ||
+                                                  execute->prediction.false_control_alias)) {
                         const simrv::xlen::VirtAddr sequential =
-                            decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4);
+                            execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4);
                         const simrv::xlen::VirtAddr target =
-                            decode->context.tkn ? decode->context.jmp_pc : sequential;
+                            execute->context.tkn ? execute->context.jmp_pc
+                                                 : simrv::xlen::VirtAddr{sequential};
 
                         const simrv::pipeline::BranchFeedback feedback{
-                            .pc = decode->context.cpc,
-                            .actual_taken = decode->context.tkn,
+                            .pc = execute->context.cpc,
+                            .actual_taken = execute->context.tkn,
                             .actual_target = target,
-                            .opcode = decode->context.opcode,
-                            .op_id = decode->context.op_id,
-                            .rd = decode->context.rd,
-                            .rs1 = decode->context.rs1,
-                            .prediction = decode->prediction,
+                            .opcode = execute->context.opcode,
+                            .op_id = execute->context.op_id,
+                            .rd = execute->context.rd,
+                            .rs1 = execute->context.rs1,
+                            .prediction = execute->prediction,
                         };
                         branch_predictor.update(feedback);
 
                         const bool dir_mispredict =
-                            (decode->context.tkn != decode->prediction.predicted_taken);
+                            (execute->context.tkn != execute->prediction.predicted_taken);
                         const bool target_mispredict =
-                            decode->context.tkn && (target != decode->prediction.predicted_target);
+                            execute->context.tkn &&
+                            (target != execute->prediction.predicted_target);
                         const bool mispredict = dir_mispredict || target_mispredict;
 
                         if (mispredict) {
                             record_hpm_event(HpmEvent::BranchMispredict);
-                            branch_predictor.restore_speculation(decode->prediction);
-                            // The resolving instruction itself occupies the combined ID/EX stage.
-                            // Only the younger fetch-stage instruction is squashed.
-                            pipe.fetch->invalidate();
-                            pipe.control_flush = true;
-                            pipe.fetch_pc = target;
-                            cancel_port(simrv::memory::TlPort::Instruction);
-                            ca_state.instruction_fill.reset();
-                            ca_state.instruction_walk.reset();
-                            pipe.frontend_blocked = false;
+                            branch_predictor.restore_speculation(execute->prediction);
+                            flush_to(target);
                         }
                     }
                 }
-                if (decode->remaining_latency > 0) {
-                    --decode->remaining_latency;
-                } else if (!pipe.writeback->valid) {
-                    if (decode->serializing && decode->context.opcode == isa::Opcode::System) {
-                        decode->remaining_latency = pipeline_sim.config.csr_flush_penalty;
-                    } else if (decode->serializing &&
-                               decode->context.opcode == isa::Opcode::MiscMem) {
-                        decode->remaining_latency = pipeline_sim.config.fence_flush_penalty;
-                    }
-                    std::swap(pipe.writeback, pipe.decode);
-                    pipe.decode->invalidate();
+                std::swap(pipe.memory, pipe.execute);
+                pipe.execute->invalidate();
+                if (simrv::compiler::unlikely(cpu_model_config.data_cache.hit_latency > 1) &&
+                    pipe.memory->valid &&
+                    (pipe.memory->context.traits.is_mem_load ||
+                     pipe.memory->context.opcode == isa::Opcode::LoadFp ||
+                     pipe.memory->context.traits.is_mem_store ||
+                     pipe.memory->context.opcode == isa::Opcode::StoreFp)) {
+                    pipe.memory->remaining_latency = cpu_model_config.data_cache.hit_latency - 1;
                 }
-            } else {
-                if (simrv::compiler::likely(decode->context.opcode != isa::Opcode::System &&
-                                            !decode->context.pending_exception.has_value())) {
-                    decode->context.rrs1 = state_.regs.read(decode->context.rs1);
-                    decode->context.rrs2 = state_.regs.read(decode->context.rs2);
-                    decode->context.rcsr = 0;
-                    apply_forwarding(decode->context);
-                } else {
-                    (void)run_with_context(*decode, [&] {
-                        fetch_operands(machine);
-                        apply_forwarding(active_context());
-                        return !active_context().pending_exception.has_value();
-                    });
-                }
-                auto* ex_slot = pipe.decode;
-                std::swap(pipe.execute, pipe.decode);
-                pipe.decode->invalidate();
+            }
+        }
+    }
 
-                if (simrv::compiler::unlikely(
-                        ex_slot->context.traits.is_serializing ||
-                        pipeline::operation::info(ex_slot->context.op_id).execution_class !=
-                            pipeline::operation::ExecutionClass::Default)) {
-                    using pipeline::operation::ExecutionClass;
-                    const auto exec_class =
-                        pipeline::operation::info(ex_slot->context.op_id).execution_class;
-                    switch (exec_class) {
-                        case ExecutionClass::Multiply:
-                            ex_slot->remaining_latency = pipeline_sim.config.mul_latency;
-                            break;
-                        case ExecutionClass::DivideOrRemainder:
-                            ex_slot->remaining_latency = compute_div_latency(
-                                ex_slot->context, pipeline_sim.config, state_.regs.xlen);
-                            break;
-                        case ExecutionClass::FpDivideOrSqrt:
-                            ex_slot->remaining_latency = pipeline_sim.config.fp_div_latency;
-                            break;
-                        case ExecutionClass::FpAlu:
-                            ex_slot->remaining_latency = pipeline_sim.config.fp_alu_latency;
-                            break;
-                        case ExecutionClass::Cfu:
-                            ex_slot->remaining_latency = cfu_unit.query_stall_cycles(
-                                ex_slot->context.funct7,
-                                std::to_underlying(ex_slot->context.funct3));
-                            break;
-                        default:
-                            if (ex_slot->context.opcode == isa::Opcode::System) {
-                                ex_slot->remaining_latency = pipeline_sim.config.csr_flush_penalty;
-                            } else if (ex_slot->context.opcode == isa::Opcode::MiscMem) {
-                                ex_slot->remaining_latency =
-                                    pipeline_sim.config.fence_flush_penalty;
+    auto issue_to_execute = [&](pipeline::CycleInstructionSlot*& src_slot) {
+        if (!src_slot->valid || pipe.execute->valid) return;
+        pipe.sync_scoreboard(/*include_decode=*/false);
+        const bool hazard = pipe.scoreboard.has_raw_hazard(src_slot->context,
+                                                           pipeline_sim.config.enable_forwarding);
+        pipe.data_hazard_stall = hazard;
+        const bool serial_wait =
+            src_slot->serializing &&
+            (pipe.memory->valid || pipe.memory2->valid || pipe.writeback->valid);
+        if (hazard || serial_wait) return;
+
+        if (simrv::compiler::likely(src_slot->context.opcode != isa::Opcode::System &&
+                                    !src_slot->context.pending_exception.has_value())) {
+            src_slot->context.rrs1 = state_.regs.read(src_slot->context.rs1);
+            src_slot->context.rrs2 = state_.regs.read(src_slot->context.rs2);
+            src_slot->context.rcsr = 0;
+            apply_forwarding(src_slot->context);
+        } else {
+            (void)run_with_context(*src_slot, [&] {
+                fetch_operands(machine);
+                apply_forwarding(active_context());
+                return !active_context().pending_exception.has_value();
+            });
+        }
+        auto* ex_slot = src_slot;
+        std::swap(pipe.execute, src_slot);
+        src_slot->invalidate();
+        populate_exec_latency(*ex_slot, pipeline_sim.config, cfu_unit, state_.regs.xlen);
+    };
+
+    // Optional Issue stage (for SixStageIssue: IF -> ID -> IS -> EX -> MEM -> WB).
+    if constexpr (Spec.has_issue) {
+        issue_to_execute(pipe.issue);
+    }
+
+    // Decode waits for unresolved producers (unless Issue stage owns scoreboard checks).
+    if constexpr (Spec.has_decode) {
+        if constexpr (Spec.has_issue) {
+            if (pipe.decode->valid && !pipe.issue->valid) {
+                std::swap(pipe.issue, pipe.decode);
+                pipe.decode->invalidate();
+            }
+        } else if constexpr (Spec.has_execute) {
+            issue_to_execute(pipe.decode);
+        } else {
+            auto* decode = pipe.decode;
+            if (decode->valid && !pipe.execute->valid) {
+                pipe.sync_scoreboard(/*include_decode=*/false);
+                const bool hazard = pipe.scoreboard.has_raw_hazard(
+                    decode->context, pipeline_sim.config.enable_forwarding);
+                pipe.data_hazard_stall = hazard;
+                const bool serial_wait =
+                    decode->serializing && (pipe.memory->valid || pipe.writeback->valid);
+                if (!hazard && !serial_wait) {
+                    if (!decode->executed && !decode->serializing) {
+                        (void)run_with_context(*decode, [&] {
+                            fetch_operands(machine);
+                            apply_forwarding(active_context());
+                            if (active_context().pending_exception.has_value()) return false;
+                            return execute_stage(machine);
+                        });
+                        decode->executed = true;
+                        if (decode->context.traits.is_mem_load ||
+                            is_store_conditional(decode->context)) {
+                            decode->wb_valid = false;
+                        } else if (decode->writes_int &&
+                                   decode->wb_dest != simrv::xlen::RegId::Zero) {
+                            decode->wb_val = (decode->context.opcode == isa::Opcode::System &&
+                                              decode->context.funct3 != isa::Funct3::Priv)
+                                                 ? decode->context.rcsr
+                                                 : decode->context.wb_data;
+                            decode->wb_valid = true;
+                        }
+                        const auto exec_class =
+                            pipeline::operation::info(decode->context.op_id).execution_class;
+                        if (exec_class == pipeline::operation::ExecutionClass::Multiply) {
+                            decode->remaining_latency = pipeline_sim.config.mul_latency;
+                        } else if (exec_class ==
+                                   pipeline::operation::ExecutionClass::DivideOrRemainder) {
+                            decode->remaining_latency = compute_div_latency(
+                                decode->context, pipeline_sim.config, state_.regs.xlen);
+                        } else if (decode->context.traits.is_cfu) {
+                            decode->remaining_latency = cfu_unit.query_stall_cycles(
+                                decode->context.funct7, std::to_underlying(decode->context.funct3));
+                        }
+                        if (decode->context.traits.is_control ||
+                            decode->prediction.false_control_alias) {
+                            const simrv::xlen::VirtAddr sequential =
+                                decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4);
+                            const simrv::xlen::VirtAddr target =
+                                decode->context.tkn ? decode->context.jmp_pc : sequential;
+
+                            const simrv::pipeline::BranchFeedback feedback{
+                                .pc = decode->context.cpc,
+                                .actual_taken = decode->context.tkn,
+                                .actual_target = target,
+                                .opcode = decode->context.opcode,
+                                .op_id = decode->context.op_id,
+                                .rd = decode->context.rd,
+                                .rs1 = decode->context.rs1,
+                                .prediction = decode->prediction,
+                            };
+                            branch_predictor.update(feedback);
+
+                            const bool dir_mispredict =
+                                (decode->context.tkn != decode->prediction.predicted_taken);
+                            const bool target_mispredict =
+                                decode->context.tkn &&
+                                (target != decode->prediction.predicted_target);
+                            const bool mispredict = dir_mispredict || target_mispredict;
+
+                            if (mispredict) {
+                                record_hpm_event(HpmEvent::BranchMispredict);
+                                branch_predictor.restore_speculation(decode->prediction);
+                                // The resolving instruction itself occupies the combined ID/EX
+                                // stage. Only the younger fetch-stage instruction is squashed.
+                                pipe.fetch->invalidate();
+                                pipe.control_flush = true;
+                                pipe.fetch_pc = target;
+                                cancel_port(simrv::memory::TlPort::Instruction);
+                                ca_state.instruction_fill.reset();
+                                ca_state.instruction_walk.reset();
+                                pipe.frontend_blocked = false;
                             }
-                            break;
+                        }
+                    }
+                    if (decode->remaining_latency > 0) {
+                        --decode->remaining_latency;
+                    } else if (!pipe.writeback->valid) {
+                        if (decode->serializing && decode->context.opcode == isa::Opcode::System) {
+                            decode->remaining_latency = pipeline_sim.config.csr_flush_penalty;
+                        } else if (decode->serializing &&
+                                   decode->context.opcode == isa::Opcode::MiscMem) {
+                            decode->remaining_latency = pipeline_sim.config.fence_flush_penalty;
+                        }
+                        std::swap(pipe.writeback, pipe.decode);
+                        pipe.decode->invalidate();
                     }
                 }
             }
+        }
+    }
+
+    // Optional second fetch stage (for split-fetch topologies such as SixStageFetch).
+    if constexpr (Spec.fetch_stages == 2) {
+        if (pipe.fetch2->valid && !pipe.decode->valid) {
+            std::swap(pipe.decode, pipe.fetch2);
+            pipe.fetch2->invalidate();
         }
     }
 
@@ -625,8 +745,17 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (fetch->valid && fetch->remaining_latency > 0) {
         --fetch->remaining_latency;
     }
-    if (fetch->valid && fetch->remaining_latency == 0 && !pipe.decode->valid) {
-        std::swap(pipe.decode, pipe.fetch);
+    auto*& next_fetch_stage = [&]() -> auto*& {
+        if constexpr (Spec.fetch_stages == 2) {
+            return pipe.fetch2;
+        } else if constexpr (Spec.has_decode) {
+            return pipe.decode;
+        } else {
+            return pipe.writeback;
+        }
+    }();
+    if (fetch->valid && fetch->remaining_latency == 0 && !next_fetch_stage->valid) {
+        std::swap(next_fetch_stage, pipe.fetch);
         pipe.fetch->invalidate();
         fetch = pipe.fetch;
     }
@@ -717,6 +846,18 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (simrv::compiler::unlikely(machine.tui_enabled() || pipeline_sim.config.record_snapshots)) {
         pipe.sync_scoreboard();
     }
+}
+
+void CPU::run_ca_pipeline_cycle(Machine& machine) {
+    using DispatchFn = void (CPU::*)(Machine&);
+    static constexpr auto kDispatchTable = []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::array<DispatchFn, sizeof...(Is)>{
+            &CPU::run_ca_pipeline_cycle_impl<pipeline::kPipelineCatalog[Is].spec>...};
+    }(std::make_index_sequence<pipeline::kPipelineCatalog.size()>{});
+
+    const auto index = static_cast<size_t>(pipeline_sim.config.pipeline_type);
+    const auto fn = index < kDispatchTable.size() ? kDispatchTable[index] : kDispatchTable[2];
+    (this->*fn)(machine);
 }
 
 }  // namespace simrv::core

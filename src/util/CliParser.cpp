@@ -31,8 +31,6 @@
 
 namespace simrv::util {
 
-using isa::IsaPreset;
-
 namespace {
 
 enum class CliArgumentForm : uint8_t { None, Required, Optional, RequiredThenOptional };
@@ -352,14 +350,14 @@ inline auto iequals(std::string_view a, std::string_view b) -> bool {
     });
 }
 
-struct ParsedIsaPreset {
-    IsaPreset preset;
-    unsigned int xlen;
+struct ParsedIsaSpec {
+    isa::IsaSpec spec;
+    unsigned int xlen = 0;
     bool has_zb = false;
 };
 
-auto parse_isa_base_preset(std::string_view value)
-    -> std::expected<std::optional<ParsedIsaPreset>, std::string> {
+auto parse_isa_base_spec(std::string_view value)
+    -> std::expected<std::optional<ParsedIsaSpec>, std::string> {
     // Reject legacy draft single-letter 'b' shorthands with a clear explanation
     if (iequals(value, "gcbv") || iequals(value, "rv32gcbv") || iequals(value, "rv64gcbv") ||
         iequals(value, "gcb") || iequals(value, "rv32gcb") || iequals(value, "rv64gcb")) {
@@ -369,151 +367,48 @@ auto parse_isa_base_preset(std::string_view value)
             value));
     }
 
-    if (iequals(value, "i")) {
-        return ParsedIsaPreset{.preset = IsaPreset::I, .xlen = 0};
-    }
-    if (iequals(value, "e")) {
-        return ParsedIsaPreset{.preset = IsaPreset::E, .xlen = 32};
-    }
-    if (iequals(value, "em")) {
-        return ParsedIsaPreset{.preset = IsaPreset::EM, .xlen = 32};
-    }
-    if (iequals(value, "emac")) {
-        return ParsedIsaPreset{.preset = IsaPreset::EMAC, .xlen = 32};
-    }
-    if (iequals(value, "im")) {
-        return ParsedIsaPreset{.preset = IsaPreset::IM, .xlen = 0};
-    }
-    if (iequals(value, "ima")) {
-        return ParsedIsaPreset{.preset = IsaPreset::IMA, .xlen = 0};
-    }
-    if (iequals(value, "imac")) {
-        return ParsedIsaPreset{.preset = IsaPreset::IMAC, .xlen = 0};
-    }
-    if (iequals(value, "g")) {
-        return ParsedIsaPreset{.preset = IsaPreset::G, .xlen = 0};
-    }
-    if (iequals(value, "gc")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0};
-    }
-    if (iequals(value, "gcv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0};
-    }
-    if (iequals(value, "gczb")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0, .has_zb = true};
-    }
-    if (iequals(value, "gczbv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0, .has_zb = true};
-    }
-
-    unsigned int parsed_xlen = 0;
-    IsaPreset preset = IsaPreset::GCV;
-    bool has_zb = false;
-    bool valid = false;
-
-    if (iequals(value, "rv32e")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::E;
-        valid = true;
-    } else if (iequals(value, "rv32em")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::EM;
-        valid = true;
-    } else if (iequals(value, "rv32emac")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::EMAC;
-        valid = true;
-    } else if (iequals(value, "rv32i")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::I;
-        valid = true;
-    } else if (iequals(value, "rv64i")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::I;
-        valid = true;
-    } else if (iequals(value, "rv32im")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::IM;
-        valid = true;
-    } else if (iequals(value, "rv64im")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::IM;
-        valid = true;
-    } else if (iequals(value, "rv32ima")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::IMA;
-        valid = true;
-    } else if (iequals(value, "rv64ima")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::IMA;
-        valid = true;
-    } else if (iequals(value, "rv32imac")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::IMAC;
-        valid = true;
-    } else if (iequals(value, "rv64imac")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::IMAC;
-        valid = true;
-    } else if (iequals(value, "rv32g")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::G;
-        valid = true;
-    } else if (iequals(value, "rv64g")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::G;
-        valid = true;
-    } else if (iequals(value, "rv32gc")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GC;
-        valid = true;
-    } else if (iequals(value, "rv64gc")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GC;
-        valid = true;
-    } else if (iequals(value, "rv32gcv")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GCV;
-        valid = true;
-    } else if (iequals(value, "rv64gcv")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GCV;
-        valid = true;
-    } else if (iequals(value, "rv32gczb")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GC;
-        has_zb = true;
-        valid = true;
-    } else if (iequals(value, "rv64gczb")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GC;
-        has_zb = true;
-        valid = true;
-    } else if (iequals(value, "rv32gczbv")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GCV;
-        has_zb = true;
-        valid = true;
-    } else if (iequals(value, "rv64gczbv")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GCV;
-        has_zb = true;
-        valid = true;
-    }
-
-    if (valid) {
-        if (parsed_xlen == 64 && simrv::xlen::kXLenBits == 32) {
-            return std::unexpected(std::format(
-                "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
+    auto make_parsed = [](std::string_view spec_str, unsigned int xlen_override,
+                          bool has_zb) -> std::optional<ParsedIsaSpec> {
+        auto parsed = isa::parse_isa_spec(spec_str);
+        if (!parsed) return std::nullopt;
+        const unsigned int final_xlen = xlen_override != 0 ? xlen_override : parsed->xlen;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            if (final_xlen == 64) return std::nullopt;
         }
-        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen, .has_zb = has_zb};
+        parsed->xlen = final_xlen;
+        if (has_zb) {
+            parsed->misa_bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+        }
+        return ParsedIsaSpec{.spec = std::move(*parsed), .xlen = final_xlen, .has_zb = has_zb};
+    };
+
+    if (iequals(value, "gczb")) return make_parsed("gc", 0, true);
+    if (iequals(value, "gczbv")) return make_parsed("gcv", 0, true);
+    if (iequals(value, "rv32gczb")) return make_parsed("rv32gc", 32, true);
+    if (iequals(value, "rv32gczbv")) return make_parsed("rv32gcv", 32, true);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (iequals(value, "rv64gczb")) return make_parsed("rv64gc", 64, true);
+        if (iequals(value, "rv64gczbv")) return make_parsed("rv64gcv", 64, true);
+    }
+
+    if (value.find('_') == std::string_view::npos &&
+        value.find_first_of("zZxX", 4) == std::string_view::npos) {
+        if (auto direct_raw = isa::parse_isa_spec(value)) {
+            if constexpr (!simrv::xlen::kIsXLen64) {
+                if (direct_raw->xlen == 64) {
+                    return std::unexpected(std::format(
+                        "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
+                }
+            }
+            return ParsedIsaSpec{.spec = *direct_raw, .xlen = direct_raw->xlen, .has_zb = false};
+        }
     }
 
     return std::nullopt;
 }
 
-auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
-    auto base_match = parse_isa_base_preset(value);
+auto parse_isa_spec_cli(std::string_view value) -> std::expected<ParsedIsaSpec, std::string> {
+    auto base_match = parse_isa_base_spec(value);
     if (!base_match) return std::unexpected(base_match.error());
     if (*base_match) return **base_match;
 
@@ -525,7 +420,7 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
         auto base_end = extension_start;
         if (base_end > 0 && value[base_end - 1] == '_') --base_end;
         const auto base = value.substr(0, base_end);
-        auto parsed = parse_isa_preset(base);
+        auto parsed = parse_isa_spec_cli(base);
         if (!parsed) return parsed;
         auto extensions = value.substr(extension_start);
         if (extensions.empty() || extensions.back() == '_') {
@@ -622,12 +517,15 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
             extensions.remove_prefix(next + 1);
         }
 
-        const bool final_has_v = has_v || (parsed->preset == IsaPreset::GCV);
+        const bool final_has_v = has_v || parsed->spec.has(isa::IsaExtension::V);
         const bool final_has_zb = has_zb || parsed->has_zb;
         parsed->has_zb = final_has_zb;
 
-        if (final_has_v && (parsed->preset == IsaPreset::GC || parsed->preset == IsaPreset::G)) {
-            parsed->preset = IsaPreset::GCV;
+        if (final_has_v) {
+            parsed->spec.misa_bits |= isa::misa_extension_bit(isa::IsaExtension::V);
+        }
+        if (final_has_zb) {
+            parsed->spec.misa_bits |= isa::misa_extension_bit(isa::IsaExtension::B);
         }
         return parsed;
     }
@@ -647,14 +545,14 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
         std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
 }
 
-auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
+auto effective_isa_spec(const RuntimeOptions& options) -> isa::IsaSpec {
     if (options.misa_override) {
-        return options.isa_preset;
+        return options.isa_spec;
     }
     if (options.cpu_model_preset.has_value()) {
-        return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa_preset;
+        return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa;
     }
-    return IsaPreset::GCV;
+    return isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
 }
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
@@ -925,9 +823,9 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     if (option_id == "--isa") {
         auto value = next_argument(args, i, "--isa");
         if (!value) return std::unexpected(value.error());
-        auto parsed_misa = parse_isa_preset(*value);
+        auto parsed_misa = parse_isa_spec_cli(*value);
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
-        result.options.isa_preset = parsed_misa->preset;
+        result.options.isa_spec = parsed_misa->spec;
         result.options.misa_xlen = parsed_misa->xlen;
         result.options.has_zb_extensions = parsed_misa->has_zb;
         result.options.misa_override = true;
@@ -940,7 +838,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!parsed) {
             return std::unexpected(
                 std::format("invalid architecture profile '{}' (valid: rva23, rva23s64, rva23u64, "
-                            "rva22, rva22s64, rva20, legacy)",
+                            "rvb23, rvb23s64, rvb23u64, rva22, rva22s64, rva22u64, rva20, "
+                            "rva20s64, rva20u64, legacy)",
                             *value));
         }
         result.options.profile = *parsed;
@@ -1028,10 +927,31 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (!pipeline::parse_pipeline_type(*value).has_value()) {
+            std::string supported;
+            for (const auto& entry : pipeline::kPipelineCatalog) {
+                if (!supported.empty()) supported += ", ";
+                supported += entry.cli_name;
+            }
             return std::unexpected(
-                std::format("unsupported pipeline '{}' (supported: 3stage, 5stage)", *value));
+                std::format("unsupported pipeline '{}' (supported: {})", *value, supported));
         }
         result.options.pipeline_type = std::string(*value);
+        return true;
+    }
+    if (option_id == "--bus") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        const auto* entry = simrv::memory::find_bus_catalog_entry(*value);
+        if (entry == nullptr) {
+            std::string supported;
+            for (const auto& item : simrv::memory::kBusCatalog) {
+                if (!supported.empty()) supported += ", ";
+                supported += item.cli_name;
+            }
+            return std::unexpected(
+                std::format("unsupported bus protocol '{}' (supported: {})", *value, supported));
+        }
+        result.options.bus_protocol = entry->protocol;
         return true;
     }
     if (option_id == "--cpu-preset") {
@@ -1050,10 +970,15 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         }
         auto parsed = simrv::pipeline::parse_cpu_model_preset(*value);
         if (!parsed) {
+            std::string supported = "tiny, balanced, performance";
+            for (const auto& model : simrv::core::discover_cpu_models()) {
+                supported += ", ";
+                supported += model.name;
+            }
             return std::unexpected(
-                std::format("unsupported CPU model preset '{}' (supported presets: tiny, balanced, "
-                            "performance, or path/name of model .cfg)",
-                            *value));
+                std::format("unsupported CPU model preset '{}' (supported presets: {}, or "
+                            "path/name of model .cfg)",
+                            *value, supported));
         }
         result.options.cpu_model_preset = parsed;
         return true;
@@ -1627,8 +1552,8 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                 if (opt_id == "--image" || opt_id == "--pc" || opt_id == "--bootargs" ||
                     opt_id == "--disk" || opt_id == "--virtiofs" || opt_id == "--dtb" ||
                     opt_id == "--isa" || opt_id == "--profile" || opt_id == "--mode" ||
-                    opt_id == "--pipeline" || opt_id == "--bpred" || opt_id == "--cpu-preset" ||
-                    opt_id == "--trace" || opt_id == "--arch-trace" ||
+                    opt_id == "--pipeline" || opt_id == "--bus" || opt_id == "--bpred" ||
+                    opt_id == "--cpu-preset" || opt_id == "--trace" || opt_id == "--arch-trace" ||
                     opt_id == "--checkpoint-every" || opt_id == "--trace-range" ||
                     opt_id == "--trace-pc-range" || opt_id == "--tohost-addr" ||
                     opt_id == "--signature" || opt_id == "--explain-inst" ||
@@ -2168,14 +2093,18 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.execution.profile = profile;
-    cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
+    const auto eff_isa = effective_isa_spec(*this);
+    cfg.isa.isa_preset = eff_isa.misa_bits;
+    cfg.isa.enabled_extensions.merge(eff_isa.extension_set);
     if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
         cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
     }
+    const auto default_gcv_bits =
+        simrv::isa::parse_isa_spec("gcv").value_or(simrv::isa::IsaSpec{}).misa_bits;
     cfg.isa.misa_override =
         misa_override ||
         (cpu_model_preset.has_value() &&
-         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCV);
+         pipeline::make_cpu_model_preset(*cpu_model_preset).isa.misa_bits != default_gcv_bits);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 
@@ -2209,7 +2138,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
         if (simrv::core::load_platform_config(fn_config, model, cfg.soc)) {
             if (!cfg.soc.cpu_model.empty()) {
                 cfg.isa.misa_xlen = model.supported_xlen;
-                cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
+                cfg.isa.isa_preset = model.isa.misa_bits;
+                cfg.isa.enabled_extensions.merge(model.isa.extension_set);
                 cfg.isa.misa_override = true;
             }
             if (model.mmio_console_redirect) {
@@ -2224,6 +2154,9 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     if (cfg.soc.bram_prewarm) cfg.bram_prewarm = true;
     if (bram_prewarm.has_value()) {
         cfg.bram_prewarm = *bram_prewarm;
+    }
+    if (bus_protocol.has_value()) {
+        cfg.soc.bus_protocol = *bus_protocol;
     }
     if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
     if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
@@ -2522,7 +2455,7 @@ _simrv() {
     local subcommand="${words[1]}"
     case "$subcommand" in
         run)
-            local run_opts="-m --image --pc --start-pc -b --baremetal --os --no-sbi --uefi --uefi-vars --auto-fdt --bootargs -d --disk --virtiofs -f --dtb --isa --profile --mode --pipeline --bpred --cpu-preset -u --tui -c --cli -t --trace --arch-trace --checkpoint-every"
+            local run_opts="-m --image --pc --start-pc -b --baremetal --os --no-sbi --uefi --uefi-vars --auto-fdt --bootargs -d --disk --virtiofs -f --dtb --isa --profile --mode --pipeline --bus --bpred --cpu-preset -u --tui -c --cli -t --trace --arch-trace --checkpoint-every"
             COMPREPLY=($(compgen -W "$run_opts" -- "$cur"))
             ;;
         bench)
@@ -2649,6 +2582,10 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Select fast, detailed, or cycle-accurate execution."},
               {.option = "--pipeline <TYPE>",
                .description = "Select the CA pipeline: 3stage or 5stage (default: 5stage)."},
+              {.option = "--bus <PROTOCOL>",
+               .description =
+                   "Select system bus protocol: tilelink-c, tilelink-uh, tilelink-ul, axi4, or "
+                   "axi4-lite."},
               {.option = "--no-forwarding", .description = "Disable operand forwarding."},
               {.option = "--early-out-div",
                .description = "Enable realistic data-dependent early-out division latency."},

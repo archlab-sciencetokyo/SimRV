@@ -146,13 +146,16 @@ struct CycleInstructionSlot {
 };
 
 struct HartPipelineState {
-    std::array<CycleInstructionSlot, 6> storage_{};
+    std::array<CycleInstructionSlot, 9> storage_{};
     CycleInstructionSlot* fetch = &storage_[0];
-    CycleInstructionSlot* decode = &storage_[1];
-    CycleInstructionSlot* execute = &storage_[2];
-    CycleInstructionSlot* memory = &storage_[3];
-    CycleInstructionSlot* writeback = &storage_[4];
-    CycleInstructionSlot* retired = &storage_[5];
+    CycleInstructionSlot* fetch2 = &storage_[1];
+    CycleInstructionSlot* decode = &storage_[2];
+    CycleInstructionSlot* issue = &storage_[3];
+    CycleInstructionSlot* execute = &storage_[4];
+    CycleInstructionSlot* memory = &storage_[5];
+    CycleInstructionSlot* memory2 = &storage_[6];
+    CycleInstructionSlot* writeback = &storage_[7];
+    CycleInstructionSlot* retired = &storage_[8];
     simrv::xlen::VirtAddr fetch_pc{};
     bool initialized = false;
     bool frontend_blocked = false;
@@ -177,34 +180,23 @@ struct HartPipelineState {
 
     constexpr HartPipelineState() noexcept = default;
 
-    constexpr HartPipelineState(const HartPipelineState& other) noexcept {
-        storage_ = other.storage_;
-        fetch = &storage_[other.fetch - other.storage_.data()];
-        decode = &storage_[other.decode - other.storage_.data()];
-        execute = &storage_[other.execute - other.storage_.data()];
-        memory = &storage_[other.memory - other.storage_.data()];
-        writeback = &storage_[other.writeback - other.storage_.data()];
-        retired = &storage_[other.retired - other.storage_.data()];
-        fetch_pc = other.fetch_pc;
-        initialized = other.initialized;
-        frontend_blocked = other.frontend_blocked;
-        retired_this_cycle = other.retired_this_cycle;
-        data_hazard_stall = other.data_hazard_stall;
-        control_flush = other.control_flush;
-        control_recovery_bubbles = other.control_recovery_bubbles;
-        frontend_refill_stall = other.frontend_refill_stall;
-        scoreboard = other.scoreboard;
-    }
+    constexpr HartPipelineState(const HartPipelineState& other) noexcept { *this = other; }
 
     constexpr auto operator=(const HartPipelineState& other) noexcept -> HartPipelineState& {
         if (this != &other) {
             storage_ = other.storage_;
-            fetch = &storage_[other.fetch - other.storage_.data()];
-            decode = &storage_[other.decode - other.storage_.data()];
-            execute = &storage_[other.execute - other.storage_.data()];
-            memory = &storage_[other.memory - other.storage_.data()];
-            writeback = &storage_[other.writeback - other.storage_.data()];
-            retired = &storage_[other.retired - other.storage_.data()];
+            const auto rebind = [this, &other](const CycleInstructionSlot* ptr) noexcept {
+                return &storage_[ptr - other.storage_.data()];
+            };
+            fetch = rebind(other.fetch);
+            fetch2 = rebind(other.fetch2);
+            decode = rebind(other.decode);
+            issue = rebind(other.issue);
+            execute = rebind(other.execute);
+            memory = rebind(other.memory);
+            memory2 = rebind(other.memory2);
+            writeback = rebind(other.writeback);
+            retired = rebind(other.retired);
             fetch_pc = other.fetch_pc;
             initialized = other.initialized;
             frontend_blocked = other.frontend_blocked;
@@ -220,17 +212,22 @@ struct HartPipelineState {
 
     constexpr void flush_younger() noexcept {
         fetch->invalidate();
+        fetch2->invalidate();
         decode->invalidate();
-        scoreboard.flush_from_stage(PipelineStage::Decode);
+        issue->invalidate();
+        scoreboard.flush_from_stage(PipelineStage::Issue);
     }
     constexpr void reset() noexcept {
         for (auto& slot : storage_) slot.clear();
         fetch = &storage_[0];
-        decode = &storage_[1];
-        execute = &storage_[2];
-        memory = &storage_[3];
-        writeback = &storage_[4];
-        retired = &storage_[5];
+        fetch2 = &storage_[1];
+        decode = &storage_[2];
+        issue = &storage_[3];
+        execute = &storage_[4];
+        memory = &storage_[5];
+        memory2 = &storage_[6];
+        writeback = &storage_[7];
+        retired = &storage_[8];
         fetch_pc = simrv::xlen::VirtAddr{};
         initialized = false;
         frontend_blocked = false;

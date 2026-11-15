@@ -28,6 +28,7 @@
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/SerialDevice.hpp"
@@ -52,7 +53,7 @@ static_assert(sizeof(void*) != 8 ||
                offsetof(SimRvExternalDevice, set_host_services) == 80 &&
                offsetof(SimRvExternalDevice, advance_cycles) == 88));
 
-using simrv::isa::IsaPreset;
+using simrv::isa::IsaExtension;
 using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::CpuModelPreset;
 using simrv::pipeline::PipelineType;
@@ -120,7 +121,7 @@ void test_rvcomp_profile_validation() {
 
     TEST_CHECK(profile.name == "rvcomp");
     TEST_CHECK(profile.supported_xlen == 32);
-    TEST_CHECK(profile.isa_preset == IsaPreset::IMA);
+    TEST_CHECK(profile.isa.misa_bits == simrv::isa::parse_isa_spec("ima").value().misa_bits);
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding == true);
     TEST_CHECK(profile.pipeline.mul_latency == 2);
@@ -165,7 +166,7 @@ void test_rvcomp_profile_validation() {
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
-    const simrv::xlen::CsrValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
+    const simrv::xlen::CsrValue ima_bits = simrv::isa::parse_isa_spec("ima").value().misa_bits;
     const simrv::xlen::CsrValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
     // In RVComp Verilog (RVComp/src/rvcom.vh): `define ISA_CODE 32'h40141101
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -670,11 +671,81 @@ void test_rvcomp_mmc_plugin_and_device() {
     std::filesystem::remove(raw_image_path, ec);
 }
 
+void test_vexriscv_profile_validation() {
+    std::cout << "[Test] VexRiscv profile validation...\n";
+    auto path = simrv::core::resolve_cpu_model_path("vexriscv");
+    TEST_CHECK(path.has_value());
+
+    simrv::pipeline::CpuModelConfig profile{};
+    TEST_CHECK(simrv::core::load_cpu_config(*path, profile));
+    TEST_CHECK(profile.validate().has_value());
+    TEST_CHECK(profile.name == "vexriscv");
+    TEST_CHECK(profile.supported_xlen == 32);
+    TEST_CHECK(profile.isa.misa_bits == simrv::isa::parse_isa_spec("imac").value().misa_bits);
+    TEST_CHECK(profile.pipeline.pipeline_type == simrv::pipeline::PipelineType::FiveStage);
+    TEST_CHECK(profile.pipeline.enable_forwarding);
+    TEST_CHECK(profile.pipeline.mul_latency == 2);
+    TEST_CHECK(profile.pipeline.div_latency == 33);
+    TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 3);
+    TEST_CHECK(profile.pipeline.branch_predictor.type ==
+               simrv::pipeline::BranchPredictorType::Bimodal);
+    TEST_CHECK(profile.pipeline.branch_predictor.btb_entries == 512);
+    TEST_CHECK(profile.pipeline.branch_predictor.bht_entries == 1024);
+    TEST_CHECK(profile.instruction_cache.capacity_bytes == 4096);
+    TEST_CHECK(profile.instruction_cache.associativity == 1);
+    TEST_CHECK(profile.data_cache.capacity_bytes == 4096);
+    TEST_CHECK(profile.data_cache.associativity == 1);
+
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    cpu.apply_cpu_model_config(profile);
+    TEST_CHECK(cpu.cpu_model_config.name == "vexriscv");
+    TEST_CHECK(cpu.state().regs.xlen == 32);
+    TEST_CHECK(cpu.pipeline_sim.config.pipeline_type == simrv::pipeline::PipelineType::FiveStage);
+}
+
+void test_ibex_profile_validation() {
+    std::cout << "[Test] Ibex profile validation...\n";
+    auto path = simrv::core::resolve_cpu_model_path("ibex");
+    TEST_CHECK(path.has_value());
+
+    simrv::pipeline::CpuModelConfig profile{};
+    TEST_CHECK(simrv::core::load_cpu_config(*path, profile));
+    TEST_CHECK(profile.validate().has_value());
+    TEST_CHECK(profile.name == "ibex");
+    TEST_CHECK(profile.supported_xlen == 32);
+    TEST_CHECK(profile.isa.misa_bits == simrv::isa::parse_isa_spec("imac").value().misa_bits);
+    TEST_CHECK(profile.pipeline.pipeline_type == simrv::pipeline::PipelineType::ThreeStage);
+    TEST_CHECK(!profile.pipeline.enable_forwarding);
+    TEST_CHECK(profile.pipeline.mul_latency == 0);
+    TEST_CHECK(profile.pipeline.div_latency == 35);
+    TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 2);
+    TEST_CHECK(profile.pipeline.branch_predictor.type ==
+               simrv::pipeline::BranchPredictorType::Static);
+    TEST_CHECK(profile.instruction_cache.capacity_bytes == 4096);
+    TEST_CHECK(profile.instruction_cache.associativity == 2);
+    TEST_CHECK(profile.data_cache.capacity_bytes == 4096);
+    TEST_CHECK(profile.data_cache.hit_latency == 1);
+
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    cpu.apply_cpu_model_config(profile);
+    TEST_CHECK(cpu.cpu_model_config.name == "ibex");
+    TEST_CHECK(cpu.state().regs.xlen == 32);
+    TEST_CHECK(cpu.pipeline_sim.config.pipeline_type == simrv::pipeline::PipelineType::ThreeStage);
+}
+
 int main() {
     test_timing_front_cache();
     std::cout << "=== Running RVComp Profile Tests ===" << std::endl;
     test_rvcomp_profile_validation();
     test_rvcomp_machine_application();
+    test_vexriscv_profile_validation();
+    test_ibex_profile_validation();
     test_soc_metadata_parser();
     test_soc_manifest_export();
     test_rvcomp_reset_and_ethernet_extensions();

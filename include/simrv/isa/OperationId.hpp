@@ -691,6 +691,66 @@ enum OperationId : uint16_t {
     HSV_H,
     HSV_W,
     HSV_D,
+    /* Track 1B: Zacas / Zabha */
+    AMOSWAP_B,
+    AMOADD_B,
+    AMOXOR_B,
+    AMOAND_B,
+    AMOOR_B,
+    AMOMIN_B,
+    AMOMAX_B,
+    AMOMINU_B,
+    AMOMAXU_B,
+    AMOSWAP_H,
+    AMOADD_H,
+    AMOXOR_H,
+    AMOAND_H,
+    AMOOR_H,
+    AMOMIN_H,
+    AMOMAX_H,
+    AMOMINU_H,
+    AMOMAXU_H,
+    AMOCAS_B,
+    AMOCAS_H,
+    AMOCAS_W,
+    AMOCAS_D,
+    AMOCAS_Q,
+    /* Track 1C: Zfh / Zvfh / Zfbfmin / Zvfbfmin / Zvfbfwma */
+    FMADD_H,
+    FMSUB_H,
+    FNMSUB_H,
+    FNMADD_H,
+    FADD_H,
+    FSUB_H,
+    FMUL_H,
+    FDIV_H,
+    FSQRT_H,
+    FSGNJ_H,
+    FSGNJN_H,
+    FSGNJX_H,
+    FMIN_H,
+    FMAX_H,
+    FCVT_W_H,
+    FCVT_WU_H,
+    FCVT_L_H,
+    FCVT_LU_H,
+    FCVT_H_W,
+    FCVT_H_WU,
+    FCVT_H_L,
+    FCVT_H_LU,
+    FEQ_H,
+    FLT_H,
+    FLE_H,
+    FCLASS_H,
+    FCVT_S_BF16,
+    FCVT_BF16_S,
+    VFWCVTBF16_F_F_V,
+    VFNCVTBF16_F_F_W,
+    VFWMACCBF16_VV,
+    VFWMACCBF16_VF,
+    /* Track 2A: Vector Cryptography (Zvkn / Zvks / Zvkg / Zvknh*) */
+    /* Track 2B: Scalar Cryptography (Zknd / Zkne / Zknh / Zksed / Zksh) */
+    /* Track 2C: Code-Size (Zcmp / Zcmt) */
     /* Others */
     ILLEGAL,
     OperationIdCount
@@ -792,7 +852,8 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 [[nodiscard]] constexpr auto is_b_op(OperationId op_id) noexcept -> bool { return is_zb_op(op_id); }
 
 [[nodiscard]] constexpr auto is_vector_op(OperationId op_id) noexcept -> bool {
-    return op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd;
+    return (op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd) ||
+           (op_id >= VFWCVTBF16_F_F_V && op_id <= VFWMACCBF16_VF);
 }
 
 [[nodiscard]] constexpr auto is_cfu_op(OperationId op_id) noexcept -> bool { return op_id == CFU; }

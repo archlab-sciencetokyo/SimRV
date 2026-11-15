@@ -18,9 +18,7 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
             std::format("CPU model '{}' requires XLEN=64 (this simulator build is RV32)",
                         name.empty() ? "custom" : name));
     }
-    if ((isa_preset == isa::IsaPreset::E || isa_preset == isa::IsaPreset::EM ||
-         isa_preset == isa::IsaPreset::EMAC) &&
-        supported_xlen != 32) {
+    if (isa.has(isa::IsaExtension::E) && supported_xlen != 32) {
         return std::unexpected(std::format("CPU model '{}' uses RV32E and must specify XLEN=32",
                                            name.empty() ? "custom" : name));
     }

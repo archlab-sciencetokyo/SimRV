@@ -33,6 +33,8 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/AIA.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
@@ -958,7 +960,7 @@ void test_timed_interconnect_ordering() {
 
     check(bus.send_request(first));
     check(bus.send_request(second));
-    simrv::memory::TileLinkBus::TimedResponse response{};
+    simrv::memory::Bus::TimedResponse response{};
     check(!bus.try_get_timed_response(2, response));
 
     bus.advance_cycle();
@@ -1009,7 +1011,7 @@ void test_timed_interconnect_cancellation() {
     bus.cancel_source(request.source);
     check(bus.pending_requests() == 0);
     bus.advance_cycle();
-    simrv::memory::TileLinkBus::TimedResponse response{};
+    simrv::memory::Bus::TimedResponse response{};
     check(!bus.try_get_timed_response(request.source, response));
 
     check(bus.send_request(request));
@@ -1399,7 +1401,7 @@ void test_timed_smp_coherence_ordering() {
     owner.size = simrv::memory::kTlBlockSize;
     check(bus.send_request(owner));
 
-    simrv::memory::TileLinkBus::TimedResponse response{};
+    simrv::memory::Bus::TimedResponse response{};
     for (unsigned beat = 0; beat < simrv::memory::kTlBlockBytes / simrv::memory::kTlBeatBytes;
          ++beat) {
         bus.advance_cycle();

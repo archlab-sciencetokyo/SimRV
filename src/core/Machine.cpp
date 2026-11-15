@@ -36,6 +36,7 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/BenchmarkEvent.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"

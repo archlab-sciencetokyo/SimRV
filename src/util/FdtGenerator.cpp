@@ -336,6 +336,28 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         guest_extensions.emplace_back("shgatpa");
     }
 
+    const auto append_if_enabled = [&](simrv::isa::MultiLetterExtension ext,
+                                       std::string_view dt_name) {
+        if (config.isa.enabled_extensions.has(ext) &&
+            std::ranges::find(guest_extensions, dt_name) == guest_extensions.end()) {
+            guest_extensions.emplace_back(dt_name);
+        }
+    };
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sdtrig, "sdtrig");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sv48, "sv48");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sv57, "sv57");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zkr, "zkr");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svadu, "svadu");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sspm, "sspm");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svvptc, "svvptc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zacas, "zacas");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zabha, "zabha");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfh, "zfh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfh, "zvfh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfbfmin, "zfbfmin");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfbfmin, "zvfbfmin");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfbfwma, "zvfbfwma");
+
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));
         fdt.property_string("device_type", "cpu");

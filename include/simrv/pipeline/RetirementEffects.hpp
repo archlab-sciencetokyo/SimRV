@@ -16,6 +16,7 @@ struct RegisterWriteEffect {
 /// Architectural changes produced by the writeback stage, before they are applied.
 struct WritebackEffects {
     RegisterWriteEffect<simrv::xlen::RegId, simrv::xlen::Register> integer_write{};
+    RegisterWriteEffect<simrv::xlen::RegId, simrv::xlen::Register> integer_write_hi{};
     RegisterWriteEffect<simrv::xlen::FpRegId, simrv::xlen::FloatingRegister> floating_write{};
     bool increments_instruction_count = false;
     bool marks_floating_point_dirty = false;
@@ -29,7 +30,7 @@ struct WritebackEffects {
     if (context.pending_exception.has_value()) return effects;
 
     effects.increments_instruction_count = true;
-    if (context.op_id >= isa::OperationId::VSETVLI && context.op_id <= isa::OperationId::VWSLL_VI) {
+    if (isa::is_vector_op(context.op_id)) {
         return effects;
     }
 
@@ -43,6 +44,12 @@ struct WritebackEffects {
         (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc)) {
         integer.value = context.mem_rdata;
         integer.enabled = true;
+        if (context.int_wb_pair && context.rd != simrv::xlen::RegId::Zero) {
+            effects.integer_write_hi.destination =
+                static_cast<simrv::xlen::RegId>(std::to_underlying(context.rd) + 1U);
+            effects.integer_write_hi.value = context.mem_rdata_hi;
+            effects.integer_write_hi.enabled = true;
+        }
     } else if (opcode == isa::Opcode::System && context.op_id == isa::OperationId::MOP) {
         integer.value = context.wb_data;
         integer.enabled = true;

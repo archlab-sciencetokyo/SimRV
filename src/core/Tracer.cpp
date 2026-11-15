@@ -44,6 +44,7 @@
 #include "simrv/isa/Priv.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"

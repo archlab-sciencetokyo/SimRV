@@ -35,6 +35,7 @@ constexpr simrv::xlen::CsrValue kHstatusVgeinMask = simrv::xlen::CsrValue{0x3F} 
 constexpr simrv::xlen::CsrValue kVsSoftwareInterrupt = simrv::xlen::CsrValue{1} << 1U;
 constexpr simrv::xlen::CsrValue kHenvcfgWritableMask =
     0xF1U | static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 32U) |
+    static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 61U) |
     static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U) |
     static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
 constexpr simrv::xlen::CsrValue kSenvcfgWritableMask =
@@ -327,6 +328,17 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         case csr_addr(Csr::Vcsr):
             return require_vector().transform(
                 [&state]() { return (state.vxrm << 1) | state.vxsat; });
+        case csr_addr(Csr::Seed): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zkr)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            uint64_t z = state.zkr_entropy_state ^ (static_cast<uint64_t>(state.mhartid) << 16U);
+            z = (z ^ (z >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+            z = (z ^ (z >> 27U)) * 0x94D049BB133111EBULL;
+            z = z ^ (z >> 31U);
+            rcsr = static_cast<simrv::xlen::CsrValue>(0x80000000U | (z & 0xFFFFU));
+            break;
+        }
         case csr_addr(Csr::Vl):
             return require_vector().transform([&state]() { return state.vl; });
         case csr_addr(Csr::Vtype):
@@ -570,12 +582,17 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             rcsr = state.mcountinhibit;
             break;
         case csr_addr(Csr::Menvcfg):
-            rcsr = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(state.menvcfg) &
-                                                      ~(uint64_t{1} << 61U));
+            rcsr = state.enabled_extensions.has(isa::MultiLetterExtension::Svadu)
+                       ? state.menvcfg
+                       : static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(state.menvcfg) &
+                                                            ~(uint64_t{1} << 61U));
             break;
         case csr_addr(Csr::Menvcfgh):
-            return require_rv32_counter().transform(
-                [&state]() { return state.menvcfgh & ~(simrv::xlen::CsrValue{1} << 29U); });
+            return require_rv32_counter().transform([&state]() {
+                return state.enabled_extensions.has(isa::MultiLetterExtension::Svadu)
+                           ? state.menvcfgh
+                           : (state.menvcfgh & ~(simrv::xlen::CsrValue{1} << 29U));
+            });
         case csr_addr(Csr::Mseccfg):
             rcsr = state.mseccfg;
             break;
@@ -988,6 +1005,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
+        case csr_addr(Csr::Seed):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zkr)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().zkr_entropy_state += 0x9E3779B97F4A7C15ULL;
+            break;
         case csr_addr(Csr::Vl):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vl = wdata;
@@ -1047,6 +1070,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
             wdata &= kHenvcfgWritableMask;
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Svadu)) {
+                wdata &= ~static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 61U);
+            }
             if ((cpu_.state().menvcfg & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U)) ==
                 0) {
                 wdata &= ~static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U);
@@ -1278,13 +1304,22 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             }
             if constexpr (simrv::xlen::kIsXLen64) {
                 constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
-                wdata =
-                    static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) & ~kPmmMask);
+                if (cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sspm)) {
+                    const uint64_t pmm = (static_cast<uint64_t>(wdata) & kPmmMask) >> 32U;
+                    if (pmm != 0U && pmm != 2U) {
+                        wdata = static_cast<simrv::xlen::CsrValue>(
+                            (static_cast<uint64_t>(wdata) & ~kPmmMask) |
+                            (static_cast<uint64_t>(cpu_.state().menvcfg) & kPmmMask));
+                    }
+                } else {
+                    wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
+                                                               ~kPmmMask);
+                }
             }
-            // Svadu is not implemented, so ADUE is read-only zero and the
-            // mandatory Svade page-fault scheme remains active.
-            wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
-                                                       ~(uint64_t{1} << 61U));
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Svadu)) {
+                wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
+                                                           ~(uint64_t{1} << 61U));
+            }
             cpu_.state().menvcfg = wdata;
             if ((wdata & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U)) == 0) {
                 cpu_.state().henvcfg &= ~static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
@@ -1297,7 +1332,11 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Menvcfgh):
             return require_rv32_counter().and_then([this,
                                                     wdata]() -> std::expected<void, ExceptionCode> {
-                cpu_.state().menvcfgh = wdata & ~(simrv::xlen::CsrValue{1} << 29U);
+                const simrv::xlen::CsrValue adue_mask =
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Svadu)
+                        ? simrv::xlen::CsrValue{0}
+                        : (simrv::xlen::CsrValue{1} << 29U);
+                cpu_.state().menvcfgh = wdata & ~adue_mask;
                 if constexpr (simrv::xlen::kIsXLen64) {
                     cpu_.state().menvcfg = (cpu_.state().menvcfg & 0x00000000FFFFFFFFULL) |
                                            (static_cast<uint64_t>(cpu_.state().menvcfgh) << 32U);

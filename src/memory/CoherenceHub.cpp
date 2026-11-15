@@ -12,7 +12,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/TileLinkBus.hpp"
+#include "simrv/memory/Bus.hpp"
 
 namespace simrv::memory {
 

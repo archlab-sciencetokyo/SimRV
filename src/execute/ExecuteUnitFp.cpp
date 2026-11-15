@@ -544,6 +544,46 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         }
         out.fp_wb_data = f64_bits(value);
         out.fp_wb_enable = true;
+    } else if (static_cast<uint8_t>(fmt) == 2U) {
+        const uint16_t a_bits = read_f16(freg, u_rs1);
+        const uint16_t b_bits = read_f16(freg, u_rs2);
+        const uint16_t c_bits = read_f16(freg, u_rs3);
+        const double a = isa::fp::binary16_to_double(a_bits);
+        const double b = isa::fp::binary16_to_double(b_bits);
+        const double c = isa::fp::binary16_to_double(c_bits);
+        FpEnvironment::clear_exceptions();
+        if (isa::fp::binary16_is_snan(a_bits) || isa::fp::binary16_is_snan(b_bits) ||
+            isa::fp::binary16_is_snan(c_bits)) {
+            FpEnvironment::raise_invalid();
+        }
+        double value = 0.0;
+        switch (opcode) {
+            case Opcode::MAdd:
+                value = std::fma(a, b, c);
+                break;
+            case Opcode::MSub:
+                value = std::fma(a, b, -c);
+                break;
+            case Opcode::NMAdd:
+                value = std::fma(-a, b, -c);
+                break;
+            case Opcode::NMSub:
+                value = std::fma(-a, b, c);
+                break;
+            default:
+                break;
+        }
+        if (std::fetestexcept(FE_INVALID) != 0) {
+            FpEnvironment::raise_invalid();
+        }
+        uint16_t out_bits = UINT16_C(0x7E00);
+        if (!std::isnan(value)) {
+            const auto res = isa::fp::to_binary16(value, effective_rm);
+            FpEnvironment::raise_flags(res.flags);
+            out_bits = res.bits;
+        }
+        out.fp_wb_data = write_f16_boxed(out_bits);
+        out.fp_wb_enable = true;
     }
     FpEnvironment::accumulate_exceptions(fcsr);
     return out;
@@ -587,6 +627,31 @@ bool fp_exec_add_sub(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::W
                      simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                      const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
+    if (funct7 == 0x02 || funct7 == 0x06) {
+        const uint16_t a_bits = read_f16(freg, rs1);
+        const uint16_t b_bits = read_f16(freg, rs2);
+        const double a = isa::fp::binary16_to_double(a_bits);
+        const double b = isa::fp::binary16_to_double(b_bits);
+        const auto effective_rm = resolve_rounding_mode(rm, fcsr);
+        FpEnvironment::clear_exceptions();
+        if (isa::fp::binary16_is_snan(a_bits) || isa::fp::binary16_is_snan(b_bits)) {
+            FpEnvironment::raise_invalid();
+        }
+        const double value = (funct7 == 0x02) ? (a + b) : (a - b);
+        if (std::fetestexcept(FE_INVALID) != 0) {
+            FpEnvironment::raise_invalid();
+        }
+        uint16_t out_bits = UINT16_C(0x7E00);
+        if (!std::isnan(value)) {
+            const auto res = isa::fp::to_binary16(value, effective_rm);
+            FpEnvironment::raise_flags(res.flags);
+            out_bits = res.bits;
+        }
+        out.fp_wb_data = write_f16_boxed(out_bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FaddS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
             return rmm_mode ? rmm::add(a, b) : a + b;
@@ -610,6 +675,41 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xl
                           simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                           const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
+    if (funct7 == 0x0A || funct7 == 0x0E || funct7 == 0x2E) {
+        const uint16_t a_bits = read_f16(freg, rs1);
+        const uint16_t b_bits = read_f16(freg, rs2);
+        const double a = isa::fp::binary16_to_double(a_bits);
+        const double b = isa::fp::binary16_to_double(b_bits);
+        const auto effective_rm = resolve_rounding_mode(rm, fcsr);
+        FpEnvironment::clear_exceptions();
+        if (isa::fp::binary16_is_snan(a_bits) ||
+            (funct7 != 0x2E && isa::fp::binary16_is_snan(b_bits))) {
+            FpEnvironment::raise_invalid();
+        }
+        double value = 0.0;
+        if (funct7 == 0x0A) {
+            value = a * b;
+        } else if (funct7 == 0x0E) {
+            value = a / b;
+        } else {
+            value = std::sqrt(a);
+        }
+        const int exc = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
+        if ((exc & FE_INVALID) != 0) FpEnvironment::raise_invalid();
+        if ((exc & FE_DIVBYZERO) != 0) {
+            FpEnvironment::raise_flags(static_cast<simrv::xlen::CsrValue>(isa::FflagsBit::Dz));
+        }
+        uint16_t out_bits = UINT16_C(0x7E00);
+        if (!std::isnan(value)) {
+            const auto res = isa::fp::to_binary16(value, effective_rm);
+            FpEnvironment::raise_flags(res.flags);
+            out_bits = res.bits;
+        }
+        out.fp_wb_data = write_f16_boxed(out_bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FmulS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
             return rmm_mode ? rmm::mul(a, b) : a * b;
@@ -640,6 +740,56 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xl
 bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3,
                          simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == 0x12) {  // FSGNJ.H / FSGNJN.H / FSGNJX.H
+        const uint16_t a = read_f16(freg, rs1);
+        const uint16_t b = read_f16(freg, rs2);
+        constexpr uint16_t kSign = UINT16_C(0x8000);
+        uint16_t value = 0;
+        if (funct3 == Funct3Fp::Sgnj) value = static_cast<uint16_t>((a & ~kSign) | (b & kSign));
+        if (funct3 == Funct3Fp::Sgnjn) value = static_cast<uint16_t>((a & ~kSign) | (~b & kSign));
+        if (funct3 == Funct3Fp::Sgnjx) value = static_cast<uint16_t>(a ^ (b & kSign));
+        out.fp_wb_data = write_f16_boxed(value);
+        out.fp_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x16) {  // FMIN.H / FMAX.H
+        FpEnvironment::clear_exceptions();
+        const uint16_t a_bits = read_f16(freg, rs1);
+        const uint16_t b_bits = read_f16(freg, rs2);
+        const bool a_nan = isa::fp::binary16_is_nan(a_bits);
+        const bool b_nan = isa::fp::binary16_is_nan(b_bits);
+        if (isa::fp::binary16_is_snan(a_bits) || isa::fp::binary16_is_snan(b_bits)) {
+            FpEnvironment::raise_invalid();
+        }
+        uint16_t res = UINT16_C(0x7E00);
+        if (a_nan && b_nan) {
+            res = UINT16_C(0x7E00);
+        } else if (a_nan) {
+            res = b_bits;
+        } else if (b_nan) {
+            res = a_bits;
+        } else {
+            const float a = isa::fp::binary16_to_float(a_bits);
+            const float b = isa::fp::binary16_to_float(b_bits);
+            if (a == 0.0F && b == 0.0F) {
+                const bool a_neg = (a_bits & UINT16_C(0x8000)) != 0;
+                const bool b_neg = (b_bits & UINT16_C(0x8000)) != 0;
+                if (funct3 == Funct3Fp::Max) {
+                    res = (a_neg && b_neg) ? a_bits : (a_neg ? b_bits : a_bits);
+                } else {
+                    res = (a_neg || b_neg) ? (a_neg ? a_bits : b_bits) : a_bits;
+                }
+            } else if (funct3 == Funct3Fp::Max) {
+                res = (a > b) ? a_bits : b_bits;
+            } else {
+                res = (a < b) ? a_bits : b_bits;
+            }
+        }
+        out.fp_wb_data = write_f16_boxed(res);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FsgnjS || funct7 == Funct7Fp::FsgnjD) {
         const bool is_d = (funct7 == Funct7Fp::FsgnjD);
         simrv::xlen::FloatingRegister a = freg[rs1];
@@ -788,6 +938,17 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
+    if (funct7 == 0x20 && rs2 == 6) {  // FCVT.S.BF16
+        FpEnvironment::clear_exceptions();
+        const uint16_t raw = read_f16(freg, rs1);
+        if (isa::fp::bf16_is_snan(raw)) {
+            FpEnvironment::raise_invalid();
+        }
+        out.fp_wb_data = write_f32_boxed(isa::fp::bf16_to_float(raw));
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FcvtSD) {
         const auto mode = resolve_rounding_mode(rm, fcsr);
         FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
@@ -808,6 +969,41 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         out.fp_wb_data = std::isnan(src)
                              ? static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF64Qnan)
                              : f64_bits(static_cast<double>(src));
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x22 && rs2 == 8) {  // FCVT.BF16.S
+        FpEnvironment::clear_exceptions();
+        const float src = read_f32(freg, rs1);
+        const auto res = isa::fp::to_bfloat16(src, resolve_rounding_mode(rm, fcsr));
+        FpEnvironment::raise_flags(res.flags);
+        out.fp_wb_data = write_f16_boxed(res.bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x62) {  // FCVT.{W,WU,L,LU}.H
+        const double a = isa::fp::binary16_to_double(read_f16(freg, rs1));
+        const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
+        out.int_wb_data = fcvt_to_int(a, rs2, effective_rm, fcsr);
+        out.int_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x6A) {  // FCVT.H.{W,WU,L,LU}
+        FpEnvironment::clear_exceptions();
+        double val64 = 0.0;
+        if (rs2 == 0)
+            val64 = static_cast<double>(static_cast<int32_t>(rrs1));
+        else if (rs2 == 1)
+            val64 = static_cast<double>(static_cast<uint32_t>(rrs1));
+        else if (rs2 == 2)
+            val64 = static_cast<double>(static_cast<int64_t>(rrs1));
+        else if (rs2 == 3)
+            val64 = static_cast<double>(static_cast<uint64_t>(rrs1));
+        const auto res = isa::fp::to_binary16(val64, resolve_rounding_mode(rm, fcsr));
+        FpEnvironment::raise_flags(res.flags);
+        out.fp_wb_data = write_f16_boxed(res.bits);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -852,6 +1048,29 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
 bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, simrv::xlen::Word rs1,
                  simrv::xlen::Word rs2, const simrv::xlen::FloatingRegister* freg,
                  simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == 0x52) {  // FEQ.H / FLT.H / FLE.H
+        FpEnvironment::clear_exceptions();
+        const uint16_t a_bits = read_f16(freg, rs1);
+        const uint16_t b_bits = read_f16(freg, rs2);
+        const float a = isa::fp::binary16_to_float(a_bits);
+        const float b = isa::fp::binary16_to_float(b_bits);
+        if (std::isnan(a) || std::isnan(b)) {
+            if (funct3 != Funct3Fp::Eq || isa::fp::binary16_is_snan(a_bits) ||
+                isa::fp::binary16_is_snan(b_bits)) {
+                FpEnvironment::raise_invalid();
+            }
+            out.int_wb_data = 0;
+        } else {
+            if (funct3 == Funct3Fp::Eq)
+                out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
+            if (funct3 == Funct3Fp::Lt) out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
+            if (funct3 == Funct3Fp::Leq)
+                out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
+        }
+        out.int_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FcmpS || funct7 == Funct7Fp::FcmpD) {
         const bool is_d = (funct7 == Funct7Fp::FcmpD);
         FpEnvironment::clear_exceptions();
@@ -948,6 +1167,31 @@ bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3
     if (funct7 == 0x72 && funct3 == Funct3Fp::FmvXW) {  // FMV.X.H
         out.int_wb_data = static_cast<simrv::xlen::Register>(
             static_cast<int16_t>(static_cast<uint16_t>(freg[rs1])));
+        out.int_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x72 && funct3 == Funct3Fp::Fclass) {  // FCLASS.H
+        const uint16_t a_bits = read_f16(freg, rs1);
+        const bool sign = (a_bits & UINT16_C(0x8000)) != 0;
+        const unsigned exp = (a_bits >> 10U) & 0x1FU;
+        const unsigned frac = a_bits & 0x03FFU;
+        simrv::xlen::Register cls = 0;
+        if (exp == 0x1FU) {
+            if (frac == 0) {
+                cls = sign ? (1U << 0U) : (1U << 7U);
+            } else {
+                cls = ((frac & 0x0200U) == 0) ? (1U << 8U) : (1U << 9U);
+            }
+        } else if (exp == 0) {
+            if (frac == 0) {
+                cls = sign ? (1U << 3U) : (1U << 4U);
+            } else {
+                cls = sign ? (1U << 2U) : (1U << 5U);
+            }
+        } else {
+            cls = sign ? (1U << 1U) : (1U << 6U);
+        }
+        out.int_wb_data = cls;
         out.int_wb_enable = true;
         return true;
     }

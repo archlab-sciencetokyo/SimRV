@@ -1611,6 +1611,150 @@ void test_pipeline_sim_wrapper() {
     std::cout << "  PipelineSim wrapper tests passed.\n";
 }
 
+void test_pipeline_topology_catalog() {
+    using simrv::pipeline::kPipelineCatalog;
+    using simrv::pipeline::parse_pipeline_type;
+    using simrv::pipeline::pipeline_stage_count;
+    using simrv::pipeline::pipeline_type_name;
+    using simrv::pipeline::PipelineType;
+
+    TEST_CHECK(kPipelineCatalog.size() == 6);
+    TEST_CHECK(pipeline_stage_count(PipelineType::TwoStage) == 2);
+    TEST_CHECK(pipeline_stage_count(PipelineType::ThreeStage) == 3);
+    TEST_CHECK(pipeline_stage_count(PipelineType::FiveStage) == 5);
+    TEST_CHECK(pipeline_stage_count(PipelineType::SixStageIssue) == 6);
+    TEST_CHECK(pipeline_stage_count(PipelineType::SixStageFetch) == 6);
+    TEST_CHECK(pipeline_stage_count(PipelineType::SixStageMem) == 6);
+
+    TEST_CHECK(parse_pipeline_type("2stage") == PipelineType::TwoStage);
+    TEST_CHECK(parse_pipeline_type("two-stage") == PipelineType::TwoStage);
+    TEST_CHECK(parse_pipeline_type("6stage") == PipelineType::SixStageIssue);
+    TEST_CHECK(parse_pipeline_type("6stage-issue") == PipelineType::SixStageIssue);
+    TEST_CHECK(parse_pipeline_type("6stage-fetch") == PipelineType::SixStageFetch);
+    TEST_CHECK(parse_pipeline_type("6stage-mem") == PipelineType::SixStageMem);
+
+    TEST_CHECK(pipeline_type_name(PipelineType::TwoStage) == "2-Stage In-Order");
+    TEST_CHECK(pipeline_type_name(PipelineType::SixStageIssue) == "6-Stage In-Order (Split Issue)");
+    TEST_CHECK(pipeline_type_name(PipelineType::SixStageFetch) == "6-Stage In-Order (Split Fetch)");
+    TEST_CHECK(pipeline_type_name(PipelineType::SixStageMem) == "6-Stage In-Order (Split Memory)");
+}
+
+void test_two_stage_and_six_stage_execution() {
+    using simrv::pipeline::PipelineType;
+
+    const auto run_program = [](PipelineType type) -> simrv::xlen::CycleCount {
+        simrv::core::Machine machine;
+        const simrv::xlen::VirtAddr pc{machine.memory_geometry().dram_base.raw()};
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        cpu.pipeline_sim.config.pipeline_type = type;
+        cpu.pipeline_sim.config.enable_forwarding = true;
+
+        // addi x1(ra), x0, 5   (0x00500093)
+        // addi x2(sp), x1, 7   (0x00708113)
+        // addi x3(gp), x2, 11  (0x00b10193)
+        // jal  x0, 0           (0x0000006f)
+        constexpr std::array<uint32_t, 4> kProgram = {
+            0x00500093u,
+            0x00708113u,
+            0x00b10193u,
+            0x0000006fu,
+        };
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), kProgram.data(), sizeof(kProgram));
+        std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc.raw()}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
+        cpu.state().pc = pc;
+
+        simrv::xlen::CycleCount cycles = 0;
+        while (cpu.e_icount < 3 && cycles < 64) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        TEST_CHECK(cpu.e_icount >= 3);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Ra) == 5);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Sp) == 12);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Gp) == 23);
+        return cycles;
+    };
+
+    const auto c2 = run_program(PipelineType::TwoStage);
+    const auto c3 = run_program(PipelineType::ThreeStage);
+    const auto c5 = run_program(PipelineType::FiveStage);
+    const auto c6_issue = run_program(PipelineType::SixStageIssue);
+    const auto c6_fetch = run_program(PipelineType::SixStageFetch);
+    const auto c6_mem = run_program(PipelineType::SixStageMem);
+
+    TEST_CHECK(c2 < c3);
+    TEST_CHECK(c3 < c5);
+    TEST_CHECK(c5 < c6_issue);
+    TEST_CHECK(c5 < c6_fetch);
+    TEST_CHECK(c5 < c6_mem);
+}
+
+void test_branch_predictor_spec_catalog() {
+    using simrv::pipeline::BranchFeedback;
+    using simrv::pipeline::BranchPrediction;
+    using simrv::pipeline::BranchPredictor;
+    using simrv::pipeline::BranchPredictorConfig;
+    using simrv::pipeline::BranchPredictorType;
+    using simrv::pipeline::DecodedInstruction;
+    using simrv::pipeline::kBranchPredictorCatalog;
+
+    TEST_CHECK(kBranchPredictorCatalog.size() == 16);
+
+    DecodedInstruction beq_back{};
+    beq_back.opcode = simrv::isa::Opcode::Branch;
+    beq_back.imm = -8;
+
+    for (const auto type :
+         {BranchPredictorType::Disabled, BranchPredictorType::Static, BranchPredictorType::Bimodal,
+          BranchPredictorType::GShare, BranchPredictorType::Tournament}) {
+        BranchPredictorConfig cfg{};
+        cfg.type = type;
+        BranchPredictor bp{cfg};
+        BranchPrediction pred{};
+        bp.predict(simrv::xlen::VirtAddr{0x1000}, beq_back, pred);
+        TEST_CHECK(pred.is_control);
+        TEST_CHECK(pred.is_branch);
+        if (type == BranchPredictorType::Disabled) {
+            TEST_CHECK(!pred.predicted_taken);
+        } else if (type == BranchPredictorType::Static) {
+            TEST_CHECK(pred.predicted_taken);
+        }
+        BranchFeedback fb{
+            .pc = simrv::xlen::VirtAddr{0x1000},
+            .actual_taken = true,
+            .actual_target = simrv::xlen::VirtAddr{0x0FF8},
+            .opcode = simrv::isa::Opcode::Branch,
+            .prediction = pred,
+        };
+        bp.update(fb);
+        TEST_CHECK(bp.stats().total_branches == 1);
+    }
+}
+
+void test_base_cache_associativity_fast_paths() {
+    std::array<simrv::xlen::Byte, 64> line_data{};
+    line_data[0] = simrv::xlen::Byte{0xAB};
+
+    for (const uint32_t ways : {1u, 2u, 4u}) {
+        simrv::cache::BaseCache<32, 64, 4> cache;
+        TEST_CHECK(cache.configure(2048, ways));
+        const simrv::xlen::PhysAddr addr{0x80001000ULL};
+        cache.insert(addr, line_data.data());
+        TEST_CHECK(cache.line_state(addr) == simrv::memory::MesiState::Exclusive);
+        TEST_CHECK(cache.find_way(0u, addr).has_value());
+        TEST_CHECK(!cache.find_way(0u, simrv::xlen::PhysAddr{0x80002000ULL}).has_value());
+    }
+}
+
 }  // namespace
 
 int run() {
@@ -1622,6 +1766,10 @@ int run() {
     test_runtime_cache_geometry();
     test_runtime_profile_policy();
     test_pipeline_sim_wrapper();
+    test_pipeline_topology_catalog();
+    test_two_stage_and_six_stage_execution();
+    test_branch_predictor_spec_catalog();
+    test_base_cache_associativity_fast_paths();
     std::cout << "=== All Pipeline Model Tests Passed Successfully ===\n";
     return 0;
 }

@@ -34,14 +34,23 @@ auto get_in_flight_badge(const simrv::pipeline::Scoreboard& sb,
         case simrv::pipeline::PipelineStage::Fetch:
             stage_str = "IF";
             break;
+        case simrv::pipeline::PipelineStage::Fetch2:
+            stage_str = "IF2";
+            break;
         case simrv::pipeline::PipelineStage::Decode:
             stage_str = "ID";
+            break;
+        case simrv::pipeline::PipelineStage::Issue:
+            stage_str = "IS";
             break;
         case simrv::pipeline::PipelineStage::Execute:
             stage_str = "EX";
             break;
         case simrv::pipeline::PipelineStage::Memory:
             stage_str = "MEM";
+            break;
+        case simrv::pipeline::PipelineStage::Memory2:
+            stage_str = "MEM2";
             break;
         case simrv::pipeline::PipelineStage::Writeback:
             stage_str = "WB";

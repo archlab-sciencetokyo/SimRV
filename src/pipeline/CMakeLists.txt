@@ -1,5 +1,6 @@
 simrv_add_component(simrv-isa
   Decoder.cpp
+  Decompressor.cpp
   ../isa/Zb.cpp
   ../isa/Zk.cpp
 )

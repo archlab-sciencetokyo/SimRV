@@ -17,6 +17,51 @@ inline bool is_element_active(const core::VectorRegister& mask_reg,
            0;  // NOLINT(cppcoreguidelines-pro-type-union-access)
 }
 
+template <typename Fn>
+inline auto dispatch_sew(uint32_t sew_bytes, Fn&& fn) -> decltype(auto) {
+    switch (sew_bytes) {
+        case 1:
+            return fn.template operator()<uint8_t>();
+        case 2:
+            return fn.template operator()<uint16_t>();
+        case 4:
+            return fn.template operator()<uint32_t>();
+        default:
+            return fn.template operator()<uint64_t>();
+    }
+}
+
+template <typename Fn>
+inline auto dispatch_sew_signed(uint32_t sew_bytes, Fn&& fn) -> decltype(auto) {
+    switch (sew_bytes) {
+        case 1:
+            return fn.template operator()<int8_t>();
+        case 2:
+            return fn.template operator()<int16_t>();
+        case 4:
+            return fn.template operator()<int32_t>();
+        default:
+            return fn.template operator()<int64_t>();
+    }
+}
+
+template <typename BodyFn>
+inline void for_each_active_element(const core::VectorRegister& mask_reg, uint32_t vstart,
+                                    uint32_t vl, bool vm, BodyFn&& body) {
+    if (vm) {
+        for (uint32_t i = vstart; i < vl; ++i) {
+            body(i);
+        }
+    } else {
+        for (uint32_t i = vstart; i < vl; ++i) {
+            if ((mask_reg.u8[i / 8] & (1u << (i % 8))) !=
+                0) {  // NOLINT(cppcoreguidelines-pro-type-union-access)
+                body(i);
+            }
+        }
+    }
+}
+
 inline bool get_mask_bit(const core::VectorRegister& mask_reg, simrv::xlen::VectorElementIndex i) {
     return (mask_reg.u8[i / 8] & (1u << (i % 8))) !=
            0;  // NOLINT(cppcoreguidelines-pro-type-union-access)

@@ -47,7 +47,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     branch_predictor.reset();
     const unsigned int target_xlen =
         (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
-    state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
+    state_.misa = isa::misa_with_mxl(config.isa.misa_bits, target_xlen);
     state_.refresh_misa_status();
     state_.initialize_lower_xlen_fields();
     sync_decode_context();
@@ -348,8 +348,7 @@ void CPU::evaluate_timer_interrupt() {
 void CPU::fast_forward_wfi(Machine& machine) {
     // mtime is shared by all harts. Advancing it from one hart's WFI is only sound
     // when no other hart can independently advance or observe the virtual deadline.
-    if (!machine.appmode_enabled() || machine.num_harts() != 1 ||
-        (state_.mip & state_.mie) != 0) {
+    if (!machine.appmode_enabled() || machine.num_harts() != 1 || (state_.mip & state_.mie) != 0) {
         return;
     }
     auto& primary_clint = machine.primary_hart().clint_mmio;

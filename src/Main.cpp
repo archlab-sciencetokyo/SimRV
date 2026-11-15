@@ -674,8 +674,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                  cfg.supported_xlen == 0 ? "Any (RV32 or RV64)"
                                                          : std::format("RV{}", cfg.supported_xlen));
                     std::println("  Simulator XLEN  : RV{}", simrv::xlen::kXLenBits);
-                    std::println("  MISA Profile    : {}",
-                                 simrv::core::detail::isa_preset_name(cfg.isa_preset));
+                    std::println("  MISA Profile    : {}", cfg.isa.canonical_string());
                     std::println("  Pipeline Type   : {}",
                                  simrv::pipeline::pipeline_type_name(cfg.pipeline.pipeline_type));
                     std::println("  Branch Predictor: {}",

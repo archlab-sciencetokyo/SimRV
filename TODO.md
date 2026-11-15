@@ -1,9 +1,17 @@
 # SimRV 3.0.0 release-candidate handoff
 
-Branch: `release/3.0.0-rc.19`
+Branch: `release/3.0.0-rc.20`
 Target: `dev`
 
-## Candidate scope for v3.0.0-rc.19
+## Candidate scope for v3.0.0-rc.20
+
+- [x] Replace fixed ISA/pipeline presets with dynamic `IsaSpec`, `discover_cpu_models()`, and `PipelineTopology` NTTP kernels.
+- [x] Implement protocol-neutral `Bus` and `TemplatedBus<BusProtocolSpec>` for TileLink-C/UH/UL and AXI4/AXI4-Lite.
+- [x] Specialize memory fast paths (`MemoryTopologySpec`), MMU/PTW walks (`SvModeSpec`), and FP/vector traits (`FloatTraits`, `dispatch_sew`).
+- [x] Add `rvb23u64` / `rvb23s64` profile coverage and `profile_default_isa_string` mapping.
+- [x] Verify RV64 & RV32 gate suites and CoreMark throughput vs. Spike (637.70 MIPS median, 1.067x Spike).
+
+## Completed scope for v3.0.0-rc.19
 
 - [x] Flatten ALU opcode dispatch in fast execution path into dense compiler jump table.
 - [x] Unify partitioned execution switches into a single contiguous fast dispatch jump table.

@@ -15,6 +15,7 @@
 #include "simrv/isa/IsaTypes.hpp"              // IWYU pragma: export
 #include "simrv/isa/OperationId.hpp"           // IWYU pragma: export
 #include "simrv/isa/Priv.hpp"                  // IWYU pragma: export
+#include "simrv/isa/Zb.hpp"                    // IWYU pragma: export
 #include "simrv/pipeline/OperationTraits.hpp"  // IWYU pragma: export
 #include "simrv/xlen/Types.hpp"                // IWYU pragma: export
 
@@ -156,6 +157,75 @@ constexpr auto instruction_enabled_by_misa(simrv::xlen::CsrValue misa, Operation
             (required & ~misa_extension_bit(IsaExtension::I)) | misa_extension_bit(IsaExtension::E);
     }
     return required != 0 && (misa & required) == required;
+}
+
+constexpr auto is_zabha_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::AMOSWAP_B && op_id <= OperationId::AMOMAXU_H;
+}
+
+constexpr auto is_zacas_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::AMOCAS_B && op_id <= OperationId::AMOCAS_Q;
+}
+
+constexpr auto is_zfh_operation(OperationId op_id) noexcept -> bool {
+    return op_id >= OperationId::FMADD_H && op_id <= OperationId::FCLASS_H;
+}
+
+constexpr auto is_zfbfmin_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::FCVT_S_BF16 || op_id == OperationId::FCVT_BF16_S;
+}
+
+constexpr auto is_zvfbfmin_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::VFWCVTBF16_F_F_V || op_id == OperationId::VFNCVTBF16_F_F_W;
+}
+
+constexpr auto is_zvfbfwma_operation(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::VFWMACCBF16_VV || op_id == OperationId::VFWMACCBF16_VF;
+}
+
+/**
+ * @brief Verify both single-letter MISA and multi-letter ExtensionSet requirements for an
+ *        already decoded instruction.
+ */
+constexpr auto instruction_enabled(simrv::xlen::CsrValue misa, ExtensionSet enabled_extensions,
+                                   OperationId op_id, bool compressed = false) -> bool {
+    if (is_zfh_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zfh);
+    }
+    if (is_zfbfmin_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zfbfmin);
+    }
+    if (is_zvfbfmin_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zvfbfmin);
+    }
+    if (is_zvfbfwma_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zvfbfwma);
+    }
+    if (is_zabha_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zabha);
+    }
+    if (op_id == OperationId::AMOCAS_B || op_id == OperationId::AMOCAS_H) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zacas) &&
+               enabled_extensions.has(MultiLetterExtension::Zabha);
+    }
+    if (is_zacas_operation(op_id)) {
+        return instruction_enabled_by_misa(misa, op_id, compressed) &&
+               enabled_extensions.has(MultiLetterExtension::Zacas);
+    }
+    if (instruction_enabled_by_misa(misa, op_id, compressed)) {
+        return true;
+    }
+    if (is_zb_crypto_operation(op_id) && (enabled_extensions.has(MultiLetterExtension::Zbkb) ||
+                                          enabled_extensions.has(MultiLetterExtension::Zbkc))) {
+        return true;
+    }
+    return false;
 }
 
 /** RV32E exposes only x0-x15; floating-point and vector register banks are unaffected. */

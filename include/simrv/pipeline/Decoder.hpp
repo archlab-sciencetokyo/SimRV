@@ -9,6 +9,7 @@
 #include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
+#include "simrv/pipeline/Decompressor.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
@@ -157,9 +158,6 @@ class Decoder {
 
 /// Decode instruction word to internal OperationId enum
 auto decoder(simrv::xlen::Instruction ir) -> isa::OperationId;
-
-/// Expand 16-bit C-extension instructions to canonical 32-bit forms
-auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::xlen::Instruction;
 
 /// String mapping for instruction mix profiling
 extern const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)>

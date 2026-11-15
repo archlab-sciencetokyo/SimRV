@@ -30,10 +30,11 @@
 #include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/Bus.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/ReservationTable.hpp"
-#include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
@@ -456,7 +457,13 @@ void test_zfhmin_scalar_instructions() {
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x22, 0, 2, 0, 1)) == OperationId::FCVT_H_S);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x21, 2, 2, 0, 1)) == OperationId::FCVT_D_H);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x22, 1, 2, 0, 1)) == OperationId::FCVT_H_D);
-    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x02, 0, 2, 0, 1)) == OperationId::ILLEGAL);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x02, 0, 2, 0, 1)) == OperationId::FADD_H);
+    {
+        ExtensionSet zfhmin_only{};
+        zfhmin_only.set(MultiLetterExtension::Zfhmin);
+        TEST_ASSERT(!instruction_enabled(kMisaDefault | misa_extension_bit(IsaExtension::F),
+                                         zfhmin_only, OperationId::FADD_H));
+    }
 
     std::array<simrv::xlen::FloatingRegister, 32> fp{};
     simrv::xlen::CsrValue fcsr = 0;
@@ -1855,8 +1862,7 @@ void test_sha_two_stage_cpu_translation_uses_vsatp() {
             std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::X) |
             std::to_underlying(simrv::PteFlag::U) | std::to_underlying(simrv::PteFlag::A) |
             std::to_underlying(simrv::PteFlag::D);
-        constexpr uint64_t kVsLeafFlags =
-            kLeafFlags & ~std::to_underlying(simrv::PteFlag::U);
+        constexpr uint64_t kVsLeafFlags = kLeafFlags & ~std::to_underlying(simrv::PteFlag::U);
         const auto put = [&](simrv::xlen::Address address, uint64_t pte) {
             std::memcpy(ram.data() + (address - kDramBase), &pte, sizeof(pte));
         };
@@ -2414,25 +2420,135 @@ void test_cbo_zero_execution() {
 void test_profile_engine() {
     using namespace simrv::isa;
 
-    // 1. String conversion
-    TEST_ASSERT(to_profile_string(ArchitectureProfile::Rva23S64) == "rva23s64");
-    TEST_ASSERT(to_profile_string(ArchitectureProfile::Rva23U64) == "rva23u64");
-    TEST_ASSERT(to_profile_string(ArchitectureProfile::Legacy) == "legacy");
+    struct ProfileCase {
+        ArchitectureProfile profile;
+        std::string_view canonical;
+        std::string_view alias;
+        bool expect_b;
+        bool expect_v;
+    };
+    constexpr std::array<ProfileCase, 9> kProfileCases = {{
+        {ArchitectureProfile::Rva23S64, "rva23s64", "rva23", true, true},
+        {ArchitectureProfile::Rva23U64, "rva23u64", "rva23u64", true, true},
+        {ArchitectureProfile::Rvb23S64, "rvb23s64", "rvb23", true, false},
+        {ArchitectureProfile::Rvb23U64, "rvb23u64", "rvb23u64", true, false},
+        {ArchitectureProfile::Rva22S64, "rva22s64", "rva22", false, false},
+        {ArchitectureProfile::Rva22U64, "rva22u64", "rva22u64", false, false},
+        {ArchitectureProfile::Rva20S64, "rva20s64", "rva20", false, false},
+        {ArchitectureProfile::Rva20U64, "rva20u64", "rva20u64", false, false},
+        {ArchitectureProfile::Legacy, "legacy", "rv64gc", false, false},
+    }};
 
-    // 2. String parsing
-    TEST_ASSERT(parse_architecture_profile("rva23") == ArchitectureProfile::Rva23S64);
-    TEST_ASSERT(parse_architecture_profile("rva23s64") == ArchitectureProfile::Rva23S64);
-    TEST_ASSERT(parse_architecture_profile("rva23u64") == ArchitectureProfile::Rva23U64);
-    TEST_ASSERT(parse_architecture_profile("rva22") == ArchitectureProfile::Rva22S64);
-    TEST_ASSERT(parse_architecture_profile("legacy") == ArchitectureProfile::Legacy);
-    TEST_ASSERT(parse_architecture_profile("rv64gc") == ArchitectureProfile::Legacy);
+    for (const auto& entry : kProfileCases) {
+        TEST_ASSERT(to_profile_string(entry.profile) == entry.canonical);
+        TEST_ASSERT(parse_architecture_profile(entry.canonical) == entry.profile);
+        TEST_ASSERT(parse_architecture_profile(entry.alias) == entry.profile);
+        const auto isa = parse_isa_spec(profile_default_isa_string(entry.profile));
+        TEST_ASSERT(isa.has_value());
+        TEST_ASSERT(isa->has(IsaExtension::B) == entry.expect_b);
+        TEST_ASSERT(isa->has(IsaExtension::V) == entry.expect_v);
+
+        const auto rec = parse_isa_spec(profile_recommended_isa_string(entry.profile));
+        TEST_ASSERT(rec.has_value());
+        TEST_ASSERT(rec->has(IsaExtension::B) == entry.expect_b);
+        TEST_ASSERT(rec->has(IsaExtension::V) == entry.expect_v);
+    }
+
+    TEST_ASSERT(parse_architecture_profile("rv32gc") == ArchitectureProfile::Legacy);
     TEST_ASSERT(parse_architecture_profile("invalid_profile") == std::nullopt);
 
-    // 3. Default profile configuration
     if constexpr (simrv::xlen::kIsXLen64) {
         TEST_ASSERT(kDefaultArchitectureProfile == ArchitectureProfile::Rva23S64);
     } else {
         TEST_ASSERT(kDefaultArchitectureProfile == ArchitectureProfile::Legacy);
+    }
+
+    // Verify ExtensionSet, aggregate shorthand expansion, and unified instruction_enabled() gating.
+    ExtensionSet ext_set{};
+    TEST_ASSERT(ext_set.empty());
+    add_extension_to_set(ext_set, "zkn");
+    TEST_ASSERT(!ext_set.empty());
+    TEST_ASSERT(ext_set.has(MultiLetterExtension::Zbkb));
+    TEST_ASSERT(ext_set.has(MultiLetterExtension::Zbkc));
+    TEST_ASSERT(ext_set.has(MultiLetterExtension::Zknd));
+    TEST_ASSERT(!ext_set.has(MultiLetterExtension::Zkr));
+
+    const auto zfh_spec = parse_isa_spec("rv64gc_zfh_zvkn");
+    TEST_ASSERT(zfh_spec.has_value());
+    TEST_ASSERT(zfh_spec->has_extension(MultiLetterExtension::Zfh));
+    TEST_ASSERT(zfh_spec->has_extension(MultiLetterExtension::Zfhmin));
+    TEST_ASSERT(zfh_spec->has_extension(MultiLetterExtension::Zvkned));
+    TEST_ASSERT(zfh_spec->has_extension(MultiLetterExtension::Zvknhb));
+    TEST_ASSERT(zfh_spec->has_extension(MultiLetterExtension::Zvkb));
+    TEST_ASSERT(zfh_spec->has_extension(MultiLetterExtension::Zvkt));
+
+    const auto no_b_misa = parse_isa_spec("rv64gc")->misa_bits;
+    TEST_ASSERT(!instruction_enabled(no_b_misa, ExtensionSet{}, OperationId::CLMUL));
+    TEST_ASSERT(instruction_enabled(no_b_misa, ext_set, OperationId::CLMUL));
+}
+
+void test_track1a_zkr_svadu_sspm() {
+    using simrv::core::Csr;
+    using simrv::core::TrapController;
+    using simrv::isa::ExceptionCode;
+    using simrv::isa::MultiLetterExtension;
+
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    auto& state = cpu.state();
+    state.priv = simrv::xlen::PrivilegeLevel::Machine;
+    state.virt = false;
+
+    // 1. Zkr disabled -> IllegalInstruction
+    state.enabled_extensions.clear(MultiLetterExtension::Zkr);
+    TEST_ASSERT(TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, true) ==
+                ExceptionCode::IllegalInstruction);
+
+    // 2. Zkr enabled -> read-only fails, read-write succeeds in M-mode, S/U obey mseccfg
+    state.enabled_extensions.set(MultiLetterExtension::Zkr);
+    TEST_ASSERT(TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, false) ==
+                ExceptionCode::IllegalInstruction);
+    TEST_ASSERT(
+        !TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, true).has_value());
+
+    const auto s1 = cpu.csr_file.read(Csr::Seed);
+    TEST_ASSERT(s1.has_value());
+    TEST_ASSERT(((*s1 >> 30U) & 0x3U) == 2U);  // OPST = ES16
+    TEST_ASSERT(cpu.csr_file.write(Csr::Seed, 0).has_value());
+    const auto s2 = cpu.csr_file.read(Csr::Seed);
+    TEST_ASSERT(s2.has_value());
+    TEST_ASSERT(*s2 != *s1);
+
+    state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    state.mseccfg = 0;
+    TEST_ASSERT(TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, true) ==
+                ExceptionCode::IllegalInstruction);
+    state.mseccfg = static_cast<simrv::xlen::CsrValue>(1ULL << 9U);  // sseed
+    TEST_ASSERT(
+        !TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, true).has_value());
+
+    state.priv = simrv::xlen::PrivilegeLevel::User;
+    TEST_ASSERT(TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, true) ==
+                ExceptionCode::IllegalInstruction);
+    state.mseccfg = static_cast<simrv::xlen::CsrValue>(1ULL << 8U);  // useed
+    TEST_ASSERT(
+        !TrapController::check_csr_access(state, simrv::xlen::CsrNumber{0x015}, true).has_value());
+
+    // 3. Svadu & Sspm menvcfg WARL behavior (RV64)
+    state.priv = simrv::xlen::PrivilegeLevel::Machine;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        const auto adue_bit = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 61U);
+        const auto pmm_val = static_cast<simrv::xlen::CsrValue>(uint64_t{2} << 32U);
+        state.enabled_extensions.clear(MultiLetterExtension::Svadu);
+        state.enabled_extensions.clear(MultiLetterExtension::Sspm);
+        TEST_ASSERT(cpu.csr_file.write(Csr::Menvcfg, adue_bit | pmm_val).has_value());
+        TEST_ASSERT((*cpu.csr_file.read(Csr::Menvcfg) & (adue_bit | pmm_val)) == 0);
+
+        state.enabled_extensions.set(MultiLetterExtension::Svadu);
+        state.enabled_extensions.set(MultiLetterExtension::Sspm);
+        TEST_ASSERT(cpu.csr_file.write(Csr::Menvcfg, adue_bit | pmm_val).has_value());
+        TEST_ASSERT((*cpu.csr_file.read(Csr::Menvcfg) & (adue_bit | pmm_val)) ==
+                    (adue_bit | pmm_val));
     }
 }
 
@@ -2865,6 +2981,450 @@ void test_sha_and_ssnpm_audit_regressions() {
 #endif
 }
 
+void test_track1b_zacas_zabha() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+    using simrv::xlen::CsrValue;
+    auto encode_amo = [](uint32_t funct5, uint32_t f3, uint32_t rs2, uint32_t rs1,
+                         uint32_t rd) -> uint32_t {
+        return (funct5 << 27U) | (rs2 << 20U) | (rs1 << 15U) | (f3 << 12U) | (rd << 7U) | 0x2FU;
+    };
+
+    // 1. Decode & instruction_enabled gating
+    {
+        const uint32_t amoadd_b = encode_amo(0x00, 0, 11, 10, 12);
+        const uint32_t amoswap_h = encode_amo(0x01, 1, 11, 10, 12);
+        const uint32_t amocas_b = encode_amo(0x05, 0, 11, 10, 12);
+        const uint32_t amocas_w = encode_amo(0x05, 2, 11, 10, 12);
+        const uint32_t amocas_d = encode_amo(0x05, 3, 12, 10, 14);
+        const uint32_t amocas_q = encode_amo(0x05, 4, 12, 10, 14);
+
+        TEST_ASSERT(simrv::pipeline::decoder(amoadd_b) == OperationId::AMOADD_B);
+        TEST_ASSERT(simrv::pipeline::decoder(amoswap_h) == OperationId::AMOSWAP_H);
+        TEST_ASSERT(simrv::pipeline::decoder(amocas_b) == OperationId::AMOCAS_B);
+        TEST_ASSERT(simrv::pipeline::decoder(amocas_w) == OperationId::AMOCAS_W);
+        TEST_ASSERT(simrv::pipeline::decoder(amocas_d) == OperationId::AMOCAS_D);
+        if constexpr (simrv::xlen::kIsXLen64) {
+            TEST_ASSERT(simrv::pipeline::decoder(amocas_q) == OperationId::AMOCAS_Q);
+            // Odd register pair must decode as ILLEGAL for amocas.q
+            TEST_ASSERT(simrv::pipeline::decoder(encode_amo(0x05, 4, 13, 10, 14)) ==
+                        OperationId::ILLEGAL);
+            TEST_ASSERT(simrv::pipeline::decoder(encode_amo(0x05, 4, 12, 10, 15)) ==
+                        OperationId::ILLEGAL);
+        } else {
+            TEST_ASSERT(simrv::pipeline::decoder(amocas_q) == OperationId::ILLEGAL);
+            // Odd register pair must decode as ILLEGAL for amocas.d on RV32
+            TEST_ASSERT(simrv::pipeline::decoder(encode_amo(0x05, 3, 13, 10, 14)) ==
+                        OperationId::ILLEGAL);
+            TEST_ASSERT(simrv::pipeline::decoder(encode_amo(0x05, 3, 12, 10, 15)) ==
+                        OperationId::ILLEGAL);
+        }
+
+        const auto misa_a =
+            misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::A);
+        ExtensionSet none{};
+        ExtensionSet zabha_only{};
+        zabha_only.set(MultiLetterExtension::Zabha);
+        ExtensionSet zacas_only{};
+        zacas_only.set(MultiLetterExtension::Zacas);
+        ExtensionSet both{};
+        both.set(MultiLetterExtension::Zabha);
+        both.set(MultiLetterExtension::Zacas);
+
+        TEST_ASSERT(!instruction_enabled(misa_a, none, OperationId::AMOADD_B));
+        TEST_ASSERT(instruction_enabled(misa_a, zabha_only, OperationId::AMOADD_B));
+        TEST_ASSERT(!instruction_enabled(misa_a, none, OperationId::AMOCAS_W));
+        TEST_ASSERT(instruction_enabled(misa_a, zacas_only, OperationId::AMOCAS_W));
+        TEST_ASSERT(!instruction_enabled(misa_a, zabha_only, OperationId::AMOCAS_B));
+        TEST_ASSERT(!instruction_enabled(misa_a, zacas_only, OperationId::AMOCAS_B));
+        TEST_ASSERT(instruction_enabled(misa_a, both, OperationId::AMOCAS_B));
+    }
+
+    // 2. Execution positive + negative tests
+    {
+        constexpr simrv::xlen::Address kCodeAddr = 0x80001000ULL;
+        constexpr simrv::xlen::Address kDataAddr = 0x80002000ULL;
+
+        std::array<simrv::xlen::Byte, 0x4000> ram{};
+        Machine machine;
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+
+        auto& cpu = machine.primary_hart();
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.state().misa |= misa_extension_bit(IsaExtension::A);
+        cpu.state().mtvec = 0x80003000ULL;
+
+        // Negative: amoadd.b with Zabha disabled -> IllegalInstruction
+        const uint32_t amoadd_b = encode_amo(0x00, 0, 11, 10, 12);
+        std::memcpy(ram.data() + 0x1000, &amoadd_b, sizeof(amoadd_b));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr};
+        cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr);
+        cpu.state().regs.write(simrv::xlen::RegId::A1, 5);
+        cpu.state().enabled_extensions = ExtensionSet{};
+        cpu.run_cycle(machine);
+        TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+        // Negative: amocas.w with Zacas disabled -> IllegalInstruction
+        const uint32_t amocas_w = encode_amo(0x05, 2, 11, 10, 12);
+        std::memcpy(ram.data() + 0x1004, &amocas_w, sizeof(amocas_w));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 4};
+        cpu.state().mcause = 0;
+        cpu.run_cycle(machine);
+        TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+        // Enable both Zabha and Zacas
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Zabha);
+        cpu.state().enabled_extensions.set(MultiLetterExtension::Zacas);
+
+        // Zabha: amoadd.b (mem = 0xFE -> -2, add 5 -> mem = 0x03, rd = sign_ext(-2))
+        ram[0x2000] = std::byte{0xFEU};
+        std::memcpy(ram.data() + 0x1008, &amoadd_b, sizeof(amoadd_b));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 8};
+        cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr);
+        cpu.state().regs.write(simrv::xlen::RegId::A1, 5);
+        cpu.state().regs.write(simrv::xlen::RegId::A2, 0);
+        cpu.run_cycle(machine);
+        TEST_ASSERT(ram[0x2000] == std::byte{0x03U});
+        TEST_ASSERT(static_cast<simrv::xlen::SignedWord>(
+                        cpu.state().regs.read(simrv::xlen::RegId::A2)) == -2);
+
+        // Zabha: amomin.h (mem = 0xFFF0 (-16), rs2 = 0x0010 (+16) -> mem = 0xFFF0, rd = -16)
+        const uint32_t amomin_h = encode_amo(0x10, 1, 11, 10, 12);
+        const uint16_t init_h = 0xFFF0U;
+        std::memcpy(ram.data() + 0x2002, &init_h, sizeof(init_h));
+        std::memcpy(ram.data() + 0x100C, &amomin_h, sizeof(amomin_h));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 0x0C};
+        cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr + 2);
+        cpu.state().regs.write(simrv::xlen::RegId::A1, 0x0010U);
+        cpu.run_cycle(machine);
+        uint16_t out_h = 0;
+        std::memcpy(&out_h, ram.data() + 0x2002, sizeof(out_h));
+        TEST_ASSERT(out_h == 0xFFF0U);
+        TEST_ASSERT(static_cast<simrv::xlen::SignedWord>(
+                        cpu.state().regs.read(simrv::xlen::RegId::A2)) == -16);
+
+        // Zacas: amocas.w match & mismatch
+        const uint32_t init_w = 0x80000010U;
+        std::memcpy(ram.data() + 0x2004, &init_w, sizeof(init_w));
+        std::memcpy(ram.data() + 0x1010, &amocas_w, sizeof(amocas_w));
+        // Mismatch first (rd = 0x1234 != 0x80000010)
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 0x10};
+        cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr + 4);
+        cpu.state().regs.write(simrv::xlen::RegId::A1, 0xCAFEBABEU);
+        cpu.state().regs.write(simrv::xlen::RegId::A2, 0x1234U);
+        cpu.run_cycle(machine);
+        uint32_t out_w = 0;
+        std::memcpy(&out_w, ram.data() + 0x2004, sizeof(out_w));
+        TEST_ASSERT(out_w == init_w);
+        TEST_ASSERT(static_cast<uint32_t>(cpu.state().regs.read(simrv::xlen::RegId::A2)) == init_w);
+
+        // Match now (rd == init_w)
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 0x10};
+        cpu.run_cycle(machine);
+        std::memcpy(&out_w, ram.data() + 0x2004, sizeof(out_w));
+        TEST_ASSERT(out_w == 0xCAFEBABEU);
+        TEST_ASSERT(static_cast<uint32_t>(cpu.state().regs.read(simrv::xlen::RegId::A2)) == init_w);
+
+        // Zacas + Zabha: amocas.b match
+        const uint32_t amocas_b = encode_amo(0x05, 0, 11, 10, 12);
+        ram[0x2008] = std::byte{0xAAU};
+        std::memcpy(ram.data() + 0x1014, &amocas_b, sizeof(amocas_b));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 0x14};
+        cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr + 8);
+        cpu.state().regs.write(simrv::xlen::RegId::A1, 0x55U);
+        cpu.state().regs.write(simrv::xlen::RegId::A2, 0xAAU);
+        cpu.run_cycle(machine);
+        TEST_ASSERT(ram[0x2008] == std::byte{0x55U});
+        TEST_ASSERT(static_cast<simrv::xlen::SignedWord>(cpu.state().regs.read(
+                        simrv::xlen::RegId::A2)) == static_cast<int8_t>(0xAAU));
+
+        if constexpr (simrv::xlen::kIsXLen64) {
+            // Zacas RV64: amocas.q (128-bit pair a2:a3 vs mem, swap with a4:a5)
+            const uint32_t amocas_q = encode_amo(0x05, 4, 14, 10, 12);
+            const uint64_t init_lo = UINT64_C(0x1122334455667788);
+            const uint64_t init_hi = UINT64_C(0x99AABBCCDDEEFF00);
+            std::memcpy(ram.data() + 0x2010, &init_lo, sizeof(init_lo));
+            std::memcpy(ram.data() + 0x2018, &init_hi, sizeof(init_hi));
+            std::memcpy(ram.data() + 0x1018, &amocas_q, sizeof(amocas_q));
+
+            cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 0x18};
+            cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr + 0x10);
+            cpu.state().regs.write(simrv::xlen::RegId::A2, init_lo);
+            cpu.state().regs.write(simrv::xlen::RegId::A3, init_hi);
+            cpu.state().regs.write(simrv::xlen::RegId::A4, UINT64_C(0x0102030405060708));
+            cpu.state().regs.write(simrv::xlen::RegId::A5, UINT64_C(0xF1F2F3F4F5F6F7F8));
+            cpu.run_cycle(machine);
+            uint64_t out_lo = 0;
+            uint64_t out_hi = 0;
+            std::memcpy(&out_lo, ram.data() + 0x2010, sizeof(out_lo));
+            std::memcpy(&out_hi, ram.data() + 0x2018, sizeof(out_hi));
+            TEST_ASSERT(out_lo == UINT64_C(0x0102030405060708));
+            TEST_ASSERT(out_hi == UINT64_C(0xF1F2F3F4F5F6F7F8));
+            TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A2) == init_lo);
+            TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A3) == init_hi);
+        } else {
+            // Zacas RV32: amocas.d (64-bit pair a2:a3 vs mem, swap with a4:a5)
+            const uint32_t amocas_d = encode_amo(0x05, 3, 14, 10, 12);
+            const uint64_t init_d = UINT64_C(0x1122334455667788);
+            std::memcpy(ram.data() + 0x2010, &init_d, sizeof(init_d));
+            std::memcpy(ram.data() + 0x101C, &amocas_d, sizeof(amocas_d));
+
+            cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + 0x1C};
+            cpu.state().regs.write(simrv::xlen::RegId::A0, kDataAddr + 0x10);
+            cpu.state().regs.write(simrv::xlen::RegId::A2, 0x55667788U);
+            cpu.state().regs.write(simrv::xlen::RegId::A3, 0x11223344U);
+            cpu.state().regs.write(simrv::xlen::RegId::A4, 0xAABBCCDDU);
+            cpu.state().regs.write(simrv::xlen::RegId::A5, 0xDEADBEEFU);
+            cpu.run_cycle(machine);
+            uint64_t out_d = 0;
+            std::memcpy(&out_d, ram.data() + 0x2010, sizeof(out_d));
+            TEST_ASSERT(out_d == UINT64_C(0xDEADBEEFAABBCCDD));
+            TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A2) == 0x55667788U);
+            TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A3) == 0x11223344U);
+        }
+    }
+}
+
+void test_track1c_fp16_bf16() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+    using simrv::xlen::CsrValue;
+
+    auto encode_op_fp = [](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm, uint32_t rd) {
+        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) | 0x53U;
+    };
+    auto encode_fmadd = [](uint32_t rs3, uint32_t fmt, uint32_t rs2, uint32_t rs1, uint32_t rm,
+                           uint32_t rd) {
+        return (rs3 << 27U) | (fmt << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) |
+               (rd << 7U) | 0x43U;
+    };
+    auto encode_op_v = [](uint32_t funct6, uint32_t vm, uint32_t vs2, uint32_t vs1, uint32_t funct3,
+                          uint32_t vd) {
+        return (funct6 << 26U) | (vm << 25U) | (vs2 << 20U) | (vs1 << 15U) | (funct3 << 12U) |
+               (vd << 7U) | 0x57U;
+    };
+
+    const uint32_t fadd_h = encode_op_fp(0x02U, 2U, 1U, 0U, 3U);
+    const uint32_t fmadd_h = encode_fmadd(4U, 2U, 2U, 1U, 0U, 3U);
+    const uint32_t fmin_h = encode_op_fp(0x16U, 2U, 1U, 0U, 3U);
+    const uint32_t feq_h = encode_op_fp(0x52U, 2U, 1U, 2U, 10U);
+    const uint32_t fclass_h = encode_op_fp(0x72U, 0U, 1U, 1U, 10U);
+    const uint32_t fcvt_w_h = encode_op_fp(0x62U, 0U, 1U, 1U, 10U);
+    const uint32_t fcvt_h_w = encode_op_fp(0x6AU, 0U, 10U, 0U, 3U);
+    const uint32_t fcvt_bf16_s = encode_op_fp(0x22U, 8U, 1U, 0U, 3U);
+    const uint32_t fcvt_s_bf16 = encode_op_fp(0x20U, 6U, 1U, 0U, 3U);
+    const uint32_t vfadd_vv = encode_op_v(0x00U, 1U, 2U, 1U, 1U, 4U);
+    const uint32_t vfwcvtbf16 = encode_op_v(0x12U, 1U, 2U, 13U, 1U, 4U);
+    const uint32_t vfncvtbf16 = encode_op_v(0x12U, 1U, 2U, 29U, 1U, 4U);
+    const uint32_t vfwmaccbf16_vv = encode_op_v(0x3BU, 1U, 2U, 1U, 1U, 4U);
+    const uint32_t vfwmaccbf16_vf = encode_op_v(0x3BU, 1U, 2U, 1U, 5U, 4U);
+
+    // 1. Decode checks
+    TEST_ASSERT(simrv::pipeline::decoder(fadd_h) == OperationId::FADD_H);
+    TEST_ASSERT(simrv::pipeline::decoder(fmadd_h) == OperationId::FMADD_H);
+    TEST_ASSERT(simrv::pipeline::decoder(fmin_h) == OperationId::FMIN_H);
+    TEST_ASSERT(simrv::pipeline::decoder(feq_h) == OperationId::FEQ_H);
+    TEST_ASSERT(simrv::pipeline::decoder(fclass_h) == OperationId::FCLASS_H);
+    TEST_ASSERT(simrv::pipeline::decoder(fcvt_w_h) == OperationId::FCVT_W_H);
+    TEST_ASSERT(simrv::pipeline::decoder(fcvt_h_w) == OperationId::FCVT_H_W);
+    TEST_ASSERT(simrv::pipeline::decoder(fcvt_bf16_s) == OperationId::FCVT_BF16_S);
+    TEST_ASSERT(simrv::pipeline::decoder(fcvt_s_bf16) == OperationId::FCVT_S_BF16);
+    TEST_ASSERT(simrv::pipeline::decoder(vfwcvtbf16) == OperationId::VFWCVTBF16_F_F_V);
+    TEST_ASSERT(simrv::pipeline::decoder(vfncvtbf16) == OperationId::VFNCVTBF16_F_F_W);
+    TEST_ASSERT(simrv::pipeline::decoder(vfwmaccbf16_vv) == OperationId::VFWMACCBF16_VV);
+    TEST_ASSERT(simrv::pipeline::decoder(vfwmaccbf16_vf) == OperationId::VFWMACCBF16_VF);
+
+    // 2. Execution & gating tests
+    constexpr simrv::xlen::Address kCodeAddr = 0x80001000ULL;
+    std::array<simrv::xlen::Byte, 0x4000> ram{};
+    Machine machine;
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+
+    auto& cpu = machine.primary_hart();
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    cpu.state().misa = kMisaDefault | misa_extension_bit(IsaExtension::F) |
+                       misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::V);
+    cpu.state().mstatus |= MstatusBit::Fs | MstatusBit::Vs;
+    cpu.state().mtvec = 0x80003000ULL;
+
+    auto fp_reg = [](uint32_t idx) { return static_cast<simrv::xlen::FpRegId>(idx); };
+    auto run_insn = [&](uint32_t offset, uint32_t insn) {
+        std::memcpy(ram.data() + 0x1000 + offset, &insn, sizeof(insn));
+        cpu.state().pc = simrv::xlen::VirtAddr{kCodeAddr + offset};
+        cpu.state().mcause = 0;
+        cpu.run_cycle(machine);
+    };
+
+    // Negative Zfh: disabled -> IllegalInstruction
+    cpu.state().enabled_extensions = ExtensionSet{};
+    run_insn(0x00, fadd_h);
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // Positive Zfh: f1 = 1.5h (0x3E00), f2 = 2.0h (0x4000), f4 = 0.5h (0x3800)
+    ExtensionSet zfh_ext{};
+    zfh_ext.set(MultiLetterExtension::Zfhmin);
+    zfh_ext.set(MultiLetterExtension::Zfh);
+    cpu.state().enabled_extensions = zfh_ext;
+    cpu.state().regs.write_fp(fp_reg(1), UINT64_C(0xFFFFFFFFFFFF3E00));
+    cpu.state().regs.write_fp(fp_reg(2), UINT64_C(0xFFFFFFFFFFFF4000));
+    cpu.state().regs.write_fp(fp_reg(4), UINT64_C(0xFFFFFFFFFFFF3800));
+
+    run_insn(0x04, fadd_h);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT((cpu.state().regs.read_fp(fp_reg(3)) & 0xFFFFU) == 0x4300U);  // 3.5h
+
+    run_insn(0x08, fmadd_h);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT((cpu.state().regs.read_fp(fp_reg(3)) & 0xFFFFU) ==
+                0x4300U);  // 1.5*2.0 + 0.5 = 3.5h
+
+    run_insn(0x0C, fmin_h);
+    TEST_ASSERT((cpu.state().regs.read_fp(fp_reg(3)) & 0xFFFFU) ==
+                0x3E00U);  // min(1.5, 2.0) = 1.5h
+
+    run_insn(0x10, feq_h);
+    TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A0) == 0U);
+
+    run_insn(0x14, fclass_h);
+    TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A0) == (1U << 6U));  // +normal
+
+    run_insn(0x18, fcvt_w_h);
+    TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A0) == 1U);  // trunc(1.5) = 1
+
+    cpu.state().regs.write(simrv::xlen::RegId::A0, 3);
+    run_insn(0x1C, fcvt_h_w);
+    TEST_ASSERT((cpu.state().regs.read_fp(fp_reg(3)) & 0xFFFFU) == 0x4200U);  // 3.0h
+
+    // Negative & Positive Zfbfmin
+    cpu.state().enabled_extensions = ExtensionSet{};
+    run_insn(0x20, fcvt_bf16_s);
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    ExtensionSet bf_ext{};
+    bf_ext.set(MultiLetterExtension::Zfbfmin);
+    cpu.state().enabled_extensions = bf_ext;
+    cpu.state().regs.write_fp(fp_reg(1), UINT64_C(0xFFFFFFFF3FC00000));  // 1.5f
+    run_insn(0x24, fcvt_bf16_s);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT((cpu.state().regs.read_fp(fp_reg(3)) & 0xFFFFU) == 0x3FC0U);  // 1.5 bf16
+
+    cpu.state().regs.write_fp(fp_reg(1), UINT64_C(0xFFFFFFFFFFFF3FC0));
+    run_insn(0x28, fcvt_s_bf16);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(static_cast<uint32_t>(cpu.state().regs.read_fp(fp_reg(3))) == 0x3FC00000U);
+
+    // Vector SEW=16 setup
+    cpu.state().vtype = 1U << 3U;  // SEW=16, LMUL=1
+    cpu.state().vl = 2;
+    cpu.state().vstart = 0;
+
+    // Negative Zvfh: Zvfhmin alone must trap on vfadd.vv
+    ExtensionSet zvfhmin_only{};
+    zvfhmin_only.set(MultiLetterExtension::Zvfhmin);
+    cpu.state().enabled_extensions = zvfhmin_only;
+    run_insn(0x2C, vfadd_vv);
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // Positive Zvfh: vfadd.vv (1.5h + 2.0h = 3.5h)
+    ExtensionSet zvfh_ext{};
+    zvfh_ext.set(MultiLetterExtension::Zvfhmin);
+    zvfh_ext.set(MultiLetterExtension::Zvfh);
+    cpu.state().enabled_extensions = zvfh_ext;
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)))
+        .u16[0] = 0x3E00U;
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(1)))
+        .u16[0] = 0x4000U;
+    run_insn(0x30, vfadd_vv);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u16[0] == 0x4300U);
+
+    // Negative Zvfbfmin -> IllegalInstruction
+    cpu.state().enabled_extensions = ExtensionSet{};
+    run_insn(0x34, vfwcvtbf16);
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // Positive Zvfbfmin: vfwcvtbf16.f.f.v & vfncvtbf16.f.f.w
+    ExtensionSet zvfbfmin_ext{};
+    zvfbfmin_ext.set(MultiLetterExtension::Zvfbfmin);
+    cpu.state().enabled_extensions = zvfbfmin_ext;
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)))
+        .u16[0] = 0x3FC0U;  // 1.5 bf16
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)))
+        .u16[1] = 0x4000U;  // 2.0 bf16
+    run_insn(0x38, vfwcvtbf16);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u32[0] == 0x3FC00000U);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u32[1] == 0x40000000U);
+
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)))
+        .u32[0] = 0x3FC00000U;
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)))
+        .u32[1] = 0x40000000U;
+    run_insn(0x3C, vfncvtbf16);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u16[0] == 0x3FC0U);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u16[1] == 0x4000U);
+
+    // Negative Zvfbfwma -> IllegalInstruction
+    run_insn(0x40, vfwmaccbf16_vv);
+    TEST_ASSERT(cpu.state().mcause == static_cast<CsrValue>(ExceptionCode::IllegalInstruction));
+
+    // Positive Zvfbfwma: vfwmaccbf16.vv & vfwmaccbf16.vf
+    zvfbfmin_ext.set(MultiLetterExtension::Zvfbfwma);
+    cpu.state().enabled_extensions = zvfbfmin_ext;
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)))
+        .u16[0] = 0x3FC0U;  // 1.5 bf16
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(1)))
+        .u16[0] = 0x4000U;  // 2.0 bf16
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+        .u32[0] = 0x3F800000U;  // 1.0f
+    run_insn(0x44, vfwmaccbf16_vv);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u32[0] == 0x40800000U);  // 1.5*2.0 + 1.0 = 4.0f
+
+    cpu.state().regs.write_fp(fp_reg(1), UINT64_C(0xFFFFFFFFFFFF4000));  // 2.0 bf16
+    cpu.state()
+        .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+        .u32[0] = 0x3F800000U;  // 1.0f
+    run_insn(0x48, vfwmaccbf16_vf);
+    TEST_ASSERT(cpu.state().mcause == 0);
+    TEST_ASSERT(
+        cpu.state()
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)))
+            .u32[0] == 0x40800000U);  // 4.0f
+}
+
 }  // namespace
 
 int main() {
@@ -3039,6 +3599,18 @@ int main() {
     std::cout << "[RUN] test_profile_engine" << std::endl;
     test_profile_engine();
     std::cout << "[PASS] test_profile_engine" << std::endl;
+
+    std::cout << "[RUN] test_track1a_zkr_svadu_sspm" << std::endl;
+    test_track1a_zkr_svadu_sspm();
+    std::cout << "[PASS] test_track1a_zkr_svadu_sspm" << std::endl;
+
+    std::cout << "[RUN] test_track1b_zacas_zabha" << std::endl;
+    test_track1b_zacas_zabha();
+    std::cout << "[PASS] test_track1b_zacas_zabha" << std::endl;
+
+    std::cout << "[RUN] test_track1c_fp16_bf16" << std::endl;
+    test_track1c_fp16_bf16();
+    std::cout << "[PASS] test_track1c_fp16_bf16" << std::endl;
 
     std::cout << "\nAll RVA23 Profile unit tests passed successfully!\n";
     return simrv::test::failures() == 0 ? 0 : 1;

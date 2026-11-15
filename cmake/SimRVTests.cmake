@@ -154,12 +154,16 @@ if(BUILD_TESTING)
     "gate;regress;pipeline;model")
 
   simrv_add_runtime_test(
+    simrv-bus-protocol-tests tests/BusProtocolTests.cpp bus-protocol
+    "gate;regress;memory")
+
+  simrv_add_runtime_test(
     simrv-simulator-standards-tests tests/SimulatorStandardsTests.cpp
     simulator-standards "gate;regress;core;sbi;isa")
 
   simrv_add_runtime_test(
-    simrv-rva23-profile-tests tests/Rva23ProfileTests.cpp
-    rva23-profile "gate;regress;core;isa;cache")
+    simrv-riscv-profile-tests tests/RiscvProfileTests.cpp
+    riscv-profile "gate;regress;core;isa;cache")
 
   simrv_add_runtime_test(
     simrv-fdt-generator-tests tests/FdtGeneratorTests.cpp

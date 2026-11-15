@@ -283,14 +283,18 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
                             ? active_translation_status()
                             : (state_.virt ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
                                            : state_.mstatus);
+    const bool allow_ad_update =
+        state_.enabled_extensions.has(isa::MultiLetterExtension::Svadu) &&
+        ((static_cast<uint64_t>(force_virt ? state_.henvcfg : state_.menvcfg) &
+          (uint64_t{1} << 61U)) != 0);
     if (machine.runtime_profile.is_instruction_mode()) {
         simrv::memory::GuestPhysAddr guest_fault_address{};
         bool implicit_vs_stage_page_table_fault = false;
         const bool saved_virt = state_.virt;
         state_.virt = force_virt;
-        auto result =
-            mmu->translate(virtual_address, access, privilege, status, satp, active_xlen, false,
-                           &state_, &guest_fault_address, &implicit_vs_stage_page_table_fault);
+        auto result = mmu->translate(virtual_address, access, privilege, status, satp, active_xlen,
+                                     allow_ad_update, &state_, &guest_fault_address,
+                                     &implicit_vs_stage_page_table_fault);
         state_.virt = saved_virt;
         active_context().pending_htval =
             result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address.raw() >> 2U;
@@ -309,7 +313,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
         const bool saved_virt = state_.virt;
         state_.virt = force_virt;
         timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, status, satp,
-                                               active_xlen, false, &state_);
+                                               active_xlen, allow_ad_update, &state_);
         state_.virt = saved_virt;
         timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
@@ -318,7 +322,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
 
     auto& walk = timed_walk.walk;
     if (timed_walk.request_pending) {
-        simrv::memory::TileLinkBus::TimedResponse response{};
+        simrv::memory::Bus::TimedResponse response{};
         if (!machine.memory_.system_bus().try_get_timed_response(timed_walk.source, response)) {
             ca_state.waiting_for_interconnect = true;
             return std::nullopt;
@@ -404,7 +408,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                                         ca_state.instruction_fill.line_base == line_base;
         if (machine.runtime_profile.is_cycle_mode() && ca_state.instruction_prefetch.active &&
             ca_state.instruction_prefetch.request_pending) {
-            simrv::memory::TileLinkBus::TimedResponse pf_timed{};
+            simrv::memory::Bus::TimedResponse pf_timed{};
             if (machine.memory_.system_bus().try_get_timed_response(
                     ca_state.instruction_prefetch.source, pf_timed)) {
                 ca_state.instruction_prefetch.request_pending = false;
@@ -471,7 +475,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 }
 
                 if (fill.request_pending) {
-                    simrv::memory::TileLinkBus::TimedResponse timed{};
+                    simrv::memory::Bus::TimedResponse timed{};
                     if (!machine.memory_.system_bus().try_get_timed_response(fill.source, timed)) {
                         ca_state.waiting_for_interconnect = true;
                         return;
@@ -582,7 +586,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 }
 
                 if (fill.request_pending) {
-                    simrv::memory::TileLinkBus::TimedResponse timed{};
+                    simrv::memory::Bus::TimedResponse timed{};
                     if (!machine.memory_.system_bus().try_get_timed_response(fill.source, timed)) {
                         ca_state.waiting_for_interconnect = true;
                         return std::nullopt;
@@ -758,13 +762,11 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
             : ctx.ir_org;
 
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
-    bool is_valid = instruction_enabled_by_misa(state_.misa, op_id, w_compressed);
-    if (!is_valid && simrv::isa::is_zkn_operation(op_id) &&
-        cpu_model_config.has_isa_extension("zkn")) {
-        // Zbkb/Zbkc are multi-letter extensions.  They use the existing B execution unit but do
-        // not require the legacy B MISA bit when enabled through a preset.
-        is_valid = true;
+    auto effective_extensions = state_.enabled_extensions;
+    if (cpu_model_config.has_isa_extension("zkn")) {
+        add_extension_to_set(effective_extensions, "zkn");
     }
+    bool is_valid = instruction_enabled(state_.misa, effective_extensions, op_id, w_compressed);
     if (is_valid && misa_has_extension(state_.misa, isa::IsaExtension::E) &&
         state_.regs.xlen == 32) {
         const auto decoded = simrv::pipeline::Decoder(w_ir_tmp);
@@ -801,11 +803,18 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         if (op == Opcode::Amo) {
             const auto f3 = std::to_underlying(funct3_of(w_ir_tmp));
             if (state_.regs.xlen == 32) {
-                if (f3 != 2) {
+                if (f3 > 3) {
                     is_valid = false;
+                } else if (f3 == 3) {
+                    const auto rd_idx = (w_ir_tmp >> 7U) & 0x1FU;
+                    const auto rs2_idx = (w_ir_tmp >> 20U) & 0x1FU;
+                    if (op_id != isa::OperationId::AMOCAS_D || (rd_idx & 1U) != 0U ||
+                        (rs2_idx & 1U) != 0U) {
+                        is_valid = false;
+                    }
                 }
             } else {
-                if (f3 != 2 && f3 != 3) {
+                if (f3 > 4) {
                     is_valid = false;
                 }
             }
