@@ -159,7 +159,8 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "pci@30000000"), "PCIe ECAM node address present");
     expect(blob_contains_string(blob, "zihpm"), "Implemented HPM counter extension advertised");
     expect(blob_contains_string(blob, "zicntr"), "Base counters and timers advertised");
-    expect(blob_contains_string(blob, "sstc"), "Supervisor timer extension advertised");
+    expect(blob_contains_string(blob, "sstc") == simrv::xlen::kIsXLen64,
+           "Supervisor timer extension advertised when S-mode profile is active");
     expect(blob_contains_string(blob, std::string_view{"\0h\0", 3}) == simrv::xlen::kIsXLen64,
            "Hypervisor extension advertisement follows the hart ISA configuration");
     expect(blob_contains_string(blob, "zihintntl"), "Zihintntl extension advertised");
@@ -180,19 +181,23 @@ void test_generate_platform_fdt_pcie() {
                std::string(extension) + " mandatory RVA23 extension advertised");
     }
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
-    expect(blob_contains_string(blob, "svade"), "Svade page-fault behavior advertised");
-    expect(blob_contains_string(blob, "ssccptr"), "Ssccptr page-table reads advertised");
-    expect(blob_contains_string(blob, "sscounterenw"),
-           "Sscounterenw HPM counter enables advertised");
-    expect(blob_contains_string(blob, "sstvala"), "Sstvala supervisor trap values advertised");
-    expect(blob_contains_string(blob, "sstvecd"), "Sstvecd direct trap vectors advertised");
+    expect(blob_contains_string(blob, "svade") == simrv::xlen::kIsXLen64,
+           "Svade page-fault behavior advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "ssccptr") == simrv::xlen::kIsXLen64,
+           "Ssccptr page-table reads advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "sscounterenw") == simrv::xlen::kIsXLen64,
+           "Sscounterenw HPM counter enables advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "sstvala") == simrv::xlen::kIsXLen64,
+           "Sstvala supervisor trap values advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "sstvecd") == simrv::xlen::kIsXLen64,
+           "Sstvecd direct trap vectors advertised when S-mode profile is active");
     for (const auto extension : {"ssstateen", "shcounterenw", "shvstvala", "shtvala", "shvstvecd",
                                  "shvsatpa", "shgatpa"}) {
         expect(blob_contains_string(blob, extension) == simrv::xlen::kIsXLen64,
                std::string(extension) + " Sha component advertisement follows H support");
     }
-    expect(blob_contains_string(blob, "sscofpmf"),
-           "Sscofpmf overflow interrupt support advertised");
+    expect(blob_contains_string(blob, "sscofpmf") == simrv::xlen::kIsXLen64,
+           "Sscofpmf overflow interrupt support advertised when S-mode profile is active");
     expect(blob_contains_string(blob, "ziccrse"), "Ziccrse main-memory support advertised");
     expect(blob_contains_string(blob, "ziccif"), "Ziccif atomic fetch support advertised");
     expect(blob_contains_string(blob, "ssnpm") == simrv::xlen::kIsXLen64,

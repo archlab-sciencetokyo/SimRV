@@ -1951,16 +1951,16 @@ void test_category_groups_and_glossary() {
             rows, [&rows](const std::string& row) { rows.push_back(row); }, topic, 0, 30, 78);
         expect(!rows.empty(), "glossary renders rows for topic " + std::to_string(topic));
         bool found_nav = false;
+        std::string footer_text;
         for (const auto& r : rows) {
             expect(simrv::tui::get_display_width(r) <= 78,
                    "glossary row stays within the requested modal width");
-            if (r.find("Previous") != std::string::npos && r.find("Next") != std::string::npos &&
-                r.find("Close") != std::string::npos) {
-                found_nav = true;
-                break;
-            }
+            footer_text += r;
         }
+        found_nav = footer_text.contains("Previous") && footer_text.contains("Next") &&
+                    footer_text.contains("Close");
         expect(found_nav, "glossary includes consistent action-key navigation");
+        expect(footer_text.contains("Press /") || topic != 0, "glossary exposes its search key");
     }
 
     std::vector<std::string> pipeline_rows;
@@ -2029,6 +2029,56 @@ void test_category_groups_and_glossary() {
         expect(simrv::tui::get_display_width(row) <= 40,
                "narrow glossary rows do not exceed the modal width");
     }
+
+    std::vector<std::string> privilege_glossary_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        privilege_glossary_rows,
+        [&privilege_glossary_rows](const std::string& row) {
+            privilege_glossary_rows.push_back(row);
+        },
+        5, 0, 50, 100);
+    std::string privilege_glossary_text;
+    for (const auto& row : privilege_glossary_rows) privilege_glossary_text += row + '\n';
+    expect(privilege_glossary_text.contains("reference/isa/priv/machine.html") &&
+               privilege_glossary_text.contains("reference/profiles-overview/index.html") &&
+               privilege_glossary_text.contains("Press O"),
+           "privilege glossary exposes official RISC-V links and browser action");
+
+    simrv::tui::modals::GlossaryModal glossary_search;
+    glossary_search.handle_key('/', simrv::tui::TuiKey::None);
+    for (const char ch : std::string_view("pipeline stages")) {
+        glossary_search.handle_key(static_cast<uint8_t>(ch), simrv::tui::TuiKey::None);
+    }
+    std::vector<std::string> search_rows;
+    glossary_search.render_content(search_rows, 100, 40);
+    std::string search_text;
+    for (const auto& row : search_rows) search_text += row + '\n';
+    expect(search_text.contains("[glossary]") && search_text.contains("Pipeline"),
+           "glossary search finds topic content");
+
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    std::vector<std::string> detail_rows;
+    glossary_search.render_content(detail_rows, 100, 40);
+    std::string detail_text;
+    for (const auto& row : detail_rows) detail_text += row + '\n';
+    expect(detail_text.contains("Pipeline Stages"),
+           "selecting a glossary search result opens its topic");
+
+    glossary_search.handle_key('/', simrv::tui::TuiKey::None);
+    for (const char ch : std::string_view("RVA23S64")) {
+        glossary_search.handle_key(static_cast<uint8_t>(ch), simrv::tui::TuiKey::None);
+    }
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    detail_rows.clear();
+    glossary_search.render_content(detail_rows, 100, 40);
+    detail_text.clear();
+    for (const auto& row : detail_rows) detail_text += row + '\n';
+    expect(detail_text.contains("ISA Explanation") && detail_text.contains("RVA23S64") &&
+               detail_text.contains("Mandatory ISA") &&
+               detail_text.contains("docs.riscv.org/reference/rva23"),
+           "glossary search opens the shared profile explanation and spec URL");
 
     int topic_idx = 0;
     int scroll_offset = 0;

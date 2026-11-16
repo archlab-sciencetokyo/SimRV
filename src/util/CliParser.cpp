@@ -350,224 +350,19 @@ inline auto iequals(std::string_view a, std::string_view b) -> bool {
     });
 }
 
-struct ParsedIsaSpec {
-    isa::IsaSpec spec;
-    unsigned int xlen = 0;
-    bool has_zb = false;
-};
-
-auto parse_isa_base_spec(std::string_view value)
-    -> std::expected<std::optional<ParsedIsaSpec>, std::string> {
-    // Reject legacy draft single-letter 'b' shorthands with a clear explanation
-    if (iequals(value, "gcbv") || iequals(value, "rv32gcbv") || iequals(value, "rv64gcbv") ||
-        iequals(value, "gcb") || iequals(value, "rv32gcb") || iequals(value, "rv64gcb")) {
-        return std::unexpected(std::format(
-            "legacy shorthand '{}' is not a ratified RISC-V ISA string; use ratified 'gcv', "
-            "'gc', or multi-letter extensions like 'rv64gcv_zba_zbb_zbs'",
-            value));
+auto parse_isa_spec_cli(std::string_view value) -> std::expected<isa::IsaSpec, std::string> {
+    auto spec = isa::parse_isa_spec(value);
+    if (!spec) {
+        return std::unexpected(
+            std::format("unsupported or malformed RISC-V ISA string '{}'", value));
     }
-
-    auto make_parsed = [](std::string_view spec_str, unsigned int xlen_override,
-                          bool has_zb) -> std::optional<ParsedIsaSpec> {
-        auto parsed = isa::parse_isa_spec(spec_str);
-        if (!parsed) return std::nullopt;
-        const unsigned int final_xlen = xlen_override != 0 ? xlen_override : parsed->xlen;
-        if constexpr (!simrv::xlen::kIsXLen64) {
-            if (final_xlen == 64) return std::nullopt;
-        }
-        parsed->xlen = final_xlen;
-        if (has_zb) {
-            parsed->misa_bits |= isa::misa_extension_bit(isa::IsaExtension::B);
-        }
-        return ParsedIsaSpec{.spec = std::move(*parsed), .xlen = final_xlen, .has_zb = has_zb};
-    };
-
-    if (iequals(value, "gczb")) return make_parsed("gc", 0, true);
-    if (iequals(value, "gczbv")) return make_parsed("gcv", 0, true);
-    if (iequals(value, "rv32gczb")) return make_parsed("rv32gc", 32, true);
-    if (iequals(value, "rv32gczbv")) return make_parsed("rv32gcv", 32, true);
-    if constexpr (simrv::xlen::kIsXLen64) {
-        if (iequals(value, "rv64gczb")) return make_parsed("rv64gc", 64, true);
-        if (iequals(value, "rv64gczbv")) return make_parsed("rv64gcv", 64, true);
-    }
-
-    if (value.find('_') == std::string_view::npos &&
-        value.find_first_of("zZxX", 4) == std::string_view::npos) {
-        if (auto direct_raw = isa::parse_isa_spec(value)) {
-            if constexpr (!simrv::xlen::kIsXLen64) {
-                if (direct_raw->xlen == 64) {
-                    return std::unexpected(std::format(
-                        "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
-                }
-            }
-            return ParsedIsaSpec{.spec = *direct_raw, .xlen = direct_raw->xlen, .has_zb = false};
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        if (spec->xlen == 64) {
+            return std::unexpected(std::format(
+                "cannot run a 64-bit ISA string ({}) on a 32-bit simulator build", value));
         }
     }
-
-    return std::nullopt;
-}
-
-auto parse_isa_spec_cli(std::string_view value) -> std::expected<ParsedIsaSpec, std::string> {
-    auto base_match = parse_isa_base_spec(value);
-    if (!base_match) return std::unexpected(base_match.error());
-    if (*base_match) return **base_match;
-
-    // Standard ISA strings may attach their first multi-letter extension directly
-    // to the single-letter base (e.g. RV64GCZicntr2p0 or RV64GCZba). Underscores separate later
-    // multi-letter extensions.
-    const auto extension_start = value.find_first_of("zZxX", 4);
-    if (extension_start != std::string_view::npos) {
-        auto base_end = extension_start;
-        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
-        const auto base = value.substr(0, base_end);
-        auto parsed = parse_isa_spec_cli(base);
-        if (!parsed) return parsed;
-        auto extensions = value.substr(extension_start);
-        if (extensions.empty() || extensions.back() == '_') {
-            return std::unexpected("ISA string contains an empty extension name");
-        }
-        uint64_t seen_extensions = 0;
-        bool has_zb = false;
-        bool has_v = false;
-        while (!extensions.empty()) {
-            const auto next = extensions.find('_');
-            const auto extension = extensions.substr(0, next);
-            const auto supported_extension = [extension](std::string_view name) -> bool {
-                if (iequals(extension, name)) return true;
-                if (extension.size() <= name.size() ||
-                    !iequals(extension.substr(0, name.size()), name))
-                    return false;
-                const auto version = extension.substr(name.size());
-                return iequals(version, "1") || iequals(version, "1p0") || iequals(version, "2") ||
-                       iequals(version, "2p0");
-            };
-            const auto extension_id = [&]() -> uint64_t {
-                // CSR, Fence, Counters, Performance Monitoring
-                if (supported_extension("zicntr")) return 1ULL << 0;
-                if (supported_extension("zicsr")) return 1ULL << 1;
-                if (supported_extension("zifencei")) return 1ULL << 2;
-                if (supported_extension("zihpm")) return 1ULL << 3;
-
-                // Ratified Bitmanip (Zb)
-                if (supported_extension("zba")) return 1ULL << 4;
-                if (supported_extension("zbb")) return 1ULL << 5;
-                if (supported_extension("zbc")) return 1ULL << 6;
-                if (supported_extension("zbs")) return 1ULL << 7;
-                if (supported_extension("zb")) return 1ULL << 8;
-
-                // Cryptography Bitmanip & Scalar Crypto
-                if (supported_extension("zbkb")) return 1ULL << 9;
-                if (supported_extension("zbkc")) return 1ULL << 10;
-                if (supported_extension("zbkx")) return 1ULL << 11;
-                if (supported_extension("zknd")) return 1ULL << 12;
-                if (supported_extension("zkne")) return 1ULL << 13;
-                if (supported_extension("zknh")) return 1ULL << 14;
-                if (supported_extension("zksed")) return 1ULL << 15;
-                if (supported_extension("zksh")) return 1ULL << 16;
-                if (supported_extension("zkr")) return 1ULL << 17;
-                if (supported_extension("zkt")) return 1ULL << 18;
-                if (supported_extension("zkn")) return 1ULL << 19;
-                if (supported_extension("zks")) return 1ULL << 20;
-                if (supported_extension("zk")) return 1ULL << 21;
-
-                // Vector Sub-extensions
-                if (supported_extension("zve32x")) return 1ULL << 22;
-                if (supported_extension("zve32f")) return 1ULL << 23;
-                if (supported_extension("zve64x")) return 1ULL << 24;
-                if (supported_extension("zve64f")) return 1ULL << 25;
-                if (supported_extension("zve64d")) return 1ULL << 26;
-                if (supported_extension("zvl32b")) return 1ULL << 27;
-                if (supported_extension("zvl64b")) return 1ULL << 28;
-                if (supported_extension("zvl128b")) return 1ULL << 29;
-                if (supported_extension("zvl256b")) return 1ULL << 30;
-                if (supported_extension("zvl512b")) return 1ULL << 31;
-                if (supported_extension("zvl1024b")) return 1ULL << 32;
-
-                // Ratified Hints, Timers & Cache Management
-                if (supported_extension("zihintpause")) return 1ULL << 34;
-                if (supported_extension("sstc")) return 1ULL << 35;
-                if (supported_extension("zicbom")) return 1ULL << 36;
-                if (supported_extension("zicboz")) return 1ULL << 37;
-                if (supported_extension("zicbop")) return 1ULL << 38;
-
-                // Ratified Virtual Memory Extensions
-                if (supported_extension("svinval")) return 1ULL << 39;
-                if (supported_extension("svnapot")) return 1ULL << 40;
-                if (supported_extension("svpbmt")) return 1ULL << 41;
-                if (supported_extension("sscofpmf")) return 1ULL << 42;
-
-                // Wave 2 Cryptography & Code Size
-                if (supported_extension("zvkned")) return 1ULL << 43;
-                if (supported_extension("zvknha")) return 1ULL << 44;
-                if (supported_extension("zvknhb")) return 1ULL << 45;
-                if (supported_extension("zvkg")) return 1ULL << 46;
-                if (supported_extension("zvksed")) return 1ULL << 47;
-                if (supported_extension("zvksh")) return 1ULL << 48;
-                if (supported_extension("zvkn")) return 1ULL << 49;
-                if (supported_extension("zvks")) return 1ULL << 50;
-                if (supported_extension("zcmp")) return 1ULL << 51;
-                if (supported_extension("zcmt")) return 1ULL << 52;
-                if (supported_extension("zvkng")) return 1ULL << 53;
-                if (supported_extension("zvknc")) return 1ULL << 54;
-                if (supported_extension("zvksg")) return 1ULL << 55;
-                if (supported_extension("zvksc")) return 1ULL << 56;
-                if (supported_extension("zvk")) return 1ULL << 57;
-
-                return 0ULL;
-            }();
-            if (extension_id == 0) {
-                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
-            }
-            if ((seen_extensions & extension_id) != 0) {
-                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
-            }
-            seen_extensions |= extension_id;
-
-            if (std::ranges::find(parsed->spec.extensions, extension) ==
-                parsed->spec.extensions.end()) {
-                parsed->spec.extensions.emplace_back(extension);
-            }
-            isa::add_extension_to_set(parsed->spec.extension_set, extension);
-
-            if (extension_id >= (1ULL << 4) && extension_id <= (1ULL << 21)) {
-                has_zb = true;
-            }
-            if ((extension_id >= (1ULL << 22) && extension_id <= (1ULL << 32)) ||
-                (extension_id >= (1ULL << 43) && extension_id <= (1ULL << 50)) ||
-                (extension_id >= (1ULL << 53) && extension_id <= (1ULL << 57))) {
-                has_v = true;
-            }
-
-            if (next == std::string_view::npos) break;
-            extensions.remove_prefix(next + 1);
-        }
-
-        const bool final_has_v = has_v || parsed->spec.has(isa::IsaExtension::V);
-        const bool final_has_zb = has_zb || parsed->has_zb;
-        parsed->has_zb = final_has_zb;
-
-        if (final_has_v) {
-            parsed->spec.misa_bits |= isa::misa_extension_bit(isa::IsaExtension::V);
-        }
-        if (final_has_zb) {
-            parsed->spec.misa_bits |= isa::misa_extension_bit(isa::IsaExtension::B);
-        }
-        return parsed;
-    }
-
-    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    auto supported = std::format(
-        "e, em, emac, i, im, ima, imac, g, gc, gcv, gczb, gczbv, rv32e, rv32em, rv32emac, rv{}i, "
-        "rv{}im, "
-        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcv, rv{}gczb, rv{}gczbv",
-        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix,
-        xlen_suffix, xlen_suffix, xlen_suffix);
-    if constexpr (simrv::xlen::kIsXLen64) {
-        supported +=
-            ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcv, rv32gczb, rv32gczbv";
-    }
-    return std::unexpected(
-        std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
+    return *spec;
 }
 
 auto effective_isa_spec(const RuntimeOptions& options) -> isa::IsaSpec {
@@ -576,6 +371,10 @@ auto effective_isa_spec(const RuntimeOptions& options) -> isa::IsaSpec {
     }
     if (options.cpu_model_preset.has_value()) {
         return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa;
+    }
+    if (const auto profile_isa =
+            isa::parse_isa_spec(isa::profile_default_isa_string(options.profile))) {
+        return *profile_isa;
     }
     return isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
 }
@@ -850,9 +649,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         auto parsed_misa = parse_isa_spec_cli(*value);
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
-        result.options.isa_spec = parsed_misa->spec;
+        result.options.isa_spec = *parsed_misa;
         result.options.misa_xlen = parsed_misa->xlen;
-        result.options.has_zb_extensions = parsed_misa->has_zb;
         result.options.misa_override = true;
         return true;
     }
@@ -862,10 +660,16 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         auto parsed = isa::parse_architecture_profile(*value);
         if (!parsed) {
             return std::unexpected(
-                std::format("invalid architecture profile '{}' (valid: rva23, rva23s64, rva23u64, "
-                            "rvb23, rvb23s64, rvb23u64, rva22, rva22s64, rva22u64, rva20, "
-                            "rva20s64, rva20u64, legacy)",
+                std::format("invalid architecture profile '{}' (valid: rvi20u32, rvi20u64, "
+                            "rva20u64, rva20s64, rva22u64, rva22s64, rva23u64, rva23s64, "
+                            "rvb23u64, rvb23s64)",
                             *value));
+        }
+        const auto* profile = isa::profile_info(*parsed);
+        if (profile != nullptr && profile->xlen > simrv::xlen::kXLenBits) {
+            return std::unexpected(
+                std::format("profile '{}' requires RV{} but this simulator was built for RV{}",
+                            *value, profile->xlen, simrv::xlen::kXLenBits));
         }
         result.options.profile = *parsed;
         return true;
@@ -1112,18 +916,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
                 std::format("invalid network mode: {}. Allowed: user, none", net_opt));
         }
         result.options.net_mode = std::string(net_opt);
-        return true;
-    }
-    if (option_id == "--explain-inst") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t raw_val = 0;
-        if (!parse_u32_base0(*value, raw_val)) {
-            return std::unexpected(
-                std::format("invalid hex instruction value for --explain-inst: {}", *value));
-        }
-        result.action = CliAction::ExplainInstruction;
-        result.options.explain_inst_val = raw_val;
         return true;
     }
     if (option_id == "--log-mmio") {
@@ -1581,10 +1373,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                     opt_id == "--cpu-preset" || opt_id == "--trace" || opt_id == "--arch-trace" ||
                     opt_id == "--checkpoint-every" || opt_id == "--trace-range" ||
                     opt_id == "--trace-pc-range" || opt_id == "--tohost-addr" ||
-                    opt_id == "--signature" || opt_id == "--explain-inst" ||
-                    opt_id == "--log-level" || opt_id == "--log-format" || opt_id == "--runs" ||
-                    opt_id == "--warmups" || opt_id == "--json" || opt_id == "--benchmark" ||
-                    opt_id == "--uefi" || opt_id == "--uefi-vars" || opt_id == "--disk-size-mb" ||
+                    opt_id == "--signature" || opt_id == "--log-level" ||
+                    opt_id == "--log-format" || opt_id == "--runs" || opt_id == "--warmups" ||
+                    opt_id == "--json" || opt_id == "--benchmark" || opt_id == "--uefi" ||
+                    opt_id == "--uefi-vars" || opt_id == "--disk-size-mb" ||
                     opt_id == "--check-mission" || opt_id == "--create-mission" ||
                     opt_id == "--create-disk" || opt_id == "--dump-soc-manifest" ||
                     opt_id == "--scaffold-device-plugin" || opt_id == "--scaffold-cfu-plugin" ||
@@ -1620,24 +1412,36 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         if (subcmd == "explain") {
             if (subcmd_pos + 1 >= expanded_strings.size()) {
                 return std::unexpected(
-                    "explain subcommand requires an instruction word (e.g. 'simrv explain "
-                    "0x00000013')");
+                    "explain requires a query: instruction, profile, extension, "
+                    "or hexadecimal instruction word");
             }
-            const std::string& hex_arg = expanded_strings[subcmd_pos + 1];
-            if (hex_arg == "-h" || hex_arg == "--help") {
+            const std::string& query_or_type = expanded_strings[subcmd_pos + 1];
+            if (query_or_type == "-h" || query_or_type == "--help") {
                 result.action = CliAction::ShowHelp;
                 return result;
             }
-            std::string_view hex = hex_arg;
-            if (hex.starts_with("0x") || hex.starts_with("0X")) hex.remove_prefix(2);
-            uint32_t val = 0;
-            auto [p, ec] = std::from_chars(hex.data(), hex.data() + hex.size(), val, 16);
-            if (ec != std::errc{} || p != hex.data() + hex.size()) {
+            result.action = CliAction::ExplainQuery;
+            result.options.explain_query = query_or_type;
+            const size_t query_pos = subcmd_pos + 1;
+            if (query_or_type == "instruction" || query_or_type == "profile" ||
+                query_or_type == "extension") {
+                if (query_pos + 1 >= expanded_strings.size()) {
+                    return std::unexpected(
+                        std::format("explain {} requires a name", query_or_type));
+                }
+                result.options.explain_query_type =
+                    query_or_type == "instruction" ? ExplainQueryType::Instruction
+                    : query_or_type == "profile"   ? ExplainQueryType::Profile
+                                                   : ExplainQueryType::Extension;
+                result.options.explain_query = expanded_strings[query_pos + 1];
+                if (query_pos + 2 < expanded_strings.size()) {
+                    return std::unexpected("explain accepts exactly one query");
+                }
+            } else if (query_pos + 1 < expanded_strings.size()) {
                 return std::unexpected(
-                    std::format("invalid hexadecimal instruction word '{}'", hex_arg));
+                    "explain accepts one query; use instruction, profile, or "
+                    "extension to specify its type");
             }
-            result.action = CliAction::ExplainInstruction;
-            result.options.explain_inst_val = val;
             return result;
         }
         if (subcmd == "config") {
@@ -2121,9 +1925,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     const auto eff_isa = effective_isa_spec(*this);
     cfg.isa.isa_preset = eff_isa.misa_bits;
     cfg.isa.enabled_extensions.merge(eff_isa.extension_set);
-    if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
-        cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
-    }
     const auto default_gcv_bits =
         simrv::isa::parse_isa_spec("gcv").value_or(simrv::isa::IsaSpec{}).misa_bits;
     cfg.isa.misa_override =
@@ -2332,7 +2133,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
 auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
-           result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
+           result.action != CliAction::ExplainQuery && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
            result.action != CliAction::ShowThirdPartyNotices &&
            result.action != CliAction::CheckMission && result.action != CliAction::CreateMission &&
@@ -2358,7 +2159,7 @@ _simrv() {
         'disk:Create virtual disk images'
         'scaffold:Generate boilerplate for CPU models, devices, or CFU plugins'
         'config:Validate or export platform configurations'
-        'explain:Decode and explain a RISC-V instruction word'
+        'explain:Explain instruction mnemonics, ISA extensions, profiles, or instruction words'
         'doctor:Diagnostics and terminal capabilities'
         'completion:Generate shell autocompletion script'
     )
@@ -2573,7 +2374,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
               {.option = "--profile <PROFILE>",
                .description =
-                   "Select formal architecture profile (rva23, rva23s64, rva22, legacy)."},
+                   "Select a ratified architecture profile by canonical name (for example, "
+                   "rva23s64 or rvi20u32)."},
               {.option = "--vlen <BITS>",
                .description = "Set vector register length (128–1024 bits; default: 256 bits)."},
               {.option = "--config <PRESET | FILE>",
@@ -2731,9 +2533,6 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--signature <FILE>",
                .description = "Dump architectural test signature on exit.",
                .hidden_aliases = {"+signature="}},
-              {.option = "--explain-inst <HEX>",
-               .description = "Disassemble and explain a 32-bit instruction.",
-               .hidden_aliases = {"--explain"}},
               {.option = "--gdb", .description = "Start the GDB remote stub in CLI mode."},
               {.option = "--gdb-port <PORT>",
                .description = "Set the GDB server port (default: 1234)."},
@@ -2916,7 +2715,7 @@ auto cli_short_flag_takes_argument(char c) -> bool {
         {"disk create <OUT.IMG>", "Create virtual disk images"},
         {"scaffold <cpu|device|cfu>", "Generate boilerplate for models and plugins"},
         {"config <validate|export-soc>", "Validate or export system/SoC configurations"},
-        {"explain <HEX>", "Decode and explain a RISC-V instruction word"},
+        {"explain <QUERY>", "Explain an instruction, ISA extension, or architecture profile"},
         {"doctor", "Inspect environment, terminal, and capabilities"},
         {"completion <bash|zsh|fish>", "Generate shell autocompletion script"},
     };
@@ -2971,6 +2770,9 @@ auto cli_short_flag_takes_argument(char c) -> bool {
     std::print(stdout, "  {} run img/hello.bin\n", executable);
     std::print(stdout, "  {} bench img/hello.bin --runs 10\n", executable);
     std::print(stdout, "  {} explain 0x00000013\n", executable);
+    std::print(stdout, "  {} explain ADD\n", executable);
+    std::print(stdout, "  {} explain profile RVA23S64\n", executable);
+    std::print(stdout, "  {} explain extension Zba\n", executable);
     std::print(stdout, "  {} --os --image Image --disk rootfs.img\n", executable);
 
     std::exit(status);

@@ -225,6 +225,8 @@ struct TlManagerCapabilities {
     bool put_full = false;
     bool put_partial = false;
     bool logical_or = false;
+    bool logical = false;
+    bool arithmetic = false;
 };
 
 inline constexpr TlManagerCapabilities kCoherentRamCapabilities{
@@ -234,6 +236,8 @@ inline constexpr TlManagerCapabilities kCoherentRamCapabilities{
     .put_full = true,
     .put_partial = true,
     .logical_or = true,
+    .logical = true,
+    .arithmetic = true,
 };
 inline constexpr TlManagerCapabilities kMmioCapabilities{
     .get = true,
@@ -304,7 +308,7 @@ struct TlChannelA {
 
     [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size,
                                                      simrv::xlen::PhysAddr address) -> TlMask {
-        if (transfer_size > kTlBeatSize) return 0;
+        if (transfer_size > kTlBeatSize) return 0xff;
         const auto bytes = static_cast<unsigned>(1u << transfer_size);
         const auto lane = static_cast<unsigned>(address.raw() & (kTlBeatBytes - 1u));
         if (lane + bytes > kTlBeatBytes) return 0;
@@ -323,6 +327,9 @@ struct TlChannelB {
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
     simrv::xlen::PhysAddr address{0};
+    TlMask mask{0xff};
+    // Routing sideband for the multiplexed simulator interface.
+    simrv::xlen::HartId target{0};
 
     [[nodiscard]] constexpr auto operator==(const TlChannelB&) const noexcept -> bool = default;
 };
@@ -334,6 +341,7 @@ struct TlChannelC {
     TlSourceId source{0};
     simrv::xlen::HartId hart{0};
     simrv::xlen::PhysAddr address{0};
+    TlMask mask{0xff};
     TlData data{0};
     bool corrupt{false};
 
@@ -362,6 +370,28 @@ struct TlChannelE {
     TlSinkId sink{0};
 
     [[nodiscard]] constexpr auto operator==(const TlChannelE&) const noexcept -> bool = default;
+};
+
+/// Channel signals sampled by a TileLink manager at a clock edge.
+struct TlCycleInput {
+    bool a_valid{false};
+    TlChannelA a{};
+    bool c_valid{false};
+    TlChannelC c{};
+    bool b_ready{false};
+    bool d_ready{false};
+    bool e_valid{false};
+    TlChannelE e{};
+};
+
+struct TlCycleOutput {
+    bool a_ready{false};
+    bool c_ready{false};
+    bool b_valid{false};
+    TlChannelB b{};
+    bool d_valid{false};
+    TlChannelD d{};
+    bool e_ready{false};
 };
 
 }  // namespace simrv::memory

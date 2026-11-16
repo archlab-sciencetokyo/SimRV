@@ -23,19 +23,26 @@ auto TileLinkProtocolChecker::accept_a(const TlChannelA& request)
         return std::unexpected(
             std::format("A source {} acquire is not one cache block", request.source));
     }
-    if (!coherent && !intent && request.size > kTlBeatSize) {
+    const bool multibeat_memory = request.opcode == TlOpcodeA::Get ||
+                                  request.opcode == TlOpcodeA::PutFullData ||
+                                  request.opcode == TlOpcodeA::PutPartialData;
+    const bool has_data =
+        request.opcode == TlOpcodeA::PutFullData || request.opcode == TlOpcodeA::PutPartialData ||
+        request.opcode == TlOpcodeA::ArithmeticData || request.opcode == TlOpcodeA::LogicalData;
+    if (request.corrupt && !has_data) {
+        return std::unexpected(
+            std::format("A source {} marks a data-less message corrupt", request.source));
+    }
+    if (!coherent && !intent && !multibeat_memory && request.size > kTlBeatSize) {
         return std::unexpected(
             std::format("A source {} uncached transfer exceeds one beat", request.source));
     }
     const TlMask natural_mask = TlChannelA::compute_mask(request.size, request.address);
-    if (!coherent && request.mask != 0) {
-        const bool partial = request.opcode == TlOpcodeA::PutPartialData;
-        const bool valid_mask =
-            partial ? ((request.mask & ~natural_mask) == 0) : request.mask == natural_mask;
-        if (!valid_mask) {
-            return std::unexpected(
-                std::format("A source {} has an illegal byte mask", request.source));
-        }
+    const bool partial = request.opcode == TlOpcodeA::PutPartialData;
+    const bool valid_mask =
+        partial ? ((request.mask & ~natural_mask) == 0) : request.mask == natural_mask;
+    if (!valid_mask) {
+        return std::unexpected(std::format("A source {} has an illegal byte mask", request.source));
     }
     if (!sources_.emplace(request.source, request).second) {
         return std::unexpected(
@@ -56,7 +63,13 @@ auto TileLinkProtocolChecker::accept_b(const TlChannelB& probe)
     if (probe.opcode != TlOpcodeB::ProbeBlock && probe.opcode != TlOpcodeB::ProbePerm) {
         return std::unexpected("B probe contains an illegal opcode");
     }
-    active_probes_.insert(probe.address);
+    if (probe.mask != TlChannelA::compute_mask(probe.size, probe.address)) {
+        return std::unexpected("B probe has an illegal byte mask");
+    }
+    if (!active_probes_.emplace(probe.source, probe).second) {
+        return std::unexpected(std::format(
+            "B probe source {} is already active or capacity is exhausted", probe.source));
+    }
     return {};
 }
 
@@ -70,13 +83,34 @@ auto TileLinkProtocolChecker::accept_c(const TlChannelC& response)
             std::format("C response address {:#x} is not block-aligned", response.address.raw()));
     }
     if (response.opcode == TlOpcodeC::Release || response.opcode == TlOpcodeC::ReleaseData) {
+        if (response.opcode == TlOpcodeC::ReleaseData &&
+            response.mask != TlChannelA::compute_mask(response.size, response.address)) {
+            return std::unexpected("C ReleaseData has an illegal byte mask");
+        }
         if (!releases_.emplace(response.source, response).second) {
             return std::unexpected(
                 std::format("C release source {} was reused before ReleaseAck", response.source));
         }
     } else if (response.opcode == TlOpcodeC::ProbeAck ||
                response.opcode == TlOpcodeC::ProbeAckData) {
-        active_probes_.erase(response.address);
+        const auto probe = active_probes_.find(response.source);
+        if (probe == active_probes_.end()) {
+            return std::unexpected(
+                std::format("C ProbeAck references idle source {}", response.source));
+        }
+        if (probe->second.address != response.address || probe->second.size != response.size) {
+            return std::unexpected(
+                std::format("C ProbeAck does not match B source {}", response.source));
+        }
+        if (response.opcode == TlOpcodeC::ProbeAckData && response.report != TlReport::TtoB &&
+            response.report != TlReport::TtoN) {
+            return std::unexpected("C ProbeAckData must report a trunk-state transition");
+        }
+        if (response.opcode == TlOpcodeC::ProbeAckData &&
+            response.mask != TlChannelA::compute_mask(response.size, response.address)) {
+            return std::unexpected("C ProbeAckData has an illegal byte mask");
+        }
+        active_probes_.erase(probe);
     } else {
         return std::unexpected("C response contains an illegal opcode");
     }
@@ -88,6 +122,10 @@ auto TileLinkProtocolChecker::accept_d(const TlChannelD& response)
     if (response.opcode == TlOpcodeD::ReleaseAck) {
         auto rel_it = releases_.find(response.source);
         if (rel_it != releases_.end()) {
+            if (response.size != rel_it->second.size) {
+                return std::unexpected(
+                    std::format("D ReleaseAck size does not match C source {}", response.source));
+            }
             releases_.erase(rel_it);
             return {};
         }
@@ -125,10 +163,10 @@ auto TileLinkProtocolChecker::accept_d(const TlChannelD& response)
     const bool grant =
         response.opcode == TlOpcodeD::Grant || response.opcode == TlOpcodeD::GrantData;
     if (grant) {
-        if (response.sink == 0) {
+        if (!response.denied && response.sink == 0) {
             return std::unexpected("D grant uses reserved sink 0");
         }
-        if (!sinks_.emplace(response.sink, response.source).second) {
+        if (!response.denied && !sinks_.emplace(response.sink, response.source).second) {
             return std::unexpected(std::format("D grant reused live sink {}", response.sink));
         }
     }
@@ -151,6 +189,7 @@ auto TileLinkProtocolChecker::accept_e(const TlChannelE& acknowledgement)
 void TileLinkProtocolChecker::cancel(TlSourceId source) {
     sources_.erase(source);
     releases_.erase(source);
+    active_probes_.erase(source);
     for (auto it = sinks_.begin(); it != sinks_.end();) {
         if (it->second == source) {
             it = sinks_.erase(it);

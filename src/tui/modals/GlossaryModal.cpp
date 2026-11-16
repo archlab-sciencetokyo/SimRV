@@ -6,11 +6,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <cstdlib>
 #include <format>
 #include <numeric>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
@@ -31,7 +36,33 @@ struct TopicData {
     const char* title;
     const char* subtitle;
     std::vector<std::string> lines;
+    std::vector<std::string_view> references{};
 };
+
+auto open_reference(std::string_view url) -> void {
+    // URLs come only from the compile-time RISC-V reference table below.
+#if defined(_WIN32)
+    const std::string command = "start \"\" \"" + std::string(url) + "\"";
+#elif defined(__APPLE__)
+    const std::string command = "open '" + std::string(url) + "' >/dev/null 2>&1";
+#else
+    const std::string command = "xdg-open '" + std::string(url) + "' >/dev/null 2>&1";
+#endif
+    std::thread([command] { (void)std::system(command.c_str()); }).detach();
+}
+
+auto lower_copy(std::string_view text) -> std::string {
+    std::string result;
+    result.reserve(text.size());
+    for (const unsigned char ch : text) {
+        result.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return result;
+}
+
+auto contains_text(std::string_view text, std::string_view query) -> bool {
+    return lower_copy(text).find(lower_copy(query)) != std::string::npos;
+}
 
 auto get_topic_data(int index) -> TopicData {
     switch (index) {
@@ -39,175 +70,201 @@ auto get_topic_data(int index) -> TopicData {
             return {
                 .title = "1. RISC-V Registers & ABI Conventions",
                 .subtitle = "Standard Calling Conventions and Architectural State",
-                .lines = {
-                    "## General-purpose registers (x0–x31)",
-                    "• \033[1;33mx0 (zero)\033[0m : Hardwired to 0; writes are discarded.",
-                    "• \033[1;33mx1 (ra)\033[0m   : Return address for function calls "
-                    "(Caller-saved).",
-                    "• \033[1;33mx2 (sp)\033[0m   : Stack pointer; kept 16-byte aligned at "
-                    "standard "
-                    "ABI procedure-call boundaries.",
-                    "• \033[1;33mx3 (gp)\033[0m   : Global pointer for fast small-data access.",
-                    "• \033[1;33mx4 (tp)\033[0m   : Thread pointer for thread-local storage (TLS).",
-                    "• \033[1;33mx5..x7 (t0..t2)\033[0m   : Temporary registers (Caller-saved).",
-                    "• \033[1;33mx8 (s0/fp)\033[0m      : Saved register or Frame pointer "
-                    "(Callee-saved).",
-                    "• \033[1;33mx9 (s1)\033[0m         : Saved register (Callee-saved).",
-                    "• \033[1;33mx10..x17 (a0..a7)\033[0m : Function arguments and return values "
-                    "(a0, a1) (Caller-saved).",
-                    "• \033[1;33mx18..x27 (s2..s11)\033[0m: Saved registers (Callee-saved, "
-                    "preserved across calls).",
-                    "• \033[1;33mx28..x31 (t3..t6)\033[0m : Temporaries (Caller-saved).",
-                    "",
-                    "## Floating-point registers (f0–f31)",
-                    "• \033[1;33mfa0..fa7 (f10..f17)\033[0m: FP Arguments and return values.",
-                    "• \033[1;33mfs0..fs11\033[0m          : Conditionally callee-saved under the "
-                    "hardware floating-point calling convention.",
-                    "• \033[1;33mft0..ft11\033[0m          : FP Temporaries (Caller-saved).",
-                    "",
-                    "## Vector registers (v0–v31)",
-                    "• Scalable register size governed by \033[1;32mVLEN\033[0m (e.g. 128, 256 "
-                    "bits).",
-                    "• Element width is selected by \033[1;32mSEW\033[0m; register grouping is "
-                    "selected by \033[1;32mLMUL\033[0m through vector-configuration "
-                    "instructions."}};
+                .lines =
+                    {"## General-purpose registers (x0–x31)",
+                     "• \033[1;33mx0 (zero)\033[0m : Hardwired to 0; writes are discarded.",
+                     "• \033[1;33mx1 (ra)\033[0m   : Return address for function calls "
+                     "(Caller-saved).",
+                     "• \033[1;33mx2 (sp)\033[0m   : Stack pointer; kept 16-byte aligned at "
+                     "standard "
+                     "ABI procedure-call boundaries.",
+                     "• \033[1;33mx3 (gp)\033[0m   : Global pointer for fast small-data access.",
+                     "• \033[1;33mx4 (tp)\033[0m   : Thread pointer for thread-local storage "
+                     "(TLS).",
+                     "• \033[1;33mx5..x7 (t0..t2)\033[0m   : Temporary registers (Caller-saved).",
+                     "• \033[1;33mx8 (s0/fp)\033[0m      : Saved register or Frame pointer "
+                     "(Callee-saved).",
+                     "• \033[1;33mx9 (s1)\033[0m         : Saved register (Callee-saved).",
+                     "• \033[1;33mx10..x17 (a0..a7)\033[0m : Function arguments and return values "
+                     "(a0, a1) (Caller-saved).",
+                     "• \033[1;33mx18..x27 (s2..s11)\033[0m: Saved registers (Callee-saved, "
+                     "preserved across calls).",
+                     "• \033[1;33mx28..x31 (t3..t6)\033[0m : Temporaries (Caller-saved).",
+                     "",
+                     "## Floating-point registers (f0–f31)",
+                     "• \033[1;33mfa0..fa7 (f10..f17)\033[0m: FP Arguments and return values.",
+                     "• \033[1;33mfs0..fs11\033[0m          : Conditionally callee-saved under the "
+                     "hardware floating-point calling convention.",
+                     "• \033[1;33mft0..ft11\033[0m          : FP Temporaries (Caller-saved).",
+                     "",
+                     "## Vector registers (v0–v31)",
+                     "• Scalable register size governed by \033[1;32mVLEN\033[0m (e.g. 128, 256 "
+                     "bits).",
+                     "• Element width is selected by \033[1;32mSEW\033[0m; register grouping is "
+                     "selected by \033[1;32mLMUL\033[0m through vector-configuration "
+                     "instructions."},
+                .references = {"https://github.com/riscv-non-isa/riscv-elf-psabi-doc"}};
         case 1:  // Pipeline & Hazards
             return {
                 .title = "2. Pipeline Stages & Hazards",
                 .subtitle = "Instruction Pipelining, Dataflow, Forwarding, and Stalls",
-                .lines = {
-                    "## Classic five-stage pipeline",
-                    "• \033[1;32mIF \033[0m · Fetch the instruction at PC from the "
-                    "instruction cache or memory.",
-                    "• \033[1;32mID \033[0m · Decode opcode and operands; read rs1 "
-                    "and rs2 from the register file.",
-                    "• \033[1;32mEX \033[0m · Execute arithmetic or logic; calculate "
-                    "addresses and resolve branches.",
-                    "• \033[1;32mMEM\033[0m · Access the data cache or memory for "
-                    "loads and stores.",
-                    "• \033[1;32mWB \033[0m · Write an instruction result to rd when "
-                    "the instruction produces one.",
-                    "",
-                    "## Hazards and mitigations",
-                    "• \033[1;31mRAW\033[0m · A consumer needs a value before its "
-                    "producer reaches write-back.",
-                    "  ◦ \033[1;32mForwarding\033[0m · Bypass a result from a later stage "
-                    "directly to the dependent instruction.",
-                    "  ◦ \033[1;33mLoad-use interlock\033[0m · A dependent instruction "
-                    "typically waits one bubble because load data arrives after MEM.",
-                    "• \033[1;31mControl\033[0m · The correct next PC is not yet known "
-                    "after a branch or jump enters the pipeline.",
-                    "  ◦ \033[1;32mPrediction\033[0m · Fetch speculatively; redirect and flush "
-                    "younger work when the prediction is wrong.",
-                    "• \033[1;31mStructural\033[0m · Concurrent instructions require the "
-                    "same unavailable hardware resource.",
-                    "  ◦ \033[1;32mArbitration or stalling\033[0m · Serialize access until "
-                    "the resource becomes available.",
-                    "",
-                    "## Custom function units (CFU) & accelerators",
-                    "• \033[1;33mCUSTOM_0 (0x0B)\033[0m · Reserved opcode space for application-"
-                    "specific coprocessors.",
-                    "• \033[1;32mfunct3 / funct7\033[0m · Select custom function and sub-operation "
-                    "within the accelerator.",
-                    "• \033[1;32mDatapath timing\033[0m · CFU operations query cycle latency and "
-                    "can introduce pipeline stalls.",
-                    "• \033[1;32mDynamic plugins\033[0m · Compile C/C++ accelerators to .so using "
-                    "SimRvCfuPlugin ABI and load via --cfu-plugin."}};
+                .lines =
+                    {"## Classic five-stage pipeline",
+                     "• \033[1;32mIF \033[0m · Fetch the instruction at PC from the "
+                     "instruction cache or memory.",
+                     "• \033[1;32mID \033[0m · Decode opcode and operands; read rs1 "
+                     "and rs2 from the register file.",
+                     "• \033[1;32mEX \033[0m · Execute arithmetic or logic; calculate "
+                     "addresses and resolve branches.",
+                     "• \033[1;32mMEM\033[0m · Access the data cache or memory for "
+                     "loads and stores.",
+                     "• \033[1;32mWB \033[0m · Write an instruction result to rd when "
+                     "the instruction produces one.",
+                     "",
+                     "## Hazards and mitigations",
+                     "• \033[1;31mRAW\033[0m · A consumer needs a value before its "
+                     "producer reaches write-back.",
+                     "  ◦ \033[1;32mForwarding\033[0m · Bypass a result from a later stage "
+                     "directly to the dependent instruction.",
+                     "  ◦ \033[1;33mLoad-use interlock\033[0m · A dependent instruction "
+                     "typically waits one bubble because load data arrives after MEM.",
+                     "• \033[1;31mControl\033[0m · The correct next PC is not yet known "
+                     "after a branch or jump enters the pipeline.",
+                     "  ◦ \033[1;32mPrediction\033[0m · Fetch speculatively; redirect and flush "
+                     "younger work when the prediction is wrong.",
+                     "• \033[1;31mStructural\033[0m · Concurrent instructions require the "
+                     "same unavailable hardware resource.",
+                     "  ◦ \033[1;32mArbitration or stalling\033[0m · Serialize access until "
+                     "the resource becomes available.",
+                     "",
+                     "## Custom function units (CFU) & accelerators",
+                     "• \033[1;33mCUSTOM_0 (0x0B)\033[0m · Reserved opcode space for application-"
+                     "specific coprocessors.",
+                     "• \033[1;32mfunct3 / funct7\033[0m · Select custom function and "
+                     "sub-operation "
+                     "within the accelerator.",
+                     "• \033[1;32mDatapath timing\033[0m · CFU operations query cycle latency and "
+                     "can introduce pipeline stalls.",
+                     "• \033[1;32mDynamic plugins\033[0m · Compile C/C++ accelerators to .so using "
+                     "SimRvCfuPlugin ABI and load via --cfu-plugin."},
+                .references = {
+                    "https://docs.riscv.org/reference/isa/v20260120/unpriv/naming.html"}};
         case 2:  // Memory Hierarchy & Caches
-            return {.title = "3. Memory Hierarchy & Caches",
-                    .subtitle = "L1 Caches, Multi-Way Set Associativity, Line Replacement",
-                    .lines = {
-                        "## Cache address breakdown",
-                        "• A cache address is divided into \033[1;33mTag · Set index · Block "
-                        "offset\033[0m.",
-                        "  - \033[1;32mOffset\033[0m: Selects byte/word within cache block (e.g. "
-                        "64-byte line = 6 bits).",
-                        "  - \033[1;32mIndex\033[0m : Selects cache set (e.g. 16 sets = 4 bits).",
-                        "  - \033[1;32mTag\033[0m   : Remaining upper bits verified against line "
-                        "tags in the selected set.",
-                        "", "## Associativity and misses",
-                        "• \033[1;33mDirect-Mapped (1-Way)\033[0m: Exactly 1 line per set. Fast, "
-                        "but high conflict misses.",
-                        "• \033[1;33mN-Way Set-Associative\033[0m: N lines per set. Line "
-                        "replacement policy chooses a victim on a miss (often LRU or an "
-                        "approximation).",
-                        "• \033[1;33mFully Associative\033[0m    : Any block can go into any "
-                        "line (used in TLBs).",
-                        "", "## Write policies",
-                        "• \033[1;32mWrite-Back (with Dirty bit)\033[0m: Stores update cache "
-                        "line; propagated to the next memory level when the dirty line is evicted.",
-                        "• \033[1;32mWrite-Through\033[0m              : Stores update cache and "
-                        "next memory level as part of the store."}};
+            return {
+                .title = "3. Memory Hierarchy & Caches",
+                .subtitle = "L1 Caches, Multi-Way Set Associativity, Line Replacement",
+                .lines =
+                    {"## Cache address breakdown",
+                     "• A cache address is divided into \033[1;33mTag · Set index · Block "
+                     "offset\033[0m.",
+                     "  - \033[1;32mOffset\033[0m: Selects byte/word within cache block (e.g. "
+                     "64-byte line = 6 bits).",
+                     "  - \033[1;32mIndex\033[0m : Selects cache set (e.g. 16 sets = 4 bits).",
+                     "  - \033[1;32mTag\033[0m   : Remaining upper bits verified against line "
+                     "tags in the selected set.",
+                     "", "## Associativity and misses",
+                     "• \033[1;33mDirect-Mapped (1-Way)\033[0m: Exactly 1 line per set. Fast, "
+                     "but high conflict misses.",
+                     "• \033[1;33mN-Way Set-Associative\033[0m: N lines per set. Line "
+                     "replacement policy chooses a victim on a miss (often LRU or an "
+                     "approximation).",
+                     "• \033[1;33mFully Associative\033[0m    : Any block can go into any "
+                     "line (used in TLBs).",
+                     "", "## Write policies",
+                     "• \033[1;32mWrite-Back (with Dirty bit)\033[0m: Stores update cache "
+                     "line; propagated to the next memory level when the dirty line is evicted.",
+                     "• \033[1;32mWrite-Through\033[0m              : Stores update cache and "
+                     "next memory level as part of the store."},
+                .references = {"https://docs.riscv.org/reference/isa/unpriv/cmo.html"}};
         case 3:  // Virtual Memory & TLB
             return {
                 .title = "4. Virtual Memory & Page Translation",
                 .subtitle = "Sv39/Sv48 Paging, Translation Lookaside Buffer (TLB), Faults",
-                .lines = {
-                    "## Sv39 virtual memory",
-                    "• Sv39 uses 39 translated address bits in a sign-extended 64-bit virtual "
-                    "address and a three-level page table (VPN[2:0]).",
-                    "• Page size is \033[1;32m4 KiB (12-bit offset)\033[0m; Mega-pages (2 "
-                    "MiB) and Giga-pages (1 GiB) supported.",
-                    "• \033[1;33msatp (Supervisor Address Translation and Protection)\033[0m "
-                    "CSR holds root page table PPN.",
-                    "", "## Translation lookaside buffer (TLB)",
-                    "• High-speed associative cache holding recent \033[1;32mVirtual Page → "
-                    "Physical Page\033[0m mappings.",
-                    "• \033[1;32mTLB hit\033[0m : Translation is supplied without a page-table "
-                    "walk.",
-                    "• \033[1;31mTLB Miss\033[0m: Requires multi-cycle hardware Page Table "
-                    "Walk (PTW).",
-                    "", "## Page-table entry (PTE) bits",
-                    "• \033[1;33mV\033[0m: Valid, \033[1;33mR\033[0m: Readable, "
-                    "\033[1;33mW\033[0m: Writable, \033[1;33mX\033[0m: Executable, "
-                    "\033[1;33mU\033[0m: User accessible.",
-                    "• \033[1;33mA\033[0m: Accessed; \033[1;33mD\033[0m: Dirty. Depending on the "
-                    "implemented scheme, hardware updates them or faults for software handling."}};
+                .lines =
+                    {"## Sv39 virtual memory",
+                     "• Sv39 uses 39 translated address bits in a sign-extended 64-bit virtual "
+                     "address and a three-level page table (VPN[2:0]).",
+                     "• Page size is \033[1;32m4 KiB (12-bit offset)\033[0m; Mega-pages (2 "
+                     "MiB) and Giga-pages (1 GiB) supported.",
+                     "• \033[1;33msatp (Supervisor Address Translation and Protection)\033[0m "
+                     "CSR holds root page table PPN.",
+                     "", "## Translation lookaside buffer (TLB)",
+                     "• High-speed associative cache holding recent \033[1;32mVirtual Page → "
+                     "Physical Page\033[0m mappings.",
+                     "• \033[1;32mTLB hit\033[0m : Translation is supplied without a page-table "
+                     "walk.",
+                     "• \033[1;31mTLB Miss\033[0m: Requires multi-cycle hardware Page Table "
+                     "Walk (PTW).",
+                     "", "## Page-table entry (PTE) bits",
+                     "• \033[1;33mV\033[0m: Valid, \033[1;33mR\033[0m: Readable, "
+                     "\033[1;33mW\033[0m: Writable, \033[1;33mX\033[0m: Executable, "
+                     "\033[1;33mU\033[0m: User accessible.",
+                     "• \033[1;33mA\033[0m: Accessed; \033[1;33mD\033[0m: Dirty. Depending on the "
+                     "implemented scheme, hardware updates them or faults for software handling."},
+                .references = {"https://docs.riscv.org/reference/isa/priv/supervisor.html"}};
         case 4:  // Branch Prediction
             return {
                 .title = "5. Branch Prediction Mechanics",
                 .subtitle =
                     "Dynamic Branch History, Direction Predictors, and Branch Target Buffers",
-                .lines = {
-                    "## Direction prediction",
-                    "• \033[1;33mStatic Predictors\033[0m    : Always predict Taken (AT) or Always "
-                    "predict Not-Taken (ANT).",
-                    "• \033[1;33m1-Bit Dynamic\033[0m        : Remembers last outcome (0: "
-                    "Not-Taken, 1: Taken).",
-                    "• \033[1;33m2-Bit Bimodal Counter\033[0m: 4-state saturating state machine:",
-                    "  - \033[1;32m00: Strongly Not-Taken\033[0m · \033[1;33m01: Weakly "
-                    "Not-Taken\033[0m",
-                    "  - \033[1;33m10: Weakly Taken\033[0m · \033[1;32m11: Strongly "
-                    "Taken\033[0m",
-                    "  - Prevents single loop exit anomaly from thrashing the predictor state.",
-                    "• \033[1;33mGshare Predictor\033[0m     : XORs Global Branch History Register "
-                    "(GBHR) with branch PC bits.",
-                    "", "## Branch target buffer (BTB)",
-                    "• Cache of predicted control-flow targets that lets fetch redirect without "
-                    "waiting for target calculation."}};
+                .lines =
+                    {"## Direction prediction",
+                     "• \033[1;33mStatic Predictors\033[0m    : Always predict Taken (AT) or "
+                     "Always "
+                     "predict Not-Taken (ANT).",
+                     "• \033[1;33m1-Bit Dynamic\033[0m        : Remembers last outcome (0: "
+                     "Not-Taken, 1: Taken).",
+                     "• \033[1;33m2-Bit Bimodal Counter\033[0m: 4-state saturating state machine:",
+                     "  - \033[1;32m00: Strongly Not-Taken\033[0m · \033[1;33m01: Weakly "
+                     "Not-Taken\033[0m",
+                     "  - \033[1;33m10: Weakly Taken\033[0m · \033[1;32m11: Strongly "
+                     "Taken\033[0m",
+                     "  - Prevents single loop exit anomaly from thrashing the predictor state.",
+                     "• \033[1;33mGshare Predictor\033[0m     : XORs Global Branch History "
+                     "Register "
+                     "(GBHR) with branch PC bits.",
+                     "", "## Branch target buffer (BTB)",
+                     "• Cache of predicted control-flow targets that lets fetch redirect without "
+                     "waiting for target calculation."},
+                .references = {"https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html"}};
         case 5:  // Privilege Modes & Traps
         default:
             return {
                 .title = "6. Privilege Modes, CSRs & Traps",
                 .subtitle = "M/S/U Modes, Exceptions, Interrupts, and Control Registers",
-                .lines = {
-                    "## Privilege hierarchy",
-                    "• \033[1;31mMachine Mode (M-mode)\033[0m    : Highest privilege level; direct "
-                    "hardware access, OpenSBI.",
-                    "• \033[1;34mSupervisor Mode (S-mode)\033[0m : OS Kernel level; virtual memory "
-                    "management (Linux).",
-                    "• \033[1;32mUser Mode (U-mode)\033[0m       : Unprivileged user applications.",
-                    "", "## Core control and status registers (CSRs)",
-                    "• \033[1;33mmstatus / sstatus\033[0m: Global interrupt enable (MIE/SIE) and "
-                    "previous privilege mode (MPP/SPP).",
-                    "• \033[1;33mmepc / sepc\033[0m      : Saved Program Counter where "
-                    "exception/interrupt occurred.",
-                    "• \033[1;33mmcause / scause\033[0m  : Numeric reason code (MSB=1 for "
-                    "Interrupt, MSB=0 for Exception).",
-                    "• \033[1;33mmtvec / stvec\033[0m    : Base trap handler entry vector address "
-                    "(Direct or Vectored).",
-                    "• \033[1;33mmedeleg / mideleg\033[0m: Bitmaps selecting exceptions and "
-                    "interrupts delegated from M-mode to S-mode."}};
+                .lines =
+                    {"## Privilege hierarchy",
+                     "• \033[1;31mMachine Mode (M-mode)\033[0m    : Highest privilege level; "
+                     "direct "
+                     "hardware access, OpenSBI.",
+                     "• \033[1;34mSupervisor Mode (S-mode)\033[0m : OS Kernel level; virtual "
+                     "memory "
+                     "management (Linux).",
+                     "• \033[1;32mUser Mode (U-mode)\033[0m       : Unprivileged user "
+                     "applications.",
+                     "", "## Core control and status registers (CSRs)",
+                     "• \033[1;33mmstatus / sstatus\033[0m: Global interrupt enable (MIE/SIE) and "
+                     "previous privilege mode (MPP/SPP).",
+                     "• \033[1;33mmepc / sepc\033[0m      : Saved Program Counter where "
+                     "exception/interrupt occurred.",
+                     "• \033[1;33mmcause / scause\033[0m  : Numeric reason code (MSB=1 for "
+                     "Interrupt, MSB=0 for Exception).",
+                     "• \033[1;33mmtvec / stvec\033[0m    : Base trap handler entry vector address "
+                     "(Direct or Vectored).",
+                     "• \033[1;33mmedeleg / mideleg\033[0m: Bitmaps selecting exceptions and "
+                     "interrupts delegated from M-mode to S-mode.",
+                     "", "## ISA names and profiles",
+                     "• B is the ratified Bit-Manipulation extension; Zba, Zbb, Zbc, and Zbs name "
+                     "standard subsets.",
+                     "• S and U are MISA privilege-support bits, not instruction-set extension "
+                     "letters.",
+                     "• RVI20, RVA20, RVA22, RVA23, and RVB23 define ratified software profiles.",
+                     "", "## Official RISC-V references",
+                     "• Press O to open the next reference in your browser."},
+                .references = {"https://docs.riscv.org/reference/isa/v20260120/unpriv/naming.html",
+                               "https://docs.riscv.org/reference/isa/priv/machine.html",
+                               "https://docs.riscv.org/reference/isa/unpriv/b-st-ext.html",
+                               "https://docs.riscv.org/reference/profiles-overview/index.html"}};
     }
 }
 
@@ -220,10 +277,154 @@ void GlossaryModal::open(int& topic_idx, int& scroll_offset) {
 
 void GlossaryModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
     auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    if (explain_detail_active_) {
+        const auto kind =
+            explain_query_type_ == "instruction" ? simrv::explain::ExplainEntryKind::Instruction
+            : explain_query_type_ == "profile"   ? simrv::explain::ExplainEntryKind::Profile
+                                                 : simrv::explain::ExplainEntryKind::Extension;
+        const auto entry = simrv::explain::find_explain_entry(explain_query_name_, kind);
+        const int wrap_w = std::max(10, width - 4);
+        const auto add_wrapped = [&](std::string_view line) {
+            for (const auto& wrapped : wrap_ansi_line(std::string(line), wrap_w, 2)) {
+                add_row(wrapped);
+            }
+        };
+        add_row(build_section_divider("ISA Explanation", kThemeSky));
+        if (entry) {
+            add_wrapped(std::format("{}: {}", explain_query_type_, entry->name));
+            add_wrapped(entry->summary);
+            add_wrapped(entry->description);
+            add_wrapped(std::format("Spec: {}", entry->spec_reference));
+            add_wrapped(std::format("URL: {}", entry->spec_url));
+            add_wrapped("Press O to open this reference, Esc to return to search results.");
+        } else {
+            add_row("This ISA entry is no longer available in the simulator catalog.");
+        }
+        return;
+    }
+    if (search_results_active_) {
+        const int wrap_w = std::max(10, width - 4);
+        add_row(build_section_divider("Glossary Search", kThemeSky));
+        add_row(std::format("Search: {}{}", search_query_, search_input_active_ ? "_" : ""));
+        add_row(
+            "Type to filter. Enter a result to open it; j/k move; Esc returns to the glossary.");
+        if (search_matches_.empty()) {
+            add_row("No matching glossary topics or ISA entries.");
+        } else {
+            add_row(std::format("{} result(s)", search_matches_.size()));
+            const int first =
+                std::clamp(search_selection_ - 8, 0,
+                           std::max(0, static_cast<int>(search_matches_.size()) - 16));
+            const int last = std::min(static_cast<int>(search_matches_.size()), first + 16);
+            for (int i = first; i < last; ++i) {
+                const auto& match = search_matches_.at(static_cast<std::size_t>(i));
+                const std::string label =
+                    match.isa_entry
+                        ? std::format("[{}] {} — {}", match.type, match.name, match.summary)
+                        : std::format("[glossary] {}", match.name);
+                for (const auto& line : wrap_ansi_line(
+                         std::format("{}{}", i == search_selection_ ? "> " : "  ", label), wrap_w,
+                         4)) {
+                    add_row(line);
+                }
+            }
+        }
+        return;
+    }
     render(content_rows, add_row, topic_idx_, scroll_offset_, height, width);
 }
 
 auto GlossaryModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (explain_detail_active_) {
+        if (byte == 27 || key == TuiKey::Esc) {
+            explain_detail_active_ = false;
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'o' || byte == 'O') {
+            const auto kind =
+                explain_query_type_ == "instruction" ? simrv::explain::ExplainEntryKind::Instruction
+                : explain_query_type_ == "profile"   ? simrv::explain::ExplainEntryKind::Profile
+                                                     : simrv::explain::ExplainEntryKind::Extension;
+            if (const auto entry = simrv::explain::find_explain_entry(explain_query_name_, kind)) {
+                open_reference(entry->spec_url);
+            }
+        }
+        return framework::ModalAction::Continue;
+    }
+
+    if (search_input_active_) {
+        if (byte == 27 || key == TuiKey::Esc) {
+            search_input_active_ = false;
+            search_results_active_ = false;
+            search_query_.clear();
+            search_matches_.clear();
+            return framework::ModalAction::Continue;
+        }
+        if (key == TuiKey::Enter || key == TuiKey::Newline) {
+            search_input_active_ = false;
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 8 || byte == 127 || key == TuiKey::Backspace) {
+            if (!search_query_.empty()) search_query_.pop_back();
+            refresh_search();
+            return framework::ModalAction::Continue;
+        }
+        if (byte >= 32 && byte <= 126) {
+            search_query_.push_back(static_cast<char>(byte));
+            refresh_search();
+        }
+        return framework::ModalAction::Continue;
+    }
+
+    if (search_results_active_) {
+        if (byte == 27 || key == TuiKey::Esc) {
+            search_results_active_ = false;
+            search_query_.clear();
+            search_matches_.clear();
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'j' || byte == 'J') {
+            if (!search_matches_.empty()) {
+                search_selection_ =
+                    std::min(search_selection_ + 1, static_cast<int>(search_matches_.size()) - 1);
+            }
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'k' || byte == 'K') {
+            search_selection_ = std::max(0, search_selection_ - 1);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == '/') {
+            search_input_active_ = true;
+            return framework::ModalAction::Continue;
+        }
+        if (key == TuiKey::Enter || key == TuiKey::Newline || byte == ' ') {
+            if (search_matches_.empty()) return framework::ModalAction::Continue;
+            const auto& match = search_matches_.at(static_cast<std::size_t>(search_selection_));
+            if (match.isa_entry) {
+                explain_query_type_ = match.type;
+                explain_query_name_ = match.name;
+                explain_detail_active_ = true;
+            } else {
+                topic_idx_ = match.topic_index;
+                scroll_offset_ = 0;
+                search_results_active_ = false;
+                search_query_.clear();
+                search_matches_.clear();
+            }
+            return framework::ModalAction::Continue;
+        }
+        return framework::ModalAction::Continue;
+    }
+
+    if (byte == '/') {
+        search_query_.clear();
+        search_selection_ = 0;
+        search_results_active_ = true;
+        search_input_active_ = true;
+        refresh_search();
+        return framework::ModalAction::Continue;
+    }
     if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
         key == simrv::tui::TuiKey::QuestionMark) {
         return framework::ModalAction::Close;
@@ -236,9 +437,18 @@ auto GlossaryModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalActi
         move_topic(topic_idx_, scroll_offset_, -1);
         return framework::ModalAction::Continue;
     }
+    if (byte == 'o' || byte == 'O') {
+        const auto data = get_topic_data(topic_idx_);
+        if (!data.references.empty()) {
+            open_reference(data.references.at(reference_idx_ % data.references.size()));
+            ++reference_idx_;
+        }
+        return framework::ModalAction::Continue;
+    }
     if (byte >= '1' && byte <= '6') {
         topic_idx_ = byte - '1';
         scroll_offset_ = 0;
+        reference_idx_ = 0;
         return framework::ModalAction::Continue;
     }
     if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
@@ -248,6 +458,43 @@ auto GlossaryModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalActi
     return framework::ModalAction::Continue;
 }
 
+void GlossaryModal::refresh_search() {
+    search_matches_.clear();
+    search_selection_ = 0;
+    if (search_query_.empty()) return;
+
+    for (const auto& entry : simrv::explain::search_explain_entries(search_query_)) {
+        const char* type = entry.kind == simrv::explain::ExplainEntryKind::Instruction
+                               ? "instruction"
+                           : entry.kind == simrv::explain::ExplainEntryKind::Profile ? "profile"
+                                                                                     : "extension";
+        if (search_matches_.size() < 100) {
+            search_matches_.push_back(SearchMatch{
+                .isa_entry = true,
+                .type = type,
+                .name = entry.name,
+                .summary = entry.summary,
+            });
+        }
+    }
+
+    for (int index = 0; index < 6; ++index) {
+        const auto topic = get_topic_data(index);
+        bool matched = contains_text(topic.title, search_query_) ||
+                       contains_text(topic.subtitle, search_query_);
+        for (const auto& line : topic.lines)
+            matched = matched || contains_text(line, search_query_);
+        if (matched) {
+            search_matches_.push_back(SearchMatch{
+                .topic_index = index,
+                .type = {},
+                .name = topic.title,
+                .summary = topic.subtitle,
+            });
+        }
+    }
+}
+
 void GlossaryModal::handle_wheel(int delta) { scroll_content(scroll_offset_, delta * 2, 30); }
 
 auto GlossaryModal::handle_control_click(int content_row, size_t action_index)
@@ -255,6 +502,7 @@ auto GlossaryModal::handle_control_click(int content_row, size_t action_index)
     if (content_row == 0) {
         topic_idx_ = static_cast<int>(action_index);
         scroll_offset_ = 0;
+        reference_idx_ = 0;
     } else if (action_index == 0) {
         move_topic(topic_idx_, scroll_offset_, -1);
     } else if (action_index == 1) {
@@ -287,6 +535,7 @@ auto GlossaryModal::handle_click(framework::ScreenCoord local_pt, framework::Scr
             if (local_pt.x >= current_x && local_pt.x < current_x + kTabWidths.at(i)) {
                 topic_idx_ = static_cast<int>(i);
                 scroll_offset_ = 0;
+                reference_idx_ = 0;
                 return framework::ModalAction::Continue;
             }
             current_x += kTabWidths.at(i) + kSeparatorWidth;
@@ -333,6 +582,7 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
     };
 
     emit_row(build_modal_tab_bar(kTopicNames, static_cast<std::size_t>(topic_idx)));
+    emit_row("Press / to search glossary topics and ISA entries.");
 
     TopicData const data = get_topic_data(topic_idx);
     for (const auto& w : wrap_ansi_line(std::format(" \033[1m{}\033[0m", data.title), wrap_w, 2)) {
@@ -373,6 +623,12 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
             add_body_row(" " + wrapped);
         }
     }
+    for (std::size_t i = 0; i < data.references.size(); ++i) {
+        for (const auto& wrapped :
+             wrap_ansi_line(std::format(" • [{}] {}", i + 1, data.references[i]), wrap_w, 4)) {
+            add_body_row(" " + wrapped);
+        }
+    }
 
     // Keep modal geometry independent of scrolling. Tabs/title/subtitle and the footer consume six
     // content rows; the remaining rows form a stable body viewport. Previously, dropping rows
@@ -395,20 +651,24 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
                                       ModalActionHint{.key = ">", .action = "Next"},
                                       ModalActionHint{.key = "^", .action = "Up"},
                                       ModalActionHint{.key = "v", .action = "Down"},
+                                      ModalActionHint{.key = "O", .action = "Open spec"},
                                       ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         const std::array unicode_actions{ModalActionHint{.key = "←", .action = "Previous"},
                                          ModalActionHint{.key = "→", .action = "Next"},
                                          ModalActionHint{.key = "↑", .action = "Up"},
                                          ModalActionHint{.key = "↓", .action = "Down"},
+                                         ModalActionHint{.key = "O", .action = "Open spec"},
                                          ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     } else {
         const std::array ansi_actions{ModalActionHint{.key = "<", .action = "Previous"},
                                       ModalActionHint{.key = ">", .action = "Next"},
+                                      ModalActionHint{.key = "O", .action = "Open spec"},
                                       ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         const std::array unicode_actions{ModalActionHint{.key = "←", .action = "Previous"},
                                          ModalActionHint{.key = "→", .action = "Next"},
+                                         ModalActionHint{.key = "O", .action = "Open spec"},
                                          ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));

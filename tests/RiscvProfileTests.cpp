@@ -2442,11 +2442,11 @@ void test_profile_engine() {
          .expect_v = false},
         {.profile = ArchitectureProfile::Rva22U64,
          .canonical = "rva22u64",
-         .expect_b = false,
+         .expect_b = true,
          .expect_v = false},
         {.profile = ArchitectureProfile::Rva22S64,
          .canonical = "rva22s64",
-         .expect_b = false,
+         .expect_b = true,
          .expect_v = false},
         {.profile = ArchitectureProfile::Rva23U64,
          .canonical = "rva23u64",
@@ -2647,6 +2647,7 @@ void test_track1a_zkr_svadu_sspm() {
         acquire.hart = cpu.hart_id();
         acquire.address = simrv::xlen::PhysAddr{line_base};
         acquire.size = simrv::memory::kTlBlockSize;
+        acquire.mask = simrv::memory::TlChannelA::compute_mask(acquire.size, acquire.address);
         simrv::memory::TlChannelD grant{};
         std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> acquired_line{};
         TEST_ASSERT(bus.acquire_block(acquire, grant, acquired_line));
@@ -3993,12 +3994,21 @@ void test_track2b_scalar_crypto_gating() {
     // 1. Zkne enables encrypt and key schedule
     ExtensionSet zkne_set{};
     zkne_set.set(MultiLetterExtension::Zkne);
-    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES32ESI));
-    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES32ESMI));
-    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64ES));
-    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64ESM));
-    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64KS1I));
-    TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64KS2));
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES32ESI));
+        TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES32ESMI));
+        TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64ES));
+        TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64ESM));
+        TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64KS1I));
+        TEST_ASSERT(instruction_enabled(misa, zkne_set, AES64KS2));
+    } else {
+        TEST_ASSERT(instruction_enabled(misa, zkne_set, AES32ESI));
+        TEST_ASSERT(instruction_enabled(misa, zkne_set, AES32ESMI));
+        TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64ES));
+        TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64ESM));
+        TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64KS1I));
+        TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64KS2));
+    }
     TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64DS));
     TEST_ASSERT(!instruction_enabled(misa, zkne_set, AES64IM));
     TEST_ASSERT(!instruction_enabled(misa, zkne_set, SHA256SIG0));
@@ -4006,13 +4016,23 @@ void test_track2b_scalar_crypto_gating() {
     // 2. Zknd enables decrypt and key schedule
     ExtensionSet zknd_set{};
     zknd_set.set(MultiLetterExtension::Zknd);
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES32DSI));
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES32DSMI));
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64DS));
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64DSM));
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64IM));
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64KS1I));
-    TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64KS2));
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES32DSI));
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES32DSMI));
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64DS));
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64DSM));
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64IM));
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64KS1I));
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES64KS2));
+    } else {
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES32DSI));
+        TEST_ASSERT(instruction_enabled(misa, zknd_set, AES32DSMI));
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64DS));
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64DSM));
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64IM));
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64KS1I));
+        TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64KS2));
+    }
     TEST_ASSERT(!instruction_enabled(misa, zknd_set, AES64ES));
 
     // 3. Zknh enables SHA-256 and SHA-512
@@ -4022,12 +4042,21 @@ void test_track2b_scalar_crypto_gating() {
     TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SIG1));
     TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SUM0));
     TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA256SUM1));
-    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0));
-    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG1));
-    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SUM0));
-    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SUM1));
-    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0L));
-    TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0H));
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0));
+        TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG1));
+        TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SUM0));
+        TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SUM1));
+        TEST_ASSERT(!instruction_enabled(misa, zknh_set, SHA512SIG0L));
+        TEST_ASSERT(!instruction_enabled(misa, zknh_set, SHA512SIG0H));
+    } else {
+        TEST_ASSERT(!instruction_enabled(misa, zknh_set, SHA512SIG0));
+        TEST_ASSERT(!instruction_enabled(misa, zknh_set, SHA512SIG1));
+        TEST_ASSERT(!instruction_enabled(misa, zknh_set, SHA512SUM0));
+        TEST_ASSERT(!instruction_enabled(misa, zknh_set, SHA512SUM1));
+        TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0L));
+        TEST_ASSERT(instruction_enabled(misa, zknh_set, SHA512SIG0H));
+    }
     TEST_ASSERT(!instruction_enabled(misa, zknh_set, SM4ED));
 
     // 4. Zksed enables SM4
@@ -4047,8 +4076,13 @@ void test_track2b_scalar_crypto_gating() {
     // 6. Compound Zkn enables Zkne, Zknd, Zknh
     ExtensionSet zkn_set{};
     add_extension_to_set(zkn_set, "zkn");
-    TEST_ASSERT(instruction_enabled(misa, zkn_set, AES64ES));
-    TEST_ASSERT(instruction_enabled(misa, zkn_set, AES64DS));
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(instruction_enabled(misa, zkn_set, AES64ES));
+        TEST_ASSERT(instruction_enabled(misa, zkn_set, AES64DS));
+    } else {
+        TEST_ASSERT(instruction_enabled(misa, zkn_set, AES32ESI));
+        TEST_ASSERT(instruction_enabled(misa, zkn_set, AES32DSI));
+    }
     TEST_ASSERT(instruction_enabled(misa, zkn_set, SHA256SIG0));
     TEST_ASSERT(!instruction_enabled(misa, zkn_set, SM4ED));
     TEST_ASSERT(!instruction_enabled(misa, zkn_set, SM3P0));
@@ -4063,8 +4097,13 @@ void test_track2b_scalar_crypto_gating() {
     // 8. Compound Zk enables Zkn + Zkr + Zkt (not Zks)
     ExtensionSet zk_set{};
     add_extension_to_set(zk_set, "zk");
-    TEST_ASSERT(instruction_enabled(misa, zk_set, AES64ES));
-    TEST_ASSERT(instruction_enabled(misa, zk_set, AES64DS));
+    if constexpr (simrv::xlen::kIsXLen64) {
+        TEST_ASSERT(instruction_enabled(misa, zk_set, AES64ES));
+        TEST_ASSERT(instruction_enabled(misa, zk_set, AES64DS));
+    } else {
+        TEST_ASSERT(instruction_enabled(misa, zk_set, AES32ESI));
+        TEST_ASSERT(instruction_enabled(misa, zk_set, AES32DSI));
+    }
     TEST_ASSERT(instruction_enabled(misa, zk_set, SHA256SIG0));
     TEST_ASSERT(!instruction_enabled(misa, zk_set, SM4ED));
     TEST_ASSERT(!instruction_enabled(misa, zk_set, SM3P0));

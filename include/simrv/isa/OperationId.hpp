@@ -810,6 +810,12 @@ enum OperationId : uint16_t {
     CM_MVSA01,
     CM_JT,
     CM_JALT,
+    /* Zicfiss (Shadow Stack) */
+    SSPUSH,
+    SSPOPCHK,
+    SSRDP,
+    SSAMOSWAP_W,
+    SSAMOSWAP_D,
     /* Others */
     ILLEGAL,
     OperationIdCount

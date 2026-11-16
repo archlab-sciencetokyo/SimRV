@@ -28,7 +28,6 @@
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
-#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/SerialDevice.hpp"
@@ -36,6 +35,7 @@
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MmioDevice.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -166,13 +166,13 @@ void test_rvcomp_profile_validation() {
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
-    const simrv::xlen::CsrValue ima_bits = simrv::isa::parse_isa_spec("ima").value().misa_bits;
+    const simrv::xlen::CsrValue ima_bits = simrv::isa::parse_isa_spec("rv32ima").value().misa_bits;
     const simrv::xlen::CsrValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
-    // In RVComp Verilog (RVComp/src/rvcom.vh): `define ISA_CODE 32'h40141101
+    // Standard RV32IMA misa encoding: MXL=1 (RV32), I (bit 8), M (bit 12), A (bit 0) -> 0x40001101
     if constexpr (!simrv::xlen::kIsXLen64) {
-        TEST_CHECK(ima_misa == 0x40141101U);
+        TEST_CHECK(ima_misa == 0x40001101U);
     } else {
-        TEST_CHECK(ima_misa == ((1ull << 62) | 0x00141101ULL));
+        TEST_CHECK(ima_misa == ((1ull << 62) | 0x00001101ULL));
     }
 
     // A model requiring XLEN=64 must be rejected on an RV32 build
@@ -209,10 +209,20 @@ void test_rvcomp_machine_application() {
     TEST_CHECK(cpu.pipeline_sim.config.div_latency == 34);
     TEST_CHECK(cpu.state().regs.xlen == 32);
     if constexpr (!simrv::xlen::kIsXLen64) {
-        TEST_CHECK(cpu.state().misa == 0x40141101U);
+        TEST_CHECK(cpu.state().misa == 0x40001101U);
     } else {
-        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL));
+        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00001101ULL));
     }
+
+    auto soc_cfg = simrv::core::SoCConfig::rvcomp();
+    TEST_CHECK(simrv::core::parse_soc_config(*path, soc_cfg));
+    simrv::core::MachineConfig rvcomp_cfg{};
+    rvcomp_cfg.cpu_model_config_override = profile;
+    rvcomp_cfg.soc = soc_cfg;
+    simrv::core::Machine rvcomp_machine(rvcomp_cfg);
+    TEST_CHECK(rvcomp_machine.initialize().has_value());
+    TEST_CHECK(rvcomp_machine.memory().system_bus().protocol() ==
+               simrv::memory::BusProtocol::Axi4LiteUnified);
 }
 
 void test_soc_metadata_parser() {
@@ -223,6 +233,7 @@ void test_soc_metadata_parser() {
     auto soc = simrv::core::SoCConfig::rvcomp();
     TEST_CHECK(simrv::core::parse_soc_config(*path, soc));
     TEST_CHECK(soc.name == "rvcomp");
+    TEST_CHECK(soc.bus_protocol == simrv::memory::BusProtocol::Axi4LiteUnified);
     TEST_CHECK(soc.disable_unlisted_devices);
     const auto* uart = soc.find(simrv::core::SoCDeviceKind::Uart);
     TEST_CHECK(uart != nullptr && uart->base == 0x10000000 && uart->size == 0x10 && uart->irq == 1);

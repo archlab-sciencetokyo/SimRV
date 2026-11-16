@@ -621,8 +621,12 @@ consteval auto generate_operation_info() {
               {.rd = b_int, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,
               side_csr);
 
-    // Privileged & System Extensions (Zimop, Zawrs, Svinval, Hypervisor)
-    set_props({MOP}, exec_def, {.rd = b_int, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none});
+    // Privileged & System Extensions (Zimop, Zicfiss, Zawrs, Svinval, Hypervisor)
+    set_props({MOP, SSRDP}, exec_def, {.rd = b_int, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none});
+    set_props({SSPUSH}, exec_def, {.rd = b_none, .rs1 = b_none, .rs2 = b_int, .rs3 = b_none},
+              mem_store);
+    set_props({SSPOPCHK}, exec_def, {.rd = b_none, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
+              mem_load);
     set_props({URET, SRET, MRET, MNRET, WFI}, exec_def,
               {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,
               side_sys);
@@ -647,11 +651,12 @@ consteval auto generate_operation_info() {
     set_props({LR_W, LR_D}, exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
               mem_atomic);
     set_props(
-        {SC_W,      SC_D,      AMOSWAP_W, AMOADD_W, AMOXOR_W, AMOAND_W, AMOOR_W, AMOMIN_W, AMOMAX_W,
-         AMOMINU_W, AMOMAXU_W, AMOSWAP_D, AMOADD_D, AMOXOR_D, AMOAND_D, AMOOR_D, AMOMIN_D, AMOMAX_D,
-         AMOMINU_D, AMOMAXU_D, AMOSWAP_B, AMOADD_B, AMOXOR_B, AMOAND_B, AMOOR_B, AMOMIN_B, AMOMAX_B,
-         AMOMINU_B, AMOMAXU_B, AMOSWAP_H, AMOADD_H, AMOXOR_H, AMOAND_H, AMOOR_H, AMOMIN_H, AMOMAX_H,
-         AMOMINU_H, AMOMAXU_H, AMOCAS_B,  AMOCAS_H, AMOCAS_W, AMOCAS_D, AMOCAS_Q},
+        {SC_W,     SC_D,      AMOSWAP_W, AMOADD_W,    AMOXOR_W,   AMOAND_W,  AMOOR_W,  AMOMIN_W,
+         AMOMAX_W, AMOMINU_W, AMOMAXU_W, AMOSWAP_D,   AMOADD_D,   AMOXOR_D,  AMOAND_D, AMOOR_D,
+         AMOMIN_D, AMOMAX_D,  AMOMINU_D, AMOMAXU_D,   AMOSWAP_B,  AMOADD_B,  AMOXOR_B, AMOAND_B,
+         AMOOR_B,  AMOMIN_B,  AMOMAX_B,  AMOMINU_B,   AMOMAXU_B,  AMOSWAP_H, AMOADD_H, AMOXOR_H,
+         AMOAND_H, AMOOR_H,   AMOMIN_H,  AMOMAX_H,    AMOMINU_H,  AMOMAXU_H, AMOCAS_B, AMOCAS_H,
+         AMOCAS_W, AMOCAS_D,  AMOCAS_Q,  SSAMOSWAP_W, SSAMOSWAP_D},
         exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_atomic);
 
     // F Extension (Single-Precision Floating Point)

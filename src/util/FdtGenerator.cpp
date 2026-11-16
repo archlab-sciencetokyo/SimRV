@@ -373,6 +373,21 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     append_if_enabled(simrv::isa::MultiLetterExtension::Zvksh, "zvksh");
     append_if_enabled(simrv::isa::MultiLetterExtension::Zcmp, "zcmp");
     append_if_enabled(simrv::isa::MultiLetterExtension::Zcmt, "zcmt");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfinx, "zfinx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zdinx, "zdinx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zhinx, "zhinx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smdbltrp, "smdbltrp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Ssdbltrp, "ssdbltrp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smcsrind, "smcsrind");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sscsrind, "sscsrind");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smrnmi, "smrnmi");
+
+    if (!simrv::isa::profile_info(config.execution.profile)->supervisor_profile) {
+        std::erase_if(guest_extensions, [](std::string_view ext) {
+            return ext.starts_with("sv") || ext.starts_with("ss") || ext.starts_with("sh") ||
+                   ext == "h";
+        });
+    }
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));

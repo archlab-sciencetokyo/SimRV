@@ -65,6 +65,7 @@ enum class TuiRegPage : uint8_t {
     DISPLAY,
     LIVE,  // Retired page id, reserved so saved layout ordinals remain stable.
     LOG,
+    DTREE,
     DISASM = CONSOLE
 };
 
@@ -158,11 +159,21 @@ inline constexpr TuiPageInfo kTuiPages[] = {
      .name = "Bus & Coherence",
      .tab_name = "Bus",
      .picker_label = "Bus & Coherence",
-     .description = "TileLink Bus Topology & Directory Hub",
+     .description = "Live bus traffic, protocol counters, and transaction history",
      .mission_slug = "bus",
      .accelerator = 'b',
      .picker_order = 6,
      .fast_mode_content = TuiFastModeContent::FastChangingDetail},
+    {.page = TuiRegPage::DTREE,
+     .group = TuiCategoryGroup::Memory,
+     .name = "Device Tree",
+     .tab_name = "DT",
+     .picker_label = "Device Tree & Maps",
+     .description = "Platform devices, memory maps, and activity counters",
+     .mission_slug = "device-tree",
+     .accelerator = 'n',
+     .picker_order = 15,
+     .fast_mode_content = TuiFastModeContent::SampledMetrics},
     {.page = TuiRegPage::PIPELINE,
      .group = TuiCategoryGroup::Pipeline,
      .name = "Pipeline Stages",

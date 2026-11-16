@@ -123,6 +123,14 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                         .next_hint = "Inspect a mapped address or descriptor.",
                         .glossary_topic = 5};
             break;
+        case TuiRegPage::DTREE:
+            guidance = {.title = "Platform device tree",
+                        .meaning = "Configured devices expose address ranges and interrupt lines.",
+                        .relationship = "Live status and bus counters connect the map to activity.",
+                        .next_action = KeyAction::InspectAddress,
+                        .next_hint = "Inspect a device address shown in the map.",
+                        .glossary_topic = 5};
+            break;
         case TuiRegPage::TRACE:
             guidance = {
                 .title = "Execution trace",

@@ -872,8 +872,8 @@ void test_privilege_returns_flush_cached_instructions() {
     expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
            "MRET invalidates cached ops so fetch permissions are rechecked");
 
-    const simrv::xlen::CsrValue misa_with_u = cpu.state().misa;
-    cpu.state().misa &= ~simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+    const bool user_mode_was_supported = cpu.state().user_mode_supported;
+    cpu.state().user_mode_supported = false;
     cpu.state().mstatus =
         static_cast<simrv::xlen::CsrValue>(simrv::xlen::PrivilegeLevel::Supervisor) << 11U;
     cpu.mret();
@@ -881,7 +881,7 @@ void test_privilege_returns_flush_cached_instructions() {
         cpu.state().priv == simrv::xlen::PrivilegeLevel::Supervisor &&
             simrv::core::mstatus_mpp(cpu.state().mstatus) == simrv::xlen::PrivilegeLevel::Machine,
         "MRET to S-mode resets MPP to M when U-mode is absent");
-    cpu.state().misa = misa_with_u;
+    cpu.state().user_mode_supported = user_mode_was_supported;
 
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
     cpu.decode_cache.insert(decoded.cpc, cached);
@@ -3568,10 +3568,8 @@ void test_named_isa_presets() {
 
     expect(simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::I) &&
                simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::M) &&
-               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::A) &&
-               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::S) &&
-               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::U),
-           "the named IMA profile includes I, M, A, S, U");
+               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::A),
+           "the named IMA ISA string includes I, M, A");
     expect(!simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::C) &&
                !simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::F),
            "the named IMA profile does not include C or F");
@@ -3614,6 +3612,19 @@ void test_sv32_page_walk() {
                                           kPrivSupervisor, 0, kSatp, 32, false);
     expect(translated.has_value() && *translated == 0x3234,
            "Sv32 walks a two-level page table and preserves the page offset");
+
+    simrv::memory::ReservationTable external_reservations;
+    mmu.walker().set_reservation_table(&external_reservations);
+    simrv::memory::ram_write_fast(
+        simrv::xlen::PhysAddr{kNext + 4},
+        ((kPhysical >> 12U) << 10U) | (kLeafFlags & ~std::to_underlying(simrv::PteFlag::A)),
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sw), ram_view);
+    external_reservations.set_external_reservation(1, simrv::xlen::PhysAddr{kNext + 4}, 4);
+    const auto updated = mmu.translate(simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read,
+                                       kPrivSupervisor, 0, kSatp, 32, true);
+    expect(updated.has_value() && !external_reservations.check_and_clear_external_reservation(
+                                      1, simrv::xlen::PhysAddr{kNext + 4}, 4),
+           "Sv32 hardware A-bit writes invalidate overlapping external reservations");
 
     constexpr simrv::xlen::Word kReservedNonLeaf = std::to_underlying(simrv::PteFlag::D);
     simrv::memory::ram_write_fast(
@@ -4276,9 +4287,7 @@ void test_lower_privilege_xlen_initialization() {
     if constexpr (simrv::xlen::kIsXLen64) {
         simrv::core::ArchState state;
         state.misa = static_cast<simrv::xlen::CsrValue>(uint64_t{1U} << 62U) |
-                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I) |
-                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
-                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I);
         state.initialize_lower_xlen_fields();
         expect(((static_cast<uint64_t>(state.mstatus) >> 32U) & 0x3U) == 1U &&
                    ((static_cast<uint64_t>(state.mstatus) >> 34U) & 0x3U) == 1U,
@@ -4289,9 +4298,7 @@ void test_lower_privilege_xlen_initialization() {
                "entering supervisor mode does not widen an RV32 machine personality");
 
         state.misa = static_cast<simrv::xlen::CsrValue>(uint64_t{2U} << 62U) |
-                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I) |
-                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
-                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+                     simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I);
         state.initialize_lower_xlen_fields();
         expect(((static_cast<uint64_t>(state.mstatus) >> 32U) & 0x3U) == 2U &&
                    ((static_cast<uint64_t>(state.mstatus) >> 34U) & 0x3U) == 2U,
@@ -4306,6 +4313,8 @@ void test_lower_privilege_xlen_initialization() {
 
         state.misa = static_cast<simrv::xlen::CsrValue>(uint64_t{2U} << 62U) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I);
+        state.supervisor_mode_supported = false;
+        state.user_mode_supported = false;
         state.initialize_lower_xlen_fields();
         expect(((static_cast<uint64_t>(state.mstatus) >> 32U) & 0xFU) == 0U,
                "M-only RV64 profiles expose absent UXL and SXL fields as read-only zero");
@@ -4738,7 +4747,8 @@ void test_tilelink_c_protocol_checker() {
                        .size = kTlBlockSize,
                        .source = 9,
                        .hart = simrv::xlen::HartId{0},
-                       .address = simrv::xlen::PhysAddr{0x80000040}};
+                       .address = simrv::xlen::PhysAddr{0x80000040},
+                       .mask = 0xff};
     expect(checker.accept_a(acquire).has_value(), "checker accepts one-block AcquireBlock");
     TlChannelD grant{.opcode = TlOpcodeD::GrantData,
                      .cap = TlCap::ToT,
@@ -5448,7 +5458,7 @@ inline auto vaesz_vs(uint32_t vd, uint32_t vs2, bool vm = true) -> uint32_t {
            (0x07U << 15U) | (0x2U << 12U) | ((vd & 0x1FU) << 7U) | 0x77U;
 }
 inline auto vaeskf1_vi(uint32_t vd, uint32_t vs2, uint32_t rnd, bool vm = true) -> uint32_t {
-    return (0x21U << 26U) | (static_cast<uint32_t>(vm) << 25U) | ((vs2 & 0x1FU) << 20U) |
+    return (0x22U << 26U) | (static_cast<uint32_t>(vm) << 25U) | ((vs2 & 0x1FU) << 20U) |
            ((rnd & 0x1FU) << 15U) | (0x2U << 12U) | ((vd & 0x1FU) << 7U) | 0x77U;
 }
 inline auto vaeskf2_vi(uint32_t vd, uint32_t vs2, uint32_t rnd, bool vm = true) -> uint32_t {
@@ -5479,7 +5489,7 @@ inline auto vsha2cl_vv(uint32_t vd, uint32_t vs2, uint32_t vs1, bool vm = true) 
 }
 
 inline auto vsm4k_vi(uint32_t vd, uint32_t vs2, uint32_t rgroup, bool vm = true) -> uint32_t {
-    return (0x20U << 26U) | (static_cast<uint32_t>(vm) << 25U) | ((vs2 & 0x1FU) << 20U) |
+    return (0x21U << 26U) | (static_cast<uint32_t>(vm) << 25U) | ((vs2 & 0x1FU) << 20U) |
            ((rgroup & 0x1FU) << 15U) | (0x2U << 12U) | ((vd & 0x1FU) << 7U) | 0x77U;
 }
 inline auto vsm4r_vv(uint32_t vd, uint32_t vs2, bool vm = true) -> uint32_t {
@@ -5605,9 +5615,10 @@ struct Wave2TestEnv {
         cpu.state().mtvec = trap_addr;
         cpu.state().pc = simrv::xlen::VirtAddr{code_addr};
         cpu.state().regs.write(simrv::xlen::RegId::Sp, stack_addr);
-        cpu.state().misa = simrv::isa::kMisaDefault |
-                           misa_extension_bit(simrv::isa::IsaExtension::V) |
-                           misa_extension_bit(simrv::isa::IsaExtension::C);
+        cpu.state().misa = simrv::isa::misa_with_mxl(
+            simrv::isa::kMisaDefault | misa_extension_bit(simrv::isa::IsaExtension::V) |
+                misa_extension_bit(simrv::isa::IsaExtension::C),
+            simrv::xlen::kXLenBits);
         cpu.state().mstatus |= simrv::core::MstatusBit::Vs;
 
         // Enable Wave 2 multi-letter extensions
@@ -5625,6 +5636,8 @@ struct Wave2TestEnv {
         cpu.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zvksh);
         cpu.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zvkg);
         cpu.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zvkb);
+        cpu.state().refresh_misa_status();
+        cpu.sync_decode_context();
 
         // Trap vector handler loop at 0x8000F000 (j .)
         const uint32_t j_self = 0x0000006FU;
@@ -5639,6 +5652,8 @@ struct Wave2TestEnv {
         c.state().pc = simrv::xlen::VirtAddr{at_addr};
         c.active_context().pending_exception.reset();
         std::memcpy(ram.data() + (at_addr - 0x80000000ULL), &ir, sizeof(ir));
+        c.decode_cache.flush();
+        c.block_cache.flush();
         c.run_cycle(machine);
         return (c.state().mcause == 0 && !c.active_context().pending_exception.has_value() &&
                 c.state().pc != simrv::xlen::VirtAddr{trap_addr});
@@ -5650,6 +5665,8 @@ struct Wave2TestEnv {
         c.state().pc = simrv::xlen::VirtAddr{at_addr};
         c.active_context().pending_exception.reset();
         std::memcpy(ram.data() + (at_addr - 0x80000000ULL), &ir, sizeof(ir));
+        c.decode_cache.flush();
+        c.block_cache.flush();
         c.run_cycle(machine);
         return (c.state().mcause == 0 && !c.active_context().pending_exception.has_value() &&
                 c.state().pc != simrv::xlen::VirtAddr{trap_addr});
@@ -5666,6 +5683,11 @@ void test_wave2_tier1_scalar_crypto() {
     Wave2TestEnv env;
     auto& c = env.cpu();
 
+    auto sext32 = [](uint32_t v) -> simrv::xlen::Register {
+        return static_cast<simrv::xlen::Register>(
+            static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(v)));
+    };
+
     // 1. SHA-256 (Common to RV32 and RV64)
     {
         const uint32_t sig0_in = 0x61626380U;
@@ -5676,7 +5698,7 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_sig0 = env.run_32(ir_sig0);
         if (decoded_sig0) {
             expect(ok_sig0, "sha256sig0 executed without exception");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x83bf8b3bU,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) == sext32(0x940e90efU),
                    "sha256sig0 computes exact FIPS 180-4 sigma0 for abc block");
         } else {
             expect(c.state().mcause ==
@@ -5692,7 +5714,7 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_sig1 = env.run_32(ir_sig1);
         if (decoded_sig1) {
             expect(ok_sig1, "sha256sig1 executed without exception");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x3da85f53U,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) == sext32(0x7da86405U),
                    "sha256sig1 computes exact FIPS 180-4 sigma1 for abc block");
         } else {
             expect(c.state().mcause ==
@@ -5708,7 +5730,7 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_sum0 = env.run_32(ir_sum0);
         if (decoded_sum0) {
             expect(ok_sum0, "sha256sum0 executed without exception");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x9a69432fU,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) == sext32(0xce20b47eU),
                    "sha256sum0 computes exact FIPS 180-4 Sum0 for H0");
         } else {
             expect(c.state().mcause ==
@@ -5724,7 +5746,7 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_sum1 = env.run_32(ir_sum1);
         if (decoded_sum1) {
             expect(ok_sum1, "sha256sum1 executed without exception");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0xa4088ab5U,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) == sext32(0x3587272bU),
                    "sha256sum1 computes exact FIPS 180-4 Sum1 for H4");
         } else {
             expect(c.state().mcause ==
@@ -5743,7 +5765,7 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_p0 = env.run_32(ir_p0);
         if (decoded_p0) {
             expect(ok_p0, "sm3p0 executed without exception");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0xd6688234U,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) == sext32(0xd6688234U),
                    "sm3p0 computes exact GB/T 32918 P0 permutation");
         } else {
             expect(c.state().mcause ==
@@ -5992,7 +6014,7 @@ void test_wave2_tier1_scalar_crypto() {
                    "sha512sig0l traps safely as IllegalInstruction when unimplemented");
         }
 
-        const uint32_t ir_s0h = enc::sha512sig0h(10, 11, 12);
+        const uint32_t ir_s0h = enc::sha512sig0h(10, 12, 11);
         const bool dec_s0h = (simrv::pipeline::decoder(ir_s0h) != simrv::isa::OperationId::ILLEGAL);
         const bool ok_s0h = env.run_32(ir_s0h);
         if (dec_s0h) {
@@ -6018,7 +6040,7 @@ void test_wave2_tier1_scalar_crypto() {
                    "sha512sig1l traps safely as IllegalInstruction when unimplemented");
         }
 
-        const uint32_t ir_s1h = enc::sha512sig1h(10, 11, 12);
+        const uint32_t ir_s1h = enc::sha512sig1h(10, 12, 11);
         const bool dec_s1h = (simrv::pipeline::decoder(ir_s1h) != simrv::isa::OperationId::ILLEGAL);
         const bool ok_s1h = env.run_32(ir_s1h);
         if (dec_s1h) {
@@ -6072,6 +6094,10 @@ void test_wave2_tier1_code_size_reduction() {
     using namespace wave2;
     Wave2TestEnv env;
     auto& c = env.cpu();
+    // Zcmp/Zcmt are mutually exclusive with Zcd (D + C); disable D for code-size reduction tests.
+    c.state().misa &= ~misa_extension_bit(simrv::isa::IsaExtension::D);
+    c.state().refresh_misa_status();
+    c.sync_decode_context();
 
     // 1. cm.push with representative rlist values (4, 5, 6, 8, 15) and spimm
     for (uint32_t rlist = 4; rlist <= 15; ++rlist) {
@@ -6216,7 +6242,7 @@ void test_wave2_tier1_vector_crypto() {
     auto& c = env.cpu();
 
     // Standard vector setup: SEW=32, LMUL=1, vl=4, vstart=0
-    c.state().vtype = 2;  // SEW=32, LMUL=1
+    c.state().vtype = (2U << 3U);  // SEW=32, LMUL=1
     c.state().vl = 4;
     c.state().vstart = 0;
 
@@ -6395,8 +6421,10 @@ void test_wave2_tier2_boundary_and_corner_cases() {
         }
     }
 
-    // 2. Vector LMUL & EGW Constraints
+    // 2. Vector LMUL & EGW Constraints (under VLEN=128)
     {
+        const auto saved_vlen = c.state().regs.vlen;
+        c.state().regs.vlen = 128U;
         // Fractional LMUL on EGW=128 (e.g. LMUL=1/2 -> vlmul=7)
         c.state().vtype = (2U << 3U) | 7U;  // SEW=32, LMUL=1/2
         const uint32_t ir_vaesef = enc::vaesef_vv(2, 4);
@@ -6422,6 +6450,7 @@ void test_wave2_tier2_boundary_and_corner_cases() {
         expect(c.state().mcause ==
                    static_cast<simrv::xlen::CsrValue>(ExceptionCode::IllegalInstruction),
                "vaesef.vv with SEW=8 must trigger IllegalInstruction");
+        c.state().regs.vlen = saved_vlen;
     }
 
     // 3. Out-of-Range Round Immediates
@@ -6466,14 +6495,13 @@ void test_wave2_tier2_boundary_and_corner_cases() {
 
     // 4. Code-Size Reduction Bounds: rlist < 4 and r1s' == r2s'
     {
+        c.state().misa &= ~misa_extension_bit(simrv::isa::IsaExtension::D);
+        c.state().refresh_misa_status();
+        c.sync_decode_context();
+
         // cm.push with rlist = 0..3 are reserved/illegal
         for (uint32_t bad_rlist = 0; bad_rlist < 4; ++bad_rlist) {
             const uint16_t ir_bad_push = enc::cm_push(bad_rlist, 0);
-            const auto decomp =
-                simrv::pipeline::decompressInstruction(ir_bad_push, simrv::xlen::kIsXLen64);
-            expect(decomp == 0 ||
-                       (simrv::pipeline::decoder(decomp) == simrv::isa::OperationId::ILLEGAL),
-                   "cm.push with rlist < 4 must fail decompression or decode as ILLEGAL");
             env.run_16(ir_bad_push);
             expect(c.state().mcause ==
                        static_cast<simrv::xlen::CsrValue>(ExceptionCode::IllegalInstruction),
@@ -6482,11 +6510,6 @@ void test_wave2_tier2_boundary_and_corner_cases() {
 
         // cm.mvsa01 with r1s == r2s is illegal per Zcmp spec
         const uint16_t ir_mvsa01_eq = enc::cm_mvsa01(2, 2);
-        const auto decomp_eq =
-            simrv::pipeline::decompressInstruction(ir_mvsa01_eq, simrv::xlen::kIsXLen64);
-        expect(decomp_eq == 0 ||
-                   (simrv::pipeline::decoder(decomp_eq) == simrv::isa::OperationId::ILLEGAL),
-               "cm.mvsa01 with r1s == r2s must fail decompression or decode as ILLEGAL");
         env.run_16(ir_mvsa01_eq);
         expect(c.state().mcause ==
                    static_cast<simrv::xlen::CsrValue>(ExceptionCode::IllegalInstruction),
@@ -6547,10 +6570,10 @@ void test_wave2_tier4_real_world_scenarios() {
         const uint32_t S0 = ref::sha256_sum0(a);
         const uint32_t S1 = ref::sha256_sum1(e);
 
-        expect(s0 == 0x83bf8b3bU, "Scenario 2: sigma0 on w0 matches standard value");
-        expect(s1 == 0x3da85f53U, "Scenario 2: sigma1 on w0 matches standard value");
-        expect(S0 == 0x9a69432fU, "Scenario 2: Sum0 on H0 matches standard value");
-        expect(S1 == 0xa4088ab5U, "Scenario 2: Sum1 on H4 matches standard value");
+        expect(s0 == 0x940e90efU, "Scenario 2: sigma0 on w0 matches standard value");
+        expect(s1 == 0x7da86405U, "Scenario 2: sigma1 on w0 matches standard value");
+        expect(S0 == 0xce20b47eU, "Scenario 2: Sum0 on H0 matches standard value");
+        expect(S1 == 0x3587272bU, "Scenario 2: Sum1 on H4 matches standard value");
 
         // Verify compression step with round constant K0 = 0x428a2f98
         const uint32_t ch = (e & f) ^ (~e & g);
@@ -6604,9 +6627,9 @@ void test_wave2_tier4_real_world_scenarios() {
     // Scenario 4: Complete SM3 Hash & SM4-128 Workload
     // -------------------------------------------------------------------------
     {
-        // SM3 permutation chain
+        // SM3 permutation chain (note: P0^4 = P1^4 = I in GF(2)[x]/(x^32-1), so use 3 rounds)
         uint32_t sm3_state = 0x12345678U;
-        for (int round = 0; round < 16; ++round) {
+        for (int round = 0; round < 3; ++round) {
             sm3_state = ref::sm3_p0(sm3_state);
             sm3_state = ref::sm3_p1(sm3_state);
         }
@@ -6625,6 +6648,9 @@ void test_wave2_tier4_real_world_scenarios() {
     // Scenario 5: Nested Function Call Frames via cm.push and cm.popret
     // -------------------------------------------------------------------------
     {
+        c.state().misa &= ~misa_extension_bit(simrv::isa::IsaExtension::D);
+        c.state().refresh_misa_status();
+        c.sync_decode_context();
         // Set up caller frame
         c.state().regs.write(simrv::xlen::RegId::Sp, 0x80008000ULL);
         c.state().regs.write(simrv::xlen::RegId::Ra, 0x80001020ULL);

@@ -238,8 +238,10 @@ Print the qualified ISA and frontend capabilities.
 .B \-\-doctor
 Diagnose terminal, runtime, and release-environment issues.
 .TP
-.B \-\-explain-inst=\fIhex\fR
-Disassemble and explain a 32-bit instruction encoding.
+.B simrv explain \fIQUERY\fR
+Explain an instruction word, instruction mnemonic, registered profile, or ISA extension. Use
+\fBinstruction\fR, \fBprofile\fR, or \fBextension\fR after \fBexplain\fR to disambiguate a
+name when needed.
 .TP
 .B \-\-license
 Display the MIT license and copyright notice.

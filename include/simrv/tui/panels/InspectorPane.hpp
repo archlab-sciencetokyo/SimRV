@@ -209,6 +209,7 @@ class InspectorPane : public TuiWidget {
                                            int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_io_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
                                        int right_width) -> std::string;
+    [[nodiscard]] auto render_device_tree_stats(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_stack_frame(const simrv::core::CPU& cpu, int logical_row,
                                           int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,

@@ -78,8 +78,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
                          !state_.has_locked_pmp);
                     const bool check_reservations =
-                        machine.memory_.reservation_table().may_have_reservations() &&
-                        machine.num_harts() > 1;
+                        machine.memory_.reservation_table().may_have_reservations();
                     auto* chained = cached;
                     CachedOp* fallback_op = nullptr;
                     simrv::xlen::VirtAddr next_pc = state_.pc;

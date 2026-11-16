@@ -29,8 +29,8 @@ auto CoherenceHub::configure_topology(const simrv::core::SmpTopologyConfig& topo
     l2_caches_.clear();
     l3_enabled_ = topology.l3.enabled;
     l3_cache_.flush(true);
-    if (l3_enabled_ &&
-        !l3_cache_.configure(topology.l3.capacity_bytes, topology.l3.associativity)) {
+    if (l3_enabled_ && !l3_cache_.configure(topology.l3.capacity_bytes, topology.l3.associativity,
+                                            topology.l3.line_bytes)) {
         return std::unexpected("shared L3 geometry exceeds simulator cache backing");
     }
     for (const auto& cluster : topology.clusters) {
@@ -39,7 +39,8 @@ auto CoherenceHub::configure_topology(const simrv::core::SmpTopologyConfig& topo
         cache->id = cluster.id;
         cache->harts = cluster.harts;
         cache->config = cluster.l2;
-        if (!cache->cache.configure(cluster.l2.capacity_bytes, cluster.l2.associativity)) {
+        if (!cache->cache.configure(cluster.l2.capacity_bytes, cluster.l2.associativity,
+                                    cluster.l2.line_bytes)) {
             return std::unexpected(
                 std::format("cluster {} L2 geometry exceeds simulator backing", cluster.id));
         }
@@ -563,43 +564,52 @@ auto CoherenceHub::service_uncached_shared_cache(simrv::xlen::HartId hart,
     if (l2 == nullptr && !l3_enabled_) {
         return false;
     }
-    const LineAddress line_base = address & ~static_cast<simrv::xlen::Address>(kLineBytes - 1u);
+    const LineAddress l2_line_base =
+        l2 != nullptr ? (address & ~static_cast<simrv::xlen::Address>(l2->cache.line_mask()))
+                      : simrv::xlen::PhysAddr{0};
+    const LineAddress l3_line_base =
+        address & ~static_cast<simrv::xlen::Address>(l3_cache_.line_mask());
+    const LineAddress check_base = l2 != nullptr ? l2_line_base : l3_line_base;
+    const uint32_t check_bytes = l2 != nullptr ? l2->cache.line_bytes() : l3_cache_.line_bytes();
     auto* dram_ptr = machine_.ram_data();
     const auto geometry = machine_.memory_geometry();
-    if (dram_ptr == nullptr || !geometry.contains(line_base, kLineBytes)) {
+    if (dram_ptr == nullptr || !geometry.contains(check_base, check_bytes)) {
         return false;
     }
 
     std::array<simrv::xlen::Byte, kLineBytes> line_buf{};
     MesiState state = MesiState::Invalid;
-    if (l2 != nullptr && l2->cache.read_line(line_base, line_buf)) {
+    if (l2 != nullptr && l2->cache.read_line(l2_line_base, line_buf)) {
         out_hit_latency = l2->config.hit_latency;
         return true;
     }
 
     if (l2 != nullptr) {
-        if (l3_enabled_ && l3_cache_.lookup_line(line_base, line_buf, state)) {
-            l2->cache.write_line(line_base, line_buf, MesiState::Exclusive);
+        if (l3_enabled_ && l3_cache_.lookup_line(l3_line_base, line_buf, state)) {
+            l2->cache.write_line(l2_line_base, line_buf, MesiState::Exclusive);
             out_hit_latency = l2->config.miss_latency + topology_.l3.hit_latency - 1;
             return true;
         }
-        const auto offset = line_base.raw() - geometry.dram_base.raw();
-        std::memcpy(line_buf.data(), dram_ptr + offset, kLineBytes);
-        if (l3_enabled_) {
-            l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
+        const auto offset = l2_line_base.raw() - geometry.dram_base.raw();
+        std::memcpy(line_buf.data(), dram_ptr + offset, l2->cache.line_bytes());
+        if (l3_enabled_ && geometry.contains(l3_line_base, l3_cache_.line_bytes())) {
+            std::array<simrv::xlen::Byte, kLineBytes> l3_buf{};
+            std::memcpy(l3_buf.data(), dram_ptr + (l3_line_base.raw() - geometry.dram_base.raw()),
+                        l3_cache_.line_bytes());
+            l3_cache_.write_line(l3_line_base, l3_buf, MesiState::Exclusive);
         }
-        l2->cache.write_line(line_base, line_buf, MesiState::Exclusive);
+        l2->cache.write_line(l2_line_base, line_buf, MesiState::Exclusive);
         return false;
     }
 
-    if (l3_enabled_ && l3_cache_.lookup_line(line_base, line_buf, state)) {
+    if (l3_enabled_ && l3_cache_.lookup_line(l3_line_base, line_buf, state)) {
         out_hit_latency = topology_.l3.hit_latency;
         return true;
     }
-    const auto offset = line_base.raw() - geometry.dram_base.raw();
-    std::memcpy(line_buf.data(), dram_ptr + offset, kLineBytes);
+    const auto offset = l3_line_base.raw() - geometry.dram_base.raw();
+    std::memcpy(line_buf.data(), dram_ptr + offset, l3_cache_.line_bytes());
     if (l3_enabled_) {
-        l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
+        l3_cache_.write_line(l3_line_base, line_buf, MesiState::Exclusive);
     }
     return false;
 }

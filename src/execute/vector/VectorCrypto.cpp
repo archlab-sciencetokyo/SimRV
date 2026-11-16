@@ -106,9 +106,11 @@ void for_each_eg(core::CPU& cpu, uint32_t vl, Fn&& fn) {
 
 auto validate_crypto_constraints(const core::CPU& cpu, isa::OperationId op_id,
                                  simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
-                                 simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t sew)
-    -> bool {
+                                 simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                 uint32_t uimm5) -> bool {
     if (!vm) return false;
+    if (op_id == isa::OperationId::VAESKF1_VI && (uimm5 == 0U || uimm5 > 10U)) return false;
+    if (op_id == isa::OperationId::VSM4K_VI && uimm5 > 7U) return false;
     const auto vtype =
         VtypeView{.raw = cpu.state().vtype, .xlen = static_cast<uint8_t>(cpu.state().regs.xlen)};
     if (vtype.vill()) return false;
@@ -198,7 +200,7 @@ auto validate_crypto_constraints(const core::CPU& cpu, isa::OperationId op_id,
 auto execute_vector_crypto(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
                            simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm, uint32_t vl,
                            uint32_t sew, uint32_t uimm5) -> bool {
-    if (!validate_crypto_constraints(cpu, op_id, rd, rs1, rs2, vm, vl, sew)) {
+    if (!validate_crypto_constraints(cpu, op_id, rd, rs1, rs2, vm, vl, sew, uimm5)) {
         return false;
     }
 

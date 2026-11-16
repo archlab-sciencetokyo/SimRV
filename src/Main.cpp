@@ -201,13 +201,8 @@ auto print_isa_info() -> void {
     std::println("SimRV {} capabilities", simrv::buildinfo::kVersion);
     std::println("  host build       : RV{}", simrv::xlen::kXLenBits);
     std::println(
-        "  public profiles  : RV32GCBV/RV32GCZBV, RV64GCBV/RV64GCZBV (canonical RV32GCV, RV64GCV "
-        "with Zb)");
-    std::println(
-        "  selectable       : rv{}i, rv{}imac, rv{}gc, rv{}gczb, rv{}gcv, rv{}gczbv (plus "
-        "_zba_zbb_zbc_zbs)",
-        simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits,
-        simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
+        "  public profiles  : RVI20U32/U64, RVA20U/S64, RVA22U/S64, RVA23U/S64, RVB23U/S64");
+    std::println("  ISA strings      : canonical RISC-V ISA strings; X extensions are preserved");
     std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
     std::println("  privilege         : M/S/U, Sv32 (RV32), Sv39/Sv48 (RV64)");
     std::println("  debug frontends   : TUI, GDB RSP");
@@ -565,9 +560,18 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
                                                        : simrv::core::HostExitCode::GeneralError));
             }
-            case CliAction::ExplainInstruction:
-                simrv::explain::explain_instruction(parsed->options.explain_inst_val);
-                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::ExplainQuery: {
+                const auto query_type = parsed->options.explain_query_type;
+                const std::string_view query_type_name =
+                    query_type == simrv::util::ExplainQueryType::Instruction ? "instruction"
+                    : query_type == simrv::util::ExplainQueryType::Profile   ? "profile"
+                    : query_type == simrv::util::ExplainQueryType::Extension ? "extension"
+                                                                             : "auto";
+                const bool ok =
+                    simrv::explain::explain_query(parsed->options.explain_query, query_type_name);
+                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                       : simrv::core::HostExitCode::UsageError));
+            }
             case CliAction::DumpCpuModel: {
                 if (!simrv::util::scaffold_cpu_model(parsed->options.dump_cpu_model_preset,
                                                      parsed->options.dump_cpu_model_output)) {

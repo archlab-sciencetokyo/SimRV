@@ -230,6 +230,17 @@ constexpr auto is_zksh_operation(OperationId op_id) noexcept -> bool {
     return op_id == OperationId::SM3P0 || op_id == OperationId::SM3P1;
 }
 
+constexpr auto is_rv32_only_scalar_crypto(OperationId op_id) noexcept -> bool {
+    return op_id == OperationId::AES32DSI || op_id == OperationId::AES32DSMI ||
+           op_id == OperationId::AES32ESI || op_id == OperationId::AES32ESMI ||
+           (op_id >= OperationId::SHA512SIG0L && op_id <= OperationId::SHA512SUM1R);
+}
+
+constexpr auto is_rv64_only_scalar_crypto(OperationId op_id) noexcept -> bool {
+    return (op_id >= OperationId::AES64DS && op_id <= OperationId::AES64KS2) ||
+           (op_id >= OperationId::SHA512SIG0 && op_id <= OperationId::SHA512SUM1);
+}
+
 constexpr auto is_zcmp_operation(OperationId op_id) noexcept -> bool {
     return op_id >= OperationId::CM_PUSH && op_id <= OperationId::CM_MVSA01;
 }
@@ -332,6 +343,15 @@ constexpr auto instruction_enabled(simrv::xlen::CsrValue misa, ExtensionSet enab
     }
 
     // Track 2B: Scalar Cryptography
+    const auto mxl_bits = static_cast<unsigned int>((misa >> (simrv::xlen::kXLenBits - 2U)) & 0x3U);
+    const unsigned int active_xlen =
+        (mxl_bits == 1U) ? 32U : ((mxl_bits == 2U) ? 64U : simrv::xlen::kXLenBits);
+    if (is_rv32_only_scalar_crypto(op_id) && active_xlen != 32U) {
+        return false;
+    }
+    if (is_rv64_only_scalar_crypto(op_id) && active_xlen != 64U) {
+        return false;
+    }
     if (is_aes64_ks_operation(op_id)) {
         return instruction_enabled_by_misa(misa, op_id, compressed) &&
                (enabled_extensions.has(MultiLetterExtension::Zkne) ||

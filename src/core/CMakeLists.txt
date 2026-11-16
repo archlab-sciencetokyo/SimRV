@@ -37,6 +37,7 @@ simrv_add_component(simrv-core
   ../explain/VectorSpecCatalog.cpp
   ../explain/InstructionExplainer.cpp
   ../explain/ExplainCliPrinter.cpp
+  ../explain/ExplainQuery.cpp
 )
 add_library(simrv::core ALIAS simrv-core)
 

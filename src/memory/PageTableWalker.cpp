@@ -9,6 +9,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/ReservationTable.hpp"
 #include "simrv/xlen/Constants.hpp"
 
 namespace simrv::memory {
@@ -550,6 +551,9 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
             const simrv::xlen::Word current = simrv::memory::host_read_fast(
                 pte_ptr, state.pte_size == 4 ? static_cast<simrv::xlen::Instruction>(Funct3::Lw)
                                              : static_cast<simrv::xlen::Instruction>(Funct3::Ld));
+            if (reservations_ != nullptr) {
+                reservations_->invalidate_range(state.pte_address, state.pte_size);
+            }
             simrv::memory::host_write_fast(pte_ptr, current | state.pte_update_mask, operation);
             accept_write(state);
         }

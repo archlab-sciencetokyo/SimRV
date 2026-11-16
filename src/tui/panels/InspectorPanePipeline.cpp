@@ -1142,6 +1142,10 @@ auto InspectorPane::render_system_or_pipeline_extended(const simrv::core::CPU& c
     if (page_ == TuiRegPage::BUS && logical_row >= 16 && logical_row <= 24) {
         return render_io_stats(cpu, logical_row, col_width, right_width);
     }
+    if (page_ == TuiRegPage::DTREE && logical_row >= 0 &&
+        logical_row < performance_start_row(false)) {
+        return render_device_tree_stats(logical_row, col_width + right_width);
+    }
     if (!single_column && logical_row >= 16 && logical_row <= 20) {
         return render_system_state(cpu, logical_row, col_width, right_width);
     }
@@ -1169,8 +1173,7 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
                                         ? (st.mstatus & core::MstatusBit::Sie) != 0
                                         : true;
         const simrv::xlen::CsrValue pending =
-            st.mip & core::interrupt_implemented_mask(
-                         simrv::isa::misa_has_extension(st.misa, simrv::isa::IsaExtension::S));
+            st.mip & core::interrupt_implemented_mask(st.supervisor_mode_supported);
         const simrv::xlen::CsrValue eligible = pending & st.mie;
         const std::string state = eligible != 0 ? (global_enabled ? "ready" : "masked")
                                                 : (global_enabled ? "enabled" : "disabled");

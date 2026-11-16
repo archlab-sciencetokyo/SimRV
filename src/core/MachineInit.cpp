@@ -862,6 +862,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
             return bits;
         }
+        if (const auto profile_isa =
+                isa::parse_isa_spec(isa::profile_default_isa_string(config.execution.profile))) {
+            return profile_isa->misa_bits;
+        }
         return config.isa.isa_preset;
     };
 

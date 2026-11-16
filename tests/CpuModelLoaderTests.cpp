@@ -278,8 +278,7 @@ void test_serialize_and_roundtrip() {
     TEST_CHECK(text.find("mul_latency = 5") != std::string::npos);
     TEST_CHECK(text.find("div_latency = 22") != std::string::npos);
     TEST_CHECK(text.find("branch_mispredict_penalty = 6") != std::string::npos);
-    TEST_CHECK(text.find("isa_preset = \"gcv\"") != std::string::npos ||
-               text.find("isa_preset = \"gczbv\"") != std::string::npos);
+    TEST_CHECK(text.find("isa_preset = \"gcv") != std::string::npos);
 
     simrv::pipeline::CpuModelConfig reloaded{};
     const bool ok = simrv::core::load_cpu_config_string(text, reloaded);

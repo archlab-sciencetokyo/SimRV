@@ -929,13 +929,17 @@ auto main() -> int {
         cfg.tui.enabled = true;
         simrv::core::Machine machine(cfg);
         expect(machine.initialize().has_value(), "default Machine initializes successfully");
-        expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
-                                              simrv::isa::IsaExtension::B),
-               "default Machine initial misa enables bitmanip extension (B)");
         if constexpr (simrv::xlen::kIsXLen64) {
+            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                  simrv::isa::IsaExtension::B),
+                   "default RVA23S64 profile enables bitmanip extension (B)");
             expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                                   simrv::isa::IsaExtension::H),
                    "default RVA23S64 profile enables the H extension");
+        } else {
+            expect(!simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                   simrv::isa::IsaExtension::B),
+                   "default RV32 profile (RVI20U32) does not enable bitmanip extension (B)");
         }
     }
 
@@ -1269,19 +1273,21 @@ auto main() -> int {
         expect(parsed.has_value(), "default CLI args parse");
         if (parsed) {
             auto cfg = parsed->options.to_machine_config();
-            expect(simrv::isa::misa_has_extension(cfg.isa.isa_preset, simrv::isa::IsaExtension::B),
-                   "default CLI MachineConfig enables bitmanip extension (B)");
             cfg.tui.enabled = true;
             simrv::core::Machine machine(cfg);
             expect(machine.initialize().has_value(),
                    "CLI-configured Machine initializes successfully");
-            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
-                                                  simrv::isa::IsaExtension::B),
-                   "CLI-configured Machine initial misa enables bitmanip extension (B)");
             if constexpr (simrv::xlen::kIsXLen64) {
+                expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                      simrv::isa::IsaExtension::B),
+                       "CLI-configured Machine initial misa enables bitmanip extension (B)");
                 expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                                       simrv::isa::IsaExtension::H),
                        "CLI default RVA23S64 profile enables the H extension");
+            } else {
+                expect(!simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                       simrv::isa::IsaExtension::B),
+                       "CLI default RVI20U32 profile omits bitmanip extension (B)");
             }
         }
     }
@@ -1332,7 +1338,7 @@ auto main() -> int {
         // CPU config parser ISA spec validation
         expect(simrv::isa::parse_isa_spec("rv64gcbv").has_value(),
                "isa::parse_isa_spec accepts canonical GCBV single-letter extensions");
-        const auto gcv_zb_spec = simrv::isa::parse_isa_spec("rvgcv_zba_zbb_zbs");
+        const auto gcv_zb_spec = simrv::isa::parse_isa_spec("rv64gcv_zba_zbb_zbs");
         expect(gcv_zb_spec.has_value() && gcv_zb_spec->has(simrv::isa::IsaExtension::V) &&
                    !gcv_zb_spec->extensions.empty(),
                "isa::parse_isa_spec accepts ratified GCV with explicit bitmanip extensions");
@@ -1690,10 +1696,48 @@ auto main() -> int {
         std::array<char*, 3> explain_args = {explain_args_str[0].data(), explain_args_str[1].data(),
                                              explain_args_str[2].data()};
         auto parsed_explain = simrv::util::parse_command_line(explain_args);
-        expect(parsed_explain.has_value() &&
-                   parsed_explain->action == simrv::util::CliAction::ExplainInstruction &&
-                   parsed_explain->options.explain_inst_val == 0x13,
-               "explain subcommand decodes hex instruction value");
+        expect(
+            parsed_explain.has_value() &&
+                parsed_explain->action == simrv::util::CliAction::ExplainQuery &&
+                parsed_explain->options.explain_query == "0x13" &&
+                parsed_explain->options.explain_query_type == simrv::util::ExplainQueryType::Auto,
+            "explain subcommand accepts hexadecimal instruction query");
+
+        std::array<std::string, 4> explain_profile_args_str = {"simrv", "explain", "profile",
+                                                               "RVA23S64"};
+        std::array<char*, 4> explain_profile_args = {
+            explain_profile_args_str[0].data(), explain_profile_args_str[1].data(),
+            explain_profile_args_str[2].data(), explain_profile_args_str[3].data()};
+        auto parsed_explain_profile = simrv::util::parse_command_line(explain_profile_args);
+        expect(parsed_explain_profile.has_value() &&
+                   parsed_explain_profile->action == simrv::util::CliAction::ExplainQuery &&
+                   parsed_explain_profile->options.explain_query == "RVA23S64" &&
+                   parsed_explain_profile->options.explain_query_type ==
+                       simrv::util::ExplainQueryType::Profile,
+               "typed explain profile query is parsed");
+
+        std::array<std::string, 3> explain_instruction_args_str = {"simrv", "explain", "ADD"};
+        std::array<char*, 3> explain_instruction_args = {explain_instruction_args_str[0].data(),
+                                                         explain_instruction_args_str[1].data(),
+                                                         explain_instruction_args_str[2].data()};
+        auto parsed_explain_instruction = simrv::util::parse_command_line(explain_instruction_args);
+        expect(parsed_explain_instruction.has_value() &&
+                   parsed_explain_instruction->options.explain_query == "ADD" &&
+                   parsed_explain_instruction->options.explain_query_type ==
+                       simrv::util::ExplainQueryType::Auto,
+               "bare explain instruction query is parsed");
+
+        std::array<std::string, 3> removed_explain_flag_args_str = {"simrv", "--explain-inst",
+                                                                    "0x13"};
+        std::array<char*, 3> removed_explain_flag_args = {removed_explain_flag_args_str[0].data(),
+                                                          removed_explain_flag_args_str[1].data(),
+                                                          removed_explain_flag_args_str[2].data()};
+        expect(!simrv::util::parse_command_line(removed_explain_flag_args).has_value(),
+               "removed legacy explain flags are rejected");
+        removed_explain_flag_args_str[1] = "--explain";
+        removed_explain_flag_args[1] = removed_explain_flag_args_str[1].data();
+        expect(!simrv::util::parse_command_line(removed_explain_flag_args).has_value(),
+               "removed explain alias is rejected");
 
         std::array<std::string, 3> run_args_str = {"simrv", "run", "guest.elf"};
         std::array<char*, 3> run_args = {run_args_str[0].data(), run_args_str[1].data(),

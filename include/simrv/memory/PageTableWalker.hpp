@@ -16,6 +16,8 @@ struct ArchState;
 
 namespace simrv::memory {
 
+class ReservationTable;
+
 /// Address produced by VS-stage translation and consumed by G-stage translation.
 struct GuestPhysAddr {
     explicit constexpr GuestPhysAddr(simrv::xlen::Address value = 0) noexcept : value_(value) {}
@@ -230,6 +232,7 @@ class PageTableWalker {
 
     [[nodiscard]] constexpr auto ram_view() const noexcept -> RamView { return ram_; }
     constexpr void set_ram_view(RamView ram) noexcept { ram_ = ram; }
+    void set_reservation_table(ReservationTable* table) noexcept { reservations_ = table; }
 
     template <SvModeSpec Spec>
     [[nodiscard]] static constexpr auto is_canonical_sv(simrv::xlen::VirtAddr v_addr) noexcept
@@ -318,6 +321,7 @@ class PageTableWalker {
     mutable std::array<PdcEntry, kPdcSize> pdc_{};
     mutable uint32_t pdc_epoch_{1};
     RamView ram_{};
+    ReservationTable* reservations_ = nullptr;
 
     [[nodiscard]] auto pte_access_valid(simrv::xlen::PhysAddr address, unsigned size) const noexcept
         -> bool;

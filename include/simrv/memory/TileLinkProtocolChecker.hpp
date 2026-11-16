@@ -18,11 +18,16 @@ class TileLinkProtocolChecker {
     [[nodiscard]] auto accept_e(const TlChannelE& acknowledgement)
         -> std::expected<void, std::string>;
     void cancel(TlSourceId source);
+    void cancel_probe(TlSourceId source) { active_probes_.erase(source); }
     void reset();
 
     [[nodiscard]] auto outstanding_sources() const noexcept -> size_t { return sources_.size(); }
     [[nodiscard]] auto outstanding_probes() const noexcept -> size_t {
         return active_probes_.size();
+    }
+    [[nodiscard]] auto probe_for(TlSourceId source) const noexcept -> const TlChannelB* {
+        const auto it = active_probes_.find(source);
+        return it == active_probes_.end() ? nullptr : &it->second;
     }
     [[nodiscard]] auto outstanding_releases() const noexcept -> size_t { return releases_.size(); }
     [[nodiscard]] auto outstanding_sinks() const noexcept -> size_t { return sinks_.size(); }
@@ -30,7 +35,7 @@ class TileLinkProtocolChecker {
    private:
     simrv::util::SmallFlatMap<TlSourceId, TlChannelA, 64> sources_;
     simrv::util::SmallFlatMap<TlSourceId, TlChannelC, 64> releases_;
-    simrv::util::SmallFlatSet<simrv::xlen::PhysAddr, 64> active_probes_;
+    simrv::util::SmallFlatMap<TlSourceId, TlChannelB, 64> active_probes_;
     simrv::util::SmallFlatMap<TlSinkId, TlSourceId, 64> sinks_;
 };
 

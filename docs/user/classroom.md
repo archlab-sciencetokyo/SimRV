@@ -136,17 +136,29 @@ architectural counters. Build all of them with `make -C examples/isa XLEN=64` or
 ## 4. Using the Educational Explainer Utility
 
 SimRV provides two interfaces for interactive instruction decoding and explanation:
-the `--explain-inst` CLI flag and the interactive TUI EXPLAIN pane.
+the `simrv explain` command and the interactive TUI EXPLAIN pane.
 
 ### Command Line Interface (CLI)
 
-Use `--explain-inst <HEX>` to disassemble, decode, and print the step-by-step
+Use `simrv explain <HEX>` to disassemble, decode, and print the step-by-step
 reconstruction of any instruction hex value.
+
+The same command can look up a mnemonic, registered profile, or ISA extension by name. Add a type
+when you want to make the lookup explicit:
+
+```bash
+simrv explain ADD
+simrv explain profile RVA23S64
+simrv explain extension Zba
+```
+
+Each named result includes its official specification reference and URL. The glossary modal also
+supports `/` search across its topics and ISA entries; select an ISA result to view its explanation.
 
 #### Example: Explaining an ADD instruction
 
 ```bash
-./build/rv32-release/simrv --explain-inst 0x00B502B3
+./build/rv32-release/simrv explain 0x00B502B3
 ```
 
 **Output:**

@@ -44,7 +44,7 @@ namespace {
     const bool store_needs_checks =
         is_write &&
         (cpu.cpu_model_config.mmio_console_redirect || cpu.state().lr_reservation_active ||
-         (machine.num_harts() > 1 && machine.memory().reservation_table().may_have_reservations()));
+         machine.memory().reservation_table().may_have_reservations());
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any() ||
                                   cpu.state().has_active_triggers || store_needs_checks)) {
         return nullptr;
@@ -269,8 +269,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
                 chunk_rem -= reg_chunk;
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
-                                          mem.reservation_table().may_have_reservations() &&
-                                          cpu.machine_->num_harts() > 1)) {
+                                          mem.reservation_table().may_have_reservations())) {
                 mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
                                                          cpu.hart_id());
             }
@@ -443,8 +442,7 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vs3)).u8.data(),
                         evl);
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
-                                          mem.reservation_table().may_have_reservations() &&
-                                          cpu.machine_->num_harts() > 1)) {
+                                          mem.reservation_table().may_have_reservations())) {
                 mem.reservation_table().invalidate_range(physical_address, evl, cpu.hart_id());
             }
             return;
@@ -510,8 +508,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 chunk_rem -= chunk;
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
-                                          mem.reservation_table().may_have_reservations() &&
-                                          cpu.machine_->num_harts() > 1)) {
+                                          mem.reservation_table().may_have_reservations())) {
                 mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
                                                          cpu.hart_id());
             }

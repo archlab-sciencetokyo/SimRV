@@ -19,7 +19,9 @@ MemorySubsystem::MemorySubsystem(simrv::core::Machine& machine)
 
 void MemorySubsystem::configure_bus(const BusProtocolSpec& spec) {
     const bool smp = system_bus_ ? system_bus_->is_smp_enabled() : false;
-    system_bus_ = make_system_bus(machine_, spec);
+    auto replacement = make_system_bus(machine_, spec);
+    reservation_table_.clear_external_reservations();
+    system_bus_ = std::move(replacement);
     if (system_bus_) {
         system_bus_->set_smp_enabled(smp);
     }
@@ -34,6 +36,7 @@ void MemorySubsystem::configure_bus(BusProtocol protocol) {
 void MemorySubsystem::initialize_mmu() {
     if (!mmu_) {
         mmu_ = std::make_unique<simrv::Mmu>(machine_.ram_view());
+        mmu_->walker().set_reservation_table(&reservation_table_);
     }
 }
 

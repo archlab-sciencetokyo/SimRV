@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -57,8 +58,27 @@ class GlossaryModal : public framework::IModal {
                        int scroll_offset, int term_height, int box_w);
 
    private:
+    struct SearchMatch {
+        bool isa_entry = false;
+        int topic_index = 0;
+        std::string type;
+        std::string name;
+        std::string summary;
+    };
+
+    void refresh_search();
+
     int owned_topic_ = 0;
     int owned_scroll_ = 0;
+    std::size_t reference_idx_ = 0;
+    std::string search_query_;
+    std::string explain_query_type_;
+    std::string explain_query_name_;
+    std::vector<SearchMatch> search_matches_;
+    int search_selection_ = 0;
+    bool search_input_active_ = false;
+    bool search_results_active_ = false;
+    bool explain_detail_active_ = false;
     int& topic_idx_;
     int& scroll_offset_;
 };

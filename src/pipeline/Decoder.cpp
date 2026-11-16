@@ -116,7 +116,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "SHA512SIG1L", "SHA512SIG1H", "SHA512SUM0R", "SHA512SUM1R", "SM4ED", "SM4KS", "SM3P0", "SM3P1",
     /* Track 2C: Code-Size */
     "CM_PUSH", "CM_POP", "CM_POPRET", "CM_POPRETZ", "CM_MVA01S", "CM_MVSA01", "CM_JT", "CM_JALT",
-    "ILLEGAL"};
+    /* Zicfiss */
+    "SSPUSH", "SSPOPCHK", "SSRDP", "SSAMOSWAP_W", "SSAMOSWAP_D", "ILLEGAL"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
     const auto index = static_cast<std::size_t>(operation);
@@ -579,6 +580,7 @@ consteval auto generate_amo_table() {
     table.assign(2, 0x03, OperationId::SC_W);
     table.assign(2, 0x04, OperationId::AMOXOR_W);
     table.assign(2, 0x05, OperationId::AMOCAS_W);
+    table.assign(2, 0x09, OperationId::SSAMOSWAP_W);
     table.assign(2, 0x08, OperationId::AMOOR_W);
     table.assign(2, 0x0C, OperationId::AMOAND_W);
     table.assign(2, 0x10, OperationId::AMOMIN_W);
@@ -593,6 +595,7 @@ consteval auto generate_amo_table() {
     table.assign(3, 0x03, OperationId::SC_D);
     table.assign(3, 0x04, OperationId::AMOXOR_D);
     table.assign(3, 0x05, OperationId::AMOCAS_D);
+    table.assign(3, 0x09, OperationId::SSAMOSWAP_D);
     table.assign(3, 0x08, OperationId::AMOOR_D);
     table.assign(3, 0x0C, OperationId::AMOAND_D);
     table.assign(3, 0x10, OperationId::AMOMIN_D);
@@ -1520,7 +1523,25 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
         constexpr uint32_t kMopRrMask = 0xfe00707fU;
         for (size_t index = 0; index < kMopMatches.size(); ++index) {
             const uint32_t mask = index < 32 ? kMopRMask : kMopRrMask;
-            if ((ir & mask) == kMopMatches[index]) return OperationId::MOP;
+            if ((ir & mask) == kMopMatches[index]) {
+                if (kMopMatches[index] == 0xce004073U && dec.rd() == simrv::xlen::RegId::Zero &&
+                    dec.rs1() == simrv::xlen::RegId::Zero &&
+                    (dec.rs2() == simrv::xlen::RegId::Ra || dec.rs2() == simrv::xlen::RegId::T0)) {
+                    return OperationId::SSPUSH;
+                }
+                if (kMopMatches[index] == 0xcdc04073U) {
+                    if (dec.rd() == simrv::xlen::RegId::Zero &&
+                        (dec.rs1() == simrv::xlen::RegId::Ra ||
+                         dec.rs1() == simrv::xlen::RegId::T0)) {
+                        return OperationId::SSPOPCHK;
+                    }
+                    if (dec.rs1() == simrv::xlen::RegId::Zero &&
+                        dec.rd() != simrv::xlen::RegId::Zero) {
+                        return OperationId::SSRDP;
+                    }
+                }
+                return OperationId::MOP;
+            }
         }
     }
 

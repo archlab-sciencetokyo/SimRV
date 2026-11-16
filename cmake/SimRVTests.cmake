@@ -185,7 +185,7 @@ if(BUILD_TESTING)
   set_tests_properties(cli-help-isa PROPERTIES PASS_REGULAR_EXPRESSION "--isa"
                                                LABELS "gate;regress;cli")
   add_test(NAME cli-isa-info COMMAND $<TARGET_FILE:SimRV> --isa-info)
-  set_tests_properties(cli-isa-info PROPERTIES PASS_REGULAR_EXPRESSION "RV64GCBV"
+  set_tests_properties(cli-isa-info PROPERTIES PASS_REGULAR_EXPRESSION "RVA23U/S64"
                                                LABELS "gate;regress;cli;release")
   add_test(NAME cli-doctor COMMAND $<TARGET_FILE:SimRV> --doctor)
   set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "SimRV environment diagnostics"

@@ -213,6 +213,10 @@ struct MachineConfig {
         if (isa.misa_xlen != 0 && isa.misa_xlen != 32 && isa.misa_xlen != 64) {
             return std::unexpected("MISA XLEN must be 32, 64, or unspecified");
         }
+        if (const auto* profile = simrv::isa::profile_info(execution.profile);
+            profile != nullptr && profile->xlen > simrv::xlen::kXLenBits) {
+            return std::unexpected("selected architecture profile exceeds the simulator XLEN");
+        }
         if (isa.vlen != 0 &&
             (isa.vlen < 128 || isa.vlen > 1024 || (isa.vlen & (isa.vlen - 1U)) != 0)) {
             return std::unexpected("VLEN must be a power of two between 128 and 1024");

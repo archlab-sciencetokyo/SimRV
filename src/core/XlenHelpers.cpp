@@ -23,8 +23,6 @@ auto resolve_misa_string(CsrValue misa) -> std::string {
     bool has_c = (misa & (static_cast<CsrValue>(1) << ('c' - 'a'))) != 0;
     bool has_b = (misa & (static_cast<CsrValue>(1) << ('b' - 'a'))) != 0;
     bool has_v = (misa & (static_cast<CsrValue>(1) << ('v' - 'a'))) != 0;
-    bool has_s = (misa & (static_cast<CsrValue>(1) << ('s' - 'a'))) != 0;
-    bool has_u = (misa & (static_cast<CsrValue>(1) << ('u' - 'a'))) != 0;
 
     bool is_g = has_i && has_m && has_a && has_f && has_d;
 
@@ -41,8 +39,6 @@ auto resolve_misa_string(CsrValue misa) -> std::string {
     if (has_c) s += "C";
     if (has_b) s += "B";
     if (has_v) s += "V";
-    if (has_s) s += "S";
-    if (has_u) s += "U";
 
     for (int i = 0; i < 26; ++i) {
         char ch = static_cast<char>('a' + i);

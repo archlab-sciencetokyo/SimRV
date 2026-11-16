@@ -1823,9 +1823,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 // applied at the enclosing batch boundary. If one is already pending, or if an
                 // LR reservation is active, or if SMP/non-fast-RAM requires individual
                 // synchronization, execute a single instruction.
-                if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u ||
-                                              state_.lr_reservation_active || !fast_m_ram ||
-                                              multi_hart)) {
+                if (simrv::compiler::unlikely(
+                        (state_.mip & state_.mie) != 0u || state_.lr_reservation_active ||
+                        !fast_m_ram || multi_hart ||
+                        machine.memory_.reservation_table().may_have_external_reservations())) {
                     if (cached_ops != 0 &&
                         simrv::compiler::unlikely(is_batch_accounted_counter_csr(*cached))) {
                         break;

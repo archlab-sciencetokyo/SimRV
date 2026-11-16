@@ -201,21 +201,19 @@ first. The plugin is installed with the optional tools component.
 | DDR | `0x80000000–0x87ffffff` | 128 MiB on the selected Nexys build | SimRV's backing DRAM is configured separately. |
 | SD-backed RAM | `0xa0000000–0xbfffffff` | RTL decode window; RTL macro declares a 1.5 GiB controller capacity | RTL-only; not an additional SimRV RAM region. |
 
-The RVComp RTL calls its memory-mapped channel fabric AXI and routes the CPU through
-`axi_interconnect`. This is a custom valid/ready interface rather than full AXI4: stores present
-address, data, and byte strobes together, reads use address and response handshakes, and the fabric
-has independent read and write state machines that each handle one request at a time. The CPU data
-path is 32 bits, while the instruction/cache/DDR path is 128 bits. Address decode and target
-responses are implemented per device in the RTL.
+RVComp's `axi_interconnect` uses an AXI4-Lite-based protocol. Its write-address and write-data
+channels share one valid/ready handshake, and the memory side uses a 128-bit datapath while
+peripherals use 32-bit accesses. SimRV selects the `rvcomp-axi4-lite` bus profile for this model:
+it couples AW/W acceptance, uses 128-bit single-beat transfers for RAM, routes MMIO as 32-bit
+transfers, and splits cache-line requests into the corresponding single-beat operations. AMOs are
+handled by the simulated memory endpoint because AXI4-Lite has no atomic channel operation.
+The cycle-facing bus API models the coupled AW/W handshake and the independent read/write paths;
+the CPU's calibrated CA timing still abstracts target-specific RTL wait states and backpressure.
+This profile is distinct from the generic AXI4-Lite profile, which keeps independent AW and W
+channels. SimRV's `Axi4Bridge` remains a separate host-facing adapter API.
 
-SimRV's CA execution routes accesses through its TileLink-style timing fabric and applies the
-RVComp model's calibrated request/response delays. It does not reproduce the RTL's valid/ready
-handshakes, per-target backpressure, or independent read/write state machines cycle by cycle.
-SimRV's `Axi4Bridge` is a separate adapter API; enabling it does not reproduce this custom fabric.
 The RVComp MAC does not use VirtIO registers: its model adapts RVComp's ring-buffer interface to the
-shared network packet backend. The RVComp model therefore leaves `[axi].enabled` false. A
-cycle-by-cycle fabric model must preserve the existing RTL parity gates while modeling the custom
-handshakes and address decode above.
+shared network packet backend.
 
 ```mermaid
 flowchart LR

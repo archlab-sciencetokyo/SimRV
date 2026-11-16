@@ -9,10 +9,12 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/explain/ExplainTypes.hpp"
@@ -28,11 +30,31 @@ class Machine;
 
 namespace simrv::explain {
 
+enum class ExplainEntryKind : uint8_t { Instruction, Profile, Extension };
+
+struct ExplainEntry {
+    ExplainEntryKind kind = ExplainEntryKind::Instruction;
+    std::string name;
+    std::string summary;
+    std::string description;
+    std::string spec_reference;
+    std::string spec_url;
+};
+
 /**
  * @brief Print a detailed educational breakdown of a 32-bit (or 16-bit compressed) instruction.
  * @param raw_inst The raw bits of the instruction to explain.
  */
 void explain_instruction(uint32_t raw_inst);
+
+/** Explain a hexadecimal instruction word, operation mnemonic, architecture profile, or ISA
+ * extension. Returns false when the query is unknown or ambiguous. */
+[[nodiscard]] auto explain_query(std::string_view query, std::string_view query_type = "auto")
+    -> bool;
+
+[[nodiscard]] auto find_explain_entry(std::string_view query, ExplainEntryKind kind)
+    -> std::optional<ExplainEntry>;
+[[nodiscard]] auto search_explain_entries(std::string_view query) -> std::vector<ExplainEntry>;
 
 /**
  * @brief Retrieve the full normative RISC-V specification details (mnemonic, description,

@@ -25,7 +25,7 @@ enum class CliAction : uint8_t {
     ShowLicense,
     ShowIsaInfo,
     Doctor,
-    ExplainInstruction,
+    ExplainQuery,
     DumpCpuModel,
     ExportSoCManifest,
     ValidateCpuModel,
@@ -39,6 +39,7 @@ enum class CliAction : uint8_t {
     GenerateCompletion
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
+enum class ExplainQueryType : uint8_t { Auto, Instruction, Profile, Extension };
 
 struct RuntimeOptions {
     std::string fn_memimg;
@@ -82,8 +83,6 @@ struct RuntimeOptions {
     simrv::xlen::Address isatest_tohost = 0x80001000;
     isa::IsaSpec isa_spec = isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
     isa::ArchitectureProfile profile = isa::kDefaultArchitectureProfile;
-    bool has_zb_extensions = false;
-    std::vector<std::string> isa_extensions{};
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 
@@ -159,7 +158,8 @@ struct RuntimeOptions {
     std::vector<std::string> device_plugins;
     std::optional<bool> bram_prewarm;
     uint64_t step_delay_us = 0;
-    uint32_t explain_inst_val = 0;
+    std::string explain_query;
+    ExplainQueryType explain_query_type = ExplainQueryType::Auto;
     unsigned int vlen = 0;
     uint32_t num_harts = 1;
     bool explicit_num_harts = false;
