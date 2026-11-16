@@ -78,6 +78,18 @@ namespace {
 
 const bool g_retire_trace = std::getenv("SIMRV_RETIRE_TRACE") != nullptr;
 const bool g_cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
+const bool g_branch_trace = std::getenv("SIMRV_BRANCH_TRACE") != nullptr;
+
+void trace_branch(const pipeline::PipelineContext& context,
+                  const simrv::pipeline::BranchPrediction& prediction,
+                  simrv::xlen::VirtAddr target, bool mispredict) {
+    if (!g_branch_trace) return;
+    std::println(stderr,
+                 "BRTRACE pc={:08x} ir={:08x} taken={} target={:08x} pred_taken={} "
+                 "pred_target={:08x} miss={}",
+                 context.cpc.raw(), context.ir, context.tkn, target.raw(),
+                 prediction.predicted_taken, prediction.predicted_target.raw(), mispredict);
+}
 
 void populate_exec_latency(pipeline::CycleInstructionSlot& slot, const pipeline::CpuConfig& config,
                            execute::CfuUnit& cfu_unit, unsigned xlen) {
@@ -135,13 +147,8 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
     if (ca_state.host_write_pending) {
         if (ca_state.host_write_remaining > 0) {
             --ca_state.host_write_remaining;
-        } else {
-            machine.publish_tohost_write(
-                ca_state.pending_host_value,
-                static_cast<Machine::TohostWriteKind>(ca_state.pending_host_write_kind));
-            ca_state.host_write_pending = false;
+            return;
         }
-        return;
     }
     if (pipe.frontend_refill_stall > 0) {
         --pipe.frontend_refill_stall;
@@ -274,6 +281,8 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
                         const bool target_mispredict =
                             writeback->context.tkn &&
                             (target != writeback->prediction.predicted_target);
+                        trace_branch(writeback->context, writeback->prediction, target,
+                                     dir_mispredict || target_mispredict);
                         if (dir_mispredict || target_mispredict) {
                             record_hpm_event(HpmEvent::BranchMispredict);
                             branch_predictor.restore_speculation(writeback->prediction);
@@ -340,9 +349,18 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
                     return;
                 }
             }
+            if (ca_state.host_write_pending && ca_state.host_write_remaining == 0) {
+                const auto value = ca_state.pending_host_value;
+                const auto kind =
+                    static_cast<Machine::TohostWriteKind>(ca_state.pending_host_write_kind);
+                const auto fallback_cycles =
+                    static_cast<uint32_t>(ca_state.host_write_fallback_cycles);
+                ca_state.host_write_pending = false;
+                machine.publish_tohost_write(value, kind, fallback_cycles);
+            }
             if (simrv::compiler::unlikely(g_retire_trace)) {
                 std::println(stderr, "CYCLETRACE cycle={} inst={} pc={:08x} ir={:08x}",
-                             pipeline_sim.cycle_count(), e_icount, writeback->context.cpc.raw(),
+                             clint_mmio.mcycle, e_icount, writeback->context.cpc.raw(),
                              writeback->context.ir);
             }
             const bool is_wfi = writeback->context.op_id == isa::OperationId::WFI;
@@ -568,6 +586,7 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
                             execute->context.tkn &&
                             (target != execute->prediction.predicted_target);
                         const bool mispredict = dir_mispredict || target_mispredict;
+                        trace_branch(execute->context, execute->prediction, target, mispredict);
 
                         if (mispredict) {
                             record_hpm_event(HpmEvent::BranchMispredict);
@@ -701,6 +720,7 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
                                 decode->context.tkn &&
                                 (target != decode->prediction.predicted_target);
                             const bool mispredict = dir_mispredict || target_mispredict;
+                            trace_branch(decode->context, decode->prediction, target, mispredict);
 
                             if (mispredict) {
                                 record_hpm_event(HpmEvent::BranchMispredict);

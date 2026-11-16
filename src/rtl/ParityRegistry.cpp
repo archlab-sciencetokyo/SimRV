@@ -117,15 +117,13 @@ SECTIONS
 {
   . = 0x80000000;
   .text.init : { *(.text.init) }
-  . = ALIGN(0x1000);
   .text : { *(.text .text.*) }
-  . = ALIGN(0x1000);
   .rodata : { *(.rodata .rodata.*) }
+  ASSERT(. <= 0x80001000, "RVComp parity text overlaps the tohost register")
+  .tohost 0x80001000 : { *(.tohost) }
   . = ALIGN(0x1000);
   .data : { *(.data .data.*) }
   .bss : { *(.bss .bss.*) *(COMMON) }
-  . = ALIGN(0x1000);
-  .tohost : { *(.tohost) }
   _end = .;
 }
 )ld";
@@ -260,8 +258,8 @@ auto get_embedded_benchmarks() -> const std::vector<Benchmark>& { return build_b
 
 auto find_riscv_toolchain() -> std::optional<Toolchain> {
     constexpr std::array<const char*, 4> kCandidates = {
-        "riscv32-linux-gnu-gcc", "riscv32-unknown-elf-gcc", "riscv64-linux-gnu-gcc",
-        "riscv64-unknown-elf-gcc"};
+        "riscv32-unknown-elf-gcc", "riscv64-unknown-elf-gcc", "riscv32-linux-gnu-gcc",
+        "riscv64-linux-gnu-gcc"};
 
     for (const auto* gcc_cand : kCandidates) {
         if (auto found_gcc = check_tool(gcc_cand)) {

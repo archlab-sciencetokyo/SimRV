@@ -167,7 +167,8 @@ class RvcompTarget final : public ParityTarget {
             work_dir, out_dummy);
         if (objcopy_rc != 0) {
             std::snprintf(out_result.error_message, sizeof(out_result.error_message),
-                          "objcopy failed for %s", elf_path.string().c_str());
+                          "objcopy failed for %s (exit %d): %.160s", elf_path.string().c_str(),
+                          objcopy_rc, out_dummy.c_str());
             return false;
         }
 
@@ -191,7 +192,7 @@ class RvcompTarget final : public ParityTarget {
         const auto rtl_cwd = sim_bin->parent_path().filename() == "obj_dir"
                                  ? sim_bin->parent_path().parent_path()
                                  : sim_bin->parent_path();
-        run_child_capture(rtl_cmd, rtl_cwd, rtl_output);
+        int rtl_rc = run_child_capture(rtl_cmd, rtl_cwd, rtl_output);
 
         out_result.rtl_cycles = extract_metric(R"re(===> mcycle\s*:\s*(\d+))re", rtl_output);
         out_result.rtl_instructions =
@@ -216,7 +217,8 @@ class RvcompTarget final : public ParityTarget {
         }
 
         std::string simrv_output;
-        run_child_capture(simrv_cmd, work_dir, simrv_output);
+        ::setenv("SIMRV_RETIRE_TRACE", "1", 1);
+        int simrv_rc = run_child_capture(simrv_cmd, work_dir, simrv_output);
 
         out_result.simrv_cycles = extract_metric(
             R"re(Elapsed Cycles\s*:\s*[\d\.]*[KM]?\s*\(([0-9,]+)\))re", simrv_output);
@@ -228,26 +230,64 @@ class RvcompTarget final : public ParityTarget {
             std::filesystem::path trace_dir(ctx.trace_dir);
             std::filesystem::create_directories(trace_dir);
 
+            auto save = [&](std::string_view suffix, const std::string& contents) {
+                std::ofstream trace(trace_dir / (std::string(bench_name) + std::string(suffix)));
+                trace << contents;
+            };
+            save(".rtl.log", rtl_output);
+            save(".simrv.log", simrv_output);
+
             auto rtl_trace = parse_retirement_trace(rtl_output);
             auto simrv_trace = parse_retirement_trace(simrv_output);
+            // RVComp is an RV32 target. A native RV64 SimRV build sign-extends RV32
+            // addresses in its trace, while the RTL prints the same addresses as 32 bits.
+            for (auto& event : simrv_trace) {
+                event.pc = simrv::xlen::VirtAddr{static_cast<uint32_t>(event.pc.raw())};
+            }
             auto comp = compare_retirement_traces(rtl_trace, simrv_trace);
 
-            if (!comp.is_match()) {
-                if (comp.first_architectural_divergence.has_value()) {
-                    out_result.divergence_cycle = comp.first_architectural_divergence.value();
-                    std::snprintf(out_result.error_message, sizeof(out_result.error_message),
-                                  "Architectural divergence at event #%zu",
-                                  comp.first_architectural_divergence.value());
-                } else if (comp.first_timing_divergence.has_value()) {
-                    out_result.divergence_cycle = comp.first_timing_divergence->index;
-                    std::snprintf(
-                        out_result.error_message, sizeof(out_result.error_message),
-                        "Timing divergence at event #%zu (pc 0x%llx)",
-                        comp.first_timing_divergence->index,
-                        static_cast<unsigned long long>(comp.first_timing_divergence->pc.raw()));
-                }
-                return true;
+            std::ofstream rtl_events(trace_dir / (std::string(bench_name) + ".rtl.trace"));
+            std::ofstream simrv_events(trace_dir / (std::string(bench_name) + ".simrv.trace"));
+            for (const auto& event : rtl_trace) {
+                rtl_events << event.cycle << ' ' << event.pc.raw() << ' ' << event.ir << '\n';
             }
+            for (const auto& event : simrv_trace) {
+                simrv_events << event.cycle << ' ' << event.pc.raw() << ' ' << event.ir << '\n';
+            }
+
+            const auto common_events = std::min(rtl_trace.size(), simrv_trace.size());
+            const bool architectural_mismatch =
+                comp.first_architectural_divergence.has_value() &&
+                *comp.first_architectural_divergence < common_events;
+            const bool equivalent_retirement_count =
+                out_result.rtl_instructions > 0 &&
+                out_result.rtl_instructions == out_result.simrv_instructions;
+            if (architectural_mismatch) {
+                out_result.divergence_cycle = comp.first_architectural_divergence.value();
+                std::snprintf(out_result.error_message, sizeof(out_result.error_message),
+                              "Architectural divergence at event #%zu",
+                              comp.first_architectural_divergence.value());
+            } else if (comp.first_timing_divergence.has_value()) {
+                out_result.divergence_cycle = comp.first_timing_divergence->index;
+                std::snprintf(
+                    out_result.error_message, sizeof(out_result.error_message),
+                    "Timing divergence at event #%zu (pc 0x%llx, RTL +%llu / SimRV +%llu cycles)",
+                    comp.first_timing_divergence->index,
+                    static_cast<unsigned long long>(comp.first_timing_divergence->pc.raw()),
+                    static_cast<unsigned long long>(comp.first_timing_divergence->rtl_step_cycles),
+                    static_cast<unsigned long long>(
+                        comp.first_timing_divergence->simrv_step_cycles));
+            } else if (!equivalent_retirement_count && !comp.is_match()) {
+                std::snprintf(out_result.error_message, sizeof(out_result.error_message),
+                              "Retirement trace lengths differ (RTL %zu, SimRV %zu)",
+                              rtl_trace.size(), simrv_trace.size());
+            }
+        }
+
+        if (rtl_rc != 0 || simrv_rc != 0) {
+            std::snprintf(out_result.error_message, sizeof(out_result.error_message),
+                          "Execution failed (RTL rc=%d, SimRV rc=%d)", rtl_rc, simrv_rc);
+            return false;
         }
 
         out_result.matched = (out_result.rtl_instructions > 0 &&

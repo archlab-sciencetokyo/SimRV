@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <format>
+#include <print>
 #include <utility>
 
 #include "simrv/CompilerHints.hpp"
@@ -26,6 +27,14 @@
 namespace simrv::memory {
 
 namespace {
+[[nodiscard]] auto memory_request_cycle(const core::CPU& cpu) noexcept -> simrv::xlen::Counter {
+    if (cpu.machine_->runtime_profile.is_cycle_mode()) {
+        const auto cycle = cpu.pipeline_sim.cycle_count();
+        return cycle > 0 ? cycle - 1 : 0;
+    }
+    return cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
+}
+
 class HypervisorMemoryAccessScope {
    public:
     explicit HypervisorMemoryAccessScope(core::CPU& cpu) noexcept
@@ -415,7 +424,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             const bool is_aligned = (addr & (req_size_bytes - 1u)) == 0;
 
             req.hart = cpu.hart_id();
-            req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
+            req.logical_cycle = memory_request_cycle(cpu);
             req.logical_issue_sequence = cpu.next_logical_issue_sequence();
             req.source = make_tl_source(req.hart, TlPort::Data);
             if (is_aligned) {
@@ -517,7 +526,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         req.grow = TlGrow::NtoB;
         req.size = static_cast<uint8_t>(cpu.dcache.line_shift());
         req.hart = cpu.hart_id();
-        req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
+        req.logical_cycle = memory_request_cycle(cpu);
         req.logical_issue_sequence = cpu.next_logical_issue_sequence();
         req.source = make_tl_source(req.hart, TlPort::Data);
         req.address = simrv::xlen::PhysAddr{line_base};
@@ -814,11 +823,17 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                          ? (funct3 == Funct3::Sw || funct3 == Funct3::Sd)
                                          : (funct3 == Funct3::Sw);
         if (simrv::compiler::unlikely(is_tohost_write)) {
+            const auto fallback_cycles =
+                static_cast<uint32_t>(cpu.pipeline_sim.config.tohost_pair_fallback_cycles);
             auto publish_host_write = [&](uint64_t value, core::Machine::TohostWriteKind kind) {
-                if (cpu.machine_->runtime_profile.is_cycle_mode() &&
+                const bool delay_cycle_host_write =
+                    !cpu.pipeline_sim.config.tohost_requires_high_word ||
+                    kind != core::Machine::TohostWriteKind::LowWord;
+                if (cpu.machine_->runtime_profile.is_cycle_mode() && delay_cycle_host_write &&
                     cpu.pipeline_sim.config.host_interface_latency != 0) {
                     cpu.ca_state.pending_host_value = value;
                     cpu.ca_state.pending_host_write_kind = static_cast<uint8_t>(kind);
+                    cpu.ca_state.host_write_fallback_cycles = fallback_cycles;
                     const auto skipped_l1_hit =
                         (cpu.cpu_model_config.data_cache.write_through &&
                          cpu.cpu_model_config.data_cache.hit_latency > 1)
@@ -834,7 +849,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                         phase_delay - 1;
                     cpu.ca_state.host_write_pending = true;
                 } else {
-                    cpu.machine_->publish_tohost_write(value, kind);
+                    cpu.machine_->publish_tohost_write(value, kind, fallback_cycles);
                 }
             };
             const bool is_guest_xlen32 = (cpu.state().regs.xlen == 32) || !simrv::xlen::kIsXLen64;
@@ -842,18 +857,40 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 addr == 0x40008000) {
                 if (!check_sc_reservation(addr)) return;
                 const bool low_word = funct3 == Funct3::Sw;
+                const auto kind = low_word && (!is_guest_xlen32 ||
+                                               cpu.pipeline_sim.config.tohost_requires_high_word)
+                                      ? core::Machine::TohostWriteKind::LowWord
+                                      : core::Machine::TohostWriteKind::Full;
+                if (std::getenv("SIMRV_TOHOST_TRACE") != nullptr) {
+                    std::println(stderr,
+                                 "TOHOST_TRACE addr={:08x} data={:08x} xlen32={} "
+                                 "requires_high={} kind={} fallback={}",
+                                 addr, data, is_guest_xlen32,
+                                 cpu.pipeline_sim.config.tohost_requires_high_word,
+                                 static_cast<unsigned>(kind), fallback_cycles);
+                }
                 publish_host_write(
                     low_word || is_guest_xlen32
                         ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | (data & 0xFFFFFFFFULL))
                         : data,
-                    low_word && !is_guest_xlen32 ? core::Machine::TohostWriteKind::LowWord
-                                                 : core::Machine::TohostWriteKind::Full);
+                    kind);
+                if (cpu.pipeline_sim.config.tohost_requires_high_word) {
+                    commit_write();
+                    return;
+                }
             } else if (funct3 == Funct3::Sw && (addr == cpu.machine_->isa_test_tohost() + 4 ||
                                                 addr == 0x80001004 || addr == 0x40008004)) {
                 if (!check_sc_reservation(addr)) return;
+                if (std::getenv("SIMRV_TOHOST_TRACE") != nullptr) {
+                    std::println(stderr, "TOHOST_TRACE high addr={:08x} data={:08x}", addr, data);
+                }
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
                                        (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32),
                                    core::Machine::TohostWriteKind::HighWord);
+                if (cpu.pipeline_sim.config.tohost_requires_high_word) {
+                    commit_write();
+                    return;
+                }
             }
         }
         if (pbmt == simrv::memory::PtePbmt::Pma &&
@@ -898,7 +935,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 req.grow = is_upgrade ? TlGrow::BtoT : TlGrow::NtoT;
                 req.size = static_cast<uint8_t>(cpu.dcache.line_shift());
                 req.hart = cpu.hart_id();
-                req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
+                req.logical_cycle = memory_request_cycle(cpu);
                 req.logical_issue_sequence = cpu.next_logical_issue_sequence();
                 req.source = make_tl_source(req.hart, TlPort::Data);
                 req.address = simrv::xlen::PhysAddr{line_base};
@@ -969,7 +1006,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         const bool is_aligned = (addr & (req_size_bytes - 1u)) == 0;
 
         req.hart = cpu.hart_id();
-        req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
+        req.logical_cycle = memory_request_cycle(cpu);
         req.logical_issue_sequence = cpu.next_logical_issue_sequence();
         req.source = make_tl_source(req.hart, TlPort::Data);
         if (is_aligned) {

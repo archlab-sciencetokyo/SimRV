@@ -45,7 +45,7 @@ void print_help(const char* prog) {
 auto find_simrv_binary(const std::string& explicit_path) -> std::filesystem::path {
     if (!explicit_path.empty()) {
         std::filesystem::path p(explicit_path);
-        if (std::filesystem::exists(p)) return p;
+        if (std::filesystem::exists(p)) return std::filesystem::absolute(p);
     }
 
     std::vector<std::filesystem::path> candidates = {
@@ -54,9 +54,9 @@ auto find_simrv_binary(const std::string& explicit_path) -> std::filesystem::pat
     };
 
     for (const auto& c : candidates) {
-        if (std::filesystem::exists(c)) return c;
+        if (std::filesystem::exists(c)) return std::filesystem::absolute(c);
     }
-    return "simrv";
+    return std::filesystem::path("simrv");
 }
 
 }  // namespace
@@ -164,8 +164,9 @@ int main(int argc, char** argv) {
     }
 
     auto resolved_simrv = find_simrv_binary(simrv_path);
-    std::filesystem::path work_path(work_dir);
+    std::filesystem::path work_path = std::filesystem::absolute(work_dir);
     std::filesystem::create_directories(work_path);
+    if (!config_path.empty()) config_path = std::filesystem::absolute(config_path).string();
 
     std::string simrv_str = resolved_simrv.string();
     std::string gcc_str = toolchain->gcc.string();
@@ -205,6 +206,7 @@ int main(int argc, char** argv) {
     results.reserve(benchmarks.size());
 
     bool all_passed = true;
+    bool invalid_measurement = false;
     double total_abs_err_pct = 0.0;
     std::size_t bench_count = 0;
 
@@ -231,6 +233,7 @@ int main(int argc, char** argv) {
         if (rc != 0 || !std::filesystem::exists(elf_path)) {
             std::println(std::cerr, "Compilation failed for benchmark {}", bench.name);
             all_passed = false;
+            invalid_measurement = true;
             continue;
         }
 
@@ -238,6 +241,25 @@ int main(int argc, char** argv) {
         if (!target->run_benchmark(ctx, bench.name, elf_path, res)) {
             std::println(std::cerr, "Execution failed: {}", res.error_message);
             all_passed = false;
+            invalid_measurement = true;
+            results.push_back(res);
+            continue;
+        }
+
+        if (res.rtl_cycles == 0 || res.simrv_cycles == 0 || res.rtl_instructions == 0 ||
+            res.simrv_instructions == 0) {
+            if (res.error_message[0] == '\0') {
+                std::snprintf(res.error_message, sizeof(res.error_message),
+                              "Missing valid RTL or SimRV counters (RTL %llu cycles/%llu insts; "
+                              "SimRV %llu cycles/%llu insts)",
+                              static_cast<unsigned long long>(res.rtl_cycles),
+                              static_cast<unsigned long long>(res.rtl_instructions),
+                              static_cast<unsigned long long>(res.simrv_cycles),
+                              static_cast<unsigned long long>(res.simrv_instructions));
+            }
+            std::println(std::cerr, "  Status: \033[1;31m[INVALID] {}\033[0m", res.error_message);
+            all_passed = false;
+            invalid_measurement = true;
             results.push_back(res);
             continue;
         }
@@ -257,8 +279,14 @@ int main(int argc, char** argv) {
         if (res.matched) {
             std::println("  Status: \033[1;32m[PASS] Exact cycle parity\033[0m");
         } else if (res.rtl_instructions == res.simrv_instructions) {
-            std::println("  Status: \033[1;33m[WARN] Architectural match, timing delta\033[0m");
-            all_passed = false;
+            if (res.error_message[0] != '\0') {
+                std::println("  Status: \033[1;33m[WARN] {} (timing delta)\033[0m",
+                             res.error_message);
+                all_passed = false;
+            } else {
+                std::println("  Status: \033[1;33m[WARN] Architectural match, timing delta\033[0m");
+                all_passed = false;
+            }
         } else {
             std::println("  Status: \033[1;31m[FAIL] Discrepancy: {}\033[0m", res.error_message);
             all_passed = false;
@@ -266,18 +294,32 @@ int main(int argc, char** argv) {
         results.push_back(res);
     }
 
-    double mape = bench_count > 0 ? (total_abs_err_pct / static_cast<double>(bench_count)) : 0.0;
+    const bool mape_complete = bench_count == benchmarks.size();
+    double mape = mape_complete ? (total_abs_err_pct / static_cast<double>(bench_count)) : 0.0;
     std::println("\n\033[1m=== Evaluation Summary ===\033[0m");
-    std::println("  Mean Absolute Percentage Error (MAPE): {:.2f}%", mape);
-    std::println("  Overall Status: {}",
-                 all_passed ? "\033[1;32mPASSED\033[0m" : "\033[1;33mCOMPLETED WITH DELTAS\033[0m");
+    if (mape_complete) {
+        std::println("  Mean Absolute Percentage Error (MAPE): {:.2f}%", mape);
+    } else {
+        std::println("  Mean Absolute Percentage Error (MAPE): n/a ({}/{} valid benchmarks)",
+                     bench_count, benchmarks.size());
+    }
+    const auto overall_status = all_passed            ? "\033[1;32mPASSED\033[0m"
+                                : invalid_measurement ? "\033[1;31mFAILED (invalid data)\033[0m"
+                                                      : "\033[1;33mCOMPLETED WITH DELTAS\033[0m";
+    std::println("  Overall Status: {}", overall_status);
 
     if (!out_json.empty()) {
         std::ofstream json_file(out_json);
         if (json_file.is_open()) {
             json_file << "{\n";
             json_file << std::format("  \"target\": \"{}\",\n", target->name());
-            json_file << std::format("  \"mape\": {:.4f},\n", mape);
+            json_file << "  \"metric\": \"mean absolute cycle-count percentage error; each "
+                         "benchmark is normalized by RTL cycles\",\n";
+            if (mape_complete) {
+                json_file << std::format("  \"mape\": {:.4f},\n", mape);
+            } else {
+                json_file << "  \"mape\": null,\n";
+            }
             json_file << std::format("  \"passed\": {},\n", all_passed ? "true" : "false");
             json_file << "  \"benchmarks\": {\n";
             for (std::size_t i = 0; i < results.size(); ++i) {
@@ -286,6 +328,20 @@ int main(int argc, char** argv) {
                                          r.benchmark_name ? r.benchmark_name : "unknown");
                 json_file << std::format("      \"simrv_cycles\": {},\n", r.simrv_cycles);
                 json_file << std::format("      \"rtl_cycles\": {},\n", r.rtl_cycles);
+                json_file << std::format("      \"simrv_instructions\": {},\n",
+                                         r.simrv_instructions);
+                json_file << std::format("      \"rtl_instructions\": {},\n", r.rtl_instructions);
+                if (r.rtl_cycles > 0 && r.simrv_cycles > 0) {
+                    const auto delta =
+                        static_cast<double>(r.simrv_cycles) - static_cast<double>(r.rtl_cycles);
+                    const auto error = std::abs(delta) / static_cast<double>(r.rtl_cycles) * 100.0;
+                    json_file << std::format("      \"cycle_delta\": {},\n",
+                                             static_cast<int64_t>(delta));
+                    json_file << std::format("      \"cycle_error_pct\": {:.4f},\n", error);
+                } else {
+                    json_file << "      \"cycle_delta\": null,\n";
+                    json_file << "      \"cycle_error_pct\": null,\n";
+                }
                 json_file << std::format("      \"matched\": {}\n", r.matched ? "true" : "false");
                 json_file << std::format("    }}{}\n", (i + 1 < results.size()) ? "," : "");
             }
@@ -312,7 +368,11 @@ int main(int argc, char** argv) {
 
         std::println("[*] Evaluated {} parameter combinations.",
                      req_lats.size() * resp_lats.size() * dc_hits.size());
-        std::println("  Baseline Error (MAPE): {:.2f}%", mape);
+        if (mape_complete) {
+            std::println("  Baseline Error (MAPE): {:.2f}%", mape);
+        } else {
+            std::println("  Baseline Error (MAPE): n/a (incomplete measurements)");
+        }
         std::println("  Calibration Status   : Parameters aligned with target RTL.");
 
         if (apply_tune && !config_path.empty()) {

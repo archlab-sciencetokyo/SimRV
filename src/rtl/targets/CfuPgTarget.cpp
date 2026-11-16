@@ -14,6 +14,7 @@
 #include <fstream>
 #include <regex>
 #include <sstream>
+#include <utility>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/rtl/ParityTarget.hpp"
@@ -129,8 +130,14 @@ class CfuPgTarget final : public ParityTarget {
     auto prepare(const SimRvRtlContext& ctx) -> bool override {
         std::filesystem::path work_dir(ctx.work_dir ? ctx.work_dir : "build/rtl_parity/cfu-pg");
         std::filesystem::create_directories(work_dir);
-
-        return resolve_cfu_dir(ctx).has_value();
+        auto cfu_dir = resolve_cfu_dir(ctx);
+        if (!cfu_dir) return false;
+        for (const auto& [source, destination] :
+             {std::pair{"app/crt0.s", "crt0.S"}, std::pair{"app/link.ld", "link.ld"}}) {
+            std::filesystem::copy_file(*cfu_dir / source, work_dir / destination,
+                                       std::filesystem::copy_options::overwrite_existing);
+        }
+        return true;
     }
 
     auto run_benchmark(const SimRvRtlContext& ctx, std::string_view bench_name,
@@ -151,13 +158,18 @@ class CfuPgTarget final : public ParityTarget {
         std::filesystem::path rtl_dir = work_dir / "rtl";
         std::filesystem::create_directories(rtl_dir);
 
-        // Copy and instrument RTL sources if not already prepared
+        // Compile the generated memory contents into a fresh simulator per benchmark.
+        // CFU-PG includes memi.txt/memd.txt at Verilog compile time.
+        std::filesystem::path bench_rtl_dir = rtl_dir / std::string(bench_name);
+        std::filesystem::create_directories(bench_rtl_dir);
+
+        // Copy and instrument RTL sources into this benchmark's isolated build directory.
         constexpr std::array<const char*, 5> kRtlFiles = {"top.v", "main.v", "proc.v", "cfu.v",
                                                           "config.vh"};
         for (const auto* fname : kRtlFiles) {
             auto src_path = *cfu_dir / fname;
-            auto dst_path = rtl_dir / fname;
-            if (!std::filesystem::exists(dst_path) && std::filesystem::exists(src_path)) {
+            auto dst_path = bench_rtl_dir / fname;
+            if (std::filesystem::exists(src_path)) {
                 std::ifstream in(src_path);
                 std::stringstream ss;
                 ss << in.rdbuf();
@@ -169,9 +181,9 @@ class CfuPgTarget final : public ParityTarget {
                         "    always @(posedge clk) begin\n"
                         "        if ($test$plusargs(\"parity_trace\") && !m0.rst && !cpu_sim_fini "
                         "&&\n"
-                        "            !m0.cpu.stall && m0.cpu.MaWb_v && !m0.cpu.stall_i) begin\n"
+                        "            !m0.cpu.stall && m0.cpu.ExMa_v && !m0.cpu.stall_i) begin\n"
                         "            $write(\"CYCLETRACE cycle=%0d inst=%0d pc=%08x ir=%08x\\n\",\n"
-                        "                   mcycle, minstret, m0.cpu.MaWb_pc, m0.cpu.MaWb_ir);\n"
+                        "                   mcycle, minstret, m0.cpu.ExMa_pc, m0.cpu.ExMa_ir);\n"
                         "        end\n"
                         "    end\n\n";
                     auto pos = content.find(marker);
@@ -192,19 +204,27 @@ class CfuPgTarget final : public ParityTarget {
 
         std::string dummy;
         run_cmd_capture(
-            {objcopy, "-O", "binary", "--only-section=.text", elf_path.string(), imem_bin.string()},
+            {objcopy, "-O", "binary", "--only-section=.text.init", "--only-section=.text.*",
+             "--only-section=.text", elf_path.string(), imem_bin.string()},
             work_dir, dummy);
         run_cmd_capture({objcopy, "-O", "binary", "--only-section=.data", "--only-section=.rodata",
                          "--only-section=.bss", elf_path.string(), dmem_bin.string()},
                         work_dir, dummy);
 
-        write_verilog_memory_include(rtl_dir / "memi.txt", "imem", imem_bin, 32 * 1024);
-        write_verilog_memory_include(rtl_dir / "memd.txt", "dmem", dmem_bin, 16 * 1024);
+        if (!write_verilog_memory_include(bench_rtl_dir / "memi.txt", "imem", imem_bin,
+                                          32 * 1024) ||
+            !write_verilog_memory_include(bench_rtl_dir / "memd.txt", "dmem", dmem_bin,
+                                          16 * 1024)) {
+            std::snprintf(out_result.error_message, sizeof(out_result.error_message),
+                          "Failed to generate CFU-PG memory image for %.*s",
+                          static_cast<int>(bench_name.size()), bench_name.data());
+            return false;
+        }
 
         // Compile RTL with Verilator if simulator binary doesn't exist
         std::filesystem::path verilator_bin =
             ctx.verilator_binary ? ctx.verilator_binary : "verilator";
-        std::filesystem::path top_sim = rtl_dir / "obj_dir/top";
+        std::filesystem::path top_sim = bench_rtl_dir / "obj_dir/top";
         if (!std::filesystem::exists(top_sim)) {
             std::vector<std::string> vcmd = {verilator_bin.string(),
                                              "--binary",
@@ -218,7 +238,7 @@ class CfuPgTarget final : public ParityTarget {
                                              "main.v",
                                              "proc.v",
                                              "cfu.v"};
-            int vrc = run_cmd_capture(vcmd, rtl_dir, dummy);
+            int vrc = run_cmd_capture(vcmd, bench_rtl_dir, dummy);
             if (vrc != 0 || !std::filesystem::exists(top_sim)) {
                 std::snprintf(out_result.error_message, sizeof(out_result.error_message),
                               "Verilator compilation failed for CFU-PG: %s", dummy.c_str());
@@ -232,7 +252,7 @@ class CfuPgTarget final : public ParityTarget {
             rtl_cmd.push_back("+parity_trace");
         }
         std::string rtl_output;
-        run_cmd_capture(rtl_cmd, rtl_dir, rtl_output);
+        int rtl_rc = run_cmd_capture(rtl_cmd, bench_rtl_dir, rtl_output);
 
         out_result.rtl_cycles = extract_cfu_metric(R"re(===> mcycle\s*:\s*(\d+))re", rtl_output);
         out_result.rtl_instructions =
@@ -248,12 +268,52 @@ class CfuPgTarget final : public ParityTarget {
         }
 
         std::string simrv_output;
-        run_cmd_capture(simrv_cmd, work_dir, simrv_output);
+        ::setenv("SIMRV_RETIRE_TRACE", "1", 1);
+        int simrv_rc = run_cmd_capture(simrv_cmd, work_dir, simrv_output);
 
         out_result.simrv_cycles = extract_cfu_metric(
-            R"re(Elapsed cycles \(clocks\)\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\))re", simrv_output);
+            R"re(Elapsed Cycles\s*:\s*[\d\.]*[KM]?\s*\(([0-9,]+)\))re", simrv_output);
         out_result.simrv_instructions = extract_cfu_metric(
-            R"re(Executed instructions\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\))re", simrv_output);
+            R"re(Retired Instructions\s*:\s*[\d\.]*[KM]?\s*\(([0-9,]+)\))re", simrv_output);
+
+        if (ctx.trace_dir && ctx.trace_dir[0] != '\0') {
+            std::filesystem::path trace_dir(ctx.trace_dir);
+            std::filesystem::create_directories(trace_dir);
+            auto save = [&](std::string_view suffix, const std::string& contents) {
+                std::ofstream trace(trace_dir / (std::string(bench_name) + std::string(suffix)));
+                trace << contents;
+            };
+            save(".rtl.log", rtl_output);
+            save(".simrv.log", simrv_output);
+
+            auto rtl_trace = parse_retirement_trace(rtl_output);
+            auto simrv_trace = parse_retirement_trace(simrv_output);
+            auto comp = compare_retirement_traces(rtl_trace, simrv_trace);
+            const auto common_events = std::min(rtl_trace.size(), simrv_trace.size());
+            if (comp.first_architectural_divergence.has_value() &&
+                *comp.first_architectural_divergence < common_events) {
+                out_result.divergence_cycle = *comp.first_architectural_divergence;
+                std::snprintf(out_result.error_message, sizeof(out_result.error_message),
+                              "Architectural divergence at event #%zu",
+                              *comp.first_architectural_divergence);
+            } else if (comp.first_timing_divergence.has_value()) {
+                const auto& divergence = *comp.first_timing_divergence;
+                out_result.divergence_cycle = divergence.index;
+                std::snprintf(
+                    out_result.error_message, sizeof(out_result.error_message),
+                    "Timing divergence at event #%zu (pc 0x%llx, RTL +%llu / SimRV +%llu cycles)",
+                    divergence.index, static_cast<unsigned long long>(divergence.pc.raw()),
+                    static_cast<unsigned long long>(divergence.rtl_step_cycles),
+                    static_cast<unsigned long long>(divergence.simrv_step_cycles));
+            }
+        }
+
+        if (rtl_rc != 0 || simrv_rc != 0) {
+            std::snprintf(out_result.error_message, sizeof(out_result.error_message),
+                          "Execution failed (RTL rc=%d, SimRV rc=%d): %s", rtl_rc, simrv_rc,
+                          simrv_rc != 0 ? simrv_output.c_str() : rtl_output.c_str());
+            return false;
+        }
 
         out_result.matched = (out_result.rtl_instructions > 0 &&
                               out_result.rtl_instructions == out_result.simrv_instructions &&

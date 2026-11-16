@@ -32,7 +32,7 @@
     Features inlined per-cycle transition kernels for **3-stage** and **5-stage** pipelines with an authoritative hardware register scoreboard (tracking INT, FP, and Vector dependencies), configurable branch predictors (Bimodal, GShare, Tournament), and multi-level L1/L2/L3 MESI directory cache coherence.
 
 === "Hardware RTL Parity"
-    Validated bit-for-bit against physical Verilog implementations (such as CFU-Proving-Ground RVProc and Archlab RVComp) through Verilator. SimRV matches cycle-by-cycle retirement traces and hardware performance counters.
+    Compared against Verilog implementations such as CFU-Proving-Ground RVProc and Archlab RVComp through Verilator, with exact benchmark checkpoint cycle counts and retirement counts on the checked-in parity suites.
 
 === "Interactive TUI & Education"
     Interactive split-screen terminal monitor displaying live register files, pipeline stages, cache tags, hazard graphs, disassembly explainers, and an interactive Linux PTY console. Includes student guidance and instruction-level explanation.

@@ -489,7 +489,6 @@ To calibrate SimRV to an external RTL core:
 
    The tuner performs multi-parameter coordinate descent across interconnect latencies, cache
    capacities, and hit/miss timing, optimizing Mean Absolute Percentage Error (MAPE) against the
-   measured RTL `mcycle`. The current hierarchy-aware configuration measures **0.96% MAPE** across the five
-   evaluation kernels. The previously reported **2.39%** used the RTL testbench's derived
-   `minstret + stall counters` estimate, which is consistently 33 cycles above measured `mcycle`
-   for these kernels and must not be presented as exact cycle parity.
+   measured RTL `mcycle`. The current RVComp configuration measures **0.00% MAPE** across all five
+   evaluation kernels; each benchmark also has matching retirement counts. This is checkpoint
+   cycle parity and does not imply identical cycle numbers for individual retirement events.

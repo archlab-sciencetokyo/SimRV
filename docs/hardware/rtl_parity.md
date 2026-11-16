@@ -79,6 +79,13 @@ Checkpoint parity does not imply identical retirement timing. Blocking fetch
 hardware can retire bursts differently from SimRV's semantic pipeline while
 still producing the same architectural sequence and total cycle count.
 
+The RVComp adapter's standard benchmark linker script places `.tohost` at
+`0x80001000`, the address observed by the RVComp testbench. Its measured
+checkpoint comparison uses the testbench's `mcycle` and `minstret` totals.
+CFU-PG retirement trace instrumentation uses the same `ExMa` stage as its
+testbench retirement counter, so the trace includes the terminal event counted
+at the shared checkpoint.
+
 !!! info "Report parity at the level you measured"
     Matching final cycle counts alone does not establish cycle-by-cycle equivalence. State whether
     a result covers architectural behavior, trace extent, retirement timing, checkpoint cycles, or
