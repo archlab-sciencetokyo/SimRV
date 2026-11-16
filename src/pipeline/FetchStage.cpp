@@ -402,7 +402,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
     if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
                                 machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
         const simrv::xlen::PhysAddr line_base =
-            ctx.padr1 & ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u));
+            ctx.padr1 & ~(static_cast<simrv::xlen::Address>(icache.line_mask()));
         const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                         ca_state.instruction_fill.active &&
                                         ca_state.instruction_fill.line_base == line_base;
@@ -420,9 +420,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             if (machine.runtime_profile.is_cycle_mode() &&
                 pipeline_sim.config.enable_instruction_prefetch &&
                 !ca_state.instruction_fill.active && !ca_state.instruction_prefetch.active) {
-                const simrv::xlen::PhysAddr next_line = base + simrv::cache::ICache::kLineBytes;
-                if (machine.memory_geometry().contains(next_line,
-                                                       simrv::cache::ICache::kLineBytes) &&
+                const simrv::xlen::PhysAddr next_line = base + icache.line_bytes();
+                if (machine.memory_geometry().contains(next_line, icache.line_bytes()) &&
                     icache.line_state(next_line) == simrv::memory::MesiState::Invalid) {
                     simrv::memory::TlChannelA pf_req{};
                     pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
@@ -442,9 +441,9 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             }
         };
 
-        const bool single_line = (ctx.padr2 == ctx.padr1 + 2) &&
-                                 ((ctx.padr1.raw() & (simrv::cache::ICache::kLineBytes - 1u)) <=
-                                  (simrv::cache::ICache::kLineBytes - 4u));
+        const bool single_line =
+            (ctx.padr2 == ctx.padr1 + 2) &&
+            ((ctx.padr1.raw() & icache.line_mask()) <= (icache.line_bytes() - 4u));
         if (single_line) {
             uint32_t w_data = 0;
             if (!refill_in_progress) {
@@ -487,8 +486,10 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         fill.reset();
                         return;
                     }
-                    icache.insert(line_base, timed.line_data.data(),
-                                  simrv::memory::mesi_for(timed.payload.cap));
+                    const auto fill_state = machine.memory_.system_bus().has_coherence()
+                                                ? simrv::memory::mesi_for(timed.payload.cap)
+                                                : simrv::memory::MesiState::Exclusive;
+                    icache.insert(line_base, timed.line_data.data(), fill_state);
                     release_instruction_eviction(machine, *this);
                     machine.memory_.system_bus().grant_ack(
                         simrv::memory::TlChannelE{.sink = timed.payload.sink});
@@ -506,9 +507,11 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 }
 
                 simrv::memory::TlChannelA req{};
-                req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+                req.opcode = machine.memory_.system_bus().has_coherence()
+                                 ? simrv::memory::TlOpcodeA::AcquireBlock
+                                 : simrv::memory::TlOpcodeA::Get;
                 req.grow = simrv::memory::TlGrow::NtoB;
-                req.size = simrv::memory::kTlBlockSize;
+                req.size = static_cast<uint8_t>(icache.line_shift());
                 req.hart = hart_id();
                 req.source = fill.source;
                 req.address = line_base;
@@ -557,7 +560,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                                   simrv::xlen::VirtAddr vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
             const simrv::xlen::PhysAddr h_line_base =
-                paddr & ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u));
+                paddr & ~(static_cast<simrv::xlen::Address>(icache.line_mask()));
             const bool h_refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                               ca_state.instruction_fill.active &&
                                               ca_state.instruction_fill.line_base == h_line_base;
@@ -598,8 +601,10 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         fill.reset();
                         return std::nullopt;
                     }
-                    icache.insert(h_line_base, timed.line_data.data(),
-                                  simrv::memory::mesi_for(timed.payload.cap));
+                    const auto fill_state = machine.memory_.system_bus().has_coherence()
+                                                ? simrv::memory::mesi_for(timed.payload.cap)
+                                                : simrv::memory::MesiState::Exclusive;
+                    icache.insert(h_line_base, timed.line_data.data(), fill_state);
                     release_instruction_eviction(machine, *this);
                     machine.memory_.system_bus().grant_ack(
                         simrv::memory::TlChannelE{.sink = timed.payload.sink});
@@ -612,9 +617,11 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 }
 
                 simrv::memory::TlChannelA req{};
-                req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+                req.opcode = machine.memory_.system_bus().has_coherence()
+                                 ? simrv::memory::TlOpcodeA::AcquireBlock
+                                 : simrv::memory::TlOpcodeA::Get;
                 req.grow = simrv::memory::TlGrow::NtoB;
-                req.size = simrv::memory::kTlBlockSize;
+                req.size = static_cast<uint8_t>(icache.line_shift());
                 req.hart = hart_id();
                 req.source = fill.source;
                 req.address = h_line_base;

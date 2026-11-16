@@ -18,7 +18,6 @@
 
 #include "simrv/SafetyProfiles.hpp"
 #include "simrv/core/InterruptTopology.hpp"
-#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
@@ -392,6 +391,7 @@ struct SoCConfig {
     bool mmio_console_redirect = false;
     bool bram_prewarm = false;
     simrv::memory::BusProtocol bus_protocol = simrv::memory::BusProtocol::TileLinkC;
+    std::string bus_name{};
 
     [[nodiscard]] static auto virt_pcie() -> SoCConfig {
         return {.name = "virt-pcie",
@@ -403,7 +403,8 @@ struct SoCConfig {
                 .dram_size = std::nullopt,
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
-                .devices = {soc_device_default(SoCDeviceKind::PFlash)}};
+                .devices = {soc_device_default(SoCDeviceKind::PFlash)},
+                .bus_name = {}};
     }
 
     [[nodiscard]] static auto virt_mmio() -> SoCConfig {
@@ -424,7 +425,8 @@ struct SoCConfig {
                             soc_device_default(SoCDeviceKind::VirtioMmioSound),
                             soc_device_default(SoCDeviceKind::VirtioMmioNet),
                             soc_device_default(SoCDeviceKind::VirtioMmioFs),
-                            soc_device_default(SoCDeviceKind::DmaController)}};
+                            soc_device_default(SoCDeviceKind::DmaController)},
+                .bus_name = {}};
     }
 
     [[nodiscard]] static auto rvcomp() -> SoCConfig {
@@ -438,7 +440,9 @@ struct SoCConfig {
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
                 .devices = {soc_device_default(SoCDeviceKind::ResetControl),
-                            soc_device_default(SoCDeviceKind::RingBufferEthernet)}};
+                            soc_device_default(SoCDeviceKind::RingBufferEthernet)},
+                .bus_protocol = simrv::memory::BusProtocol::Axi4LiteUnified,
+                .bus_name = "RVComp AXI4-Lite"};
     }
 
     [[nodiscard]] static auto preset(std::string_view preset_name) -> std::optional<SoCConfig> {

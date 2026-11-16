@@ -34,6 +34,8 @@ struct L1CacheConfig {
     uint32_t line_bytes = 64;
     simrv::xlen::LatencyCycles hit_latency = 1;
     simrv::xlen::LatencyCycles miss_latency = 12;
+    bool write_through = false;
+    bool write_allocate = true;
 };
 
 struct FrontCacheConfig {

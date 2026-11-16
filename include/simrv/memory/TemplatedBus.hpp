@@ -10,6 +10,8 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "simrv/memory/Axi4.hpp"
@@ -31,10 +33,10 @@ class TemplatedBus final : public Bus {
    public:
     static constexpr BusProtocolSpec kSpec = Spec;
 
-    explicit TemplatedBus(simrv::core::Machine& machine);
+    explicit TemplatedBus(simrv::core::Machine& machine, BusProtocolSpec spec = Spec);
 
     [[nodiscard]] auto protocol() const noexcept -> BusProtocol override { return Spec.protocol; }
-    [[nodiscard]] auto protocol_spec() const noexcept -> BusProtocolSpec override { return Spec; }
+    [[nodiscard]] auto protocol_spec() const noexcept -> BusProtocolSpec override { return spec_; }
 
     auto add_node(TileLinkNode* node) -> bool override;
     void configure_timing(uint32_t request_latency, uint32_t response_latency,
@@ -97,6 +99,8 @@ class TemplatedBus final : public Bus {
                             std::string_view detail = {},
                             const simrv::core::BusTraceContext* trace_context = nullptr) override;
 
+    auto axi_cycle(const Axi4CycleInput& input) -> Axi4CycleOutput override;
+    auto tilelink_cycle(const TlCycleInput& input) -> TlCycleOutput override;
     auto send_ar(const Axi4Ar& ar) -> bool override;
     auto recv_r(Axi4R& r) -> bool override;
     auto send_aw(const Axi4Aw& aw) -> bool override;
@@ -132,6 +136,11 @@ class TemplatedBus final : public Bus {
         Cycle submitted_cycle = 0;
         simrv::xlen::LatencyCycles request_latency = 1;
         simrv::xlen::Counter sequence = 0;
+        std::array<simrv::xlen::Byte, kTlBlockBytes> data{};
+        std::array<TlMask, kTlBlockBytes / kTlBeatBytes> masks{};
+        bool has_multibeat_data = false;
+        bool multibeat_data_corrupt = false;
+        uint32_t shared_cache_hit_latency = 0;
     };
 
     struct TimedDBeat {
@@ -148,14 +157,51 @@ class TemplatedBus final : public Bus {
         uint8_t beat_count = 1;
     };
 
+    struct CReleaseAssembly {
+        TlChannelC first{};
+        std::array<simrv::xlen::Byte, kTlBlockBytes> data{};
+        uint8_t next_beat = 0;
+        bool corrupt = false;
+    };
+
+    struct ARequestAssembly {
+        TlChannelA first{};
+        std::array<simrv::xlen::Byte, kTlBlockBytes> data{};
+        std::array<TlMask, kTlBlockBytes / kTlBeatBytes> masks{};
+        uint8_t next_beat = 0;
+        bool corrupt = false;
+    };
+
+    struct PendingCycleAcquire {
+        TlChannelA request{};
+        size_t remaining_probes = 0;
+        uint64_t probe_targets = 0;
+        bool failed = false;
+    };
+
     void process_request(const TimedRequest& request);
+    auto enqueue_request(const TlChannelA& request, bool source_reserved,
+                         const ARequestAssembly* assembly = nullptr) -> bool;
+    void process_axi_writes(size_t max_beats);
+    void produce_axi_read_beat();
+    void trace_axi_response(const TlChannelA& request, const TlChannelD& response, uint64_t cycle);
+    void trace_axi_request(const TlChannelA& request, uint64_t cycle);
+    auto process_axi_lite_unified_request(
+        const TimedRequest& request, TlChannelD& response,
+        std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>& response_line, bool& has_line_data,
+        uint32_t& cache_service_latency) -> bool;
     auto consume_d_beat(TlSourceId source_id, bool honor_ready, TimedResponse& response) -> bool;
 
     simrv::core::Machine& machine_;
+    BusProtocolSpec spec_;
     simrv::xlen::Counter read_count_ = 0;
     simrv::xlen::Counter write_count_ = 0;
     std::atomic<simrv::xlen::Counter> dma_delayed_requests_{0};
     std::atomic<simrv::xlen::LatencyCycles> dma_added_latency_cycles_{0};
+    std::atomic<simrv::xlen::Counter> queue_contended_requests_{0};
+    std::atomic<simrv::xlen::LatencyCycles> queue_wait_cycles_{0};
+    std::atomic<simrv::xlen::Counter> ifetch_contended_requests_{0};
+    std::atomic<simrv::xlen::Counter> data_contended_requests_{0};
 
     mutable std::recursive_mutex bus_mutex_;
     MmioRouter router_;
@@ -171,15 +217,24 @@ class TemplatedBus final : public Bus {
     uint64_t data_response_count_ = 0;
     std::deque<TimedRequest> req_queue_;
     std::deque<TimedDBeat> d_queue_;
+    std::optional<CReleaseAssembly> c_release_;
+    std::optional<ARequestAssembly> a_request_;
+    std::optional<PendingCycleAcquire> cycle_acquire_;
+    std::deque<TlChannelB> cycle_probes_;
     simrv::util::SmallFlatMap<TlSourceId, DAssembly, 8> d_assemblies_;
     std::deque<TlTransactionRecord> transaction_history_;
 
     // AXI4 channel state (used when Spec.is_axi())
     std::vector<Axi4Ar> pending_ar_;
     std::vector<Axi4R> pending_r_;
+    std::unordered_map<AxiId, Axi4Ar> axi_exclusive_reads_;
+    uint16_t axi_read_beat_ = 0;
     std::vector<Axi4Aw> pending_aw_;
     std::vector<Axi4W> pending_w_;
     std::vector<Axi4B> pending_b_;
+    uint16_t axi_write_beat_ = 0;
+    AxiResp axi_write_response_ = AxiResp::Okay;
+    bool axi_cycle_active_ = false;
 };
 
 [[nodiscard]] auto make_system_bus(simrv::core::Machine& machine, const BusProtocolSpec& spec)
@@ -198,5 +253,6 @@ extern template class TemplatedBus<kDefaultTileLinkUHSpec>;
 extern template class TemplatedBus<kDefaultTileLinkULSpec>;
 extern template class TemplatedBus<kDefaultAxi4Spec>;
 extern template class TemplatedBus<kDefaultAxi4LiteSpec>;
+extern template class TemplatedBus<kAxi4LiteUnifiedSpec>;
 
 }  // namespace simrv::memory

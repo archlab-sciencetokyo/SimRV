@@ -162,7 +162,9 @@ class RvcompTarget final : public ParityTarget {
             ctx.objcopy_binary ? ctx.objcopy_binary : "riscv64-unknown-elf-objcopy";
         std::string out_dummy;
         int objcopy_rc = run_child_capture(
-            {objcopy, "-O", "binary", elf_path.string(), bin_path.string()}, work_dir, out_dummy);
+            {objcopy, "-O", "binary", std::filesystem::absolute(elf_path).string(),
+             std::filesystem::absolute(bin_path).string()},
+            work_dir, out_dummy);
         if (objcopy_rc != 0) {
             std::snprintf(out_result.error_message, sizeof(out_result.error_message),
                           "objcopy failed for %s", elf_path.string().c_str());
@@ -186,20 +188,28 @@ class RvcompTarget final : public ParityTarget {
         }
 
         std::string rtl_output;
-        run_child_capture(rtl_cmd, sim_bin->parent_path(), rtl_output);
+        const auto rtl_cwd = sim_bin->parent_path().filename() == "obj_dir"
+                                 ? sim_bin->parent_path().parent_path()
+                                 : sim_bin->parent_path();
+        run_child_capture(rtl_cmd, rtl_cwd, rtl_output);
 
         out_result.rtl_cycles = extract_metric(R"re(===> mcycle\s*:\s*(\d+))re", rtl_output);
         out_result.rtl_instructions =
             extract_metric(R"re(===> minstret\s*:\s*(\d+))re", rtl_output);
 
         // 4. Run SimRV
-        std::string simrv = ctx.simrv_binary ? ctx.simrv_binary : "build/rv64-release/simrv";
-        std::vector<std::string> simrv_cmd = {
-            simrv, "--cli",           "--ca", "--mode",    "five-stage",
-            "-m",  elf_path.string(), "-H",   "0x80000000"};
+        std::string simrv = ctx.simrv_binary
+                                ? std::filesystem::absolute(ctx.simrv_binary).string()
+                                : std::filesystem::absolute("build/rv64-release/simrv").string();
+        std::vector<std::string> simrv_cmd = {simrv,
+                                              "run",
+                                              "--cli",
+                                              "--mode",
+                                              "cycle-accurate",
+                                              std::filesystem::absolute(elf_path).string()};
         if (ctx.config_path && ctx.config_path[0] != '\0') {
             simrv_cmd.push_back("--config");
-            simrv_cmd.push_back(ctx.config_path);
+            simrv_cmd.push_back(std::filesystem::absolute(ctx.config_path).string());
         } else {
             simrv_cmd.push_back("--cpu-preset");
             simrv_cmd.push_back("rvcomp");
@@ -209,9 +219,9 @@ class RvcompTarget final : public ParityTarget {
         run_child_capture(simrv_cmd, work_dir, simrv_output);
 
         out_result.simrv_cycles = extract_metric(
-            R"re(Elapsed cycles \(clocks\)\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\))re", simrv_output);
+            R"re(Elapsed Cycles\s*:\s*[\d\.]*[KM]?\s*\(([0-9,]+)\))re", simrv_output);
         out_result.simrv_instructions = extract_metric(
-            R"re(Executed instructions\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\))re", simrv_output);
+            R"re(Retired Instructions\s*:\s*[\d\.]*[KM]?\s*\(([0-9,]+)\))re", simrv_output);
 
         // 5. Compare traces if trace_dir is set
         if (ctx.trace_dir && ctx.trace_dir[0] != '\0') {

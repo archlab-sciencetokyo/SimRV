@@ -25,11 +25,21 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     cfu_unit.set_default_latency(config.cfu.default_latency);
     pipeline_sim.config = config.pipeline;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
+    if (e_icount == 0 && state_.minstret == 0 && clint_mmio.mcycle == 0) {
+        e_icount = pipeline_sim.config.startup_instruction_offset;
+        state_.minstret = pipeline_sim.config.startup_instruction_offset;
+        state_.minstret = pipeline_sim.config.startup_instruction_offset;
+        state_.minstret = pipeline_sim.config.startup_instruction_offset;
+        state_.minstret = pipeline_sim.config.startup_instruction_offset;
+        clint_mmio.mcycle = pipeline_sim.config.startup_cycle_offset;
+    }
     // BaseCache has bounded 16 KiB / 8-way backing, enough for the shipped FPGA profiles.
     // A validated model is required to fit before this point.
     (void)icache.configure(config.instruction_cache.capacity_bytes,
-                           config.instruction_cache.associativity);
-    (void)dcache.configure(config.data_cache.capacity_bytes, config.data_cache.associativity);
+                           config.instruction_cache.associativity,
+                           config.instruction_cache.line_bytes);
+    (void)dcache.configure(config.data_cache.capacity_bytes, config.data_cache.associativity,
+                           config.data_cache.line_bytes);
     const simrv::cache::TimingLevelConfig instruction_level{
         .capacity_bytes = config.instruction_front_cache.capacity_bytes,
         .associativity = config.instruction_front_cache.associativity,
@@ -82,11 +92,13 @@ void CPU::reset() {
     cached_decode_context_ = 0xFF;
     dcache.flush();
     TLB_flush();
-    e_icount = 0;
+    e_icount = pipeline_sim.config.startup_instruction_offset;
+    state_.minstret = pipeline_sim.config.startup_instruction_offset;
     sbi_pmu_selector.fill(0);
     sbi_pmu_configured.fill(false);
     sbi_pmu_started.fill(false);
     e_ccount = 0;
+    clint_mmio.mcycle = pipeline_sim.config.startup_cycle_offset;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);
     perf_counters.reset();

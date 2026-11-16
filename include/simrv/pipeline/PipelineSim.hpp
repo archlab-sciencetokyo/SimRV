@@ -112,6 +112,8 @@ struct CpuConfig {
     simrv::xlen::LatencyCycles fence_flush_penalty = 4;
     simrv::xlen::LatencyCycles branch_mispredict_penalty = 2;
     simrv::xlen::LatencyCycles cycle_counter_start_delay = 0;
+    uint64_t startup_cycle_offset = 0;
+    uint64_t startup_instruction_offset = 0;
     simrv::xlen::LatencyCycles host_interface_latency = 0;
     simrv::xlen::LatencyCycles host_interface_phase_period = 0;
     bool enable_forwarding = true;

@@ -18,6 +18,7 @@ enum class BusProtocol : uint8_t {
     TileLinkC,
     Axi4,
     Axi4Lite,
+    Axi4LiteUnified,
 };
 
 struct BusProtocolSpec {
@@ -30,9 +31,13 @@ struct BusProtocolSpec {
     bool supports_atomics{true};
     bool supports_coherence{true};
     bool separate_write_response{false};
+    bool unified_write_address_data{false};
+    bool supports_block_access{false};
+    bool supports_internal_atomics{false};
 
     [[nodiscard]] constexpr auto is_axi() const noexcept -> bool {
-        return protocol == BusProtocol::Axi4 || protocol == BusProtocol::Axi4Lite;
+        return protocol == BusProtocol::Axi4 || protocol == BusProtocol::Axi4Lite ||
+               protocol == BusProtocol::Axi4LiteUnified;
     }
 
     [[nodiscard]] constexpr auto is_tilelink() const noexcept -> bool { return !is_axi(); }
@@ -74,11 +79,11 @@ inline constexpr BusProtocolSpec kDefaultTileLinkUHSpec{
 
 inline constexpr BusProtocolSpec kDefaultTileLinkULSpec{
     .protocol = BusProtocol::TileLinkUL,
-    .beat_bytes = 4,
+    .beat_bytes = 8,
     .max_outstanding = 8,
     .id_width_bits = 4,
-    .max_burst_beats = 1,
-    .supports_burst = false,
+    .max_burst_beats = 8,
+    .supports_burst = true,
     .supports_atomics = false,
     .supports_coherence = false,
     .separate_write_response = false,
@@ -108,7 +113,26 @@ inline constexpr BusProtocolSpec kDefaultAxi4LiteSpec{
     .separate_write_response = true,
 };
 
-inline constexpr std::array<BusCatalogEntry, 5> kBusCatalog = {{
+// RVComp's AXI4-Lite based fabric couples AW and W handshakes. Its cache refill
+// port also accepts block-sized simulator requests, which are expanded internally
+// into ordinary single-beat Lite transactions. Atomics are executed at the memory
+// endpoint, as they are in RVComp's L2, and are not exposed as AXI transactions.
+inline constexpr BusProtocolSpec kAxi4LiteUnifiedSpec{
+    .protocol = BusProtocol::Axi4LiteUnified,
+    .beat_bytes = 16,
+    .max_outstanding = 1,
+    .id_width_bits = 0,
+    .max_burst_beats = 1,
+    .supports_burst = false,
+    .supports_atomics = false,
+    .supports_coherence = false,
+    .separate_write_response = true,
+    .unified_write_address_data = true,
+    .supports_block_access = true,
+    .supports_internal_atomics = true,
+};
+
+inline constexpr std::array<BusCatalogEntry, 6> kBusCatalog = {{
     {BusProtocol::TileLinkC, kDefaultTileLinkCSpec, "tilelink-c", "TileLink-C (Coherent SMP)"},
     {BusProtocol::TileLinkUH, kDefaultTileLinkUHSpec, "tilelink-uh",
      "TileLink-UH (Uncached Heavy)"},
@@ -116,7 +140,31 @@ inline constexpr std::array<BusCatalogEntry, 5> kBusCatalog = {{
      "TileLink-UL (Uncached Lightweight)"},
     {BusProtocol::Axi4, kDefaultAxi4Spec, "axi4", "AMBA AXI4"},
     {BusProtocol::Axi4Lite, kDefaultAxi4LiteSpec, "axi4-lite", "AMBA AXI4-Lite"},
+    {BusProtocol::Axi4LiteUnified, kAxi4LiteUnifiedSpec, "axi4-lite-unified",
+     "AMBA AXI4-Lite (Unified)"},
 }};
+
+[[nodiscard]] constexpr auto is_supported_bus_spec(const BusProtocolSpec& spec) noexcept -> bool {
+    const auto* entry = [&]() constexpr -> const BusCatalogEntry* {
+        for (const auto& candidate : kBusCatalog) {
+            if (candidate.protocol == spec.protocol) return &candidate;
+        }
+        return nullptr;
+    }();
+    if (entry == nullptr) return false;
+    if (!spec.is_axi()) return entry->spec == spec;
+
+    auto baseline = spec;
+    baseline.max_outstanding = entry->spec.max_outstanding;
+    baseline.id_width_bits = entry->spec.id_width_bits;
+    baseline.max_burst_beats = entry->spec.max_burst_beats;
+    return baseline == entry->spec && spec.max_outstanding > 0 && spec.id_width_bits <= 32 &&
+           spec.max_burst_beats > 0 && spec.max_burst_beats <= 256 &&
+           ((spec.protocol != BusProtocol::Axi4Lite &&
+             spec.protocol != BusProtocol::Axi4LiteUnified) ||
+            spec.id_width_bits == 0) &&
+           (spec.supports_burst || spec.max_burst_beats == 1);
+}
 
 [[nodiscard]] constexpr auto find_bus_catalog_entry(BusProtocol protocol) noexcept
     -> const BusCatalogEntry* {
@@ -152,6 +200,9 @@ inline constexpr std::array<BusCatalogEntry, 5> kBusCatalog = {{
     }
     if (ieq(name, "axi4lite") || ieq(name, "axi-lite")) {
         return find_bus_catalog_entry(BusProtocol::Axi4Lite);
+    }
+    if (ieq(name, "rvcomp-axi-lite") || ieq(name, "axi4-lite-unified")) {
+        return find_bus_catalog_entry(BusProtocol::Axi4LiteUnified);
     }
     for (const auto& entry : kBusCatalog) {
         if (ieq(entry.cli_name, name)) return &entry;

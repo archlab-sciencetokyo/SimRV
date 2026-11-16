@@ -7,8 +7,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/PlatformMap.h"
-#include "simrv/device/Uart.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -19,369 +17,188 @@
 
 namespace simrv::tui {
 
-namespace {
-
-auto format_dev_status(uint32_t status) -> std::string {
-    if (status == 0x0f || status == 0x8f || (status & 0x07) == 0x07) {
-        return "\033[38;5;120mDRIVER_OK\033[0m";
-    }
-    if (status == 0x03) {
-        return "\033[38;5;215mACKNOWLEDGED\033[0m";
-    }
-    if (status == 0x01) {
-        return "\033[38;5;117mRESET\033[0m";
-    }
-    if (status == 0x00) {
-        return "\033[38;5;244mSTANDBY\033[0m";
-    }
-    return std::format("\033[38;5;215m0x{:02x}\033[0m", status);
-}
-
-}  // namespace
-
-auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+auto InspectorPane::render_io_stats(const simrv::core::CPU& /*cpu*/, int logical_row, int col_width,
                                     int right_width) -> std::string {
     int const width = col_width + right_width;
-    const auto platform = machine_.platform_status();
-    const bool is_mmio = platform.profile == simrv::core::PlatformProfile::Mmio;
+    if (page_ == TuiRegPage::BUS) {
+        const auto& bus = machine_.memory().system_bus();
+        const auto spec = bus.protocol_spec();
+        if (logical_row == 0) {
+            return section_line(std::format("{} live activity", bus.protocol_display_name()),
+                                width);
+        }
+        if (logical_row == 1) {
+            return format_to_width(
+                std::format("  {}Spec:\033[0m {} B/beat · max {} outstanding · {} · {}", kThemeText,
+                            spec.beat_bytes, spec.max_outstanding,
+                            spec.supports_burst ? "bursts" : "single beat",
+                            spec.supports_atomics ? "atomics" : "no bus atomics"),
+                width);
+        }
+        if (logical_row == 2) {
+            return format_to_width(
+                std::format("  {}Reads:\033[0m {}{} │ {}Writes:\033[0m {}{} │ {}Pending:\033[0m {} "
+                            "req / {} resp",
+                            kThemeText, kThemeMint,
+                            simrv::util::format_with_commas(bus.read_count()), kThemeText,
+                            kThemePeach, simrv::util::format_with_commas(bus.write_count()),
+                            kThemeText, bus.pending_requests(), bus.pending_responses()),
+                width);
+        }
+        if (logical_row == 3) {
+            const auto stats = bus.contention_stats();
+            return format_to_width(
+                std::format("  {}DMA:\033[0m {} │ {}Delayed:\033[0m {} (+{} cyc) │ {}Queue "
+                            "waits:\033[0m {} (+{} cyc)",
+                            kThemeText, stats.dma_active ? "active" : "idle", kThemeText,
+                            simrv::util::format_with_commas(stats.delayed_requests),
+                            simrv::util::format_with_commas(stats.added_latency_cycles), kThemeText,
+                            simrv::util::format_with_commas(stats.queue_contended_requests),
+                            simrv::util::format_with_commas(stats.queue_wait_cycles)),
+                width);
+        }
+        if (logical_row == 4) {
+            if (!bus.has_coherence()) {
+                return format_to_width("  Coherence: unsupported by this bus protocol.", width);
+            }
+            const auto& stats = bus.coherence_hub().stats();
+            return format_to_width(
+                std::format("  {}Coherence:\033[0m {} acquires · {} probes · {} grants · {} "
+                            "releases · {} writebacks",
+                            kThemeText, simrv::util::format_with_commas(stats.acquire_count),
+                            simrv::util::format_with_commas(stats.probe_count),
+                            simrv::util::format_with_commas(stats.grant_count),
+                            simrv::util::format_with_commas(stats.release_count),
+                            simrv::util::format_with_commas(stats.writeback_count)),
+                width);
+        }
+        if (logical_row == 5) {
+            return section_line(spec.is_axi() ? "AXI bridge" : "TileLink fabric", width);
+        }
+        if (logical_row == 6) {
+            if (spec.is_axi()) {
+                const auto* bridge = machine_.axi_bridge();
+                if (bridge == nullptr)
+                    return format_to_width("  AXI bridge is unavailable.", width);
+                const auto channels = bridge->channel_stats();
+                return format_to_width(
+                    std::format("  {}AR:\033[0m {} │ {}R:\033[0m {} beats │ {}AW:\033[0m {} │ "
+                                "{}W:\033[0m {} beats │ {}B:\033[0m {} responses",
+                                kThemeText, channels.ar, kThemeText, channels.r, kThemeText,
+                                channels.aw, kThemeText, channels.w, kThemeText, channels.b),
+                    width);
+            }
+            const auto& checker = bus.protocol_checker();
+            return format_to_width(
+                std::format(
+                    "  {}A req:\033[0m {} │ {}B probe:\033[0m {} │ {}C release:\033[0m {} │ "
+                    "{}D resp:\033[0m {} │ {}E ack:\033[0m {}",
+                    kThemeText, checker.outstanding_sources(), kThemeText,
+                    checker.outstanding_probes(), kThemeText, checker.outstanding_releases(),
+                    kThemeText, bus.pending_responses(), kThemeText, checker.outstanding_sinks()),
+                width);
+        }
+        if (logical_row == 7) {
+            return section_line(
+                spec.is_axi() ? "AXI channel trace" : "Recent TileLink transactions", width);
+        }
+        if (logical_row >= 8 && logical_row <= 11) {
+            if (spec.is_axi()) {
+                if (logical_row == 8) {
+                    const auto* bridge = machine_.axi_bridge();
+                    return format_to_width(
+                        bridge != nullptr && bridge->tracer().is_enabled()
+                            ? "  AXI trace enabled; channel events are written to the configured "
+                              "trace path."
+                            : "  AXI trace disabled; enable trace_axi to keep a channel event log.",
+                        width);
+                }
+                return format_to_width("", width);
+            }
+            const auto& history = bus.transaction_history();
+            const int tx_index = static_cast<int>(history.size()) - 1 - (logical_row - 8);
+            if (tx_index >= 0 && tx_index < static_cast<int>(history.size())) {
+                const auto& tx = history[static_cast<std::size_t>(tx_index)];
+                return format_to_width(std::format("  cycle {:>7}  [{}] {:<14} src:{} @ {:#x} {}",
+                                                   tx.cycle, memory::to_char(tx.channel), tx.opcode,
+                                                   tx.source, tx.address.raw(), tx.detail),
+                                       width);
+            }
+            return format_to_width("  -- idle --", width);
+        }
+        return format_to_width("", width);
+    }
 
+    return format_to_width("", width);
+}
+
+auto InspectorPane::render_device_tree_stats(int logical_row, int width) -> std::string {
+    const auto& config = machine_.configuration().soc;
+    const auto& bus = machine_.memory().system_bus();
+    const auto platform = machine_.platform_status();
     if (logical_row == 0) {
-        return section_line(is_mmio ? "VirtIO-MMIO v2 Interconnect & SoC Bus Inspector"
-                                    : "PCIe Interconnect & Modern MMIO Inspector",
+        return section_line(std::format("Platform device tree · {} devices", config.devices.size()),
                             width);
     }
     if (logical_row == 1) {
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
-            return format_to_width(
-                std::format("  {}Space:\033[0m {}DRAM\033[0m │ {}{}\033[0m", kThemeText, kThemeMint,
-                            kThemeSky, is_mmio ? "MMIO" : "ECAM"),
-                width);
-        }
-        const auto topology =
-            is_mmio ? std::format("\033[38;5;117mMMIO {:#x}..{:#x}",
-                                  static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_BLOCK_BASE),
-                                  static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_NET_BASE))
-                    : std::format("\033[38;5;117mECAM {:#x} │ BAR {:#x}",
-                                  static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_ECAM_BASE),
-                                  static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_WINDOW_BASE));
         return format_to_width(
-            std::format("  {}Space:\033[0m {}DRAM {:#010x}\033[0m │ {}\033[0m", kThemeText,
-                        kThemeMint, static_cast<uint64_t>(memory::kDramBaseAddress.raw()),
-                        topology),
+            std::format("  {}Bus:\033[0m {} · {} reads / {} writes · {} req pending · DMA {}",
+                        kThemeText, bus.protocol_display_name(),
+                        simrv::util::format_with_commas(bus.read_count()),
+                        simrv::util::format_with_commas(bus.write_count()), bus.pending_requests(),
+                        platform.dma_busy ? "busy" : "idle"),
             width);
     }
     if (logical_row == 2) {
-        return section_line(is_mmio ? "Storage & Networking (VirtIO-MMIO)"
-                                    : "Storage & Networking (PCIe Endpoints)",
-                            width);
-    }
-
-    const bool has_disk = platform.disk_loaded;
-
-    if (logical_row == 3) {
-        if (!has_disk) {
-            return format_to_width(
-                std::format("  {}Block:\033[0m \033[38;5;244mSTANDBY (No disk attached)\033[0m",
-                            kThemeText),
-                width);
-        }
-        uint32_t status = platform.disk_status;
-        uint32_t irq_stat = platform.disk_isr;
-        uint64_t cap_sec = platform.disk_capacity_sectors;
-        auto status_str = format_dev_status(status);
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
-            return format_to_width(
-                std::format("  {}Blk:\033[0m {} │ {}Cap:\033[0m {}{}MB\033[0m", kThemeText,
-                            status_str, kThemeText, kThemeVal, (cap_sec * 512) / (1024 * 1024)),
-                width);
-        }
         return format_to_width(
-            std::format("  {}VirtIO-Blk:\033[0m {} │ {}ISR:\033[0m 0x{:02x} │ {}Capacity:\033[0m "
-                        "{}{} MB\033[0m",
-                        kThemeText, status_str, kThemeText, irq_stat, kThemeText, kThemeVal,
-                        (cap_sec * 512) / (1024 * 1024)),
+            std::format(
+                "  {}DEVICE / NODE{}\033[0m   {}MEMORY MAP{}\033[0m   {}IRQ / LIVE STATS{}\033[0m",
+                kThemeText, kThemeText, kThemeText, kThemeText, kThemeText, kThemeText),
             width);
     }
-    if (logical_row == 4) {
-        uint32_t net_status = platform.network_status;
-        std::string mac_str = "52:54:00:12:34:56";
-        size_t tx_pkts = platform.network_tx_packets;
-        auto status_str = format_dev_status(net_status);
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
+
+    int row = 3;
+    for (const auto& device : config.devices) {
+        if (row++ == logical_row) {
+            const std::string name =
+                device.name.empty() ? std::string(simrv::core::soc_device_kind_name(device.kind))
+                                    : device.name;
+            std::string stats = device.enabled ? "enabled" : "disabled";
+            if (name.find("net") != std::string::npos ||
+                name.find("ethernet") != std::string::npos) {
+                stats = std::format("{} tx packets", platform.network_tx_packets);
+            } else if (name.find("block") != std::string::npos ||
+                       name.find("disk") != std::string::npos) {
+                stats = platform.disk_loaded
+                            ? std::format("{} sectors · status {:#x}",
+                                          platform.disk_capacity_sectors, platform.disk_status)
+                            : "no disk image";
+            } else if (name.find("dma") != std::string::npos) {
+                stats = platform.dma_busy ? "busy" : "idle";
+            } else if (name.find("console") != std::string::npos) {
+                stats = std::format("status {:#x}", platform.console_status);
+            }
             return format_to_width(
-                std::format("  {}Net:\033[0m {} │ {}Tx:\033[0m {}{}\033[0m", kThemeText, status_str,
-                            kThemeText, kThemeMint, tx_pkts),
+                std::format("  {}{}{}\033[0m  {:#010x}..{:#010x}  irq {} · {}",
+                            device.enabled ? kThemeMint : kThemeMuted, name, kThemeText,
+                            device.base.raw(), device.base.raw() + device.size - 1, device.irq,
+                            stats),
                 width);
         }
-        return format_to_width(std::format("  {}VirtIO-Net:\033[0m {} │ {}MAC:\033[0m {}{}\033[0m "
-                                           "│ {}Tx Pkts:\033[0m {}{}\033[0m",
-                                           kThemeText, status_str, kThemeText, kThemeSky, mac_str,
-                                           kThemeText, kThemeMint, tx_pkts),
+        for (const auto& region : device.regions) {
+            if (row++ == logical_row) {
+                return format_to_width(
+                    std::format("    {}{}{}\033[0m  {:#010x}..{:#010x}  subregion", kThemeSky,
+                                region.name, kThemeText, region.base.raw(),
+                                region.base.raw() + region.size - 1),
+                    width);
+            }
+        }
+    }
+    if (logical_row == row) {
+        return format_to_width("  Memory map ranges are configured in the selected SoC profile.",
                                width);
     }
-    if (logical_row == 5) {
-        return section_line("Console, UART & Peripheral Endpoints", width);
-    }
-    if (logical_row == 6) {
-        uint32_t c_status = platform.console_status;
-        auto c_str = format_dev_status(c_status);
-
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
-            return format_to_width(
-                std::format("  {}Console:\033[0m {} │ {}UART:\033[0m \033[38;5;120m115200\033[0m",
-                            kThemeText, c_str, kThemeText),
-                width);
-        }
-        return format_to_width(std::format("  {}VirtIO-Console:\033[0m {} │ {}16550 UART:\033[0m "
-                                           "\033[38;5;120m115200 8N1\033[0m",
-                                           kThemeText, c_str, kThemeText),
-                               width);
-    }
-    if (logical_row == 7) {
-        uint32_t rng_status = platform.rng_status;
-        uint32_t gpu_status = platform.gpu_status;
-        auto rng_str = format_dev_status(rng_status);
-        auto gpu_str = format_dev_status(gpu_status);
-        std::string sound_str =
-            platform.sound_active
-                ? std::format("\033[38;5;120m{}kHz {}\033[0m", platform.sound_sample_rate / 1000,
-                              platform.sound_channels == 2 ? "Stereo" : "Mono")
-                : (platform.sound_status != 0 ? format_dev_status(platform.sound_status)
-                                              : "\033[38;5;244mSTANDBY\033[0m");
-        std::string dma_str =
-            platform.dma_busy ? "\033[38;5;215mBUSY\033[0m" : "\033[38;5;120mREADY\033[0m";
-
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 65) {
-            return format_to_width(
-                std::format(
-                    "  {}RNG:\033[0m {} │ {}GPU:\033[0m {} │ {}Snd:\033[0m {} │ {}DMA:\033[0m {}",
-                    kThemeText, rng_str, kThemeText, gpu_str, kThemeText, sound_str, kThemeText,
-                    dma_str),
-                width);
-        }
-        return format_to_width(
-            std::format(
-                "  {}RNG:\033[0m {} │ {}GPU:\033[0m {} │ {}Sound:\033[0m {} │ {}DMA:\033[0m {}",
-                kThemeText, rng_str, kThemeText, gpu_str, kThemeText, sound_str, kThemeText,
-                dma_str),
-            width);
-    }
-    if (logical_row == 8) {
-        return section_line("Advanced Interrupt Architecture (AIA) & ACLINT", width);
-    }
-    if (logical_row == 9) {
-        return format_to_width(
-            std::format(
-                "  {}APLIC-M:\033[0m {}0x0C000000\033[0m │ {}APLIC-S:\033[0m {}0x0D000000\033[0m │ "
-                "{}IMSIC:\033[0m {}MSI Active\033[0m",
-                kThemeText, kThemeMint, kThemeText, kThemeSky, kThemeText, kThemePeach),
-            width);
-    }
-    if (logical_row == 10) {
-        return section_line("System Execution Counters & CPI / IPC Stats", width);
-    }
-
-    uint64_t icount = cpu.e_icount;
-    uint64_t cycles =
-        machine_.runtime_profile.is_cycle_mode() ? cpu.pipeline_sim.cycle_count() : icount;
-
-    if (logical_row == 11) {
-        return format_to_width(
-            std::format("  {}Insts:\033[0m {}{:<10}\033[0m │ {}Cycles:\033[0m {}{}\033[0m",
-                        kThemeText, kThemeMint, simrv::util::format_with_commas(icount), kThemeText,
-                        kThemeVal, simrv::util::format_with_commas(cycles)),
-            width);
-    }
-    if (logical_row == 12) {
-        double cpi =
-            (icount == 0) ? 1.0 : static_cast<double>(cycles) / static_cast<double>(icount);
-        double ipc =
-            (cycles == 0) ? 1.0 : static_cast<double>(icount) / static_cast<double>(cycles);
-        return format_to_width(
-            std::format("  {}CPI:\033[0m {}{:5.2f}\033[0m │ {}IPC:\033[0m {}{:5.2f}\033[0m │ "
-                        "{}Mode:\033[0m {}{}\033[0m",
-                        kThemeText, kThemePeach, cpi, kThemeText, kThemeMint, ipc, kThemeText,
-                        kThemeSky,
-                        (machine_.runtime_profile.is_cycle_mode() ? "Pipeline" : "Functional")),
-            width);
-    }
-    if (logical_row == 13) {
-        return section_line("TileLink-C Directory Coherence Hub (Illinois MESI)", width);
-    }
-    if (logical_row == 14) {
-        const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
-            return format_to_width(
-                std::format(
-                    "  {}Acq:\033[0m {}{:<5}\033[0m │ {}Prb:\033[0m {}{:<5}\033[0m │ "
-                    "{}Grnt:\033[0m {}{}\033[0m",
-                    kThemeText, kThemeMint, simrv::util::format_with_commas(c_stats.acquire_count),
-                    kThemeText, kThemeSky, simrv::util::format_with_commas(c_stats.probe_count),
-                    kThemeText, kThemePeach, simrv::util::format_with_commas(c_stats.grant_count)),
-                width);
-        }
-        return format_to_width(
-            std::format(
-                "  {}Acquire:\033[0m {}{:<7}\033[0m │ {}Probe:\033[0m {}{:<7}\033[0m │ "
-                "{}Grant:\033[0m {}{:<7}\033[0m │ {}Prefetch:\033[0m {}{}\033[0m",
-                kThemeText, kThemeMint, simrv::util::format_with_commas(c_stats.acquire_count),
-                kThemeText, kThemeSky, simrv::util::format_with_commas(c_stats.probe_count),
-                kThemeText, kThemePeach, simrv::util::format_with_commas(c_stats.grant_count),
-                kThemeText, kThemeVal, simrv::util::format_with_commas(c_stats.prefetch_count)),
-            width);
-    }
-    if (logical_row == 15) {
-        const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
-            return format_to_width(
-                std::format("  {}Rel:\033[0m {}{:<5}\033[0m │ {}Inv:\033[0m {}{:<5}\033[0m │ "
-                            "{}WB:\033[0m {}{}\033[0m",
-                            kThemeText, kThemeCoral,
-                            simrv::util::format_with_commas(c_stats.release_count), kThemeText,
-                            kThemeVal, simrv::util::format_with_commas(c_stats.invalidation_count),
-                            kThemeText, kThemePink,
-                            simrv::util::format_with_commas(c_stats.writeback_count)),
-                width);
-        }
-        return format_to_width(
-            std::format(
-                "  {}Release:\033[0m {}{:<7}\033[0m │ {}Inval:\033[0m {}{:<7}\033[0m │ "
-                "{}WBack:\033[0m {}{}\033[0m",
-                kThemeText, kThemeCoral, simrv::util::format_with_commas(c_stats.release_count),
-                kThemeText, kThemeVal, simrv::util::format_with_commas(c_stats.invalidation_count),
-                kThemeText, kThemePink, simrv::util::format_with_commas(c_stats.writeback_count)),
-            width);
-    }
-    if (logical_row == 16) {
-        const char* label = "TileLink-C";
-        switch (machine_.memory().system_bus().protocol()) {
-            case simrv::memory::BusProtocol::TileLinkC:
-                label = "TileLink-C";
-                break;
-            case simrv::memory::BusProtocol::TileLinkUH:
-                label = "TileLink-UH";
-                break;
-            case simrv::memory::BusProtocol::TileLinkUL:
-                label = "TileLink-UL";
-                break;
-            case simrv::memory::BusProtocol::Axi4:
-                label = "AXI4";
-                break;
-            case simrv::memory::BusProtocol::Axi4Lite:
-                label = "AXI4-Lite";
-                break;
-        }
-        return section_line(std::format("{} Channels & Fabric State", label), width);
-    }
-    if (logical_row == 17) {
-        auto const& bus = machine_.memory().system_bus();
-        auto const& checker = bus.protocol_checker();
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 50) {
-            return format_to_width(
-                std::format("  {}A:\033[0m{}{}\033[0m │ {}B:\033[0m{}{}\033[0m │ "
-                            "{}C:\033[0m{}{}\033[0m │ {}D:\033[0m{}{}\033[0m │ "
-                            "{}E:\033[0m{}{}\033[0m",
-                            kThemeText, kThemeMint, checker.outstanding_sources(), kThemeText,
-                            kThemeSky, checker.outstanding_probes(), kThemeText, kThemeCoral,
-                            checker.outstanding_releases(), kThemeText, kThemePeach,
-                            bus.pending_responses(), kThemeText, kThemeVal,
-                            checker.outstanding_sinks()),
-                width);
-        }
-        return format_to_width(
-            std::format("  {}A(Req):\033[0m {}{:<3}\033[0m │ {}B(Probe):\033[0m {}{:<3}\033[0m │ "
-                        "{}C(Rel):\033[0m {}{:<3}\033[0m │ {}D(Resp):\033[0m {}{:<3}\033[0m │ "
-                        "{}E(Ack):\033[0m {}{}\033[0m",
-                        kThemeText, kThemeMint, checker.outstanding_sources(), kThemeText,
-                        kThemeSky, checker.outstanding_probes(), kThemeText, kThemeCoral,
-                        checker.outstanding_releases(), kThemeText, kThemePeach,
-                        bus.pending_responses(), kThemeText, kThemeVal,
-                        checker.outstanding_sinks()),
-            width);
-    }
-    if (logical_row == 18) {
-        return section_line("DMA Contention & Shared Bus Delay", width);
-    }
-    if (logical_row == 19) {
-        const auto stats = machine_.memory().system_bus().contention_stats();
-        const auto state =
-            stats.dma_active
-                ? (stats.dma_penalty_cycles == 0
-                       ? std::string("\033[38;5;215mACTIVE · no added penalty\033[0m")
-                       : std::format("\033[38;5;215mACTIVE · +{} cycles/request\033[0m",
-                                     stats.dma_penalty_cycles))
-                : std::string("\033[38;5;120mIDLE\033[0m");
-        if (framework::active_render_context().density == framework::Density::Compact ||
-            width < 58) {
-            return format_to_width(
-                std::format("  {}DMA:\033[0m {} │ {}Delayed:\033[0m {} │ {}Added:\033[0m {} cyc",
-                            kThemeText, state, kThemeText,
-                            simrv::util::format_with_commas(stats.delayed_requests), kThemeText,
-                            simrv::util::format_with_commas(stats.added_latency_cycles)),
-                width);
-        }
-        return format_to_width(
-            std::format("  {}DMA:\033[0m {} │ {}Requests delayed:\033[0m {} │ {}Added "
-                        "latency:\033[0m {} cycles",
-                        kThemeText, state, kThemeText,
-                        simrv::util::format_with_commas(stats.delayed_requests), kThemeText,
-                        simrv::util::format_with_commas(stats.added_latency_cycles)),
-            width);
-    }
-    if (logical_row == 20) {
-        return section_line("Recent Bus Transactions", width);
-    }
-    if (logical_row >= 21 && logical_row <= 24) {
-        auto const& history = machine_.memory().system_bus().transaction_history();
-        int const tx_index = static_cast<int>(history.size()) - 1 - (logical_row - 21);
-        if (tx_index >= 0 && tx_index < static_cast<int>(history.size())) {
-            auto const& tx = history[tx_index];
-            const char* ch_color = kThemeMint;
-            switch (tx.channel) {
-                case TileLinkChannel::A:
-                    ch_color = kThemeMint;
-                    break;
-                case TileLinkChannel::B:
-                    ch_color = kThemeSky;
-                    break;
-                case TileLinkChannel::C:
-                    ch_color = kThemeCoral;
-                    break;
-                case TileLinkChannel::D:
-                    ch_color = kThemePeach;
-                    break;
-                case TileLinkChannel::E:
-                    ch_color = kThemeVal;
-                    break;
-            }
-            std::string src_sink;
-            if (tx.channel == TileLinkChannel::A || tx.channel == TileLinkChannel::C) {
-                src_sink = std::format("src:{}", tx.source);
-            } else if (tx.channel == TileLinkChannel::D) {
-                src_sink = std::format("src:{} snk:{}", tx.source, tx.sink);
-            } else if (tx.channel == TileLinkChannel::E) {
-                src_sink = std::format("snk:{}", tx.sink);
-            }
-            std::string addr_str = (tx.address != 0) ? std::format("@{:#x}", tx.address.raw()) : "";
-            std::string detail_str = tx.detail.empty() ? "" : std::format("({})", tx.detail);
-
-            return format_to_width(
-                std::format("  \033[2m{:>6}\033[0m {}[{}]\033[0m {:<13} {:<10} {:<12} {}", tx.cycle,
-                            ch_color, memory::to_char(tx.channel), tx.opcode, src_sink, addr_str,
-                            detail_str),
-                width);
-        }
-        return format_to_width("  \033[2m-- idle --\033[0m", width);
-    }
-
     return format_to_width("", width);
 }
 

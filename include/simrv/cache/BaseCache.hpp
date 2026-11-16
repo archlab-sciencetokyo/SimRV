@@ -90,15 +90,17 @@ class BaseCache {
 
     /// Configure the active BRAM-visible portion of the fixed maximum backing store.  Keeping
     /// storage bounded gives FPGA-style models deterministic resource limits while allowing
-    /// profile changes to alter set/way behaviour at runtime.
-    [[nodiscard]] auto configure(uint32_t capacity_bytes, uint32_t associativity) -> bool {
-        if (capacity_bytes == 0 || associativity == 0 || !std::has_single_bit(capacity_bytes) ||
-            !std::has_single_bit(associativity) || associativity > kWays ||
-            capacity_bytes > kNumLines * kLineBytes ||
-            capacity_bytes < associativity * kLineBytes) {
+    /// profile changes to alter set/way/line geometry at runtime.
+    [[nodiscard]] auto configure(uint32_t capacity_bytes, uint32_t associativity,
+                                 uint32_t line_bytes = LineBytes) -> bool {
+        if (capacity_bytes == 0 || associativity == 0 || line_bytes < 16 ||
+            line_bytes > kLineBytes || !std::has_single_bit(line_bytes) ||
+            !std::has_single_bit(capacity_bytes) || !std::has_single_bit(associativity) ||
+            associativity > kWays || capacity_bytes > kNumLines * line_bytes ||
+            capacity_bytes < associativity * line_bytes) {
             return false;
         }
-        const uint32_t lines = capacity_bytes / kLineBytes;
+        const uint32_t lines = capacity_bytes / line_bytes;
         if (!std::has_single_bit(lines) || lines > kNumLines || lines % associativity != 0 ||
             !std::has_single_bit(lines / associativity)) {
             return false;
@@ -106,10 +108,18 @@ class BaseCache {
         active_lines_ = lines;
         active_ways_ = associativity;
         active_sets_ = lines / associativity;
+        active_line_bytes_ = line_bytes;
+        active_line_shift_ = static_cast<uint32_t>(std::bit_width(line_bytes) - 1u);
+        active_line_mask_ = line_bytes - 1u;
         flush(true);
         return true;
     }
-    [[nodiscard]] auto capacity_bytes() const -> uint32_t { return active_lines_ * kLineBytes; }
+    [[nodiscard]] auto capacity_bytes() const -> uint32_t {
+        return active_lines_ * active_line_bytes_;
+    }
+    [[nodiscard]] auto line_bytes() const noexcept -> uint32_t { return active_line_bytes_; }
+    [[nodiscard]] auto line_shift() const noexcept -> uint32_t { return active_line_shift_; }
+    [[nodiscard]] auto line_mask() const noexcept -> uint32_t { return active_line_mask_; }
     [[nodiscard]] auto associativity() const -> uint32_t { return active_ways_; }
     [[nodiscard]] auto set_count() const -> uint32_t { return active_sets_; }
 
@@ -167,7 +177,7 @@ class BaseCache {
         victim->valid = (init_state != simrv::memory::MesiState::Invalid);
         victim->state = init_state;
         victim->last_used = access_tick_;
-        std::memcpy(victim->data.data(), line_data, kLineBytes);
+        std::memcpy(victim->data.data(), line_data, active_line_bytes_);
     }
 
     void flush(bool clear_stats = false) {
@@ -368,7 +378,7 @@ class BaseCache {
             auto& l = line_ptr[w];
             if (l.valid && l.tag == tag) {
                 if (l.state == simrv::memory::MesiState::Modified && out_dirty_data != nullptr) {
-                    std::memcpy(out_dirty_data->data(), l.data.data(), kLineBytes);
+                    std::memcpy(out_dirty_data->data(), l.data.data(), active_line_bytes_);
                 }
                 l.state = target_state;
                 if (target_state == simrv::memory::MesiState::Invalid) {
@@ -410,17 +420,20 @@ class BaseCache {
     uint32_t active_lines_ = kNumLines;
     uint32_t active_ways_ = kWays;
     uint32_t active_sets_ = kNumSets;
+    uint32_t active_line_bytes_ = LineBytes;
+    uint32_t active_line_shift_ = kLineShift;
+    uint32_t active_line_mask_ = LineBytes - 1u;
 
     [[nodiscard]] auto get_set_index(simrv::xlen::PhysAddr addr) const
         -> simrv::memory::CacheSetIndex {
-        return static_cast<simrv::memory::CacheSetIndex>((addr.raw() >> kLineShift) &
+        return static_cast<simrv::memory::CacheSetIndex>((addr.raw() >> active_line_shift_) &
                                                          (active_sets_ - 1u));
     }
 
     [[nodiscard]] constexpr auto get_tag(simrv::xlen::PhysAddr addr) const
         -> simrv::memory::CacheTag {
         return simrv::xlen::PhysAddr{addr.raw() &
-                                     ~static_cast<simrv::xlen::Address>((1u << kLineShift) - 1u)};
+                                     ~static_cast<simrv::xlen::Address>(active_line_mask_)};
     }
 };
 

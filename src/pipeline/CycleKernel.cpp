@@ -578,12 +578,13 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
                 }
                 std::swap(pipe.memory, pipe.execute);
                 pipe.execute->invalidate();
+                const bool is_load = pipe.memory->context.traits.is_mem_load ||
+                                     pipe.memory->context.opcode == isa::Opcode::LoadFp;
+                const bool is_store = pipe.memory->context.traits.is_mem_store ||
+                                      pipe.memory->context.opcode == isa::Opcode::StoreFp;
                 if (simrv::compiler::unlikely(cpu_model_config.data_cache.hit_latency > 1) &&
                     pipe.memory->valid &&
-                    (pipe.memory->context.traits.is_mem_load ||
-                     pipe.memory->context.opcode == isa::Opcode::LoadFp ||
-                     pipe.memory->context.traits.is_mem_store ||
-                     pipe.memory->context.opcode == isa::Opcode::StoreFp)) {
+                    (is_load || (is_store && !cpu_model_config.data_cache.write_through))) {
                     pipe.memory->remaining_latency = cpu_model_config.data_cache.hit_latency - 1;
                 }
             }

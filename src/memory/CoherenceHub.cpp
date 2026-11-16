@@ -10,9 +10,9 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/Bus.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/Bus.hpp"
 
 namespace simrv::memory {
 
@@ -410,6 +410,14 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
         }
     }
 
+    if (req.size < kTlBlockSize) {
+        const size_t sub_bytes = size_t{1} << req.size;
+        const size_t sub_offset = static_cast<size_t>(req.address.raw() - line_base.raw());
+        if (sub_offset != 0 && sub_offset + sub_bytes <= kLineBytes) {
+            std::memmove(line_buffer.data(), line_buffer.data() + sub_offset, sub_bytes);
+        }
+    }
+
     if (granted_cap == TlCap::ToT) {
         machine_.memory_.reservation_table().invalidate_matching(line_base, req.hart);
     }
@@ -455,6 +463,52 @@ auto CoherenceHub::handle_intent(const TlChannelA& req, TlChannelD& resp) -> boo
     return true;
 }
 
+auto CoherenceHub::complete_cycle_probe(const TlChannelB& probe, const TlChannelC& response,
+                                        const std::array<simrv::xlen::Byte, kLineBytes>* data)
+    -> bool {
+    const bool dropped = response.report == TlReport::TtoN || response.report == TlReport::BtoN ||
+                         response.report == TlReport::NtoN;
+    const bool retained_branch =
+        response.report == TlReport::TtoB || response.report == TlReport::BtoB;
+    if (probe.target.raw() >= 64 || response.hart != probe.target ||
+        (response.corrupt && data != nullptr) || (probe.cap == TlCap::ToN && !dropped) ||
+        (probe.cap == TlCap::ToB && !dropped && !retained_branch) ||
+        (response.opcode == TlOpcodeC::ProbeAckData && data == nullptr && !response.corrupt)) {
+        return false;
+    }
+    DirectoryEntry entry{};
+    if (!lookup_dir_entry(probe.address, entry) ||
+        (entry.sharers_mask & (uint64_t{1} << probe.target.raw())) == 0)
+        return false;
+    if (entry.state == MesiState::Modified && entry.owner_hart == probe.target && data == nullptr &&
+        !response.corrupt)
+        return false;
+    if (data != nullptr) {
+        const auto geometry = machine_.memory_geometry();
+        if (machine_.ram_data() == nullptr || !geometry.contains(probe.address, kLineBytes))
+            return false;
+        machine_.memory_.reservation_table().invalidate_range(probe.address, kLineBytes);
+        std::memcpy(machine_.ram_data() + (probe.address.raw() - geometry.dram_base.raw()),
+                    data->data(), kLineBytes);
+        invalidate_shared_caches(probe.address);
+        if (l3_enabled_) l3_cache_.write_line(probe.address, *data, MesiState::Exclusive);
+        ++stats_.writeback_count;
+    }
+    if (dropped) {
+        entry.sharers_mask &= ~(uint64_t{1} << probe.target.raw());
+        ++stats_.invalidation_count;
+    }
+    if (entry.owner_hart == probe.target) entry.owner_hart.reset();
+    if (entry.sharers_mask == 0) {
+        erase_dir_entry(probe.address);
+    } else {
+        entry.state = MesiState::Shared;
+        update_dir_entry(probe.address, entry);
+    }
+    ++stats_.probe_count;
+    return true;
+}
+
 auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
                                   const std::array<simrv::xlen::Byte, kLineBytes>* release_data)
     -> bool {
@@ -468,6 +522,7 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
         auto* dram_ptr = machine_.ram_data();
         const auto geometry = machine_.memory_geometry();
         if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+            machine_.memory_.reservation_table().invalidate_range(line_base, kLineBytes);
             const auto offset = line_base.raw() - geometry.dram_base.raw();
             std::memcpy(dram_ptr + offset, release_data->data(), kLineBytes);
             stats_.writeback_count++;
@@ -499,6 +554,54 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
     resp.denied = false;
     resp.corrupt = false;
     return true;
+}
+
+auto CoherenceHub::service_uncached_shared_cache(simrv::xlen::HartId hart,
+                                                 simrv::xlen::PhysAddr address,
+                                                 uint32_t& out_hit_latency) -> bool {
+    auto* l2 = l2_cache_for_hart(hart);
+    if (l2 == nullptr && !l3_enabled_) {
+        return false;
+    }
+    const LineAddress line_base = address & ~static_cast<simrv::xlen::Address>(kLineBytes - 1u);
+    auto* dram_ptr = machine_.ram_data();
+    const auto geometry = machine_.memory_geometry();
+    if (dram_ptr == nullptr || !geometry.contains(line_base, kLineBytes)) {
+        return false;
+    }
+
+    std::array<simrv::xlen::Byte, kLineBytes> line_buf{};
+    MesiState state = MesiState::Invalid;
+    if (l2 != nullptr && l2->cache.read_line(line_base, line_buf)) {
+        out_hit_latency = l2->config.hit_latency;
+        return true;
+    }
+
+    if (l2 != nullptr) {
+        if (l3_enabled_ && l3_cache_.lookup_line(line_base, line_buf, state)) {
+            l2->cache.write_line(line_base, line_buf, MesiState::Exclusive);
+            out_hit_latency = l2->config.miss_latency + topology_.l3.hit_latency - 1;
+            return true;
+        }
+        const auto offset = line_base.raw() - geometry.dram_base.raw();
+        std::memcpy(line_buf.data(), dram_ptr + offset, kLineBytes);
+        if (l3_enabled_) {
+            l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
+        }
+        l2->cache.write_line(line_base, line_buf, MesiState::Exclusive);
+        return false;
+    }
+
+    if (l3_enabled_ && l3_cache_.lookup_line(line_base, line_buf, state)) {
+        out_hit_latency = topology_.l3.hit_latency;
+        return true;
+    }
+    const auto offset = line_base.raw() - geometry.dram_base.raw();
+    std::memcpy(line_buf.data(), dram_ptr + offset, kLineBytes);
+    if (l3_enabled_) {
+        l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
+    }
+    return false;
 }
 
 auto CoherenceHub::allocate_sink() -> TlSinkId {

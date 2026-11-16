@@ -12,7 +12,7 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
                           std::array<simrv::xlen::Byte, kLineBytes>& dirty_data) -> bool {
     const auto target_state = simrv::memory::mesi_for(req.cap);
     const simrv::xlen::PhysAddr line_base =
-        req.address & ~(static_cast<simrv::xlen::Address>(kLineBytes - 1u));
+        req.address & ~(static_cast<simrv::xlen::Address>(line_mask()));
     const uint32_t set_idx = get_set_index(line_base);
     const auto tag = get_tag(line_base);
 
@@ -21,7 +21,7 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
         if (cache_line.valid && cache_line.tag == tag) {
             const bool was_dirty = cache_line.state == simrv::memory::MesiState::Modified;
             if (was_dirty) {
-                std::memcpy(dirty_data.data(), cache_line.data.data(), kLineBytes);
+                std::memcpy(dirty_data.data(), cache_line.data.data(), line_bytes());
                 resp.opcode = simrv::memory::TlOpcodeC::ProbeAckData;
             } else {
                 resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;

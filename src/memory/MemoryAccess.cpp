@@ -296,8 +296,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
-    const bool crosses_cache_line = ((v_addr & (simrv::cache::DCache::kLineBytes - 1u)) +
-                                     size_bytes) > simrv::cache::DCache::kLineBytes;
+    const bool crosses_cache_line =
+        ((v_addr & cpu.dcache.line_mask()) + size_bytes) > cpu.dcache.line_bytes();
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
             cpu.active_context().pending_exception =
@@ -486,15 +486,17 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 cpu.active_context().pending_tval = v_addr.raw();
                 return 0;
             }
-            cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
+            const auto fill_state = mem.system_bus().has_coherence()
+                                        ? mesi_for(timed.payload.cap)
+                                        : simrv::memory::MesiState::Exclusive;
+            cpu.dcache.insert(completed_line, timed.line_data.data(), fill_state);
             release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data, cpu);
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
             const simrv::xlen::Address completed_offset = addr - completed_line.raw();
-            if (addr >= completed_line.raw() &&
-                completed_offset < simrv::cache::DCache::kLineBytes &&
-                size_bytes <= simrv::cache::DCache::kLineBytes - completed_offset) {
+            if (addr >= completed_line.raw() && completed_offset < cpu.dcache.line_bytes() &&
+                size_bytes <= cpu.dcache.line_bytes() - completed_offset) {
                 return read_refill_data(timed.line_data, completed_line.raw());
             }
             // A prior split or write transaction can complete before this access resumes. Its
@@ -507,13 +509,13 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         cpu.record_hpm_event(core::HpmEvent::DCacheMiss);
 
         const simrv::xlen::Address line_base =
-            addr & ~(static_cast<simrv::xlen::Address>(simrv::cache::DCache::kLineBytes - 1u));
+            addr & ~(static_cast<simrv::xlen::Address>(cpu.dcache.line_mask()));
         std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> line_data{};
 
         TlChannelA req{};
-        req.opcode = TlOpcodeA::AcquireBlock;
+        req.opcode = mem.system_bus().has_coherence() ? TlOpcodeA::AcquireBlock : TlOpcodeA::Get;
         req.grow = TlGrow::NtoB;
-        req.size = simrv::cache::DCache::kLineShift;
+        req.size = static_cast<uint8_t>(cpu.dcache.line_shift());
         req.hart = cpu.hart_id();
         req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
         req.logical_issue_sequence = cpu.next_logical_issue_sequence();
@@ -673,7 +675,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     auto note_store = [&](simrv::xlen::Address paddr, size_t bytes) {
         cpu.active_context().mem_paddr = simrv::xlen::PhysAddr{paddr};
         cpu.state().lr_reservation_active = false;
-        if (mem.reservation_table().may_have_reservations() && cpu.machine_->num_harts() > 1) {
+        if (mem.reservation_table().may_have_reservations()) {
             mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{paddr}, bytes,
                                                      cpu.hart_id());
         }
@@ -681,8 +683,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
-    const bool crosses_cache_line = ((v_addr & (simrv::cache::DCache::kLineBytes - 1u)) +
-                                     size_bytes) > simrv::cache::DCache::kLineBytes;
+    const bool crosses_cache_line =
+        ((v_addr & cpu.dcache.line_mask()) + size_bytes) > cpu.dcache.line_bytes();
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_sc = is_amo && (cpu.active_context().funct5 == Funct5Amo::Sc);
     const bool hypervisor_access = isa::is_hypervisor_memory_op(cpu.active_context().op_id);
@@ -783,11 +785,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 cpu.active_context().pending_tval = v_addr.raw();
                 return;
             }
+            const auto fill_state = mem.system_bus().has_coherence()
+                                        ? mesi_for(timed.payload.cap)
+                                        : simrv::memory::MesiState::Exclusive;
             if (is_perm_grant) {
-                cpu.dcache.upgrade_line_state(completed_line, mesi_for(timed.payload.cap));
+                cpu.dcache.upgrade_line_state(completed_line, fill_state);
             } else {
-                cpu.dcache.insert(completed_line, timed.line_data.data(),
-                                  mesi_for(timed.payload.cap));
+                cpu.dcache.insert(completed_line, timed.line_data.data(), fill_state);
                 release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data,
                                      cpu);
             }
@@ -815,11 +819,19 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     cpu.pipeline_sim.config.host_interface_latency != 0) {
                     cpu.ca_state.pending_host_value = value;
                     cpu.ca_state.pending_host_write_kind = static_cast<uint8_t>(kind);
+                    const auto skipped_l1_hit =
+                        (cpu.cpu_model_config.data_cache.write_through &&
+                         cpu.cpu_model_config.data_cache.hit_latency > 1)
+                            ? (cpu.cpu_model_config.data_cache.hit_latency - 1)
+                            : 0;
                     const auto phase_period = cpu.pipeline_sim.config.host_interface_phase_period;
                     const auto phase_delay =
-                        phase_period == 0 ? 0 : cpu.pipeline_sim.cycle_count() % phase_period;
+                        phase_period == 0
+                            ? 0
+                            : (cpu.pipeline_sim.cycle_count() + skipped_l1_hit) % phase_period;
                     cpu.ca_state.host_write_remaining =
-                        cpu.pipeline_sim.config.host_interface_latency + phase_delay - 1;
+                        cpu.pipeline_sim.config.host_interface_latency + skipped_l1_hit +
+                        phase_delay - 1;
                     cpu.ca_state.host_write_pending = true;
                 } else {
                     cpu.machine_->publish_tohost_write(value, kind);
@@ -853,10 +865,15 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             commit_write();
             return;
         }
-        if (geometry.contains(simrv::xlen::PhysAddr{addr}, size_bytes) &&
+        const bool write_through = cpu.cpu_model_config.data_cache.write_through &&
+                                   cpu.machine_->runtime_profile.is_cycle_mode();
+        const bool write_allocate = cpu.cpu_model_config.data_cache.write_allocate;
+        if (!(cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active &&
+              !transfer.line_fill) &&
+            geometry.contains(simrv::xlen::PhysAddr{addr}, size_bytes) &&
             pbmt == simrv::memory::PtePbmt::Pma) {
             const simrv::xlen::Address line_base =
-                addr & ~(static_cast<simrv::xlen::Address>(simrv::cache::DCache::kLineBytes - 1u));
+                addr & ~(static_cast<simrv::xlen::Address>(cpu.dcache.line_mask()));
             const auto line_state = cpu.dcache.line_state(simrv::xlen::PhysAddr{line_base});
             const bool has_trunk = line_state == simrv::memory::MesiState::Exclusive ||
                                    line_state == simrv::memory::MesiState::Modified;
@@ -866,16 +883,20 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             const auto misses_before = cpu.dcache.miss_count();
             bool cache_write_completed =
                 cpu.dcache.write(simrv::xlen::PhysAddr{addr}, data, funct3, &first_write);
-            if (!cache_write_completed) {
+            if (!cache_write_completed && (!write_through || write_allocate)) {
                 const auto misses_after = cpu.dcache.miss_count();
                 if (misses_after != misses_before)
                     cpu.record_hpm_event(core::HpmEvent::DCacheMiss, misses_after - misses_before);
                 // Not in Trunk state; acquire Trunk ownership via TL-C
                 const bool is_upgrade = (line_state == simrv::memory::MesiState::Shared);
                 TlChannelA req{};
-                req.opcode = is_upgrade ? TlOpcodeA::AcquirePerm : TlOpcodeA::AcquireBlock;
+                if (mem.system_bus().has_coherence()) {
+                    req.opcode = is_upgrade ? TlOpcodeA::AcquirePerm : TlOpcodeA::AcquireBlock;
+                } else {
+                    req.opcode = TlOpcodeA::Get;
+                }
                 req.grow = is_upgrade ? TlGrow::BtoT : TlGrow::NtoT;
-                req.size = simrv::cache::DCache::kLineShift;
+                req.size = static_cast<uint8_t>(cpu.dcache.line_shift());
                 req.hart = cpu.hart_id();
                 req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
                 req.logical_issue_sequence = cpu.next_logical_issue_sequence();
@@ -926,18 +947,20 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     }
                 }
             }
-            if (cache_write_completed && first_write) {
+            if (cache_write_completed && first_write && !write_through) {
                 mem.system_bus().mark_modified(simrv::xlen::PhysAddr{addr}, cpu.hart_id());
             }
-            if (!cache_write_completed) {
-                cpu.active_context().pending_exception = ExceptionCode::FaultStore;
-                cpu.active_context().pending_tval = v_addr.raw();
+            if (!write_through) {
+                if (!cache_write_completed) {
+                    cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+                    cpu.active_context().pending_tval = v_addr.raw();
+                    return;
+                }
+                simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{addr}, data, funct3,
+                                              cpu.machine_->ram_view());
+                commit_write();
                 return;
             }
-            simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{addr}, data, funct3,
-                                          cpu.machine_->ram_view());
-            commit_write();
-            return;
         }
 
         TlChannelA req{};
@@ -1323,6 +1346,7 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     if (op == isa::OperationId::CBO_ZERO) {
         if (geometry.contains(paddr, kLineSize)) {
+            mem.reservation_table().invalidate_range(paddr, kLineSize, cpu.hart_id());
             std::memset(cpu.machine_->ram_view().unchecked_ptr(paddr), 0, kLineSize);
         }
         // The broadcast removes the directory entry. Drop our copy as well so it cannot

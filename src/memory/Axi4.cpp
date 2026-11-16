@@ -88,7 +88,13 @@ Axi4Tracer::~Axi4Tracer() {
     }
 }
 
-void Axi4Tracer::enable(bool en) { enabled_ = en; }
+void Axi4Tracer::enable(bool en) {
+    const std::lock_guard lock(mutex_);
+    enabled_ = en;
+    if (!en && out_.is_open()) {
+        out_.flush();
+    }
+}
 
 void Axi4Tracer::set_path(const std::string& path) {
     const std::lock_guard lock(mutex_);
@@ -202,6 +208,7 @@ auto Axi4Bridge::send_ar(const Axi4Ar& ar) -> bool {
     }
 
     pending_ar_.push_back(ar);
+    ar_count_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -213,6 +220,7 @@ auto Axi4Bridge::recv_r(Axi4R& r) -> bool {
     const uint64_t current_cycle =
         machine_ != nullptr ? machine_->memory().system_bus().cycle() : 0;
     tracer_.trace_r(current_cycle, r);
+    r_count_.fetch_add(1, std::memory_order_relaxed);
 
     if (r.last && !pending_ar_.empty()) {
         pending_ar_.erase(pending_ar_.begin());
@@ -230,6 +238,7 @@ auto Axi4Bridge::send_aw(const Axi4Aw& aw) -> bool {
         machine_ != nullptr ? machine_->memory().system_bus().cycle() : 0;
     tracer_.trace_aw(current_cycle, aw);
     pending_aw_.push_back(aw);
+    aw_count_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -239,6 +248,7 @@ auto Axi4Bridge::send_w(const Axi4W& w) -> bool {
         machine_ != nullptr ? machine_->memory().system_bus().cycle() : 0;
     tracer_.trace_w(current_cycle, w);
     pending_w_.push_back(w);
+    w_count_.fetch_add(1, std::memory_order_relaxed);
 
     if (w.last) {
         const auto aw = pending_aw_.front();
@@ -266,6 +276,10 @@ auto Axi4Bridge::send_w(const Axi4W& w) -> bool {
                 if (geometry.contains(simrv::xlen::PhysAddr{beat_addr}, beat_bytes)) {
                     auto* destination =
                         machine_->ram_data() + (beat_addr - geometry.dram_base.raw());
+                    if (strobe != 0) {
+                        machine_->memory().reservation_table().invalidate_range(
+                            simrv::xlen::PhysAddr{beat_addr}, beat_bytes);
+                    }
                     for (uint32_t lane = 0; lane < beat_bytes; ++lane) {
                         if ((strobe & (uint32_t{1} << lane)) != 0) {
                             std::memcpy(
@@ -312,6 +326,7 @@ auto Axi4Bridge::recv_b(Axi4B& b) -> bool {
     const uint64_t current_cycle =
         machine_ != nullptr ? machine_->memory().system_bus().cycle() : 0;
     tracer_.trace_b(current_cycle, b);
+    b_count_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 

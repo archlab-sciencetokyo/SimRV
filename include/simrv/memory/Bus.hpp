@@ -48,6 +48,10 @@ class Bus {
         simrv::xlen::LatencyCycles dma_penalty_cycles = 0;
         simrv::xlen::Counter delayed_requests = 0;
         simrv::xlen::LatencyCycles added_latency_cycles = 0;
+        simrv::xlen::Counter queue_contended_requests = 0;
+        simrv::xlen::LatencyCycles queue_wait_cycles = 0;
+        simrv::xlen::Counter ifetch_contended_requests = 0;
+        simrv::xlen::Counter data_contended_requests = 0;
     };
 
     struct TlTransactionRecord {
@@ -165,6 +169,8 @@ class Bus {
 
     [[nodiscard]] virtual auto read_count() const -> simrv::xlen::Counter = 0;
     [[nodiscard]] virtual auto write_count() const -> simrv::xlen::Counter = 0;
+    virtual auto axi_cycle(const Axi4CycleInput& /*input*/) -> Axi4CycleOutput { return {}; }
+    virtual auto tilelink_cycle(const TlCycleInput& /*input*/) -> TlCycleOutput { return {}; }
 
    protected:
     std::atomic<Cycle> cycle_{0};

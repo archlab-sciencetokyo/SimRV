@@ -447,28 +447,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     for (const auto& ext : parsed_isa->extensions) {
                         detail::add_isa_extension(config.isa_extensions, ext);
                     }
-                } else if (detail::iequals(val_str, "gcbv") ||
-                           detail::iequals(val_str, "rv32gcbv") ||
-                           detail::iequals(val_str, "rv64gcbv") ||
-                           detail::iequals(val_str, "gcb") || detail::iequals(val_str, "rv32gcb") ||
-                           detail::iequals(val_str, "rv64gcb")) {
-                    simrv::log::warn(
-                        "Legacy draft ISA shorthand '{}' is deprecated and retired in 3.0; use "
-                        "ratified preset 'gczbv' or 'gczb' instead",
-                        val_str);
                 } else {
                     simrv::log::warn("Unknown ISA specification '{}'", val_str);
-                }
-                if (detail::iequals(unquoted, "gczb") || detail::iequals(unquoted, "rv32gczb") ||
-                    detail::iequals(unquoted, "rv64gczb") || detail::iequals(unquoted, "gczbv") ||
-                    detail::iequals(unquoted, "rv32gczbv") ||
-                    detail::iequals(unquoted, "rv64gczbv") || unquoted.contains("gczb")) {
-                    for (const auto& ext : {"zba", "zbb", "zbc", "zbs"}) {
-                        if (std::ranges::find(config.isa_extensions, ext) ==
-                            config.isa_extensions.end()) {
-                            config.isa_extensions.emplace_back(ext);
-                        }
-                    }
                 }
                 if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
                     config.isa.has(simrv::isa::IsaExtension::E)) {
@@ -575,6 +555,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             if (key == "cycle_counter_start_delay") {
                 config.pipeline.cycle_counter_start_delay =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "startup_cycle_offset") {
+                config.pipeline.startup_cycle_offset = std::stoull(std::string(val_str));
+            } else if (key == "startup_instruction_offset") {
+                config.pipeline.startup_instruction_offset = std::stoull(std::string(val_str));
                 continue;
             }
             if (key == "host_interface_latency") {
@@ -815,6 +799,16 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             } else if (key == "dcache_miss_latency") {
                 config.data_cache.miss_latency =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_write_through" ||
+                       (current_section == Section::DataCache && key == "write_through")) {
+                if (const auto parsed = detail::parse_bool(val_str)) {
+                    config.data_cache.write_through = *parsed;
+                }
+            } else if (key == "dcache_write_allocate" ||
+                       (current_section == Section::DataCache && key == "write_allocate")) {
+                if (const auto parsed = detail::parse_bool(val_str)) {
+                    config.data_cache.write_allocate = *parsed;
+                }
             } else if (key == "interconnect_request_latency" ||
                        (current_section == Section::Interconnect && key == "request_latency")) {
                 config.interconnect.request_latency =
@@ -833,6 +827,9 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                        current_section == Section::Interconnect) {
                 config.interconnect.startup_data_response_latency =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Interconnect &&
+                       (key == "protocol" || key == "name" || key == "label")) {
+                // Handled by SoCConfig parser.
             } else if (current_section == Section::Dma && (key == "enabled" || key == "enable")) {
                 if (const auto b = detail::parse_bool(val_str); b.has_value()) {
                     config.dma.enabled = *b;
@@ -1134,6 +1131,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 if (const auto* entry = simrv::memory::find_bus_catalog_entry(value)) {
                     config.bus_protocol = entry->protocol;
                 }
+            } else if (key == "name" || key == "label") {
+                config.bus_name = std::string(value);
             }
         } else if (section == Section::Pcie) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
@@ -1470,6 +1469,13 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "fp_div_latency = " << config.pipeline.fp_div_latency << "\n";
     out << "branch_mispredict_penalty = " << config.pipeline.branch_mispredict_penalty << "\n";
     out << "cycle_counter_start_delay = " << config.pipeline.cycle_counter_start_delay << "\n";
+    if (config.pipeline.startup_cycle_offset != 0) {
+        out << "startup_cycle_offset = " << config.pipeline.startup_cycle_offset << "\n";
+    }
+    if (config.pipeline.startup_instruction_offset != 0) {
+        out << "startup_instruction_offset = " << config.pipeline.startup_instruction_offset
+            << "\n";
+    }
     out << "host_interface_latency = " << config.pipeline.host_interface_latency << "\n";
     out << "host_interface_phase_period = " << config.pipeline.host_interface_phase_period << "\n";
     out << "csr_flush_penalty = " << config.pipeline.csr_flush_penalty << "\n";
@@ -1548,6 +1554,12 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "line_bytes = " << config.data_cache.line_bytes << "\n";
     out << "hit_latency = " << config.data_cache.hit_latency << "\n";
     out << "miss_latency = " << config.data_cache.miss_latency << "\n";
+    if (config.data_cache.write_through) {
+        out << "write_through = true\n";
+    }
+    if (!config.data_cache.write_allocate) {
+        out << "write_allocate = false\n";
+    }
     out << "\n";
 
     out << "[interconnect]\n";

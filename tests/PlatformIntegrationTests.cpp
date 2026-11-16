@@ -33,8 +33,6 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/AIA.hpp"
-#include "simrv/memory/CoherenceHub.hpp"
-#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
@@ -61,10 +59,12 @@
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
 #include "simrv/memory/Axi4.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -291,8 +291,8 @@ void test_left_pane_runtime_summaries() {
           "running view keeps performance telemetry live");
     pane.set_paused(true);
 
-    check(row(26).contains("Debug") && row(27).contains("ELF sym") &&
-              row(28).contains("breakpoints") && !row(28).contains("privilege"),
+    check(row(27).contains("Debug") && row(28).contains("ELF sym") &&
+              row(29).contains("breakpoints") && !row(29).contains("privilege"),
           "debug summary");
 
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -1575,6 +1575,7 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     acquire.hart = simrv::xlen::HartId{0};
     acquire.address = simrv::xlen::PhysAddr{line};
     acquire.size = simrv::memory::kTlBlockSize;
+    acquire.mask = simrv::memory::TlChannelA::compute_mask(acquire.size, acquire.address);
     simrv::memory::TlChannelD response{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
     check(bus.acquire_block(acquire, response, data));
@@ -1658,6 +1659,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     acquire.hart = simrv::xlen::HartId{0};
     acquire.address = simrv::xlen::PhysAddr{line};
     acquire.size = simrv::memory::kTlBlockSize;
+    acquire.mask = simrv::memory::TlChannelA::compute_mask(acquire.size, acquire.address);
     simrv::memory::TlChannelD response{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
     check(bus.acquire_block(acquire, response, data));
@@ -1727,6 +1729,7 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
         acquire.address =
             simrv::xlen::PhysAddr{first_line + index * simrv::memory::CoherenceHub::kLineBytes};
         acquire.size = simrv::memory::kTlBlockSize;
+        acquire.mask = simrv::memory::TlChannelA::compute_mask(acquire.size, acquire.address);
         simrv::memory::TlChannelD response{};
         std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
         check(bus.acquire_block(acquire, response, data));
@@ -1837,6 +1840,7 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
     request.hart = simrv::xlen::HartId{0};
     request.address = simrv::xlen::PhysAddr{line};
     request.size = simrv::memory::kTlBlockSize;
+    request.mask = simrv::memory::TlChannelA::compute_mask(request.size, request.address);
     simrv::memory::TlChannelD response{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
     check(bus.acquire_block(request, response, data));
@@ -1935,6 +1939,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     acq0.hart = simrv::xlen::HartId{0};
     acq0.address = simrv::xlen::PhysAddr{line};
     acq0.size = simrv::memory::kTlBlockSize;
+    acq0.mask = simrv::memory::TlChannelA::compute_mask(acq0.size, acq0.address);
     simrv::memory::TlChannelD resp0{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data0{};
     check(bus.acquire_block(acq0, resp0, data0));
@@ -1966,6 +1971,7 @@ void test_tilelink_c_acquire_perm_upgrade() {
     upg.hart = simrv::xlen::HartId{0};
     upg.address = simrv::xlen::PhysAddr{line};
     upg.size = simrv::memory::kTlBlockSize;
+    upg.mask = simrv::memory::TlChannelA::compute_mask(upg.size, upg.address);
     simrv::memory::TlChannelD upg_resp{};
     check(bus.acquire_perm(upg, upg_resp));
     check(upg_resp.opcode == simrv::memory::TlOpcodeD::Grant);
@@ -2016,6 +2022,7 @@ void test_tilelink_c_prefetch_intent() {
     intent.hart = simrv::xlen::HartId{0};
     intent.address = simrv::xlen::PhysAddr{line};
     intent.size = simrv::memory::kTlBlockSize;
+    intent.mask = simrv::memory::TlChannelA::compute_mask(intent.size, intent.address);
 
     check(bus.send_request(intent));
     simrv::memory::TlChannelD resp{};

@@ -16,7 +16,7 @@
 
 namespace simrv::cache {
 
-class DCache : public BaseCache<512, 64, 8> {
+class DCache : public BaseCache<1024, 64, 8> {
    public:
     DCache() = default;
 
@@ -40,7 +40,7 @@ class DCache : public BaseCache<512, 64, 8> {
         for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& l = line_ptr[w];
             if (l.valid && l.tag == tag) {
-                std::memset(l.data.data(), 0, kLineBytes);
+                std::memset(l.data.data(), 0, line_bytes());
                 l.state = simrv::memory::MesiState::Modified;
                 l.last_used = ++access_tick_;
                 ++hits_;
@@ -67,7 +67,7 @@ inline auto DCache::read(simrv::xlen::PhysAddr paddr, simrv::xlen::Word& data,
     const auto addr = paddr.raw();
     const auto funct3 = std::to_underlying(operation);
     if (simrv::compiler::unlikely(prefetcher_.is_enabled())) {
-        (void)prefetcher_.observe(paddr, kLineBytes);
+        (void)prefetcher_.observe(paddr, line_bytes());
     }
     const uint32_t set_idx = get_set_index(paddr);
     const auto tag = get_tag(paddr);
@@ -86,8 +86,8 @@ inline auto DCache::read(simrv::xlen::PhysAddr paddr, simrv::xlen::Word& data,
 
     const auto [w, cache_line] = find_matching_line(set_idx, tag);
     if (simrv::compiler::likely(cache_line != nullptr)) {
-        const uint32_t byte_offset = addr & (kLineBytes - 1u);
-        if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
+        const uint32_t byte_offset = addr & line_mask();
+        if (simrv::compiler::unlikely(byte_offset + size_bytes > line_bytes())) {
             ++misses_;
             last_access_was_hit_ = false;
             last_hit_way_ = 0xFFFFFFFF;
@@ -120,7 +120,7 @@ inline auto DCache::write(simrv::xlen::PhysAddr paddr, simrv::xlen::Word data,
     const auto addr = paddr.raw();
     const auto funct3 = std::to_underlying(operation);
     if (simrv::compiler::unlikely(prefetcher_.is_enabled())) {
-        (void)prefetcher_.observe(paddr, kLineBytes);
+        (void)prefetcher_.observe(paddr, line_bytes());
     }
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     // A native RV32 cache result holds at most four bytes. Wider FP/vector accesses
@@ -133,9 +133,9 @@ inline auto DCache::write(simrv::xlen::PhysAddr paddr, simrv::xlen::Word data,
             return false;
         }
     }
-    const uint32_t byte_offset = addr & (kLineBytes - 1u);
+    const uint32_t byte_offset = addr & line_mask();
 
-    if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
+    if (simrv::compiler::likely(byte_offset + size_bytes <= line_bytes())) {
         const uint32_t set_idx = get_set_index(paddr);
         const auto tag = get_tag(paddr);
         last_accessed_set_ = set_idx;
