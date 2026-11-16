@@ -1,0 +1,48 @@
+From: SimRV RV98 image maintainers
+Subject: [PATCH] openvt: fall back to alarm when POSIX timers are unavailable
+
+RV98's Linux kernel does not implement POSIX timers. openvt uses a periodic
+timer only to interrupt VT_WAITACTIVE and retry VT_ACTIVATE, so use alarm() as
+a compatible fallback on this target.
+
+--- a/src/openvt.c
++++ b/src/openvt.c
+@@ -155,0 +156,2 @@
++static volatile sig_atomic_t alarm_fallback;
++
+@@ -158,0 +161,2 @@
++	if (alarm_fallback)
++		alarm(1);
+@@ -185,12 +189,15 @@
+-		kbd_warning(errno, _("Unable to create timer"));
+-		goto fail;
+-	}
+-
+-	its.it_value.tv_sec     = 1;
+-	its.it_value.tv_nsec    = 0;
+-	its.it_interval.tv_sec  = its.it_value.tv_sec;
+-	its.it_interval.tv_nsec = its.it_value.tv_nsec;
+-
+-	if (timer_settime(timerid, 0, &its, NULL) < 0) {
+-		kbd_warning(errno, _("Unable to set timer"));
+-		goto fail;
++		alarm_fallback = 1;
++		alarm(1);
++	} else {
++		its.it_value.tv_sec     = 1;
++		its.it_value.tv_nsec    = 0;
++		its.it_interval.tv_sec  = its.it_value.tv_sec;
++		its.it_interval.tv_nsec = its.it_value.tv_nsec;
++
++		if (timer_settime(timerid, 0, &its, NULL) < 0) {
++			kbd_warning(errno, _("Unable to set timer; using alarm fallback"));
++			timer_delete(timerid);
++			timerid = NULL;
++			alarm_fallback = 1;
++			alarm(1);
++		}
+@@ -216,0 +224,4 @@
++	if (alarm_fallback) {
++		alarm(0);
++		alarm_fallback = 0;
++	}

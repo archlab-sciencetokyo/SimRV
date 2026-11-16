@@ -1,0 +1,8 @@
+export PATH=/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+export PS1='\u@\h:\w\$ '
+
+# RV98 exports a simple framebuffer (/dev/fb0), not a DRM device.
+export SDL_VIDEODRIVER=fbcon
+export SDL_FBDEV=/dev/fb0
+export SDL_NOMOUSE=1
+export SDL_AUDIODRIVER=dummy

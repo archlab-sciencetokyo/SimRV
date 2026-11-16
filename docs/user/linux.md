@@ -156,6 +156,29 @@ source linux-images/rv64/buildroot-fpga/setup.sh
 scripts/check-linux-artifacts.py linux-images/rv64/buildroot-fpga
 ```
 
+After booting, use the VGA shell on `tty1` and run `doom`. SDL 1.2 applications inherit
+`SDL_VIDEODRIVER=fbcon` and `SDL_NOMOUSE=1`; other SDL2 programs can select the VGA display with
+`SDL_VIDEODRIVER=kmsdrm`.
+
+### RV98 Doom image
+
+RV98 uses its own RVComp kernel, initramfs, DTB, MMC, keyboard and Ethernet drivers. This target
+builds a Buildroot root filesystem with PrBoom and SDL 1.2's fbcon driver, then inserts it at the
+existing 32 MiB rootfs offset in a copy of `linux-images/rv98/sys_full.img`. It keeps the source
+image intact. RV98 has simplefb but no GPU or audio device; Doom uses the framebuffer and dummy
+audio. `openvt` has an RV98 compatibility fallback for the kernel's missing POSIX timers.
+
+Build and launch the target with:
+
+```bash
+scripts/build-rv98-doom-image.sh
+simrv --config configs/models/rvcomp.cfg \
+  --dtb linux-images/rv98/rv32/doom/rv98.dtb \
+  -m linux-images/rv98/rv32/doom/sys_full.img
+```
+
+At the RV98 shell, run `doom`; to launch it on `tty2`, use `openvt -c 2 -s -- doom`.
+
 The builder also copies the matching SimRV firmware and DTB into Buildroot's `images/` directory.
 Pass the Buildroot output directory to SimRV to select firmware, DTB, and rootfs together:
 
