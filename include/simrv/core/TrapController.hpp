@@ -142,7 +142,8 @@ class TrapController {
     static auto can_execute_privileged_instruction(
         simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
         simrv::xlen::CsrValue mstatus, simrv::xlen::Instruction funct12, simrv::xlen::Word funct7,
-        simrv::xlen::CsrValue hstatus = 0, bool virtualization_mode = false) -> bool;
+        simrv::xlen::CsrValue hstatus = 0, bool virtualization_mode = false,
+        bool supervisor_mode_supported = true) -> bool;
 
     /**
      * @brief Validates if the current privilege level has access to a specific CSR.
@@ -158,7 +159,9 @@ class TrapController {
      */
     static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
                                simrv::xlen::CsrNumber csr_addr, bool is_write,
-                               bool virtualization_mode = false) -> bool;
+                               bool virtualization_mode = false,
+                               bool supervisor_mode_supported = true,
+                               bool user_mode_supported = true) -> bool;
 };
 
 }  // namespace simrv::core

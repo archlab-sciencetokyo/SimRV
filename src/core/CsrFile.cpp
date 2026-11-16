@@ -34,12 +34,14 @@ constexpr simrv::xlen::CsrValue kHgeieWritableMask =
 constexpr simrv::xlen::CsrValue kHstatusVgeinMask = simrv::xlen::CsrValue{0x3F} << 12U;
 constexpr simrv::xlen::CsrValue kVsSoftwareInterrupt = simrv::xlen::CsrValue{1} << 1U;
 constexpr simrv::xlen::CsrValue kHenvcfgWritableMask =
-    0xF1U | static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 32U) |
+    0xFDU | static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 32U) |
     static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 61U) |
     static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U) |
     static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
 constexpr simrv::xlen::CsrValue kSenvcfgWritableMask =
-    0xF1U | static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 32U);
+    0xFDU | static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 32U);
+constexpr simrv::xlen::CsrValue kEnvcfgLpeBit = simrv::xlen::CsrValue{1} << 2U;
+constexpr simrv::xlen::CsrValue kEnvcfgSseBit = simrv::xlen::CsrValue{1} << 3U;
 constexpr simrv::xlen::CsrValue kVsInterruptBits = (simrv::xlen::CsrValue{1} << 2U) |
                                                    (simrv::xlen::CsrValue{1} << 6U) |
                                                    (simrv::xlen::CsrValue{1} << 10U);
@@ -66,7 +68,7 @@ constexpr simrv::xlen::CsrValue kSupervisorInterruptEnableMask =
     if (high_half && state.current_xlen() != 32) {
         return ExceptionCode::IllegalInstruction;
     }
-    if (!isa::misa_has_extension(state.misa, isa::IsaExtension::S)) {
+    if (!state.supervisor_mode_supported) {
         return ExceptionCode::IllegalInstruction;
     }
     if (is_vs_csr && !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
@@ -156,8 +158,7 @@ auto CsrFile::compute_mstatus(const ArchState& state, simrv::xlen::CsrValue mask
     -> simrv::xlen::CsrValue {
     const simrv::xlen::CsrValue misa = state.misa;
     const simrv::xlen::CsrValue implemented =
-        mstatus_writable_mask(isa::misa_has_extension(misa, isa::IsaExtension::S),
-                              isa::misa_has_extension(misa, isa::IsaExtension::U),
+        mstatus_writable_mask(state.supervisor_mode_supported, state.user_mode_supported,
                               isa::misa_has_extension(misa, isa::IsaExtension::F),
                               isa::misa_has_extension(misa, isa::IsaExtension::V),
                               isa::misa_has_extension(misa, isa::IsaExtension::H));
@@ -172,8 +173,8 @@ auto CsrFile::getMstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrVa
 
 void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
     const simrv::xlen::CsrValue misa = cpu_.state().misa;
-    const bool has_s = isa::misa_has_extension(misa, isa::IsaExtension::S);
-    const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
+    const bool has_s = cpu_.state().supervisor_mode_supported;
+    const bool has_u = cpu_.state().user_mode_supported;
     const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
     const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
     const bool has_h = isa::misa_has_extension(misa, isa::IsaExtension::H);
@@ -222,8 +223,10 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
         cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp);
     const bool has_mdbltrp =
         cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp);
-    const simrv::xlen::CsrValue mask =
-        mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h, has_sdbltrp, has_mdbltrp);
+    const bool has_zicfilp =
+        cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp);
+    const simrv::xlen::CsrValue mask = mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h,
+                                                             has_sdbltrp, has_mdbltrp, has_zicfilp);
     cpu_.state().mstatus = (cpu_.state().mstatus & ~mask) | (wdata & mask);
     // Read-only-zero fields must not retain reset/profile state internally,
     // otherwise SD and effective-XLEN calculations could observe absent state.
@@ -238,20 +241,32 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
     const unsigned active_xlen = state.current_xlen();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
+    constexpr uint64_t kStateenCsrindEnable = uint64_t{1} << 60U;
+    constexpr uint64_t kStateenContextEnable = uint64_t{1} << 57U;
+    constexpr uint64_t kStateenJvtEnable = uint64_t{1} << 2U;
+    const uint64_t stateen0_jvt =
+        state.enabled_extensions.has(isa::MultiLetterExtension::Zcmt) ? kStateenJvtEnable : 0ULL;
+    const uint64_t stateen0_csrind =
+        (state.enabled_extensions.has(isa::MultiLetterExtension::Smcsrind) ||
+         state.enabled_extensions.has(isa::MultiLetterExtension::Sscsrind))
+            ? kStateenCsrindEnable
+            : 0ULL;
+    const uint64_t stateen0_context =
+        state.enabled_extensions.has(isa::MultiLetterExtension::Sdtrig) ? kStateenContextEnable
+                                                                        : 0ULL;
+    const uint64_t kStateen0Mask = kStateenSuperEnable | kStateenEnvCfgEnable | stateen0_csrind |
+                                   stateen0_context | stateen0_jvt;
     if (address >= 0x30CU && address <= 0x30FU) {
         if (active_xlen == 32) {
-            return static_cast<simrv::xlen::CsrValue>(state.mstateen[address - 0x30CU] &
-                                                      0xFFFFFFFFULL);
+            const uint64_t low_mask = address == 0x30CU ? stateen0_jvt : 0ULL;
+            return static_cast<simrv::xlen::CsrValue>(state.mstateen[address - 0x30CU] & low_mask);
         }
-        const uint64_t mask =
-            address == 0x30CU ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+        const uint64_t mask = address == 0x30CU ? kStateen0Mask : kStateenSuperEnable;
         return static_cast<simrv::xlen::CsrValue>(state.mstateen[address - 0x30CU] & mask);
     }
     if (address >= 0x31CU && address <= 0x31FU) {
         if (active_xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
-        const uint64_t high_mask = (address == 0x31CU)
-                                       ? (kStateenSuperEnable | kStateenEnvCfgEnable)
-                                       : kStateenSuperEnable;
+        const uint64_t high_mask = (address == 0x31CU) ? kStateen0Mask : kStateenSuperEnable;
         return static_cast<simrv::xlen::CsrValue>((state.mstateen[address - 0x31CU] & high_mask) >>
                                                   32U);
     }
@@ -279,10 +294,10 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             return simrv::xlen::CsrValue{0};
         }
         if (active_xlen == 32) {
-            return static_cast<simrv::xlen::CsrValue>(state.hstateen[bank] & 0xFFFFFFFFULL);
+            const uint64_t low_mask = bank == 0U ? stateen0_jvt : 0ULL;
+            return static_cast<simrv::xlen::CsrValue>(state.hstateen[bank] & low_mask);
         }
-        const uint64_t mask =
-            bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+        const uint64_t mask = bank == 0U ? kStateen0Mask : kStateenSuperEnable;
         return static_cast<simrv::xlen::CsrValue>(state.hstateen[bank] & mask);
     }
     if (address >= 0x71CU && address <= 0x71FU) {
@@ -291,8 +306,7 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         if ((state.mstateen[bank] & kStateenSuperEnable) == 0) {
             return simrv::xlen::CsrValue{0};
         }
-        const uint64_t high_mask =
-            bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+        const uint64_t high_mask = bank == 0U ? kStateen0Mask : kStateenSuperEnable;
         return static_cast<simrv::xlen::CsrValue>((state.hstateen[bank] & high_mask) >> 32U);
     }
 
@@ -453,6 +467,103 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             }
             rcsr = state.mnstatus;
             break;
+        case csr_addr(Csr::Ssp):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.ssp;
+            break;
+        case csr_addr(Csr::Mcyclecfg):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = static_cast<simrv::xlen::CsrValue>(state.mcyclecfg);
+            break;
+        case csr_addr(Csr::Minstretcfg):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = static_cast<simrv::xlen::CsrValue>(state.minstretcfg);
+            break;
+        case csr_addr(Csr::Mcyclecfgh):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            return require_rv32_counter().transform(
+                [&state]() { return static_cast<simrv::xlen::CsrValue>(state.mcyclecfg >> 32U); });
+        case csr_addr(Csr::Minstretcfgh):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            return require_rv32_counter().transform([&state]() {
+                return static_cast<simrv::xlen::CsrValue>(state.minstretcfg >> 32U);
+            });
+        case csr_addr(Csr::Mvien):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.mvien;
+            break;
+        case csr_addr(Csr::Mvip):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.mvip;
+            break;
+        case csr_addr(Csr::Hvien):
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia) ||
+                !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = state.hvien;
+            break;
+        case csr_addr(Csr::Mtopi): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto pending = state.mip & state.mie;
+            rcsr = 0;
+            for (const uint32_t iid : {11U, 3U, 7U, 9U, 1U, 5U, 13U}) {
+                if ((pending & (simrv::xlen::CsrValue{1} << iid)) != 0) {
+                    rcsr = static_cast<simrv::xlen::CsrValue>((iid << 16U) | 1U);
+                    break;
+                }
+            }
+            break;
+        }
+        case csr_addr(Csr::Stopi): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto pending = state.virt
+                                     ? ((state.vsip | h_interrupts_to_vs(state.hip | state.hvip)) &
+                                        state.vsie & h_interrupts_to_vs(state.hideleg))
+                                     : (state.mip & state.mie & state.mideleg);
+            rcsr = 0;
+            for (const uint32_t iid : {9U, 1U, 5U, 13U, 10U, 2U, 6U}) {
+                if ((pending & (simrv::xlen::CsrValue{1} << iid)) != 0) {
+                    rcsr = static_cast<simrv::xlen::CsrValue>((iid << 16U) | 1U);
+                    break;
+                }
+            }
+            break;
+        }
+        case csr_addr(Csr::Vstopi): {
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia) ||
+                !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            const auto pending = (state.vsip | h_interrupts_to_vs(state.hip | state.hvip)) &
+                                 state.vsie & h_interrupts_to_vs(state.hideleg);
+            rcsr = 0;
+            for (const uint32_t iid : {10U, 2U, 6U}) {
+                if ((pending & (simrv::xlen::CsrValue{1} << iid)) != 0) {
+                    rcsr = static_cast<simrv::xlen::CsrValue>((iid << 16U) | 1U);
+                    break;
+                }
+            }
+            break;
+        }
         case csr_addr(Csr::Vl):
             return require_vector().transform([&state]() { return state.vl; });
         case csr_addr(Csr::Vtype):
@@ -504,6 +615,12 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
             rcsr = state.henvcfg & kHenvcfgWritableMask;
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+                rcsr &= ~kEnvcfgLpeBit;
+            }
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                rcsr &= ~kEnvcfgSseBit;
+            }
             if ((state.menvcfg & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U)) == 0) {
                 rcsr &= ~static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 62U);
             }
@@ -579,7 +696,7 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             rcsr = state.hgeip & kHgeieWritableMask;
             break;
         case csr_addr(Csr::Scountovf): {
-            if (!isa::misa_has_extension(state.misa, isa::IsaExtension::S)) {
+            if (!state.supervisor_mode_supported) {
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
             uint32_t overflow = cpu != nullptr ? cpu->perf_counters.read_overflow_mask() : 0U;
@@ -628,6 +745,12 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
             rcsr = state.senvcfg & kSenvcfgWritableMask;
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+                rcsr &= ~kEnvcfgLpeBit;
+            }
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                rcsr &= ~kEnvcfgSseBit;
+            }
             break;
         case csr_addr(Csr::Stimecmp): {
             if (const auto exc = check_sstc_privilege_access(state, false, false)) {
@@ -683,7 +806,7 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             break;
         case csr_addr(Csr::Mie):
             rcsr = state.mie & interrupt_implemented_mask(
-                                   isa::misa_has_extension(state.misa, isa::IsaExtension::S),
+                                   state.supervisor_mode_supported,
                                    isa::misa_has_extension(state.misa, isa::IsaExtension::H));
             break;
         case csr_addr(Csr::Mtvec):
@@ -700,6 +823,12 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                        ? state.menvcfg
                        : static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(state.menvcfg) &
                                                             ~(uint64_t{1} << 61U));
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+                rcsr &= ~kEnvcfgLpeBit;
+            }
+            if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                rcsr &= ~kEnvcfgSseBit;
+            }
             break;
         case csr_addr(Csr::Menvcfgh):
             return require_rv32_counter().transform([&state]() {
@@ -735,11 +864,14 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                     vs_interrupts_to_h(state.vsip) | state.selected_guest_external_pending() |
                     (state.vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U)) &
                    interrupt_implemented_mask(
-                       isa::misa_has_extension(state.misa, isa::IsaExtension::S),
+                       state.supervisor_mode_supported,
                        isa::misa_has_extension(state.misa, isa::IsaExtension::H));
             break;
         case csr_addr(Csr::Misa):
-            rcsr = isa::misa_with_mxl(state.misa, active_xlen);
+            rcsr = isa::misa_with_mxl(
+                isa::misa_with_privilege_support(state.misa, state.supervisor_mode_supported,
+                                                 state.user_mode_supported),
+                active_xlen);
             if (active_xlen == 32) {
                 // In 32-bit execution mode, MISA bits [31:30] hold MXL=1 (RV32)
                 rcsr =
@@ -923,14 +1055,30 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     const uint16_t address = addr.value();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
+    constexpr uint64_t kStateenCsrindEnable = uint64_t{1} << 60U;
+    constexpr uint64_t kStateenContextEnable = uint64_t{1} << 57U;
+    constexpr uint64_t kStateenJvtEnable = uint64_t{1} << 2U;
+    const uint64_t stateen0_jvt =
+        cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zcmt) ? kStateenJvtEnable
+                                                                             : 0ULL;
+    const uint64_t stateen0_csrind =
+        (cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcsrind) ||
+         cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sscsrind))
+            ? kStateenCsrindEnable
+            : 0ULL;
+    const uint64_t stateen0_context =
+        cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Sdtrig)
+            ? kStateenContextEnable
+            : 0ULL;
+    const uint64_t kStateen0Mask = kStateenSuperEnable | kStateenEnvCfgEnable | stateen0_csrind |
+                                   stateen0_context | stateen0_jvt;
     if (address >= 0x30CU && address <= 0x30FU) {
         auto& value = cpu_.state().mstateen[address - 0x30CU];
         if (cpu_.state().regs.xlen == 32) {
-            value =
-                (value & 0xFFFFFFFF00000000ULL) | (static_cast<uint64_t>(wdata) & 0xFFFFFFFFULL);
+            const uint64_t low_mask = address == 0x30CU ? stateen0_jvt : 0ULL;
+            value = (value & 0xFFFFFFFF00000000ULL) | (static_cast<uint64_t>(wdata) & low_mask);
         } else {
-            const uint64_t mask = address == 0x30CU ? (kStateenSuperEnable | kStateenEnvCfgEnable)
-                                                    : kStateenSuperEnable;
+            const uint64_t mask = address == 0x30CU ? kStateen0Mask : kStateenSuperEnable;
             value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
         }
         return {};
@@ -938,9 +1086,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     if (address >= 0x31CU && address <= 0x31FU) {
         if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
         auto& value = cpu_.state().mstateen[address - 0x31CU];
-        const uint64_t high_mask = (address == 0x31CU)
-                                       ? (kStateenSuperEnable | kStateenEnvCfgEnable)
-                                       : kStateenSuperEnable;
+        const uint64_t high_mask = (address == 0x31CU) ? kStateen0Mask : kStateenSuperEnable;
         value = (value & 0xFFFFFFFFULL) | ((static_cast<uint64_t>(wdata) << 32U) & high_mask);
         return {};
     }
@@ -968,11 +1114,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         }
         auto& value = cpu_.state().hstateen[bank];
         if (cpu_.state().regs.xlen == 32) {
-            value =
-                (value & 0xFFFFFFFF00000000ULL) | (static_cast<uint64_t>(wdata) & 0xFFFFFFFFULL);
+            const uint64_t low_mask = bank == 0U ? stateen0_jvt : 0ULL;
+            value = (value & 0xFFFFFFFF00000000ULL) | (static_cast<uint64_t>(wdata) & low_mask);
         } else {
-            const uint64_t mask =
-                bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+            const uint64_t mask = bank == 0U ? kStateen0Mask : kStateenSuperEnable;
             value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
         }
         return {};
@@ -982,13 +1127,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         const size_t bank = address - 0x71CU;
         if ((cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) return {};
         auto& value = cpu_.state().hstateen[bank];
-        const uint64_t high_mask =
-            bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable) : kStateenSuperEnable;
+        const uint64_t high_mask = bank == 0U ? kStateen0Mask : kStateenSuperEnable;
         value = (value & 0xFFFFFFFFULL) | ((static_cast<uint64_t>(wdata) << 32U) & high_mask);
         return {};
     }
 
-    const bool has_s = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S);
+    const bool has_s = cpu_.state().supervisor_mode_supported;
     const bool has_h = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H);
     const simrv::xlen::CsrValue interrupt_mask = interrupt_implemented_mask(has_s, has_h);
     const auto log_pending_changes = [this](simrv::xlen::CsrValue before, std::string_view source) {
@@ -1278,6 +1422,71 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().mnstatus = writable;
             break;
         }
+        case csr_addr(Csr::Ssp):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().ssp = wdata & ~static_cast<simrv::xlen::CsrValue>(0x3U);
+            break;
+        case csr_addr(Csr::Mcyclecfg): {
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            constexpr uint64_t kCfgMask = uint64_t{0x1FU} << 58U;
+            if constexpr (simrv::xlen::kIsXLen64) {
+                cpu_.state().mcyclecfg = static_cast<uint64_t>(wdata) & kCfgMask;
+            }
+            break;
+        }
+        case csr_addr(Csr::Minstretcfg): {
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            constexpr uint64_t kCfgMask = uint64_t{0x1FU} << 58U;
+            if constexpr (simrv::xlen::kIsXLen64) {
+                cpu_.state().minstretcfg = static_cast<uint64_t>(wdata) & kCfgMask;
+            }
+            break;
+        }
+        case csr_addr(Csr::Mcyclecfgh):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    constexpr uint64_t kHighCfgMask = uint64_t{0x1FU} << 58U;
+                    cpu_.state().mcyclecfg = (static_cast<uint64_t>(wdata) << 32U) & kHighCfgMask;
+                    return {};
+                });
+        case csr_addr(Csr::Minstretcfgh):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    constexpr uint64_t kHighCfgMask = uint64_t{0x1FU} << 58U;
+                    cpu_.state().minstretcfg = (static_cast<uint64_t>(wdata) << 32U) & kHighCfgMask;
+                    return {};
+                });
+        case csr_addr(Csr::Mvien):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().mvien = wdata;
+            break;
+        case csr_addr(Csr::Mvip):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().mvip = wdata & cpu_.state().mvien;
+            break;
+        case csr_addr(Csr::Hvien):
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssaia) ||
+                !isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().hvien = wdata;
+            break;
         case csr_addr(Csr::Vl):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vl = wdata;
@@ -1301,8 +1510,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 constexpr simrv::xlen::CsrValue kHupmmMask =
                     static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 48U);
                 const auto hupmm = (wdata & kHupmmMask) >> 48U;
-                if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U) &&
-                    hupmm == 2U) {
+                if (cpu_.state().user_mode_supported && hupmm == 2U) {
                     cpu_.state().hstatus |= hupmm << 48U;
                 }
             }
@@ -1337,6 +1545,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
             wdata &= kHenvcfgWritableMask;
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+                wdata &= ~kEnvcfgLpeBit;
+            }
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                wdata &= ~kEnvcfgSseBit;
+            }
             if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Svadu)) {
                 wdata &= ~static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 61U);
             }
@@ -1355,7 +1569,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 constexpr simrv::xlen::CsrValue kPmmMask =
                     static_cast<simrv::xlen::CsrValue>(uint64_t{0x3} << 32U);
                 const auto pmm = (wdata & kPmmMask) >> 32U;
-                const bool has_u = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U);
+                const bool has_u = cpu_.state().user_mode_supported;
                 if (!has_u || (pmm != 0U && pmm != 2U)) wdata &= ~kPmmMask;
             }
             cpu_.state().henvcfg = wdata;
@@ -1385,7 +1599,17 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         }
 
         case csr_addr(Csr::Vsstatus): {
-            const auto next = (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+            const auto sstatus_mask =
+                kSstatusMask &
+                mstatus_writable_mask(
+                    cpu_.state().supervisor_mode_supported, cpu_.state().user_mode_supported,
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::F),
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V),
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H),
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp),
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp),
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp));
+            const auto next = (cpu_.state().vsstatus & ~sstatus_mask) | (wdata & sstatus_mask);
             const auto mod = cpu_.state().vsstatus ^ next;
             cpu_.state().vsstatus = next;
             if ((mod & (MstatusBit::Sum | MstatusBit::Mxr)) != 0) {
@@ -1486,13 +1710,19 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
             wdata &= kSenvcfgWritableMask;
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+                wdata &= ~kEnvcfgLpeBit;
+            }
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                wdata &= ~kEnvcfgSseBit;
+            }
             // CBIE=2 is reserved; choose the legal zero encoding.
             if (((wdata >> 4U) & 0x3U) == 0x2U) {
                 wdata &= ~(simrv::xlen::CsrValue{0x3} << 4U);
             }
             if constexpr (simrv::xlen::kIsXLen64) {
                 constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
-                const bool has_u = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U);
+                const bool has_u = cpu_.state().user_mode_supported;
                 const auto pmm = (static_cast<uint64_t>(wdata) & kPmmMask) >> 32U;
                 if (!has_s || !has_u || (pmm != 0U && pmm != 2U)) {
                     wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
@@ -1590,6 +1820,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp)) {
                 wdata = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(wdata) &
                                                            ~(uint64_t{1} << 59U));
+            }
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+                wdata &= ~kEnvcfgLpeBit;
+            }
+            if (!cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+                wdata &= ~kEnvcfgSseBit;
             }
             cpu_.state().menvcfg = wdata;
             if ((wdata & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U)) == 0) {
@@ -1770,15 +2006,29 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                             cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp)
                                 ? (simrv::xlen::CsrValue{1} << 10U)
                                 : simrv::xlen::CsrValue{0};
+                        const simrv::xlen::CsrValue mpelp_bit =
+                            cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)
+                                ? (simrv::xlen::CsrValue{1} << 9U)
+                                : simrv::xlen::CsrValue{0};
                         const simrv::xlen::CsrValue kMstatushWritableMask =
-                            (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | mdt_bit;
+                            (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | mpelp_bit | mdt_bit;
                         cpu_.state().mstatush = wdata & kMstatushWritableMask;
                     }
                     return {};
                 });
-        case csr_addr(Csr::Sstatus):
+        case csr_addr(Csr::Sstatus): {
+            const auto sstatus_mask =
+                kSstatusMask &
+                mstatus_writable_mask(
+                    cpu_.state().supervisor_mode_supported, cpu_.state().user_mode_supported,
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::F),
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V),
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H),
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp),
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp),
+                    cpu_.state().enabled_extensions.has(isa::MultiLetterExtension::Zicfilp));
             if (cpu_.state().virt) {
-                const auto next = (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+                const auto next = (cpu_.state().vsstatus & ~sstatus_mask) | (wdata & sstatus_mask);
                 const auto mod = cpu_.state().vsstatus ^ next;
                 cpu_.state().vsstatus = next;
                 if ((mod & (MstatusBit::Sum | MstatusBit::Mxr)) != 0) {
@@ -1786,9 +2036,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 }
                 cpu_.sync_decode_context();
             } else {
-                setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
+                setMstatus((cpu_.state().mstatus & ~sstatus_mask) | (wdata & sstatus_mask));
             }
             break;
+        }
 
         case csr_addr(Csr::Tselect):
             cpu_.state().tselect = wdata;

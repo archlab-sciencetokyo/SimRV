@@ -36,6 +36,24 @@ void CPU::execute_core(Machine& machine) {
         return;
     }
 
+    if (simrv::compiler::unlikely(state_.elp && state_.zicfilp_enabled_in_current_mode())) {
+        const bool is_lpad = (ctx.opcode == Opcode::Auipc && ctx.rd == simrv::xlen::RegId::Zero);
+        if (!is_lpad) {
+            ctx.pending_exception = ExceptionCode::SoftwareCheck;
+            ctx.pending_tval = 2;
+            return;
+        }
+        const uint32_t imm20 = (ctx.ir >> 12U) & 0xFFFFFU;
+        const uint32_t label = static_cast<uint32_t>(
+            (static_cast<uint64_t>(state_.regs.read(simrv::xlen::RegId::T2)) >> 12U) & 0xFFFFFU);
+        if (imm20 != 0U && imm20 != label) {
+            ctx.pending_exception = ExceptionCode::SoftwareCheck;
+            ctx.pending_tval = 2;
+            return;
+        }
+        state_.elp = false;
+    }
+
     if (isa::is_vector_op(ctx.op_id)) {
         ctx.tkn = false;
         execute::ExecuteUnit::execute_vector(*this, machine, ctx.op_id, ctx.ir);
@@ -210,6 +228,10 @@ void CPU::execute_core(Machine& machine) {
                 ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
             }
+            if (state_.zicfilp_enabled_in_current_mode() && ctx.rs1 != simrv::xlen::RegId::Ra &&
+                ctx.rs1 != simrv::xlen::RegId::T0 && ctx.rs1 != simrv::xlen::RegId::T2) {
+                state_.elp = true;
+            }
             break;
         case Opcode::Op:
             ctx.tkn = false;
@@ -260,6 +282,10 @@ void CPU::execute_core(Machine& machine) {
                 ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
             }
+            if (state_.zicfilp_enabled_in_current_mode() && ctx.rs1 != simrv::xlen::RegId::Ra &&
+                ctx.rs1 != simrv::xlen::RegId::T0 && ctx.rs1 != simrv::xlen::RegId::T2) {
+                state_.elp = true;
+            }
             break;
         case Opcode::Amo:
             ctx.tkn = false;
@@ -278,6 +304,29 @@ void CPU::execute_core(Machine& machine) {
             } else if (ctx.op_id == MOP) {
                 ctx.tkn = false;
                 ctx.wb_data = 0;
+            } else if (ctx.op_id == SSPUSH) {
+                ctx.tkn = false;
+                if (!state_.zicfiss_enabled_in_current_mode()) {
+                    ctx.wb_data = 0;
+                } else {
+                    const uint64_t step = (state_.regs.xlen == 64) ? 8ULL : 4ULL;
+                    ctx.mem_addr =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(state_.ssp - step)};
+                    ctx.funct3 = (state_.regs.xlen == 64) ? isa::Funct3::Sd : isa::Funct3::Sw;
+                    ctx.mem_wdata = ctx.rrs2;
+                }
+            } else if (ctx.op_id == SSPOPCHK) {
+                ctx.tkn = false;
+                if (!state_.zicfiss_enabled_in_current_mode()) {
+                    ctx.wb_data = 0;
+                } else {
+                    ctx.mem_addr =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(state_.ssp)};
+                    ctx.funct3 = (state_.regs.xlen == 64) ? isa::Funct3::Ld : isa::Funct3::Lw;
+                }
+            } else if (ctx.op_id == SSRDP) {
+                ctx.tkn = false;
+                ctx.wb_data = state_.zicfiss_enabled_in_current_mode() ? state_.ssp : 0;
             } else {
                 execute_system(machine);
             }

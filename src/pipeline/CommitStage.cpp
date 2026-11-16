@@ -86,6 +86,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     const auto funct3 = static_cast<Funct3>(ctx.funct3);
 
     if (!ctx.pending_exception.has_value() && opcode == Opcode::System && ctx.op_id != MOP &&
+        ctx.op_id != SSPUSH && ctx.op_id != SSPOPCHK && ctx.op_id != SSRDP &&
         !isa::is_hypervisor_memory_op(ctx.op_id)) {
         if (funct3 == Funct3::Priv) {
             switch (static_cast<Funct12Priv>(ctx.funct12)) {

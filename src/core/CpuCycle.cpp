@@ -52,6 +52,7 @@ auto execute_dram_amo(T* mem_ptr, simrv::xlen::Word rs2_val, Funct5Amo funct5) -
     const auto op_val = static_cast<T>(rs2_val);
     switch (funct5) {
         case Funct5Amo::Swap:
+        case Funct5Amo::Ssamoswap:
             return atomic_mem.exchange(op_val, std::memory_order_acq_rel);
         case Funct5Amo::Add:
             return atomic_mem.fetch_add(op_val, std::memory_order_acq_rel);
@@ -541,7 +542,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
     if (cycle_counter_start_delay_ != 0) {
         --cycle_counter_start_delay_;
     } else {
-        ++clint_mmio.mcycle;
+        account_arch_cycles(1);
         record_hpm_event(HpmEvent::Cycles);
     }
     if (machine.runtime_profile.is_cycle_mode()) {

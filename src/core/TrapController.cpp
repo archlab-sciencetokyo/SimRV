@@ -35,7 +35,7 @@ namespace {
 }
 
 auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause cause) -> bool {
-    if (state.priv > kPrivSupervisor || !misa_has_extension(state.misa, isa::IsaExtension::S)) {
+    if (state.priv > kPrivSupervisor || !state.supervisor_mode_supported) {
         return false;
     }
     const auto cause_code = static_cast<simrv::xlen::CsrValue>(trap_exception_code(cause));
@@ -239,7 +239,7 @@ auto TrapController::predict_mret(const ArchState& state) noexcept -> TrapReturn
 
     restore_trap_interrupt_state(mstatus, MstatusBit::Mie, MstatusBit::Mpie);
     // xRET resets xPP to the least-privileged supported mode.
-    const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
+    const bool has_u = state.user_mode_supported;
     mstatus = mstatus_with_mpp(mstatus, mstatus_mpp_after_xret(has_u));
     mstatus &= ~MstatusBit::Mpv;
 
@@ -291,6 +291,16 @@ void TrapController::mret(ArchState& state) {
             state.mstatush &= ~(simrv::xlen::CsrValue{1} << 10U);
         }
     }
+    if (state.enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            state.elp = (state.mstatus & MstatusBit::Mpelp) != 0;
+            state.mstatus &= ~MstatusBit::Mpelp;
+        } else {
+            constexpr simrv::xlen::CsrValue kMstatushMpelp = simrv::xlen::CsrValue{1} << 9U;
+            state.elp = (state.mstatush & kMstatushMpelp) != 0;
+            state.mstatush &= ~kMstatushMpelp;
+        }
+    }
     state.priv = ret.target_priv;
     state.virt = ret.target_virtualization;
     state.update_xlen();
@@ -311,6 +321,15 @@ void TrapController::sret(ArchState& state) {
             state.mstatus &= ~MstatusBit::Sdt;
         }
     }
+    if (state.enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) {
+        if (state.virt) {
+            state.elp = (state.vsstatus & MstatusBit::Spelp) != 0;
+            state.vsstatus &= ~MstatusBit::Spelp;
+        } else {
+            state.elp = (state.mstatus & MstatusBit::Spelp) != 0;
+            state.mstatus &= ~MstatusBit::Spelp;
+        }
+    }
     state.virt = ret.target_virtualization;
     state.priv = ret.target_priv;
     state.update_xlen();
@@ -320,8 +339,8 @@ void TrapController::sret(ArchState& state) {
 
 void TrapController::mnret(ArchState& state) {
     const bool has_h = isa::misa_has_extension(state.misa, isa::IsaExtension::H);
-    const bool has_s = isa::misa_has_extension(state.misa, isa::IsaExtension::S);
-    const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
+    const bool has_s = state.supervisor_mode_supported;
+    const bool has_u = state.user_mode_supported;
     const auto mnpp_raw = static_cast<unsigned>((state.mnstatus >> 11U) & 0x3U);
     auto target_priv = static_cast<simrv::xlen::PrivilegeLevel>(mnpp_raw);
     if (mnpp_raw == 2U || (target_priv == kPrivSupervisor && !has_s) ||
@@ -447,6 +466,7 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
         stack_trap_interrupt_state(state, interrupt_enable, previous_interrupt_enable);
     }
 
+    const bool has_zicfilp = state.enabled_extensions.has(isa::MultiLetterExtension::Zicfilp);
     if (delegated_to_vs) {
         const auto cause_code = trap_exception_code(effective_cause);
         const auto vs_cause = trap_is_interrupt(effective_cause) &&
@@ -457,6 +477,14 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
         state.vsepc = trap_pc;
         state.vstval = reported_tval;
         state.vsstatus = mstatus_with_spp(state.vsstatus, state.priv);
+        if (has_zicfilp) {
+            if (state.elp) {
+                state.vsstatus |= MstatusBit::Spelp;
+            } else {
+                state.vsstatus &= ~MstatusBit::Spelp;
+            }
+            state.elp = false;
+        }
     } else if (delegated) {
         state.scause = effective_cause;
         state.sepc = trap_pc;
@@ -464,6 +492,14 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
         state.mstatus = mstatus_with_spp(state.mstatus, state.priv);
         if (has_ssdbltrp && dte_enabled) {
             state.mstatus |= MstatusBit::Sdt;
+        }
+        if (has_zicfilp) {
+            if (state.elp) {
+                state.mstatus |= MstatusBit::Spelp;
+            } else {
+                state.mstatus &= ~MstatusBit::Spelp;
+            }
+            state.elp = false;
         }
         if (delegated_to_hs) {
             constexpr simrv::xlen::CsrValue kSpv = simrv::xlen::CsrValue{1} << 7U;
@@ -515,6 +551,23 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
             state.mtinst = 0;
         }
         state.mstatus = mstatus_with_mpp(state.mstatus, source_mode);
+        if (has_zicfilp) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (state.elp) {
+                    state.mstatus |= MstatusBit::Mpelp;
+                } else {
+                    state.mstatus &= ~MstatusBit::Mpelp;
+                }
+            } else {
+                constexpr simrv::xlen::CsrValue kMstatushMpelp = simrv::xlen::CsrValue{1} << 9U;
+                if (state.elp) {
+                    state.mstatush |= kMstatushMpelp;
+                } else {
+                    state.mstatush &= ~kMstatushMpelp;
+                }
+            }
+            state.elp = false;
+        }
         state.mstatus &= ~MstatusBit::Mpv;
         if (guest_source && isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
             state.mstatus |= MstatusBit::Mpv;
@@ -665,7 +718,8 @@ auto TrapController::check_privileged_instruction(const ArchState& state,
         const simrv::xlen::Instruction funct12 = isa::funct12_of(ir);
         const simrv::xlen::Word funct7 = isa::funct7_of(ir);
         if (!can_execute_privileged_instruction(state.priv, state.misa, state.mstatus, funct12,
-                                                funct7, state.hstatus, state.virt)) {
+                                                funct7, state.hstatus, state.virt,
+                                                state.supervisor_mode_supported)) {
             const bool virtual_instruction =
                 state.virt &&
                 ((funct12 == Funct12Priv::Sret &&
@@ -698,7 +752,7 @@ auto TrapController::check_privileged_instruction(const ArchState& state,
     if (is_high_half && active_xlen != 32) {
         return ExceptionCode::IllegalInstruction;
     }
-    if (!isa::misa_has_extension(state.misa, isa::IsaExtension::S)) {
+    if (!state.supervisor_mode_supported) {
         return ExceptionCode::IllegalInstruction;
     }
     const bool is_vs_csr =
@@ -779,7 +833,6 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
         if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zcmt)) {
             return ExceptionCode::IllegalInstruction;
         }
-        return std::nullopt;
     }
 
     if (address >= csr_addr(Csr::Miselect) && address <= csr_addr(Csr::Mireg6)) {
@@ -788,7 +841,7 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
         }
     } else if (address >= csr_addr(Csr::Siselect) && address <= csr_addr(Csr::Sireg6)) {
         if (!state.enabled_extensions.has(isa::MultiLetterExtension::Sscsrind) ||
-            !isa::misa_has_extension(state.misa, isa::IsaExtension::S)) {
+            !state.supervisor_mode_supported) {
             return ExceptionCode::IllegalInstruction;
         }
     } else if (address >= csr_addr(Csr::Vsiselect) && address <= csr_addr(Csr::Vsireg6)) {
@@ -803,7 +856,8 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
         }
     }
 
-    if (!can_access_csr(state.priv, state.misa, csr_number, is_write, state.virt)) {
+    if (!can_access_csr(state.priv, state.misa, csr_number, is_write, state.virt,
+                        state.supervisor_mode_supported, state.user_mode_supported)) {
         const bool virtual_supervisor_csr =
             address == csr_addr(Csr::Vsstatus) || address == csr_addr(Csr::Vsie) ||
             address == csr_addr(Csr::Vstvec) || address == csr_addr(Csr::Vsscratch) ||
@@ -824,8 +878,7 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
             (address >= 0x60CU && address <= 0x60FU);
         const bool virtualization_fault =
             state.virt &&
-            ((state.priv == kPrivUser &&
-              isa::misa_has_extension(state.misa, isa::IsaExtension::S) &&
+            ((state.priv == kPrivUser && state.supervisor_mode_supported &&
               is_implemented_supervisor_csr(address)) ||
              (address == csr_addr(Csr::Satp) &&
               (state.priv == kPrivUser ||
@@ -881,6 +934,64 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
 
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
+    constexpr uint64_t kStateenCsrindEnable = uint64_t{1} << 60U;
+    constexpr uint64_t kStateenContextEnable = uint64_t{1} << 57U;
+    constexpr uint64_t kStateenJvtEnable = uint64_t{1} << 2U;
+
+    if (address == csr_addr(Csr::Mcyclecfg) || address == csr_addr(Csr::Minstretcfg) ||
+        address == csr_addr(Csr::Mcyclecfgh) || address == csr_addr(Csr::Minstretcfgh)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smcntrpmf)) {
+            return ExceptionCode::IllegalInstruction;
+        }
+        if ((address == csr_addr(Csr::Mcyclecfgh) || address == csr_addr(Csr::Minstretcfgh)) &&
+            active_xlen != 32) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+
+    if (address == csr_addr(Csr::Mvien) || address == csr_addr(Csr::Mvip) ||
+        address == csr_addr(Csr::Mtopi)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+    if (address == csr_addr(Csr::Hvien)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smaia) &&
+            !state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia)) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+    if (address == csr_addr(Csr::Stopi) || address == csr_addr(Csr::Vstopi)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia) &&
+            !state.enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+
+    if (address == csr_addr(Csr::Ssp)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) {
+            return ExceptionCode::IllegalInstruction;
+        }
+        constexpr uint64_t kEnvcfgSseBit = uint64_t{1} << 3U;
+        if (state.priv == kPrivUser) {
+            const bool has_s = state.supervisor_mode_supported;
+            const uint64_t env =
+                has_s ? static_cast<uint64_t>(state.senvcfg) : static_cast<uint64_t>(state.menvcfg);
+            if ((env & kEnvcfgSseBit) == 0) {
+                return state.virt ? ExceptionCode::VirtualInstruction
+                                  : ExceptionCode::IllegalInstruction;
+            }
+        }
+        if (state.virt && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
+            (static_cast<uint64_t>(state.henvcfg) & kEnvcfgSseBit) == 0) {
+            return ExceptionCode::VirtualInstruction;
+        }
+        if (state.priv != kPrivMachine &&
+            (static_cast<uint64_t>(state.menvcfg) & kEnvcfgSseBit) == 0) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+
     if ((address >= 0x31CU && address <= 0x31FU) || (address >= 0x71CU && address <= 0x71FU)) {
         if (active_xlen != 32) {
             return ExceptionCode::IllegalInstruction;
@@ -917,6 +1028,38 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
             return ExceptionCode::IllegalInstruction;
         }
     }
+    if (address == csr_addr(Csr::Jvt)) {
+        if (state.virt && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
+            (state.hstateen[0] & kStateenJvtEnable) == 0) {
+            return ExceptionCode::VirtualInstruction;
+        }
+        if (state.priv != kPrivMachine && (state.mstateen[0] & kStateenJvtEnable) == 0) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+    if (address == csr_addr(Csr::Scontext)) {
+        if (state.virt && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
+            (state.hstateen[0] & kStateenContextEnable) == 0) {
+            return ExceptionCode::VirtualInstruction;
+        }
+        if (state.priv != kPrivMachine && (state.mstateen[0] & kStateenContextEnable) == 0) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+    if (address >= 0x150U && address <= 0x157U) {
+        if (state.virt && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
+            (state.hstateen[0] & kStateenCsrindEnable) == 0) {
+            return ExceptionCode::VirtualInstruction;
+        }
+        if (state.priv != kPrivMachine && (state.mstateen[0] & kStateenCsrindEnable) == 0) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
+    if (address >= 0x250U && address <= 0x257U) {
+        if (state.priv != kPrivMachine && (state.mstateen[0] & kStateenCsrindEnable) == 0) {
+            return ExceptionCode::IllegalInstruction;
+        }
+    }
 
     return std::nullopt;
 }
@@ -924,12 +1067,13 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
 auto TrapController::can_execute_privileged_instruction(
     simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
     simrv::xlen::CsrValue mstatus, simrv::xlen::Instruction funct12, simrv::xlen::Word funct7,
-    simrv::xlen::CsrValue hstatus, bool virtualization_mode) -> bool {
+    simrv::xlen::CsrValue hstatus, bool virtualization_mode, bool supervisor_mode_supported)
+    -> bool {
     if (funct12 == isa::Funct12Priv::Mret || funct12 == isa::Funct12Priv::Mnret) {
         return current_priv >= kPrivMachine;
     }
     if (funct12 == isa::Funct12Priv::Sret) {
-        return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
+        return supervisor_mode_supported && current_priv >= kPrivSupervisor &&
                !(virtualization_mode && (hstatus & (simrv::xlen::CsrValue{1} << 22U)) != 0) &&
                !(current_priv == kPrivSupervisor && !virtualization_mode &&
                  (mstatus & MstatusBit::Tsr) != 0);
@@ -949,10 +1093,10 @@ auto TrapController::can_execute_privileged_instruction(
                 (current_priv == kPrivSupervisor && !virtualization_mode));
     }
     if (funct12 == isa::Funct12Priv::SfenceWInval || funct12 == isa::Funct12Priv::SfenceInvalIr) {
-        return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor;
+        return supervisor_mode_supported && current_priv >= kPrivSupervisor;
     }
     if (funct7 == isa::Funct7Priv::SfenceVma || funct7 == isa::Funct7Priv::SinvalVma) {
-        return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
+        return supervisor_mode_supported && current_priv >= kPrivSupervisor &&
                !(virtualization_mode && (hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0) &&
                !(current_priv == kPrivSupervisor && !virtualization_mode &&
                  (mstatus & MstatusBit::Tvm) != 0);
@@ -962,7 +1106,9 @@ auto TrapController::can_execute_privileged_instruction(
 
 auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
                                     simrv::xlen::CsrValue misa, simrv::xlen::CsrNumber csr_addr,
-                                    bool is_write, bool virtualization_mode) -> bool {
+                                    bool is_write, bool virtualization_mode,
+                                    bool supervisor_mode_supported, bool user_mode_supported)
+    -> bool {
     // Debug CSRs require architectural Debug Mode, which the guest execution
     // engine does not implement. M-mode also cannot override CSR nonexistence.
     const auto address = csr_addr.value();
@@ -986,9 +1132,8 @@ auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
         if (current_priv < kPrivSupervisor) return false;
         return !is_write || !csr_addr.is_read_only();
     }
-    return csr_access_permitted(current_priv, isa::misa_has_extension(misa, isa::IsaExtension::S),
-                                isa::misa_has_extension(misa, isa::IsaExtension::U), csr_addr,
-                                is_write);
+    return csr_access_permitted(current_priv, supervisor_mode_supported, user_mode_supported,
+                                csr_addr, is_write);
 }
 
 }  // namespace simrv::core

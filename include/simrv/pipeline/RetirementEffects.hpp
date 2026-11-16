@@ -50,9 +50,13 @@ struct WritebackEffects {
             effects.integer_write_hi.value = context.mem_rdata_hi;
             effects.integer_write_hi.enabled = true;
         }
-    } else if (opcode == isa::Opcode::System && context.op_id == isa::OperationId::MOP) {
+    } else if (opcode == isa::Opcode::System && (context.op_id == isa::OperationId::MOP ||
+                                                 context.op_id == isa::OperationId::SSRDP)) {
         integer.value = context.wb_data;
         integer.enabled = true;
+    } else if (opcode == isa::Opcode::System && (context.op_id == isa::OperationId::SSPUSH ||
+                                                 context.op_id == isa::OperationId::SSPOPCHK)) {
+        integer.enabled = false;
     } else if (opcode == isa::Opcode::System && funct3 != isa::Funct3::Priv) {
         integer.value = context.rcsr;
         integer.enabled = true;

@@ -24,11 +24,16 @@ enum class IsaExtension : uint8_t {
     F = 5,   ///< Single-Precision Floating-Point extension
     H = 7,   ///< Hypervisor extension
     I = 8,   ///< Base Integer Instruction Set extension
+    Q = 16,  ///< Quad-Precision Floating-Point extension
     M = 12,  ///< Integer Multiply/Divide extension
-    S = 18,  ///< Supervisor Privilege Level support
-    U = 20,  ///< User Privilege Level support
     V = 21,  ///< Vector Extension
     X = 23,  ///< Non-standard extensions present
+};
+
+/** Privilege-mode support bits exposed by MISA, separate from instruction extensions. */
+enum class MisaPrivilegeSupport : uint8_t {
+    Supervisor = 18,
+    User = 20,
 };
 
 /**
@@ -36,7 +41,8 @@ enum class IsaExtension : uint8_t {
  * @brief Formal RISC-V Architectural Profiles per RVI Profiles Specification.
  */
 enum class ArchitectureProfile : uint8_t {
-    Legacy,    ///< Unconstrained standard RV32GC / RV64GC
+    Rvi20U32,  ///< Generic RV32I unprivileged profile
+    Rvi20U64,  ///< Generic RV64I unprivileged profile
     Rva20U64,  ///< RVA20 User-mode 64-bit profile
     Rva20S64,  ///< RVA20 Supervisor-mode 64-bit profile
     Rva22U64,  ///< RVA22 User-mode 64-bit profile
@@ -78,6 +84,7 @@ enum class MultiLetterExtension : uint8_t {
     Zcmop,
     Zcb,
     Zca,
+    Zcf,
     Zcd,
     Zfa,
     Zfhmin,
@@ -93,7 +100,9 @@ enum class MultiLetterExtension : uint8_t {
     Zalrsc,
     Supm,
 
-    /* Privileged RVA23 Mandatory */
+    /* Ratified privileged profile extensions */
+    Ss1p11,
+    Ss1p12,
     Ss1p13,
     Svbare,
     Sv32,
@@ -158,6 +167,11 @@ enum class MultiLetterExtension : uint8_t {
     Smcsrind,
     Sscsrind,
     Smrnmi,
+    Smcntrpmf,
+    Smaia,
+    Ssaia,
+    Zicfilp,
+    Zicfiss,
 
     Count
 };
@@ -202,109 +216,43 @@ struct ExtensionSet {
 /**
  * @brief Maps a lowercase canonical multi-letter extension name to MultiLetterExtension.
  */
+inline constexpr std::array<std::string_view, static_cast<size_t>(MultiLetterExtension::Count)>
+    kMultiLetterExtensionNames = {{
+        "zicsr",     "zifencei", "zicntr",       "zihpm",    "ziccif",      "ziccrse",
+        "ziccamoa",  "zicclsm",  "za64rs",       "za128rs",  "zihintpause", "zihintntl",
+        "zic64b",    "zicbom",   "zicbop",       "zicboz",   "zba",         "zbb",
+        "zbc",       "zbs",      "zicond",       "zimop",    "zcmop",       "zcb",
+        "zca",       "zcf",      "zcd",          "zfa",      "zfhmin",      "zawrs",
+        "zkt",       "zvfhmin",  "zvbb",         "zvkb",     "zvbc",        "zvkt",
+        "zmmul",     "zaamo",    "zalrsc",       "supm",     "ss1p11",      "ss1p12",
+        "ss1p13",    "svbare",   "sv32",         "sv39",     "svade",       "ssccptr",
+        "sstvecd",   "sstvala",  "sscounterenw", "svpbmt",   "svinval",     "svnapot",
+        "sstc",      "sscofpmf", "ssnpm",        "ssu64xl",  "ssstateen",   "shcounterenw",
+        "shvstvala", "shtvala",  "shvstvecd",    "shvsatpa", "shgatpa",     "sv48",
+        "sv57",      "sdtrig",   "zkr",          "svadu",    "sspm",        "svvptc",
+        "ssstrict",  "zacas",    "zabha",        "zfh",      "zvfh",        "zfbfmin",
+        "zvfbfmin",  "zvfbfwma", "zvkg",         "zvkned",   "zvknha",      "zvknhb",
+        "zvksed",    "zvksh",    "zbkb",         "zbkc",     "zbkx",        "zknd",
+        "zkne",      "zknh",     "zksed",        "zksh",     "zcmp",        "zcmt",
+        "zfinx",     "zdinx",    "zhinx",        "smdbltrp", "ssdbltrp",    "smcsrind",
+        "sscsrind",  "smrnmi",   "smcntrpmf",    "smaia",    "ssaia",       "zicfilp",
+        "zicfiss",
+    }};
+
+[[nodiscard]] constexpr auto multi_letter_extension_name(MultiLetterExtension extension) noexcept
+    -> std::string_view {
+    const auto index = static_cast<size_t>(extension);
+    return index < kMultiLetterExtensionNames.size() ? kMultiLetterExtensionNames[index]
+                                                     : std::string_view{};
+}
+
 [[nodiscard]] constexpr auto parse_multi_letter_extension(std::string_view name) noexcept
     -> std::optional<MultiLetterExtension> {
-    if (name == "zicsr") return MultiLetterExtension::Zicsr;
-    if (name == "zifencei") return MultiLetterExtension::Zifencei;
-    if (name == "zicntr") return MultiLetterExtension::Zicntr;
-    if (name == "zihpm") return MultiLetterExtension::Zihpm;
-    if (name == "ziccif") return MultiLetterExtension::Ziccif;
-    if (name == "ziccrse") return MultiLetterExtension::Ziccrse;
-    if (name == "ziccamoa") return MultiLetterExtension::Ziccamoa;
-    if (name == "zicclsm") return MultiLetterExtension::Zicclsm;
-    if (name == "za64rs") return MultiLetterExtension::Za64rs;
-    if (name == "za128rs") return MultiLetterExtension::Za128rs;
-    if (name == "zihintpause") return MultiLetterExtension::Zihintpause;
-    if (name == "zihintntl") return MultiLetterExtension::Zihintntl;
-    if (name == "zic64b") return MultiLetterExtension::Zic64b;
-    if (name == "zicbom") return MultiLetterExtension::Zicbom;
-    if (name == "zicbop") return MultiLetterExtension::Zicbop;
-    if (name == "zicboz") return MultiLetterExtension::Zicboz;
-    if (name == "zba") return MultiLetterExtension::Zba;
-    if (name == "zbb") return MultiLetterExtension::Zbb;
-    if (name == "zbc") return MultiLetterExtension::Zbc;
-    if (name == "zbs") return MultiLetterExtension::Zbs;
-    if (name == "zicond") return MultiLetterExtension::Zicond;
-    if (name == "zimop") return MultiLetterExtension::Zimop;
-    if (name == "zcmop") return MultiLetterExtension::Zcmop;
-    if (name == "zcb") return MultiLetterExtension::Zcb;
-    if (name == "zca") return MultiLetterExtension::Zca;
-    if (name == "zcd") return MultiLetterExtension::Zcd;
-    if (name == "zfa") return MultiLetterExtension::Zfa;
-    if (name == "zfhmin") return MultiLetterExtension::Zfhmin;
-    if (name == "zawrs") return MultiLetterExtension::Zawrs;
-    if (name == "zkt") return MultiLetterExtension::Zkt;
-    if (name == "zvfhmin") return MultiLetterExtension::Zvfhmin;
-    if (name == "zvbb") return MultiLetterExtension::Zvbb;
-    if (name == "zvkb") return MultiLetterExtension::Zvkb;
-    if (name == "zvbc") return MultiLetterExtension::Zvbc;
-    if (name == "zvkt") return MultiLetterExtension::Zvkt;
-    if (name == "zmmul") return MultiLetterExtension::Zmmul;
-    if (name == "zaamo") return MultiLetterExtension::Zaamo;
-    if (name == "zalrsc") return MultiLetterExtension::Zalrsc;
-    if (name == "supm") return MultiLetterExtension::Supm;
-    if (name == "ss1p13") return MultiLetterExtension::Ss1p13;
-    if (name == "svbare") return MultiLetterExtension::Svbare;
-    if (name == "sv32") return MultiLetterExtension::Sv32;
-    if (name == "sv39") return MultiLetterExtension::Sv39;
-    if (name == "svade") return MultiLetterExtension::Svade;
-    if (name == "ssccptr") return MultiLetterExtension::Ssccptr;
-    if (name == "sstvecd") return MultiLetterExtension::Sstvecd;
-    if (name == "sstvala") return MultiLetterExtension::Sstvala;
-    if (name == "sscounterenw") return MultiLetterExtension::Sscounterenw;
-    if (name == "svpbmt") return MultiLetterExtension::Svpbmt;
-    if (name == "svinval") return MultiLetterExtension::Svinval;
-    if (name == "svnapot") return MultiLetterExtension::Svnapot;
-    if (name == "sstc") return MultiLetterExtension::Sstc;
-    if (name == "sscofpmf") return MultiLetterExtension::Sscofpmf;
-    if (name == "ssnpm") return MultiLetterExtension::Ssnpm;
-    if (name == "ssu64xl") return MultiLetterExtension::Ssu64xl;
-    if (name == "ssstateen") return MultiLetterExtension::Ssstateen;
-    if (name == "shcounterenw") return MultiLetterExtension::Shcounterenw;
-    if (name == "shvstvala") return MultiLetterExtension::Shvstvala;
-    if (name == "shtvala") return MultiLetterExtension::Shtvala;
-    if (name == "shvstvecd") return MultiLetterExtension::Shvstvecd;
-    if (name == "shvsatpa") return MultiLetterExtension::Shvsatpa;
-    if (name == "shgatpa") return MultiLetterExtension::Shgatpa;
-    if (name == "sv48") return MultiLetterExtension::Sv48;
-    if (name == "sv57") return MultiLetterExtension::Sv57;
-    if (name == "sdtrig") return MultiLetterExtension::Sdtrig;
-    if (name == "zkr") return MultiLetterExtension::Zkr;
-    if (name == "svadu") return MultiLetterExtension::Svadu;
-    if (name == "sspm") return MultiLetterExtension::Sspm;
-    if (name == "svvptc") return MultiLetterExtension::Svvptc;
-    if (name == "ssstrict") return MultiLetterExtension::Ssstrict;
-    if (name == "zacas") return MultiLetterExtension::Zacas;
-    if (name == "zabha") return MultiLetterExtension::Zabha;
-    if (name == "zfh") return MultiLetterExtension::Zfh;
-    if (name == "zvfh") return MultiLetterExtension::Zvfh;
-    if (name == "zfbfmin") return MultiLetterExtension::Zfbfmin;
-    if (name == "zvfbfmin") return MultiLetterExtension::Zvfbfmin;
-    if (name == "zvfbfwma") return MultiLetterExtension::Zvfbfwma;
-    if (name == "zvkg") return MultiLetterExtension::Zvkg;
-    if (name == "zvkned") return MultiLetterExtension::Zvkned;
-    if (name == "zvknha") return MultiLetterExtension::Zvknha;
-    if (name == "zvknhb") return MultiLetterExtension::Zvknhb;
-    if (name == "zvksed") return MultiLetterExtension::Zvksed;
-    if (name == "zvksh") return MultiLetterExtension::Zvksh;
-    if (name == "zbkb") return MultiLetterExtension::Zbkb;
-    if (name == "zbkc") return MultiLetterExtension::Zbkc;
-    if (name == "zbkx") return MultiLetterExtension::Zbkx;
-    if (name == "zknd") return MultiLetterExtension::Zknd;
-    if (name == "zkne") return MultiLetterExtension::Zkne;
-    if (name == "zknh") return MultiLetterExtension::Zknh;
-    if (name == "zksed") return MultiLetterExtension::Zksed;
-    if (name == "zksh") return MultiLetterExtension::Zksh;
-    if (name == "zcmp") return MultiLetterExtension::Zcmp;
-    if (name == "zcmt") return MultiLetterExtension::Zcmt;
-    if (name == "zfinx") return MultiLetterExtension::Zfinx;
-    if (name == "zdinx") return MultiLetterExtension::Zdinx;
-    if (name == "zhinx") return MultiLetterExtension::Zhinx;
-    if (name == "smdbltrp") return MultiLetterExtension::Smdbltrp;
-    if (name == "ssdbltrp") return MultiLetterExtension::Ssdbltrp;
-    if (name == "smcsrind") return MultiLetterExtension::Smcsrind;
-    if (name == "sscsrind") return MultiLetterExtension::Sscsrind;
-    if (name == "smrnmi") return MultiLetterExtension::Smrnmi;
+    for (size_t i = 0; i < kMultiLetterExtensionNames.size(); ++i) {
+        if (kMultiLetterExtensionNames[i] == name) {
+            return static_cast<MultiLetterExtension>(i);
+        }
+    }
     return std::nullopt;
 }
 
@@ -390,7 +338,19 @@ constexpr void add_extension_to_set(ExtensionSet& set, std::string_view name) no
         set.set(MultiLetterExtension::Shgatpa);
         return;
     }
-    if (const auto ext = parse_multi_letter_extension(name)) {
+    auto ext = parse_multi_letter_extension(name);
+    if (!ext) {
+        for (size_t split = name.size(); split > 0; --split) {
+            const auto suffix = name.substr(split);
+            const bool supported_version =
+                suffix == "1" || suffix == "1p0" || suffix == "2" || suffix == "2p0";
+            if (supported_version) {
+                ext = parse_multi_letter_extension(name.substr(0, split));
+                if (ext) break;
+            }
+        }
+    }
+    if (ext) {
         set.set(*ext);
         // Implied sub-extensions
         if (*ext == MultiLetterExtension::Zfh) set.set(MultiLetterExtension::Zfhmin);

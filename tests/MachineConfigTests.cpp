@@ -86,9 +86,9 @@ auto main() -> int {
         const auto g_bits = simrv::isa::parse_isa_spec("g").value().misa_bits;
         const auto gc_bits = simrv::isa::parse_isa_spec("gc").value().misa_bits;
         const auto gcv_bits = simrv::isa::parse_isa_spec("gcv").value().misa_bits;
-        const auto gczb_bits =
+        const auto gc_with_b_bits =
             gc_bits | simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
-        const auto gczbv_bits =
+        const auto gcv_with_b_bits =
             gcv_bits | simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
         expect(g.has_value() && g->options.isa_spec.misa_bits == g_bits,
                "CLI accepts the standard G shorthand as distinct from GC");
@@ -100,40 +100,34 @@ auto main() -> int {
                "CLI accepts the canonical glued first multi-letter extension spelling");
         expect(check_isa("rv" + xlen + "gc_zicsr_zifencei_zicntr").has_value(),
                "CLI accepts explicit extensions implied by G");
-        expect(check_isa("rv" + xlen + "gczb").has_value() &&
-                   check_isa("rv" + xlen + "gczb")->options.isa_spec.misa_bits == gczb_bits &&
-                   check_isa("rv" + xlen + "gczb")->options.has_zb_extensions,
-               "CLI accepts GC with bitmanip");
         expect(check_isa("rv" + xlen + "gcv").has_value() &&
                    check_isa("rv" + xlen + "gcv")->options.isa_spec.misa_bits == gcv_bits,
                "CLI accepts canonical GCV preset");
-        expect(check_isa("rv" + xlen + "gczbv").has_value() &&
-                   check_isa("rv" + xlen + "gczbv")->options.isa_spec.misa_bits == gczbv_bits &&
-                   check_isa("rv" + xlen + "gczbv")->options.has_zb_extensions,
-               "CLI accepts GCV with bitmanip");
-        expect(check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
-                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_spec.misa_bits ==
-                       gczb_bits &&
-                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.has_zb_extensions,
-               "CLI accepts ratified bitmanip sub-extensions and enables GC with bitmanip");
-        expect(check_isa("rv" + xlen + "gc_zb").has_value() &&
-                   check_isa("rv" + xlen + "gc_zb")->options.isa_spec.misa_bits == gczb_bits &&
-                   check_isa("rv" + xlen + "gc_zb")->options.has_zb_extensions,
-               "CLI accepts ratified zb shorthand and enables GC with bitmanip");
+        expect(
+            check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
+                check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_spec.misa_bits ==
+                    gc_with_b_bits &&
+                !check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_spec.extensions.empty(),
+            "CLI accepts ratified bitmanip sub-extensions and enables GC with bitmanip");
         expect(check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs").has_value() &&
                    check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.isa_spec.misa_bits ==
-                       gczbv_bits &&
-                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.has_zb_extensions,
+                       gcv_with_b_bits &&
+                   !check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")
+                        ->options.isa_spec.extensions.empty(),
                "CLI accepts ratified bitmanip with vector base and enables GCV with bitmanip");
         expect(check_isa("rv" + xlen + "gc_zk").has_value(),
                "CLI accepts ratified scalar crypto zk shorthand");
-        expect(!check_isa("rv" + xlen + "gcbv").has_value(),
-               "CLI rejects legacy draft shorthand rv{}gcbv");
-        expect(!check_isa("gcbv").has_value(), "CLI rejects legacy draft shorthand gcbv");
+        expect(check_isa("rv" + xlen + "gcbv").has_value(),
+               "CLI accepts canonical GCBV single-letter extensions");
+        expect(check_isa("gcbv").has_value(), "CLI accepts XLEN-inherited GCBV");
+        expect(!check_isa("rv" + xlen + "gczbv").has_value(),
+               "CLI rejects the non-standard ZB shorthand");
+        expect(!check_isa("rv" + xlen + "gc_zb").has_value(),
+               "CLI rejects the unratified zb aggregate name");
         expect(!check_isa("rv" + xlen + "gc_zfoo").has_value(),
                "CLI rejects unsupported multi-letter ISA extensions");
-        expect(!check_isa("rv" + xlen + "gc_xsimrvtrace").has_value(),
-               "CLI rejects the retired experimental Xsimrvtrace extension");
+        expect(check_isa("rv" + xlen + "gc_xsimrvtrace").has_value(),
+               "CLI preserves opaque custom X extension names");
         expect(!check_isa("rv" + xlen + "gc_zicntr2p1").has_value(),
                "CLI rejects unsupported extension versions");
         expect(!check_isa("rv" + xlen + "gc_zicntr_zicntr").has_value(),
@@ -144,12 +138,22 @@ auto main() -> int {
         std::array<char*, 5> args{};
         for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
         const auto parsed = simrv::util::parse_command_line(args);
-        expect(parsed.has_value(), "CLI accepts RVA23U64 profile selection");
+        if constexpr (simrv::xlen::kXLenBits == 64) {
+            expect(parsed.has_value(), "RV64 CLI accepts RVA23U64 profile selection");
+        } else {
+            expect(!parsed.has_value(), "RV32 CLI rejects an RV64 profile");
+        }
         if (parsed) {
             const auto cfg = parsed->options.to_machine_config();
             expect(cfg.execution.profile == simrv::isa::ArchitectureProfile::Rva23U64,
                    "selected ISA profile is preserved in machine configuration");
         }
+        std::array<std::string, 5> rv32_args_str = {"SimRV", "--profile", "rvi20u32", "-m",
+                                                    "guest.elf"};
+        std::array<char*, 5> rv32_args{};
+        for (size_t i = 0; i < rv32_args_str.size(); ++i) rv32_args[i] = rv32_args_str[i].data();
+        const auto rv32_profile = simrv::util::parse_command_line(rv32_args);
+        expect(rv32_profile.has_value(), "CLI accepts RVI20U32 profile selection");
     }
     expect(simrv::log::parse_format("text") == simrv::log::Format::Text,
            "text diagnostic format is accepted");
@@ -1325,35 +1329,32 @@ auto main() -> int {
     }
 
     {
-        // CPU config parser ISA spec validation and Zb expansion
-        expect(!simrv::isa::parse_isa_spec("gcbv").has_value(),
-               "isa::parse_isa_spec rejects legacy draft gcbv");
-        expect(!simrv::isa::parse_isa_spec("rv64gcbv").has_value(),
-               "isa::parse_isa_spec rejects legacy draft rv64gcbv");
-        const auto gczbv_spec = simrv::isa::parse_isa_spec("gczbv");
-        expect(gczbv_spec.has_value() && gczbv_spec->has(simrv::isa::IsaExtension::V) &&
-                   gczbv_spec->has(simrv::isa::IsaExtension::B),
-               "isa::parse_isa_spec accepts ratified gczbv");
+        // CPU config parser ISA spec validation
+        expect(simrv::isa::parse_isa_spec("rv64gcbv").has_value(),
+               "isa::parse_isa_spec accepts canonical GCBV single-letter extensions");
+        const auto gcv_zb_spec = simrv::isa::parse_isa_spec("rvgcv_zba_zbb_zbs");
+        expect(gcv_zb_spec.has_value() && gcv_zb_spec->has(simrv::isa::IsaExtension::V) &&
+                   !gcv_zb_spec->extensions.empty(),
+               "isa::parse_isa_spec accepts ratified GCV with explicit bitmanip extensions");
 
         std::istringstream stream(
-            "[cpu]\nname = \"test_core\"\nisa_preset = \"gczbv\"\n"
+            "[cpu]\nname = \"test_core\"\nisa_preset = \"gcv_zba_zbb_zbs\"\n"
             "[device.clint]\nname = \"clint0\"\nbase = 0x2000000\nsize = 0x10000\n"
             "[device.plic]\nname = \"plic0\"\nbase = 0xc000000\nsize = 0x400000\n"
             "[smp]\nhart_count = 2\n");
         simrv::pipeline::CpuModelConfig cfg{};
         expect(simrv::core::parse_cpu_config_stream(stream, cfg),
-               "parse_cpu_config_stream successfully parses config with gczbv and device/smp "
+               "parse_cpu_config_stream successfully parses config with gcv_zba_zbb_zbs and "
+               "device/smp "
                "sections");
         expect(cfg.isa.has(simrv::isa::IsaExtension::V),
-               "gczbv config enables V extension in IsaSpec");
+               "gcv_zba_zbb_zbs config enables V extension in IsaSpec");
         expect(std::ranges::find(cfg.isa_extensions, "zba") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zba");
+               "gcv_zba_zbb_zbs config automatically includes zba");
         expect(std::ranges::find(cfg.isa_extensions, "zbb") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zbb");
-        expect(std::ranges::find(cfg.isa_extensions, "zbc") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zbc");
+               "gcv_zba_zbb_zbs config automatically includes zbb");
         expect(std::ranges::find(cfg.isa_extensions, "zbs") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zbs");
+               "gcv_zba_zbb_zbs config automatically includes zbs");
     }
 
     {
@@ -1384,7 +1385,7 @@ auto main() -> int {
     {
         // Stdin platform config parsing with unified [cpu] and [soc] sections
         std::istringstream combined_stream(
-            "[cpu]\nname = \"piped_core\"\nisa_preset = \"gczbv\"\n"
+            "[cpu]\nname = \"piped_core\"\nisa_preset = \"gcv_zba_zbb_zbs\"\n"
             "[soc]\nname = \"piped_soc\"\ndram_base = 0x80000000\ndram_size = 0x10000000\n");
         simrv::pipeline::CpuModelConfig cpu_cfg{};
         simrv::core::SoCConfig soc_cfg{};

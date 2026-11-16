@@ -87,6 +87,11 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         return;
     }
 
+    if (ctx.op_id == isa::SSPUSH || ctx.op_id == isa::SSPOPCHK || ctx.op_id == isa::SSRDP) {
+        ctx.rcsr = 0;
+        return;
+    }
+
     if (isa::is_hypervisor_memory_op(ctx.op_id)) {
         if (const auto exc =
                 TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {

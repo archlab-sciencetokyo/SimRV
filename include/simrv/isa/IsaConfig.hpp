@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,6 +24,18 @@ constexpr auto misa_extension_bit(IsaExtension ext) -> simrv::xlen::CsrValue {
                                               << static_cast<unsigned>(ext));
 }
 
+constexpr auto misa_privilege_support_bit(MisaPrivilegeSupport mode) -> simrv::xlen::CsrValue {
+    return static_cast<simrv::xlen::CsrValue>(simrv::xlen::CsrValue{1}
+                                              << static_cast<unsigned>(mode));
+}
+
+constexpr auto misa_with_privilege_support(simrv::xlen::CsrValue misa, bool supervisor, bool user)
+    -> simrv::xlen::CsrValue {
+    if (supervisor) misa |= misa_privilege_support_bit(MisaPrivilegeSupport::Supervisor);
+    if (user) misa |= misa_privilege_support_bit(MisaPrivilegeSupport::User);
+    return misa;
+}
+
 /**
  * @brief Computes the combined bitmask of all baseline supported extensions.
  * @return CsrValue mask for all base extensions.
@@ -30,8 +44,7 @@ constexpr auto misa_base_bits() -> simrv::xlen::CsrValue {
     return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
            misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::B) |
            misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D) |
-           misa_extension_bit(IsaExtension::C) | misa_extension_bit(IsaExtension::S) |
-           misa_extension_bit(IsaExtension::U) | misa_extension_bit(IsaExtension::V);
+           misa_extension_bit(IsaExtension::C) | misa_extension_bit(IsaExtension::V);
 }
 
 /**
@@ -43,7 +56,6 @@ struct IsaSpec {
         misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
         misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
         misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
-        misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U) |
         misa_extension_bit(IsaExtension::V);
     unsigned int xlen = 0;  ///< 0 = inherit host/ELF XLEN, 32 = RV32, 64 = RV64
     std::vector<std::string> extensions{};
@@ -79,12 +91,13 @@ struct IsaSpec {
             if (has(IsaExtension::F)) out.push_back('f');
             if (has(IsaExtension::D)) out.push_back('d');
         }
+        if (has(IsaExtension::Q)) out.push_back('q');
         if (has(IsaExtension::C)) out.push_back('c');
         if (has(IsaExtension::B)) out.push_back('b');
         if (has(IsaExtension::V)) out.push_back('v');
-        if (!is_g && has(IsaExtension::S) && !has(IsaExtension::A)) out.push_back('s');
-        if (!is_g && has(IsaExtension::U) && !has(IsaExtension::A)) out.push_back('u');
-        for (const auto& ext : extensions) {
+        auto canonical_extensions = extensions;
+        std::ranges::sort(canonical_extensions);
+        for (const auto& ext : canonical_extensions) {
             out.push_back('_');
             out += ext;
         }
@@ -119,10 +132,11 @@ struct IsaSpec {
     if (s.empty()) return std::nullopt;
 
     const size_t underscore = s.find('_');
-    const std::string_view single_letters =
-        (underscore == std::string_view::npos) ? s : s.substr(0, underscore);
+    const size_t glued_extension = s.find_first_of("zx");
+    const size_t extension_start = std::min(
+        underscore, glued_extension == std::string_view::npos ? s.size() : glued_extension);
+    const std::string_view single_letters = s.substr(0, extension_start);
     if (single_letters.empty()) return std::nullopt;
-    if (single_letters == "gcbv") return std::nullopt;
 
     const char base = single_letters.front();
     if (base == 'e') {
@@ -131,31 +145,18 @@ struct IsaSpec {
     } else if (base == 'i') {
         spec.misa_bits |= misa_extension_bit(IsaExtension::I);
     } else if (base == 'g') {
-        spec.misa_bits |=
-            misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-            misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
-            misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::S) |
-            misa_extension_bit(IsaExtension::U);
+        spec.misa_bits |= misa_extension_bit(IsaExtension::I) |
+                          misa_extension_bit(IsaExtension::M) |
+                          misa_extension_bit(IsaExtension::A) |
+                          misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D);
+        spec.extension_set.set(MultiLetterExtension::Zicsr);
+        spec.extension_set.set(MultiLetterExtension::Zifencei);
     } else {
         return std::nullopt;
     }
 
     for (size_t i = 1; i < single_letters.size(); ++i) {
         const char ch = single_letters[i];
-        if (ch == 'z' && i + 1 < single_letters.size() && single_letters[i + 1] == 'b') {
-            // Legacy compact shorthand such as gczb / gczbv
-            spec.misa_bits |= misa_extension_bit(IsaExtension::B);
-            spec.extensions.emplace_back("zba");
-            spec.extensions.emplace_back("zbb");
-            spec.extensions.emplace_back("zbc");
-            spec.extensions.emplace_back("zbs");
-            spec.extension_set.set(MultiLetterExtension::Zba);
-            spec.extension_set.set(MultiLetterExtension::Zbb);
-            spec.extension_set.set(MultiLetterExtension::Zbc);
-            spec.extension_set.set(MultiLetterExtension::Zbs);
-            ++i;
-            continue;
-        }
         switch (ch) {
             case 'm':
                 spec.misa_bits |= misa_extension_bit(IsaExtension::M);
@@ -169,6 +170,11 @@ struct IsaSpec {
             case 'd':
                 spec.misa_bits |= misa_extension_bit(IsaExtension::D);
                 break;
+            case 'q':
+                spec.misa_bits |= misa_extension_bit(IsaExtension::Q) |
+                                  misa_extension_bit(IsaExtension::D) |
+                                  misa_extension_bit(IsaExtension::F);
+                break;
             case 'c':
                 spec.misa_bits |= misa_extension_bit(IsaExtension::C);
                 break;
@@ -178,36 +184,95 @@ struct IsaSpec {
             case 'v':
                 spec.misa_bits |= misa_extension_bit(IsaExtension::V);
                 break;
-            case 's':
-                spec.misa_bits |= misa_extension_bit(IsaExtension::S);
-                break;
-            case 'u':
-                spec.misa_bits |= misa_extension_bit(IsaExtension::U);
+            case 'h':
+                spec.misa_bits |= misa_extension_bit(IsaExtension::H);
                 break;
             default:
                 return std::nullopt;
         }
     }
 
-    // Preserve Supervisor/User bits on "ima" (without "c") for Linux/RTOS parity.
-    if (single_letters == "ima") {
-        spec.misa_bits |= misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
+    if ((spec.misa_bits & misa_extension_bit(IsaExtension::M)) != 0) {
+        spec.extension_set.set(MultiLetterExtension::Zmmul);
+    }
+    if ((spec.misa_bits & misa_extension_bit(IsaExtension::F)) != 0) {
+        spec.extension_set.set(MultiLetterExtension::Zicsr);
+    }
+    if ((spec.misa_bits & misa_extension_bit(IsaExtension::D)) != 0) {
+        spec.misa_bits |= misa_extension_bit(IsaExtension::F);
+        spec.extension_set.set(MultiLetterExtension::Zicsr);
+    }
+    if ((spec.misa_bits & misa_extension_bit(IsaExtension::A)) != 0) {
+        spec.extension_set.set(MultiLetterExtension::Zaamo);
+        spec.extension_set.set(MultiLetterExtension::Zalrsc);
+    }
+    if ((spec.misa_bits & misa_extension_bit(IsaExtension::B)) != 0) {
+        spec.extension_set.set(MultiLetterExtension::Zba);
+        spec.extension_set.set(MultiLetterExtension::Zbb);
+        spec.extension_set.set(MultiLetterExtension::Zbs);
+    }
+    if ((spec.misa_bits & misa_extension_bit(IsaExtension::C)) != 0) {
+        spec.extension_set.set(MultiLetterExtension::Zca);
+        if (spec.xlen == 32 && (spec.misa_bits & misa_extension_bit(IsaExtension::F)) != 0) {
+            spec.extension_set.set(MultiLetterExtension::Zcf);
+        }
+        if ((spec.misa_bits & misa_extension_bit(IsaExtension::D)) != 0) {
+            spec.extension_set.set(MultiLetterExtension::Zcd);
+        }
     }
 
-    if (underscore != std::string_view::npos) {
-        std::string_view rest = s.substr(underscore + 1);
+    if (extension_start < s.size()) {
+        std::string_view rest = s.substr(extension_start);
+        if (rest.front() == '_') rest.remove_prefix(1);
         while (!rest.empty()) {
             const size_t next = rest.find('_');
             const std::string_view token =
                 (next == std::string_view::npos) ? rest : rest.substr(0, next);
             if (token.empty()) return std::nullopt;
-            if (std::ranges::find(spec.extensions, token) == spec.extensions.end()) {
-                spec.extensions.emplace_back(token);
+            constexpr std::array<std::string_view, 11> kAggregateExtensions = {
+                "sha",  "zk",    "zkn",   "zks",   "zvk",  "zvkn",
+                "zvks", "zvkng", "zvknc", "zvksg", "zvksc"};
+            bool recognized =
+                std::ranges::find(kAggregateExtensions, token) != kAggregateExtensions.end();
+            auto known = parse_multi_letter_extension(token);
+            if (!known) {
+                for (size_t split = token.size(); split > 0; --split) {
+                    const auto suffix = token.substr(split);
+                    if (suffix != "1" && suffix != "1p0" && suffix != "2" && suffix != "2p0") {
+                        continue;
+                    }
+                    known = parse_multi_letter_extension(token.substr(0, split));
+                    if (known) break;
+                }
             }
+            recognized = recognized || known.has_value();
+            if (!recognized && token.front() == 'x' && token.size() > 1 &&
+                std::ranges::all_of(token,
+                                    [](unsigned char ch) { return std::isalnum(ch) != 0; })) {
+                recognized = true;
+                spec.misa_bits |= misa_extension_bit(IsaExtension::X);
+            }
+            if (!recognized) return std::nullopt;
+            if (std::ranges::find(spec.extensions, token) != spec.extensions.end()) {
+                return std::nullopt;
+            }
+            spec.extensions.emplace_back(token);
             add_extension_to_set(spec.extension_set, token);
             if (next == std::string_view::npos) break;
             rest.remove_prefix(next + 1);
         }
+    }
+
+    if (std::ranges::find(spec.extensions, "sha") != spec.extensions.end()) {
+        spec.misa_bits |= misa_extension_bit(IsaExtension::H);
+    }
+    if (spec.extension_set.has(MultiLetterExtension::Zicntr)) {
+        spec.extension_set.set(MultiLetterExtension::Zicsr);
+    }
+    if (spec.extension_set.has(MultiLetterExtension::Zba) &&
+        spec.extension_set.has(MultiLetterExtension::Zbb) &&
+        spec.extension_set.has(MultiLetterExtension::Zbs)) {
+        spec.misa_bits |= misa_extension_bit(IsaExtension::B);
     }
 
     return spec;
@@ -286,117 +351,129 @@ constexpr auto epc_read_value(simrv::xlen::CsrValue epc, simrv::xlen::CsrValue m
     return epc & ~alignment_mask;
 }
 
-/**
- * @brief Returns the canonical string representation of an architecture profile.
- */
-constexpr auto to_profile_string(ArchitectureProfile profile) noexcept -> std::string_view {
-    switch (profile) {
-        case ArchitectureProfile::Legacy:
-            return "legacy";
-        case ArchitectureProfile::Rva20U64:
-            return "rva20u64";
-        case ArchitectureProfile::Rva20S64:
-            return "rva20s64";
-        case ArchitectureProfile::Rva22U64:
-            return "rva22u64";
-        case ArchitectureProfile::Rva22S64:
-            return "rva22s64";
-        case ArchitectureProfile::Rva23U64:
-            return "rva23u64";
-        case ArchitectureProfile::Rva23S64:
-            return "rva23s64";
-        case ArchitectureProfile::Rvb23U64:
-            return "rvb23u64";
-        case ArchitectureProfile::Rvb23S64:
-            return "rvb23s64";
+struct ArchitectureProfileInfo {
+    ArchitectureProfile profile;
+    std::string_view name;
+    std::string_view mandatory_isa;
+    uint8_t xlen;
+    bool supervisor_profile;
+};
+
+// Ratified profile definitions: RVI20/RVA20/RVA22 v1.0 and RVA23/RVB23 v1.0.
+inline constexpr std::array kArchitectureProfiles{
+    ArchitectureProfileInfo{.profile = ArchitectureProfile::Rvi20U32,
+                            .name = "rvi20u32",
+                            .mandatory_isa = "rv32i",
+                            .xlen = 32,
+                            .supervisor_profile = false},
+    ArchitectureProfileInfo{.profile = ArchitectureProfile::Rvi20U64,
+                            .name = "rvi20u64",
+                            .mandatory_isa = "rv64i",
+                            .xlen = 64,
+                            .supervisor_profile = false},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rva20U64,
+        .name = "rva20u64",
+        .mandatory_isa = "rv64imafdc_za128rs_zicclsm_ziccamoa_ziccif_ziccrse_zicntr",
+        .xlen = 64,
+        .supervisor_profile = false},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rva20S64,
+        .name = "rva20s64",
+        .mandatory_isa =
+            "rv64imafdc_za128rs_zicclsm_ziccamoa_ziccif_ziccrse_zicntr_zifencei_ss1p11_svade_"
+            "svbare_sv39_ssccptr_sstvala_sstvecd",
+        .xlen = 64,
+        .supervisor_profile = true},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rva22U64,
+        .name = "rva22u64",
+        .mandatory_isa =
+            "rv64imafdc_zba_zbb_zbs_za64rs_zfhmin_zic64b_zicbom_zicbop_zicboz_zicclsm_ziccamoa_"
+            "ziccif_ziccrse_zicntr_zihintpause_zihpm_zkt",
+        .xlen = 64,
+        .supervisor_profile = false},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rva22S64,
+        .name = "rva22s64",
+        .mandatory_isa =
+            "rv64imafdc_zba_zbb_zbs_za64rs_zfhmin_zic64b_zicbom_zicbop_zicboz_zicclsm_ziccamoa_"
+            "ziccif_ziccrse_zicntr_zifencei_zihintpause_zihpm_zkt_ss1p12_ssccptr_sscounterenw_"
+            "sstvala_sstvecd_svinval_svade_svbare_svpbmt_sv39",
+        .xlen = 64,
+        .supervisor_profile = true},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rva23U64,
+        .name = "rva23u64",
+        .mandatory_isa =
+            "rv64imafdcbv_zawrs_zba_zbb_zbs_za64rs_zfhmin_zfa_zic64b_zicbom_zicbop_zicboz_zicclsm_"
+            "ziccamoa_ziccif_ziccrse_zicntr_zicond_zihintntl_zihintpause_zihpm_zcb_zcmop_zimop_zkt_"
+            "zvbb_zvfhmin_zvkt_supm",
+        .xlen = 64,
+        .supervisor_profile = false},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rva23S64,
+        .name = "rva23s64",
+        .mandatory_isa =
+            "rv64imafdcbv_zawrs_zba_zbb_zbs_za64rs_zfhmin_zfa_zic64b_zicbom_zicbop_zicboz_"
+            "zicclsm_ziccamoa_ziccif_ziccrse_zicntr_zicond_zihintntl_zihintpause_zihpm_zcb_"
+            "zcmop_zimop_zkt_zvbb_zvfhmin_zvkt_supm_zifencei_ss1p13_ssccptr_sscounterenw_"
+            "ssstateen_shcounterenw_shvstvala_shtvala_shvstvecd_shvsatpa_shgatpa_ssnpm_"
+            "ssu64xl_sstc_sstvala_sstvecd_sscofpmf_svinval_svade_svbare_svnapot_svpbmt_sv39_sha",
+        .xlen = 64,
+        .supervisor_profile = true},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rvb23U64,
+        .name = "rvb23u64",
+        .mandatory_isa =
+            "rv64imafdcb_zawrs_zba_zbb_zbs_za64rs_zfa_zic64b_zicbom_zicbop_zicboz_zicclsm_"
+            "ziccamoa_ziccif_ziccrse_zicntr_zicond_zihintntl_zihintpause_zihpm_zimop_zkt",
+        .xlen = 64,
+        .supervisor_profile = false},
+    ArchitectureProfileInfo{
+        .profile = ArchitectureProfile::Rvb23S64,
+        .name = "rvb23s64",
+        .mandatory_isa =
+            "rv64imafdcb_zawrs_zba_zbb_zbs_za64rs_zfa_zic64b_zicbom_zicbop_zicboz_zicclsm_"
+            "ziccamoa_ziccif_ziccrse_zicntr_zicond_zihintntl_zihintpause_zihpm_zimop_zkt_zifencei_"
+            "ss1p13_ssccptr_sscounterenw_ssu64xl_sstvala_sstvecd_sscofpmf_svinval_svade_svbare_"
+            "svnapot_svpbmt_sv39",
+        .xlen = 64,
+        .supervisor_profile = true},
+};
+
+[[nodiscard]] constexpr auto profile_info(ArchitectureProfile profile) noexcept
+    -> const ArchitectureProfileInfo* {
+    for (const auto& info : kArchitectureProfiles) {
+        if (info.profile == profile) return &info;
     }
-    return "unknown";
+    return nullptr;
 }
 
-/**
- * @brief Parses an architecture profile name from string.
- */
-constexpr auto parse_architecture_profile(std::string_view str) noexcept
+[[nodiscard]] constexpr auto to_profile_string(ArchitectureProfile profile) noexcept
+    -> std::string_view {
+    const auto* info = profile_info(profile);
+    return info == nullptr ? "unknown" : info->name;
+}
+
+[[nodiscard]] constexpr auto parse_architecture_profile(std::string_view name) noexcept
     -> std::optional<ArchitectureProfile> {
-    if (str == "legacy" || str == "rv64gc" || str == "rv32gc") return ArchitectureProfile::Legacy;
-    if (str == "rva20u64") return ArchitectureProfile::Rva20U64;
-    if (str == "rva20s64" || str == "rva20") return ArchitectureProfile::Rva20S64;
-    if (str == "rva22u64") return ArchitectureProfile::Rva22U64;
-    if (str == "rva22s64" || str == "rva22") return ArchitectureProfile::Rva22S64;
-    if (str == "rva23u64") return ArchitectureProfile::Rva23U64;
-    if (str == "rva23s64" || str == "rva23") return ArchitectureProfile::Rva23S64;
-    if (str == "rvb23u64") return ArchitectureProfile::Rvb23U64;
-    if (str == "rvb23s64" || str == "rvb23") return ArchitectureProfile::Rvb23S64;
+    for (const auto& info : kArchitectureProfiles) {
+        if (info.name == name) return info.profile;
+    }
     return std::nullopt;
 }
 
-/**
- * @brief Returns the baseline ISA string implied by an ArchitectureProfile.
- */
-constexpr auto profile_default_isa_string(ArchitectureProfile profile) noexcept
+[[nodiscard]] constexpr auto profile_default_isa_string(ArchitectureProfile profile) noexcept
     -> std::string_view {
-    switch (profile) {
-        case ArchitectureProfile::Legacy:
-            return simrv::xlen::kIsXLen64 ? "rv64gc" : "rv32gc";
-        case ArchitectureProfile::Rva20U64:
-        case ArchitectureProfile::Rva20S64:
-            return "rv64gc_zicsr_zifencei_zicntr";
-        case ArchitectureProfile::Rva22U64:
-        case ArchitectureProfile::Rva22S64:
-            return "rv64gc_zba_zbb_zbs_zicbom_zicboz_zicbop_zihintpause_zfhmin_zicsr_zifencei_"
-                   "zicntr";
-        case ArchitectureProfile::Rvb23U64:
-        case ArchitectureProfile::Rvb23S64:
-            return "rv64gcb_zicond_zicbom_zicboz_zicbop_zihintpause_zfhmin_zfa_zimop_zicsr_"
-                   "zifencei_zicntr";
-        case ArchitectureProfile::Rva23U64:
-        case ArchitectureProfile::Rva23S64:
-            return "rv64gczbv_zicond_zicbom_zicboz_zicbop_zihintpause_zfhmin_zfa_zimop_zicsr_"
-                   "zifencei_zicntr";
-    }
-    return "rv64gc";
-}
-
-/**
- * @brief Returns the ISA string for an ArchitectureProfile including SimRV's
- *        implemented optional/recommended extensions (Sv48, Sv57, Svadu, Zkr, Sdtrig).
- */
-constexpr auto profile_recommended_isa_string(ArchitectureProfile profile) noexcept
-    -> std::string_view {
-    switch (profile) {
-        case ArchitectureProfile::Legacy:
-            return simrv::xlen::kIsXLen64 ? "rv64gc_zicsr_zifencei_zicntr"
-                                          : "rv32gc_zicsr_zifencei_zicntr";
-        case ArchitectureProfile::Rva20U64:
-            return "rv64gc_zicsr_zifencei_zicntr";
-        case ArchitectureProfile::Rva20S64:
-            return "rv64gc_zicsr_zifencei_zicntr_sv48_sv57";
-        case ArchitectureProfile::Rva22U64:
-            return "rv64gc_zba_zbb_zbs_zicbom_zicboz_zicbop_zihintpause_zfhmin_zicsr_zifencei_"
-                   "zicntr_zkr";
-        case ArchitectureProfile::Rva22S64:
-            return "rv64gc_zba_zbb_zbs_zicbom_zicboz_zicbop_zihintpause_zfhmin_zicsr_zifencei_"
-                   "zicntr_zkr_sv48_sv57_svadu_sdtrig";
-        case ArchitectureProfile::Rvb23U64:
-            return "rv64gcb_zicond_zicbom_zicboz_zicbop_zihintpause_zfhmin_zfa_zimop_zicsr_"
-                   "zifencei_zicntr_zkr";
-        case ArchitectureProfile::Rvb23S64:
-            return "rv64gcb_zicond_zicbom_zicboz_zicbop_zihintpause_zfhmin_zfa_zimop_zicsr_"
-                   "zifencei_zicntr_zkr_sv48_sv57_svadu_sdtrig";
-        case ArchitectureProfile::Rva23U64:
-            return "rv64gczbv_zicond_zicbom_zicboz_zicbop_zihintpause_zfhmin_zfa_zimop_zicsr_"
-                   "zifencei_zicntr_zkr";
-        case ArchitectureProfile::Rva23S64:
-            return "rv64gczbv_zicond_zicbom_zicboz_zicbop_zihintpause_zfhmin_zfa_zimop_zicsr_"
-                   "zifencei_zicntr_zkr_sv48_sv57_svadu_sdtrig";
-    }
-    return "rv64gc";
+    const auto* info = profile_info(profile);
+    return info == nullptr ? std::string_view{} : info->mandatory_isa;
 }
 
 /**
  * @brief Default architecture profile for the simulator instance.
  */
 constexpr ArchitectureProfile kDefaultArchitectureProfile =
-    simrv::xlen::kIsXLen64 ? ArchitectureProfile::Rva23S64 : ArchitectureProfile::Legacy;
+    simrv::xlen::kIsXLen64 ? ArchitectureProfile::Rva23S64 : ArchitectureProfile::Rvi20U32;
 
 }  // namespace simrv::isa

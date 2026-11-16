@@ -30,9 +30,11 @@ enum class MstatusBit : simrv::xlen::CsrValue {
     Tvm = (1u << 20),
     Tw = (1u << 21),
     Tsr = (1u << 22),
+    Spelp = (1u << 23),
     Sdt = (1u << 24),
     Gva = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 38U),
     Mpv = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 39U),
+    Mpelp = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 41U),
     Mdt = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 42U),
 };
 
@@ -244,13 +246,14 @@ constexpr auto mip_rmw_base(simrv::xlen::CsrValue visible_mip, bool seip_softwar
 constexpr simrv::xlen::CsrValue kMstatusMask =
     (MstatusBit::Sie | MstatusBit::Mie | MstatusBit::Spie | MstatusBit::Mpie | MstatusBit::Spp |
      MstatusBit::Mpp | MstatusBit::Fs | MstatusBit::Vs | MstatusBit::Mprv | MstatusBit::Sum |
-     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Sdt |
-     MstatusBit::Mpv |
-     (simrv::xlen::kIsXLen64 ? ((static_cast<simrv::xlen::CsrValue>(0xF) << 32) | MstatusBit::Mdt)
-                             : 0));
+     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Spelp |
+     MstatusBit::Sdt | MstatusBit::Mpv |
+     (simrv::xlen::kIsXLen64
+          ? ((static_cast<simrv::xlen::CsrValue>(0xF) << 32) | MstatusBit::Mpelp | MstatusBit::Mdt)
+          : 0));
 constexpr simrv::xlen::CsrValue kSstatusMask =
     (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
-     MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Sdt |
+     MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Spelp | MstatusBit::Sdt |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0x3) << 32) : 0));
 constexpr simrv::xlen::CsrValue kMstatusFsDirty = std::to_underlying(MstatusBit::Fs);
 constexpr simrv::xlen::CsrValue kMstatusGva = std::to_underlying(MstatusBit::Gva);
@@ -301,11 +304,13 @@ constexpr auto mstatus_with_sd(simrv::xlen::CsrValue mstatus) -> simrv::xlen::Cs
  */
 constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v,
                                      bool has_h = false, bool has_sdbltrp = false,
-                                     bool has_mdbltrp = false) -> simrv::xlen::CsrValue {
+                                     bool has_mdbltrp = false, bool has_zicfilp = false)
+    -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = kMstatusMask;
     if (!has_s) {
         mask &= ~(MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Sum |
-                  MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tsr | MstatusBit::Sdt);
+                  MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tsr | MstatusBit::Spelp |
+                  MstatusBit::Sdt);
         if constexpr (simrv::xlen::kIsXLen64) {
             mask &= ~(static_cast<simrv::xlen::CsrValue>(0x3U) << 34U);  // SXL
         }
@@ -321,8 +326,10 @@ constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool ha
     if (!has_v) mask &= ~MstatusBit::Vs;
     if (!has_h) mask &= ~MstatusBit::Mpv;
     if (!has_sdbltrp) mask &= ~MstatusBit::Sdt;
+    if (!has_zicfilp) mask &= ~MstatusBit::Spelp;
     if constexpr (simrv::xlen::kIsXLen64) {
         if (!has_mdbltrp) mask &= ~MstatusBit::Mdt;
+        if (!has_zicfilp) mask &= ~MstatusBit::Mpelp;
     }
     return mask;
 }
@@ -635,6 +642,7 @@ enum class Csr : uint16_t {
     Vxsat = 0x009,
     Vxrm = 0x00A,
     Vcsr = 0x00F,
+    Ssp = 0x011,
     Seed = 0x015,
     Jvt = 0x017,
     Pmpcfg0 = 0x3A0,
@@ -702,11 +710,17 @@ enum class Csr : uint16_t {
     Mtvec = 0x305,
     Mcounteren = 0x306,
     Menvcfg = 0x30A,
+    Mvien = 0x308,
+    Mvip = 0x309,
     Mstateen0 = 0x30C,
     Mstateen1 = 0x30D,
     Mstateen2 = 0x30E,
     Mstateen3 = 0x30F,
     Mcountinhibit = 0x320,
+    Mcyclecfg = 0x321,
+    Minstretcfg = 0x322,
+    Mcyclecfgh = 0x721,
+    Minstretcfgh = 0x722,
     Menvcfgh = 0x31A,
     Mstateen0h = 0x31C,
     Mstateen1h = 0x31D,
@@ -723,7 +737,11 @@ enum class Csr : uint16_t {
     Hcounteren = 0x606,
     Hgeie = 0x607,
     Hgeip = 0xE12,
+    Hvien = 0x608,
     Henvcfg = 0x60A,
+    Mtopi = 0xFB0,
+    Stopi = 0xDB0,
+    Vstopi = 0xEB0,
     Htimedelta = 0x605,
     Htval = 0x643,
     Hip = 0x644,
@@ -757,7 +775,7 @@ enum class Csr : uint16_t {
     Tinfo = 0x7A4,
     Tcontrol = 0x7A5,
     Mcontext = 0x7A8,
-    Scontext = 0x7AA,
+    Scontext = 0x5A8,
     Mcycle = 0xB00,
     Minstret = 0xB02,
     Mcycleh = 0xB80,
@@ -810,7 +828,7 @@ inline constexpr simrv::xlen::CsrNumber kTdata3{0x7A3};
 inline constexpr simrv::xlen::CsrNumber kTinfo{0x7A4};
 inline constexpr simrv::xlen::CsrNumber kTcontrol{0x7A5};
 inline constexpr simrv::xlen::CsrNumber kMcontext{0x7A8};
-inline constexpr simrv::xlen::CsrNumber kScontext{0x7AA};
+inline constexpr simrv::xlen::CsrNumber kScontext{0x5A8};
 
 inline constexpr simrv::xlen::CsrNumber kCycle{0xC00};
 inline constexpr simrv::xlen::CsrNumber kTime{0xC01};

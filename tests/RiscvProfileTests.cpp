@@ -798,6 +798,7 @@ void test_svade_faults_on_clear_accessed_and_dirty_bits() {
 void test_sstvecd_and_sstvala_supervisor_traps() {
     simrv::core::CPU cpu;
     cpu.reset();
+    cpu.state().refresh_misa_status();
     constexpr simrv::xlen::CsrValue kVectorBase = 0x12345000;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Stvec, kVectorBase | 1U).has_value());
     const auto stvec = cpu.csr_file.read(simrv::core::Csr::Stvec);
@@ -964,9 +965,7 @@ void test_ssu64xl_user_xlen_csr() {
         simrv::core::Machine machine;
         auto& cpu = machine.hart(0);
         cpu.state().misa = (simrv::xlen::CsrValue{2} << 62U) |
-                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I) |
-                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
-                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I);
         cpu.state().initialize_lower_xlen_fields();
 
         constexpr uint64_t kUxlMask = uint64_t{0x3} << 32U;
@@ -993,8 +992,6 @@ void test_supm_user_data_pointer_masking() {
         auto& cpu = machine.primary_hart();
         cpu.reset();
         auto& state = cpu.state();
-        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
-                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
         state.initialize_lower_xlen_fields();
 
         constexpr simrv::xlen::Address kBase = (simrv::memory::kDramBaseAddress + 0x100).raw();
@@ -2392,7 +2389,6 @@ void test_cbo_zero_execution() {
 
     // User pointer masking applies to cache-block operations as well as loads/stores.
     std::memset(machine.ram_view().unchecked_ptr(target_paddr), 0xAA, kLineBytes);
-    cpu.state().misa |= misa_extension_bit(IsaExtension::U);
     cpu.state().priv = kPrivUser;
     cpu.state().senvcfg = (simrv::xlen::CsrValue{1} << 6U) | (simrv::xlen::CsrValue{1} << 7U);
 #if SIMRV_XLEN == 64
@@ -2424,44 +2420,84 @@ void test_profile_engine() {
     struct ProfileCase {
         ArchitectureProfile profile;
         std::string_view canonical;
-        std::string_view alias;
         bool expect_b;
         bool expect_v;
     };
-    constexpr std::array<ProfileCase, 9> kProfileCases = {{
-        {ArchitectureProfile::Rva23S64, "rva23s64", "rva23", true, true},
-        {ArchitectureProfile::Rva23U64, "rva23u64", "rva23u64", true, true},
-        {ArchitectureProfile::Rvb23S64, "rvb23s64", "rvb23", true, false},
-        {ArchitectureProfile::Rvb23U64, "rvb23u64", "rvb23u64", true, false},
-        {ArchitectureProfile::Rva22S64, "rva22s64", "rva22", false, false},
-        {ArchitectureProfile::Rva22U64, "rva22u64", "rva22u64", false, false},
-        {ArchitectureProfile::Rva20S64, "rva20s64", "rva20", false, false},
-        {ArchitectureProfile::Rva20U64, "rva20u64", "rva20u64", false, false},
-        {ArchitectureProfile::Legacy, "legacy", "rv64gc", false, false},
+    constexpr std::array<ProfileCase, 10> kProfileCases = {{
+        {.profile = ArchitectureProfile::Rvi20U32,
+         .canonical = "rvi20u32",
+         .expect_b = false,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rvi20U64,
+         .canonical = "rvi20u64",
+         .expect_b = false,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rva20U64,
+         .canonical = "rva20u64",
+         .expect_b = false,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rva20S64,
+         .canonical = "rva20s64",
+         .expect_b = false,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rva22U64,
+         .canonical = "rva22u64",
+         .expect_b = false,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rva22S64,
+         .canonical = "rva22s64",
+         .expect_b = false,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rva23U64,
+         .canonical = "rva23u64",
+         .expect_b = true,
+         .expect_v = true},
+        {.profile = ArchitectureProfile::Rva23S64,
+         .canonical = "rva23s64",
+         .expect_b = true,
+         .expect_v = true},
+        {.profile = ArchitectureProfile::Rvb23U64,
+         .canonical = "rvb23u64",
+         .expect_b = true,
+         .expect_v = false},
+        {.profile = ArchitectureProfile::Rvb23S64,
+         .canonical = "rvb23s64",
+         .expect_b = true,
+         .expect_v = false},
     }};
 
     for (const auto& entry : kProfileCases) {
         TEST_ASSERT(to_profile_string(entry.profile) == entry.canonical);
         TEST_ASSERT(parse_architecture_profile(entry.canonical) == entry.profile);
-        TEST_ASSERT(parse_architecture_profile(entry.alias) == entry.profile);
+        const auto* info = profile_info(entry.profile);
+        TEST_ASSERT(info != nullptr && info->name == entry.canonical);
         const auto isa = parse_isa_spec(profile_default_isa_string(entry.profile));
         TEST_ASSERT(isa.has_value());
+        TEST_ASSERT(isa->xlen == info->xlen);
         TEST_ASSERT(isa->has(IsaExtension::B) == entry.expect_b);
         TEST_ASSERT(isa->has(IsaExtension::V) == entry.expect_v);
-
-        const auto rec = parse_isa_spec(profile_recommended_isa_string(entry.profile));
-        TEST_ASSERT(rec.has_value());
-        TEST_ASSERT(rec->has(IsaExtension::B) == entry.expect_b);
-        TEST_ASSERT(rec->has(IsaExtension::V) == entry.expect_v);
     }
 
-    TEST_ASSERT(parse_architecture_profile("rv32gc") == ArchitectureProfile::Legacy);
+    TEST_ASSERT(parse_architecture_profile("rva23") == std::nullopt);
+    TEST_ASSERT(parse_architecture_profile("rvb23") == std::nullopt);
+    TEST_ASSERT(parse_architecture_profile("legacy") == std::nullopt);
+    TEST_ASSERT(parse_architecture_profile("rv32gc") == std::nullopt);
     TEST_ASSERT(parse_architecture_profile("invalid_profile") == std::nullopt);
+    TEST_ASSERT(!parse_isa_spec("rv64is").has_value());
+    TEST_ASSERT(!parse_isa_spec("rv64iu").has_value());
+
+    simrv::core::CPU misa_cpu;
+    misa_cpu.reset();
+    misa_cpu.state().supervisor_mode_supported = false;
+    const auto misa_value = misa_cpu.csr_file.read(simrv::core::Csr::Misa);
+    TEST_ASSERT(misa_value.has_value());
+    TEST_ASSERT((*misa_value & misa_privilege_support_bit(MisaPrivilegeSupport::Supervisor)) == 0);
+    TEST_ASSERT((*misa_value & misa_privilege_support_bit(MisaPrivilegeSupport::User)) != 0);
 
     if constexpr (simrv::xlen::kIsXLen64) {
         TEST_ASSERT(kDefaultArchitectureProfile == ArchitectureProfile::Rva23S64);
     } else {
-        TEST_ASSERT(kDefaultArchitectureProfile == ArchitectureProfile::Legacy);
+        TEST_ASSERT(kDefaultArchitectureProfile == ArchitectureProfile::Rvi20U32);
     }
 
     // Verify ExtensionSet, aggregate shorthand expansion, and unified instruction_enabled() gating.
@@ -2568,8 +2604,6 @@ void test_track1a_zkr_svadu_sspm() {
         auto& cpu = machine.primary_hart();
         cpu.reset();
         auto& state = cpu.state();
-        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
-                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
         state.initialize_lower_xlen_fields();
         state.menvcfg |= uint64_t{1} << 62U;  // Enable Svpbmt PTE memory-type interpretation.
 
@@ -2725,7 +2759,6 @@ void test_track1a_zkr_svadu_sspm() {
         auto& cpu = machine.primary_hart();
         cpu.reset();
         auto& state = cpu.state();
-        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S);
         state.initialize_lower_xlen_fields();
         state.priv = PrivilegeLevel::Supervisor;
 
@@ -2833,8 +2866,7 @@ void test_sha_and_ssnpm_audit_regressions() {
         Machine machine;
         auto& cpu = machine.primary_hart();
         cpu.reset();
-        cpu.state().misa |=
-            misa_extension_bit(IsaExtension::H) | misa_extension_bit(IsaExtension::S);
+        cpu.state().misa |= misa_extension_bit(IsaExtension::H);
         cpu.state().hgatp = (uint64_t{8} << 60U) | 0x10U;
         cpu.state().vsatp = 0;
         cpu.state().satp = 0;
@@ -2909,8 +2941,7 @@ void test_sha_and_ssnpm_audit_regressions() {
         machine.memory().initialize_mmu();
         auto& cpu = machine.primary_hart();
         cpu.reset();
-        cpu.state().misa |=
-            misa_extension_bit(IsaExtension::H) | misa_extension_bit(IsaExtension::U);
+        cpu.state().misa |= misa_extension_bit(IsaExtension::H);
         const Address target = machine.memory_geometry().dram_base.raw() + 0x1000;
         cpu.state().virt = true;
         cpu.state().priv = PrivilegeLevel::Supervisor;
@@ -3690,7 +3721,7 @@ void test_track2_aggregate_isa_expansion() {
         TEST_ASSERT(upper2->has_extension(MultiLetterExtension::Zcmt));
 
         // Malformed strings & edge cases
-        const auto trailing = parse_isa_spec("rv64gc_");
+        const auto trailing = parse_isa_spec("rv64i_");
         TEST_ASSERT(trailing.has_value() && trailing->extension_set.empty());
         TEST_ASSERT(!parse_isa_spec("rv64gc_zkn__zks").has_value());
         TEST_ASSERT(!parse_isa_spec("invalid_arch").has_value());
@@ -4521,6 +4552,7 @@ void test_track3b_priv_completeness() {
         machine.set_ram_for_testing(ram.data(), ram.size());
         machine.memory().initialize_mmu();
         CPU& cpu = machine.primary_hart();
+        cpu.state().refresh_misa_status();
         cpu.state().enabled_extensions.set(MultiLetterExtension::Ssdbltrp);
         cpu.state().enabled_extensions.set(MultiLetterExtension::Smdbltrp);
         cpu.state().medeleg = (CsrValue{1} << 2U);  // Delegate IllegalInstruction to S-mode
@@ -4593,6 +4625,292 @@ void test_track3b_priv_completeness() {
     }
 }
 
+void test_rva23_profile_completeness_audit() {
+    using namespace simrv::isa;
+    using namespace simrv::core;
+
+    const auto u64_spec = parse_isa_spec(profile_default_isa_string(ArchitectureProfile::Rva23U64));
+    TEST_ASSERT(u64_spec.has_value());
+    for (const auto ext : {
+             MultiLetterExtension::Zicsr,       MultiLetterExtension::Zicntr,
+             MultiLetterExtension::Zihpm,       MultiLetterExtension::Ziccif,
+             MultiLetterExtension::Ziccrse,     MultiLetterExtension::Ziccamoa,
+             MultiLetterExtension::Zicclsm,     MultiLetterExtension::Za64rs,
+             MultiLetterExtension::Zihintpause, MultiLetterExtension::Zihintntl,
+             MultiLetterExtension::Zic64b,      MultiLetterExtension::Zicbom,
+             MultiLetterExtension::Zicbop,      MultiLetterExtension::Zicboz,
+             MultiLetterExtension::Zicond,      MultiLetterExtension::Zimop,
+             MultiLetterExtension::Zcmop,       MultiLetterExtension::Zcb,
+             MultiLetterExtension::Zca,         MultiLetterExtension::Zcd,
+             MultiLetterExtension::Zfa,         MultiLetterExtension::Zfhmin,
+             MultiLetterExtension::Zawrs,       MultiLetterExtension::Zkt,
+             MultiLetterExtension::Zvfhmin,     MultiLetterExtension::Zvbb,
+             MultiLetterExtension::Zvkb,        MultiLetterExtension::Zvkt,
+             MultiLetterExtension::Zmmul,       MultiLetterExtension::Zaamo,
+             MultiLetterExtension::Zalrsc,      MultiLetterExtension::Zba,
+             MultiLetterExtension::Zbb,         MultiLetterExtension::Zbs,
+             MultiLetterExtension::Supm,
+         }) {
+        TEST_ASSERT(u64_spec->has_extension(ext));
+    }
+    TEST_ASSERT(!u64_spec->has_extension(MultiLetterExtension::Sstc));
+    TEST_ASSERT(!u64_spec->has_extension(MultiLetterExtension::Svpbmt));
+    TEST_ASSERT(!u64_spec->has_extension(MultiLetterExtension::Ssstateen));
+
+    const auto s64_spec = parse_isa_spec(profile_default_isa_string(ArchitectureProfile::Rva23S64));
+    TEST_ASSERT(s64_spec.has_value());
+    for (const auto ext : {
+             MultiLetterExtension::Zifencei,     MultiLetterExtension::Ss1p13,
+             MultiLetterExtension::Svbare,       MultiLetterExtension::Sv39,
+             MultiLetterExtension::Svade,        MultiLetterExtension::Ssccptr,
+             MultiLetterExtension::Sstvecd,      MultiLetterExtension::Sstvala,
+             MultiLetterExtension::Sscounterenw, MultiLetterExtension::Svpbmt,
+             MultiLetterExtension::Svinval,      MultiLetterExtension::Svnapot,
+             MultiLetterExtension::Sstc,         MultiLetterExtension::Sscofpmf,
+             MultiLetterExtension::Ssnpm,        MultiLetterExtension::Ssu64xl,
+             MultiLetterExtension::Ssstateen,    MultiLetterExtension::Shcounterenw,
+             MultiLetterExtension::Shvstvala,    MultiLetterExtension::Shtvala,
+             MultiLetterExtension::Shvstvecd,    MultiLetterExtension::Shvsatpa,
+             MultiLetterExtension::Shgatpa,      MultiLetterExtension::Zcb,
+             MultiLetterExtension::Zvbb,         MultiLetterExtension::Supm,
+         }) {
+        TEST_ASSERT(s64_spec->has_extension(ext));
+    }
+
+    if constexpr (simrv::xlen::kIsXLen64) {
+        Machine machine;
+        std::array<simrv::xlen::Byte, 65536> backing{};
+        machine.set_ram_for_testing(backing.data(), backing.size());
+        TEST_ASSERT(machine.initialize().has_value());
+        const auto& cpu = machine.primary_hart();
+        TEST_ASSERT(misa_has_extension(cpu.state().misa, IsaExtension::H));
+        TEST_ASSERT(cpu.state().enabled_extensions.has(MultiLetterExtension::Zcb));
+        TEST_ASSERT(cpu.state().enabled_extensions.has(MultiLetterExtension::Zvbb));
+        TEST_ASSERT(cpu.state().enabled_extensions.has(MultiLetterExtension::Ssstateen));
+        TEST_ASSERT(cpu.state().enabled_extensions.has(MultiLetterExtension::Sstc));
+    }
+}
+
+void test_spec_pass2_smcntrpmf_stateen_aia_cfi() {
+    using namespace simrv;
+    using namespace simrv::core;
+    using namespace simrv::isa;
+    using namespace simrv::xlen;
+
+    auto write_word_at = [](auto& buf, uint64_t offset, uint32_t word) {
+        std::memcpy(buf.data() + offset, &word, sizeof(word));
+    };
+
+    auto make_machine = [](std::string_view isa_str) {
+        MachineConfig cfg{};
+        const auto spec = parse_isa_spec(isa_str).value();
+        cfg.isa.isa_preset = spec.misa_bits;
+        cfg.isa.enabled_extensions = spec.extension_set;
+        cfg.isa.misa_override = true;
+        auto machine = std::make_unique<Machine>(cfg);
+        machine->primary_hart().state().misa = misa_with_mxl(spec.misa_bits, SIMRV_XLEN);
+        machine->primary_hart().state().refresh_misa_status();
+        machine->primary_hart().state().enabled_extensions = spec.extension_set;
+        return machine;
+    };
+
+    // 1. Smcntrpmf: mcyclecfg / minstretcfg privilege-mode filtering
+    {
+        auto machine = make_machine((SIMRV_XLEN == 64) ? "rv64gc" : "rv32gc");
+        auto& cpu = machine->primary_hart();
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                     CsrNumber{csr_addr(Csr::Mcyclecfg)},
+                                                     true) == ExceptionCode::IllegalInstruction);
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                     CsrNumber{csr_addr(Csr::Minstretcfg)},
+                                                     true) == ExceptionCode::IllegalInstruction);
+    }
+    {
+        auto machine = make_machine((SIMRV_XLEN == 64) ? "rv64gc_smcntrpmf" : "rv32gc_smcntrpmf");
+        std::array<simrv::xlen::Byte, 65536> backing{};
+        machine->set_ram_for_testing(backing.data(), backing.size());
+        machine->memory().initialize_mmu();
+        auto& cpu = machine->primary_hart();
+        cpu.state().priv = PrivilegeLevel::Machine;
+        write_word_at(backing, 0x1000, 0x00000013U);  // nop
+        write_word_at(backing, 0x1004, 0x00000013U);  // nop
+        const uint64_t minh = uint64_t{1} << 62U;
+        if constexpr (SIMRV_XLEN == 64) {
+            TEST_ASSERT(cpu.csr_file.write(Csr::Mcyclecfg, minh).has_value());
+            TEST_ASSERT(cpu.csr_file.write(Csr::Minstretcfg, minh).has_value());
+        } else {
+            TEST_ASSERT(cpu.csr_file.write(Csr::Mcyclecfgh, 1U << 30U).has_value());
+            TEST_ASSERT(cpu.csr_file.write(Csr::Minstretcfgh, 1U << 30U).has_value());
+        }
+        const auto cyc0 = cpu.clint_mmio.mcycle;
+        const auto inst0 = cpu.state().minstret;
+        const uint64_t kDramBase = simrv::memory::kDramBaseAddress.raw();
+        cpu.state().pc = VirtAddr{kDramBase + 0x1000};
+        cpu.run_cycle(*machine);
+        TEST_ASSERT(cpu.clint_mmio.mcycle == cyc0);
+        TEST_ASSERT(cpu.state().minstret == inst0);
+
+        if constexpr (SIMRV_XLEN == 64) {
+            TEST_ASSERT(cpu.csr_file.write(Csr::Mcyclecfg, 0).has_value());
+            TEST_ASSERT(cpu.csr_file.write(Csr::Minstretcfg, 0).has_value());
+        } else {
+            TEST_ASSERT(cpu.csr_file.write(Csr::Mcyclecfgh, 0).has_value());
+            TEST_ASSERT(cpu.csr_file.write(Csr::Minstretcfgh, 0).has_value());
+        }
+        cpu.state().pc = VirtAddr{kDramBase + 0x1000};
+        cpu.run_cycle(*machine);
+        TEST_ASSERT(cpu.clint_mmio.mcycle > cyc0);
+        TEST_ASSERT(cpu.state().minstret == inst0 + 1);
+    }
+
+    // 2. Smstateen/Ssstateen bit-level gating (JVT, CONTEXT, CSRIND)
+    {
+        auto machine = make_machine((SIMRV_XLEN == 64)
+                                        ? "rv64imafdch_zcmt_sdtrig_ssstateen_smcsrind_sscsrind"
+                                        : "rv32imafdch_zcmt_sdtrig_ssstateen_smcsrind_sscsrind");
+        auto& cpu = machine->primary_hart();
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().virt = false;
+        cpu.state().mstateen[0] = 0;
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(), CsrNumber{csr_addr(Csr::Jvt)},
+                                                     false) == ExceptionCode::IllegalInstruction);
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                     CsrNumber{csr_addr(Csr::Scontext)},
+                                                     false) == ExceptionCode::IllegalInstruction);
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                     CsrNumber{csr_addr(Csr::Siselect)},
+                                                     false) == ExceptionCode::IllegalInstruction);
+
+        cpu.state().mstateen[0] = (uint64_t{1} << 2U) | (uint64_t{1} << 57U) | (uint64_t{1} << 60U);
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(), CsrNumber{csr_addr(Csr::Jvt)},
+                                                     false) == std::nullopt);
+        TEST_ASSERT(TrapController::check_csr_access(
+                        cpu.state(), CsrNumber{csr_addr(Csr::Scontext)}, false) == std::nullopt);
+        TEST_ASSERT(TrapController::check_csr_access(
+                        cpu.state(), CsrNumber{csr_addr(Csr::Siselect)}, false) == std::nullopt);
+
+        cpu.state().virt = true;
+        cpu.state().hstateen[0] = 0;
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(), CsrNumber{csr_addr(Csr::Jvt)},
+                                                     false) == ExceptionCode::VirtualInstruction);
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                     CsrNumber{csr_addr(Csr::Scontext)},
+                                                     false) == ExceptionCode::VirtualInstruction);
+        TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                     CsrNumber{csr_addr(Csr::Siselect)},
+                                                     false) == ExceptionCode::VirtualInstruction);
+    }
+
+    // 3. Smaia / Ssaia core CSRs
+    {
+        auto machine =
+            make_machine((SIMRV_XLEN == 64) ? "rv64gch_smaia_ssaia" : "rv32gch_smaia_ssaia");
+        auto& cpu = machine->primary_hart();
+        TEST_ASSERT(cpu.state().enabled_extensions.has(MultiLetterExtension::Smaia));
+        TEST_ASSERT(cpu.state().enabled_extensions.has(MultiLetterExtension::Ssaia));
+        cpu.state().priv = PrivilegeLevel::Machine;
+        TEST_ASSERT(cpu.csr_file.write(Csr::Mvien, 0x222U).has_value());
+        TEST_ASSERT(cpu.csr_file.read(Csr::Mvien).value() == 0x222U);
+        TEST_ASSERT(cpu.csr_file.write(Csr::Hvien, 0x444U).has_value());
+        TEST_ASSERT(cpu.csr_file.read(Csr::Hvien).value() == 0x444U);
+        cpu.state().mie = (1U << 11U);
+        cpu.state().mip = (1U << 11U);
+        const auto mtopi = cpu.csr_file.read(Csr::Mtopi).value();
+        TEST_ASSERT((mtopi >> 16U) == 11U);
+        TEST_ASSERT((mtopi & 0xFFU) == 1U);
+    }
+
+    // 4. Zicfilp + Zicfiss (CFI)
+    {
+        auto machine =
+            make_machine((SIMRV_XLEN == 64) ? "rv64gc_zicfilp_zicfiss" : "rv32gc_zicfilp_zicfiss");
+        std::array<simrv::xlen::Byte, 65536> backing{};
+        machine->set_ram_for_testing(backing.data(), backing.size());
+        machine->memory().initialize_mmu();
+        auto& cpu = machine->primary_hart();
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().virt = false;
+        // Enable LPE (bit 2) and SSE (bit 3) in menvcfg
+        cpu.state().menvcfg |= (uint64_t{1} << 2U) | (uint64_t{1} << 3U);
+
+        // Zicfilp: JALR x0, 0(x10) sets elp=true; LPAD with matching x7 clears elp
+        const uint64_t kDramBase = simrv::memory::kDramBaseAddress.raw();
+        const uint64_t code_off = 0x1000;
+        const uint64_t target_off = 0x1020;
+        const uint64_t code_base = kDramBase + code_off;
+        const uint64_t target_pc = kDramBase + target_off;
+        cpu.state().regs.write(RegId::A0, target_pc);
+        cpu.state().regs.write(RegId::T2, 0x12345ULL << 12U);
+        write_word_at(backing, code_off, 0x00050067U);                  // jalr x0, 0(x10)
+        write_word_at(backing, target_off, (0x12345U << 12U) | 0x17U);  // lpad 0x12345
+        write_word_at(backing, target_off + 4, 0x00000013U);            // nop
+        cpu.state().pc = VirtAddr{code_base};
+        cpu.run_cycle(*machine);  // jalr -> target_pc, elp = true
+        TEST_ASSERT(cpu.state().pc.raw() == target_pc);
+        TEST_ASSERT(cpu.state().elp);
+        cpu.run_cycle(*machine);  // lpad -> elp = false
+        TEST_ASSERT(!cpu.state().elp);
+
+        // Zicfilp: ELP mismatch raises SoftwareCheck (18) with tval=2
+        cpu.state().elp = true;
+        cpu.state().mtvec = kDramBase + 0x2000;
+        write_word_at(backing, 0x2000, 0x00000013U);
+        cpu.run_cycle(*machine);
+        TEST_ASSERT(cpu.state().priv == PrivilegeLevel::Machine);
+        TEST_ASSERT(cpu.state().mcause ==
+                    static_cast<xlen::TrapCause>(ExceptionCode::SoftwareCheck));
+        TEST_ASSERT(cpu.state().mtval == 2U);
+        TEST_ASSERT(!cpu.state().elp);
+        if constexpr (SIMRV_XLEN == 64) {
+            TEST_ASSERT((cpu.state().mstatus & MstatusBit::Mpelp) != 0);
+        } else {
+            TEST_ASSERT((cpu.state().mstatush & (1U << 9U)) != 0);
+        }
+        TrapController::mret(cpu.state());
+        TEST_ASSERT(cpu.state().elp);
+        cpu.state().elp = false;
+
+        // Zicfiss: SSRDP, SSPUSH x1, SSPOPCHK x1, SSAMOSWAP.W
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        const uint64_t ssp_base = kDramBase + 0x4000;
+        cpu.state().ssp = ssp_base;
+        cpu.state().regs.write(RegId::Ra, 0xCAFEBABEU);
+        const uint64_t ss_off = 0x3000;
+        write_word_at(backing, ss_off + 0, 0xCDC04573U);   // ssrdp x10 (mop.r.28 rd=x10, rs1=x0)
+        write_word_at(backing, ss_off + 4, 0xCE104073U);   // sspush x1 (mop.rr.7 rs2=x1)
+        write_word_at(backing, ss_off + 8, 0xCDC0C073U);   // sspopchk x1 (mop.r.28 rs1=x1)
+        write_word_at(backing, ss_off + 12, 0xCDC0C073U);  // sspopchk x1 (mismatch!)
+        cpu.state().pc = VirtAddr{kDramBase + ss_off};
+        cpu.run_cycle(*machine);  // ssrdp x10
+        TEST_ASSERT(cpu.state().regs.read(RegId::A0) == ssp_base);
+        cpu.run_cycle(*machine);  // sspush x1
+        const uint64_t expected_ssp = (SIMRV_XLEN == 64) ? (ssp_base - 8U) : (ssp_base - 4U);
+        TEST_ASSERT(cpu.state().ssp == expected_ssp);
+        cpu.run_cycle(*machine);  // sspopchk x1 (match)
+        TEST_ASSERT(cpu.state().ssp == ssp_base);
+        cpu.state().regs.write(RegId::Ra, 0xDEADBEEFU);
+        cpu.run_cycle(*machine);  // sspopchk x1 (mismatch -> SoftwareCheck tval=3)
+        TEST_ASSERT(cpu.state().mcause ==
+                    static_cast<xlen::TrapCause>(ExceptionCode::SoftwareCheck));
+        TEST_ASSERT(cpu.state().mtval == 3U);
+
+        // SSAMOSWAP.W
+        cpu.state().priv = PrivilegeLevel::Supervisor;
+        cpu.state().ssp = ssp_base;
+        write_word_at(backing, 0x4000, 0x11223344U);
+        cpu.state().regs.write(RegId::A0, ssp_base);
+        cpu.state().regs.write(RegId::A1, 0x55667788U);
+        // ssamoswap.w x12, x11, (x10): funct5=0x09 -> 0x48b5262f
+        write_word_at(backing, 0x3100, 0x48b5262fU);
+        cpu.state().pc = VirtAddr{kDramBase + 0x3100};
+        cpu.run_cycle(*machine);
+        TEST_ASSERT(static_cast<uint32_t>(cpu.state().regs.read(RegId::A2)) == 0x11223344U);
+        uint32_t swapped = 0;
+        std::memcpy(&swapped, backing.data() + 0x4000, 4);
+        TEST_ASSERT(swapped == 0x55667788U);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -4639,6 +4957,14 @@ int main() {
     std::cout << "[RUN] test_track3b_priv_completeness" << std::endl;
     test_track3b_priv_completeness();
     std::cout << "[PASS] test_track3b_priv_completeness" << std::endl;
+
+    std::cout << "[RUN] test_rva23_profile_completeness_audit" << std::endl;
+    test_rva23_profile_completeness_audit();
+    std::cout << "[PASS] test_rva23_profile_completeness_audit" << std::endl;
+
+    std::cout << "[RUN] test_spec_pass2_smcntrpmf_stateen_aia_cfi" << std::endl;
+    test_spec_pass2_smcntrpmf_stateen_aia_cfi();
+    std::cout << "[PASS] test_spec_pass2_smcntrpmf_stateen_aia_cfi" << std::endl;
 #if SIMRV_XLEN == 64
     std::cout << "[RUN] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
     test_svpbmt_noncacheable_and_io_accesses();

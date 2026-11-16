@@ -767,9 +767,14 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
          effective_extensions.has(isa::MultiLetterExtension::Zcmt))) {
         op_id = simrv::pipeline::decode_compressed_op(static_cast<uint16_t>(ctx.ir_org & 0xFFFFU));
     } else {
-        w_ir_tmp = w_compressed ? simrv::pipeline::decompressInstruction(
-                                      ctx.ir_org, state_.current_xlen() == 64)
-                                : ctx.ir_org;
+        if (w_compressed && state_.zicfiss_enabled_in_current_mode() &&
+            ((ctx.ir_org & 0xFFFFU) == 0x6081U || (ctx.ir_org & 0xFFFFU) == 0x6281U)) {
+            w_ir_tmp = ((ctx.ir_org & 0xFFFFU) == 0x6081U) ? 0xCE104073U : 0xCDC2C073U;
+        } else {
+            w_ir_tmp = w_compressed ? simrv::pipeline::decompressInstruction(
+                                          ctx.ir_org, state_.current_xlen() == 64)
+                                    : ctx.ir_org;
+        }
         op_id = simrv::pipeline::decoder(w_ir_tmp);
     }
     bool is_valid = instruction_enabled(state_.misa, effective_extensions, op_id, w_compressed);

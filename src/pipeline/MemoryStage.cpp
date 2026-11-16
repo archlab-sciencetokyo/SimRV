@@ -63,6 +63,42 @@ void CPU::run_memory_stage(Machine& machine) {
         return;
     }
 
+    if (ctx.op_id == OperationId::SSPUSH && state_.zicfiss_enabled_in_current_mode()) {
+        ctx.mem_wdata = ctx.rrs2;
+        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,
+                                              ctx.funct3);
+        if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
+            const uint64_t step = (state_.regs.xlen == 64) ? 8ULL : 4ULL;
+            state_.ssp -= step;
+        }
+        return;
+    }
+
+    if (ctx.op_id == OperationId::SSPOPCHK && state_.zicfiss_enabled_in_current_mode()) {
+        if (!ctx.memory_load_complete) {
+            ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                 ctx.mem_addr, ctx.funct3);
+            if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
+            ctx.memory_load_complete = true;
+        }
+        bool match = false;
+        if constexpr (simrv::xlen::kIsXLen64) {
+            match = (state_.regs.xlen == 32)
+                        ? (static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrs1))
+                        : (ctx.mem_rdata == ctx.rrs1);
+        } else {
+            match = (ctx.mem_rdata == ctx.rrs1);
+        }
+        if (!match) {
+            ctx.pending_exception = ExceptionCode::SoftwareCheck;
+            ctx.pending_tval = 3;
+            return;
+        }
+        const uint64_t step = (state_.regs.xlen == 64) ? 8ULL : 4ULL;
+        state_.ssp += step;
+        return;
+    }
+
     if (opcode != Opcode::Amo) {
         return;
     }
