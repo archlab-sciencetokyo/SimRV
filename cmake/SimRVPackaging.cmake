@@ -52,14 +52,17 @@ if(TARGET simrv-linux-builder)
     COMPONENT Tools)
   install(
     DIRECTORY scripts/templates/
+    USE_SOURCE_PERMISSIONS
     DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts/templates
     COMPONENT Tools)
   install(
     DIRECTORY scripts/linux/templates/
+    USE_SOURCE_PERMISSIONS
     DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts/linux/templates
     COMPONENT Tools)
   install(
     DIRECTORY configs/buildroot/simrv-buildroot/
+    USE_SOURCE_PERMISSIONS
     DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/configs/buildroot/simrv-buildroot
     COMPONENT Tools)
 endif()

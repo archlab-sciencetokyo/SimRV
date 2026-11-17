@@ -5300,26 +5300,26 @@ inline auto aes64es(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
     return (0x19U << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) | ((rd & 0x1FU) << 7U) |
            0x33U;
 }
-inline auto aes64esm(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
+[[maybe_unused]] inline auto aes64esm(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
     return (0x1BU << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) | ((rd & 0x1FU) << 7U) |
            0x33U;
 }
-inline auto aes64ds(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
+[[maybe_unused]] inline auto aes64ds(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
     return (0x1DU << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) | ((rd & 0x1FU) << 7U) |
            0x33U;
 }
-inline auto aes64dsm(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
+[[maybe_unused]] inline auto aes64dsm(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
     return (0x1FU << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) | ((rd & 0x1FU) << 7U) |
            0x33U;
 }
-inline auto aes64im(uint32_t rd, uint32_t rs1) -> uint32_t {
+[[maybe_unused]] inline auto aes64im(uint32_t rd, uint32_t rs1) -> uint32_t {
     return (0x300U << 20U) | ((rs1 & 0x1FU) << 15U) | (0x1U << 12U) | ((rd & 0x1FU) << 7U) | 0x13U;
 }
-inline auto aes64ks1i(uint32_t rd, uint32_t rs1, uint32_t rnum) -> uint32_t {
+[[maybe_unused]] inline auto aes64ks1i(uint32_t rd, uint32_t rs1, uint32_t rnum) -> uint32_t {
     return (0x31U << 26U) | ((rnum & 0xFU) << 20U) | ((rs1 & 0x1FU) << 15U) | (0x1U << 12U) |
            ((rd & 0x1FU) << 7U) | 0x13U;
 }
-inline auto aes64ks2(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
+[[maybe_unused]] inline auto aes64ks2(uint32_t rd, uint32_t rs1, uint32_t rs2) -> uint32_t {
     return (0x3FU << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) | ((rd & 0x1FU) << 7U) |
            0x33U;
 }
@@ -5342,13 +5342,13 @@ inline auto sha256sum1(uint32_t rd, uint32_t rs1) -> uint32_t {
 inline auto sha512sig0(uint32_t rd, uint32_t rs1) -> uint32_t {
     return (0x106U << 20U) | ((rs1 & 0x1FU) << 15U) | (0x1U << 12U) | ((rd & 0x1FU) << 7U) | 0x13U;
 }
-inline auto sha512sig1(uint32_t rd, uint32_t rs1) -> uint32_t {
+[[maybe_unused]] inline auto sha512sig1(uint32_t rd, uint32_t rs1) -> uint32_t {
     return (0x107U << 20U) | ((rs1 & 0x1FU) << 15U) | (0x1U << 12U) | ((rd & 0x1FU) << 7U) | 0x13U;
 }
-inline auto sha512sum0(uint32_t rd, uint32_t rs1) -> uint32_t {
+[[maybe_unused]] inline auto sha512sum0(uint32_t rd, uint32_t rs1) -> uint32_t {
     return (0x104U << 20U) | ((rs1 & 0x1FU) << 15U) | (0x1U << 12U) | ((rd & 0x1FU) << 7U) | 0x13U;
 }
-inline auto sha512sum1(uint32_t rd, uint32_t rs1) -> uint32_t {
+[[maybe_unused]] inline auto sha512sum1(uint32_t rd, uint32_t rs1) -> uint32_t {
     return (0x105U << 20U) | ((rs1 & 0x1FU) << 15U) | (0x1U << 12U) | ((rd & 0x1FU) << 7U) | 0x13U;
 }
 

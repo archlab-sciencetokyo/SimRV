@@ -343,13 +343,6 @@ auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, st
         });
 }
 
-inline auto iequals(std::string_view a, std::string_view b) -> bool {
-    return std::ranges::equal(a, b, [](char c1, char c2) -> bool {
-        return std::tolower(static_cast<unsigned char>(c1)) ==
-               std::tolower(static_cast<unsigned char>(c2));
-    });
-}
-
 auto parse_isa_spec_cli(std::string_view value) -> std::expected<isa::IsaSpec, std::string> {
     auto spec = isa::parse_isa_spec(value);
     if (!spec) {

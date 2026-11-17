@@ -61,7 +61,7 @@ static auto scaffold_device_plugin_seeded(std::string_view name, std::string_vie
     const std::string size_hex = std::format("0x{:x}", seed.size);
     const std::string c_compatible = escape_c_string(seed.compatible);
 
-    auto generate_c_source = [&name_str, &seed, &base_hex, &size_hex,
+    auto generate_c_source = [&name_str, &base_hex, &size_hex,
                               &c_compatible]() -> std::string {
         std::ostringstream ss;
         ss << "/**\n"

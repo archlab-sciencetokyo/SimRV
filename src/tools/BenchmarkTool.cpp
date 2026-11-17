@@ -3,6 +3,7 @@
  * Copyright (c) 2026 Archlab, Science Tokyo
  */
 
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -11,7 +12,6 @@
 #include <iostream>
 #include <numeric>
 #include <print>
-#include <regex>
 #include <string>
 #include <vector>
 
@@ -48,16 +48,20 @@ void print_help(const char* prog) {
 }
 
 auto extract_json_number(const std::string& key, const std::string& text) -> double {
-    std::regex re(std::format(R"re("{}"\s*:\s*([0-9\.]+))re", key));
-    std::smatch m;
-    if (std::regex_search(text, m, re) && m.size() >= 2) {
-        try {
-            return std::stod(m[1].str());
-        } catch (...) {
-            return 0.0;
-        }
-    }
-    return 0.0;
+    const auto property = std::format("\"{}\"", key);
+    const auto property_pos = text.find(property);
+    if (property_pos == std::string::npos) return 0.0;
+
+    const auto colon = text.find(':', property_pos + property.size());
+    if (colon == std::string::npos) return 0.0;
+    const auto number_pos = text.find_first_not_of(" \t\r\n", colon + 1);
+    if (number_pos == std::string::npos) return 0.0;
+
+    double value{};
+    const auto [end, error] = std::from_chars(text.data() + number_pos,
+                                              text.data() + text.size(), value);
+    if (error != std::errc{} || end == text.data() + number_pos) return 0.0;
+    return value;
 }
 
 auto run_compare_mode(const std::string& file1, const std::string& file2) -> int {

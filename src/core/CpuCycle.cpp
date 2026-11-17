@@ -82,8 +82,10 @@ auto execute_dram_cas(T* mem_ptr, T expected, T desired) -> T {
     return expected;
 }
 
-inline auto execute_dram_cas128(uint64_t* mem_ptr, uint64_t exp_lo, uint64_t exp_hi,
-                                uint64_t des_lo, uint64_t des_hi) -> std::pair<uint64_t, uint64_t> {
+[[maybe_unused]] inline auto execute_dram_cas128(uint64_t* mem_ptr, uint64_t exp_lo,
+                                                uint64_t exp_hi, uint64_t des_lo,
+                                                uint64_t des_hi)
+    -> std::pair<uint64_t, uint64_t> {
     static std::mutex cas128_mutex;
     std::scoped_lock lock(cas128_mutex);
     const uint64_t old_lo = mem_ptr[0];
