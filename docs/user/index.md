@@ -74,7 +74,7 @@ separate `build/rv32-release/simrv` target is primarily retained for strict-widt
 | Goal | Guide |
 | --- | --- |
 | Explore Linux with the Alpine/JWM desktop | [Full-System Linux](linux.md) |
-| Build or boot a serial Buildroot guest | [Buildroot image workflow](linux.md#buildroot-profile) |
+| Build or boot a serial Buildroot guest | [Buildroot image workflow](linux.md#generic-buildroot-profile) |
 | Build and validate SimRV from source | [Install and build](install.md#build-from-source) and [release validation workflow](ga-workflow.md) |
 | Create a CPU preset or custom SoC device | [Extending CPU presets and MMIO platforms](../hardware/extending-platforms.md) |
 | Compare architectural or cycle-level behavior | [RTL parity extensions](../hardware/rtl_parity.md) |
