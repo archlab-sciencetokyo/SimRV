@@ -1,0 +1,15 @@
+.TH SIMRV-LINUX-BUILDER-POST-BUILD 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-linux-builder-post-build \- prepare a Buildroot target for SimRV
+.SH SYNOPSIS
+.B simrv-linux-builder-post-build
+.RI [ options ]
+.SH DESCRIPTION
+.B simrv-linux-builder-post-build
+is a helper invoked by
+.BR simrv-linux-builder (1)
+during Buildroot image generation. It applies the SimRV image settings and
+finalizes the target root filesystem. Users normally invoke the Linux Builder
+instead of running this helper directly.
+.SH SEE ALSO
+.BR simrv-linux-builder (1)

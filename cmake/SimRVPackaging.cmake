@@ -47,6 +47,10 @@ if(TARGET simrv-linux-builder)
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT Tools)
   install(
+    FILES docs/man/simrv-linux-builder.1 docs/man/simrv-linux-builder-post-build.1
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+    COMPONENT Tools)
+  install(
     FILES scripts/linux-versions.conf
     DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts
     COMPONENT Tools)

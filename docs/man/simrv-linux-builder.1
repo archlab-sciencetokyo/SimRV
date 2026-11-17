@@ -1,0 +1,43 @@
+.TH SIMRV-LINUX-BUILDER 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-linux-builder \- build RISC-V Linux images for SimRV
+.SH SYNOPSIS
+.B simrv-linux-builder
+.RI [ options ]
+.SH DESCRIPTION
+.B simrv-linux-builder
+downloads and builds generic RISC-V Linux images using supported root filesystem
+backends such as Buildroot and Alpine. It can select upstream versions in an
+interactive terminal interface, use saved version pins, and accept custom source
+locations and root filesystem overlays. The generated images are intended for
+booting in SimRV.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.TP
+.B \-\-tui
+Open the interactive configuration and version picker.
+.TP
+.B \-\-arch \fIrv32|rv64\fR
+Select the target architecture.
+.TP
+.B \-\-rootfs \fIalpine|buildroot\fR
+Select the root filesystem backend.
+.TP
+.B \-\-profile \fINAME\fR
+Select a supported image profile.
+.TP
+.B \-\-linux-version \fIVERSION\fR
+Choose the Linux kernel version.
+.TP
+.B \-\-opensbi-version \fIVERSION\fR
+Choose the OpenSBI version.
+.TP
+.B \-\-check-updates
+Show newer versions available in the configured source catalog.
+.TP
+.B \-\-rootfs-overlay \fIDIRECTORY\fR
+Add files and symbolic links from a directory to the guest root filesystem.
+.SH SEE ALSO
+.BR simrv (1)
