@@ -530,6 +530,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_FLAGS=-ffat-lto-objects \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_ENABLE_LINUX_TOOLS=ON \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
           cmake --build build/rv64-release --target simrv-package-binaries --parallel "$(nproc)"
