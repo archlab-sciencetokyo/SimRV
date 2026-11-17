@@ -72,5 +72,6 @@ runs:
         git checkout --detach "${{ inputs.vector-tests-rev }}"
         git submodule update --init --recursive
         mkdir -p bin
-        (cd generator && CGO_ENABLED=0 go build -o ../bin/riscv-vector-tests-generator .)
+        # The pinned generator's testfloat3 package is implemented with CGO.
+        (cd generator && CGO_ENABLED=1 go build -o ../bin/riscv-vector-tests-generator .)
         chmod +x bin/riscv-vector-tests-generator
