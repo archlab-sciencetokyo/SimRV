@@ -247,8 +247,9 @@ jobs:
 
       - name: Build ${{ matrix.sanitizer }}
         run: |
-          if [[ "${{ matrix.build_jobs }}" -gt 0 ]]; then
-            cmake --build --preset ${{ matrix.preset }} --parallel "${{ matrix.build_jobs }}"
+          build_jobs=${{ matrix.build_jobs }}
+          if (( build_jobs > 0 )); then
+            cmake --build --preset ${{ matrix.preset }} --parallel "$build_jobs"
           else
             cmake --build --preset ${{ matrix.preset }}
           fi
