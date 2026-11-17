@@ -213,6 +213,24 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION
       "Clang 22 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
 endif()
 
+# GCC 16's libstdc++ <regex> implementation triggers false-positive
+# -Wmaybe-uninitialized diagnostics in its internal automaton under sanitizers.
+# Keep the warning strict elsewhere and disable it only in translation units
+# that instantiate std::regex.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  set_source_files_properties(
+    src/tools/CheckLinuxArtifacts.cpp
+    src/tools/LinuxBuilder.cpp
+    src/tools/ReleaseCheck.cpp
+    src/tools/ReleaseEvidence.cpp
+    src/tools/VectorRunner.cpp
+    src/util/BenchmarkRunner.cpp
+    src/rtl/ParityRegistry.cpp
+    tests/ReleaseTests.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-maybe-uninitialized)
+endif()
+
 # XLEN option (32 or 64) – compile-time selection
 set(SIMRV_XLEN
     "64"
