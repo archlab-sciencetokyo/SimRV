@@ -508,7 +508,7 @@ jobs:
             python3 python3-pip dpkg-dev xz-utils lintian ccache
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get -o Acquire::Retries=3 update
-          apt-get -o Acquire::Retries=3 install -y --no-install-recommends gcc-15 g++-15
+          apt-get -o Acquire::Retries=8 install -y --no-install-recommends gcc-15 g++-15
           python3 -m pip install cmake==4.3.0 ninja || \
             python3 -m pip install --break-system-packages cmake==4.3.0 ninja
           echo "CC=gcc-15" >> "$GITHUB_ENV"

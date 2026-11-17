@@ -211,12 +211,14 @@ jobs:
           - sanitizer: asan-ubsan
             preset: rv64-asan
             build_dir: /tmp/simrv-build/rv64-asan
+            build_jobs: 2
             cmake_extra: -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
             ctest_label: regress
             needs_setarch: false
           - sanitizer: tsan
             preset: rv64-tsan
             build_dir: /tmp/simrv-build/rv64-tsan
+            build_jobs: 0
             cmake_extra: ''
             ctest_label: thread
             needs_setarch: true
@@ -244,7 +246,12 @@ jobs:
           ${{ matrix.cmake_extra }}
 
       - name: Build ${{ matrix.sanitizer }}
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          if [[ "${{ matrix.build_jobs }}" -gt 0 ]]; then
+            cmake --build --preset ${{ matrix.preset }} --parallel "${{ matrix.build_jobs }}"
+          else
+            cmake --build --preset ${{ matrix.preset }}
+          fi
 
       - name: Run ${{ matrix.sanitizer }} suite
         env:
