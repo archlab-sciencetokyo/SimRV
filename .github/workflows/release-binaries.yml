@@ -562,6 +562,7 @@ jobs:
           mkdir -p packages
           cpack --config build/rv64-release/CPackConfig.cmake \
             -D CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS=libc6 -G DEB -B packages
+          set -x
           mapfile -t debs < <(find packages -maxdepth 1 -name '*.deb' -type f | sort)
           test "${#debs[@]}" -eq 4
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done

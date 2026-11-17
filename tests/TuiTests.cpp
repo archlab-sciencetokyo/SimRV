@@ -1082,10 +1082,15 @@ void test_classroom_cli_defaults() {
 
 void test_load_modal_path_completion() {
     namespace fs = std::filesystem;
-    const auto root = fs::temp_directory_path() /
-                      ("simrv-path-completion-" +
-                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root / "subdir");
+    const auto requested_root =
+        fs::temp_directory_path() /
+        ("simrv-path-completion-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(requested_root / "subdir");
+    // macOS exposes temporary directories through symlinked paths such as
+    // /var -> /private/var. Keep comparisons on the same canonical path that
+    // filesystem::relative uses below.
+    const auto root = fs::canonical(requested_root);
     std::ofstream(root / "program.elf").put('x');
     std::ofstream(root / "subdir" / "nested.elf").put('x');
 
