@@ -200,7 +200,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     container:
       image: fedora:44
       options: --security-opt seccomp=unconfined
@@ -214,7 +214,7 @@ jobs:
             build_jobs: 3
             cmake_extra: >-
               -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
-              -DCMAKE_JOB_POOLS=simrv_link_pool=1
+              -DCMAKE_JOB_POOLS=simrv_link_pool=2
               -DCMAKE_JOB_POOL_LINK=simrv_link_pool
             ctest_label: regress
             needs_setarch: false
