@@ -352,7 +352,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
         const char class_byte = ident[4];
         in.seekg(0, std::ios::beg);
         auto load_segment = [&](const auto& phdr) {
-            if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0 ||
+            if (phdr.p_type != kLoadSegment || phdr.p_memsz == 0 ||
                 !std::in_range<std::streamoff>(phdr.p_offset)) {
                 return;
             }
@@ -369,10 +369,15 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 return;
             }
             const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-            in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-            if (in.read(reinterpret_cast<char*>(ram + dest_offset),
-                        static_cast<std::streamsize>(
-                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            bool segment_read = copy_bytes == 0;
+            if (copy_bytes != 0) {
+                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+                segment_read = static_cast<bool>(in.read(
+                    reinterpret_cast<char*>(ram + dest_offset),
+                    static_cast<std::streamsize>(
+                        copy_bytes)));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            }
+            if (segment_read) {
                 loaded_segment = true;
                 if (machine != nullptr) {
                     const bool is_exec = (phdr.p_flags & 0x1) != 0;

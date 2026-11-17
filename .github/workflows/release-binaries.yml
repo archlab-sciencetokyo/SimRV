@@ -334,9 +334,12 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
             -DSIMRV_ENABLE_LTO=OFF \
+            -DSIMRV_ENABLE_LINUX_TOOLS=ON \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
           cmake --build build/rv64-release --target simrv-package-binaries --parallel "$(nproc)"
+          cmake --build build/rv64-release --target simrv-linux-builder --parallel "$(nproc)"
+          build/rv64-release/simrv-linux-builder --help | grep -q -- '--rootfs-overlay'
           if readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'; then
             echo "RHEL 10 runtime unexpectedly depends on a dynamic GCC C++ runtime" >&2
             readelf -d build/rv64-release/simrv | grep -E 'NEEDED.*(libstdc\+\+|libgcc_s)' >&2
@@ -364,10 +367,30 @@ jobs:
           test "${#rpms[@]}" -eq 4
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
           runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-[0-9]*.rpm' -type f)"
+          tools_rpm="$(find packages -maxdepth 1 -name 'simrv-tools-[0-9]*.rpm' -type f)"
           development_rpm="$(find packages -maxdepth 1 -name 'simrv-devel-[0-9]*.rpm' -type f)"
           rpm -qpl "$runtime_rpm" > packages/runtime-rpm-contents.txt
+          rpm -qpl "$tools_rpm" > packages/tools-rpm-contents.txt
           rpm -qpl "$development_rpm" > packages/development-rpm-contents.txt
           grep -q '/usr/bin/simrv$' packages/runtime-rpm-contents.txt
+          grep -q '/usr/bin/simrv-config-wizard$' packages/tools-rpm-contents.txt
+          grep -q '/usr/bin/simrv-linux-builder$' packages/tools-rpm-contents.txt
+          grep -q '/usr/bin/simrv-linux-builder-post-build$' packages/tools-rpm-contents.txt
+          grep -q '/usr/share/SimRV/LinuxBuilder/scripts/linux-versions.conf$' packages/tools-rpm-contents.txt
+          grep -q '/usr/share/SimRV/LinuxBuilder/scripts/templates/virt-rv64.dts$' packages/tools-rpm-contents.txt
+          grep -q '/usr/share/SimRV/LinuxBuilder/configs/buildroot/simrv-buildroot/rv64_defconfig$' packages/tools-rpm-contents.txt
+          if grep -q '/usr/bin/simrv-config-wizard$' packages/runtime-rpm-contents.txt; then
+            echo "Configuration wizard unexpectedly belongs to the runtime RPM" >&2
+            exit 1
+          fi
+          if grep -q '/usr/bin/simrv-linux-builder' packages/runtime-rpm-contents.txt; then
+            echo "Linux builder unexpectedly belongs to the runtime RPM" >&2
+            exit 1
+          fi
+          if grep -Eq '/simrv/plugins/|/libsimrv-.*\.so$' packages/runtime-rpm-contents.txt; then
+            echo "Runtime RPM unexpectedly contains plugin libraries" >&2
+            exit 1
+          fi
           grep -q '/include/simrv/core/MachineConfig.hpp$' packages/development-rpm-contents.txt
           grep -q '/libsimrv-runtime.a$' packages/development-rpm-contents.txt
           grep -q '/cmake/SimRV/SimRVConfig.cmake$' packages/development-rpm-contents.txt
@@ -540,10 +563,30 @@ jobs:
           test "${#debs[@]}" -eq 4
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
           runtime_deb="$(find packages -maxdepth 1 -name 'simrv_[0-9]*.deb' -type f)"
+          tools_deb="$(find packages -maxdepth 1 -name 'simrv-tools_[0-9]*.deb' -type f)"
           development_deb="$(find packages -maxdepth 1 -name 'simrv-devel_[0-9]*.deb' -type f)"
           dpkg-deb --contents "$runtime_deb" > packages/runtime-deb-contents.txt
+          dpkg-deb --contents "$tools_deb" > packages/tools-deb-contents.txt
           dpkg-deb --contents "$development_deb" > packages/development-deb-contents.txt
           grep -q '/usr/bin/simrv$' packages/runtime-deb-contents.txt
+          grep -q '/usr/bin/simrv-config-wizard$' packages/tools-deb-contents.txt
+          grep -q '/usr/bin/simrv-linux-builder$' packages/tools-deb-contents.txt
+          grep -q '/usr/bin/simrv-linux-builder-post-build$' packages/tools-deb-contents.txt
+          grep -q '/usr/share/SimRV/LinuxBuilder/scripts/linux-versions.conf$' packages/tools-deb-contents.txt
+          grep -q '/usr/share/SimRV/LinuxBuilder/scripts/templates/virt-rv64.dts$' packages/tools-deb-contents.txt
+          grep -q '/usr/share/SimRV/LinuxBuilder/configs/buildroot/simrv-buildroot/rv64_defconfig$' packages/tools-deb-contents.txt
+          if grep -q '/usr/bin/simrv-config-wizard$' packages/runtime-deb-contents.txt; then
+            echo "Configuration wizard unexpectedly belongs to the runtime DEB" >&2
+            exit 1
+          fi
+          if grep -q '/usr/bin/simrv-linux-builder' packages/runtime-deb-contents.txt; then
+            echo "Linux builder unexpectedly belongs to the runtime DEB" >&2
+            exit 1
+          fi
+          if grep -Eq '/simrv/plugins/|/libsimrv-.*\.so$' packages/runtime-deb-contents.txt; then
+            echo "Runtime DEB unexpectedly contains plugin libraries" >&2
+            exit 1
+          fi
           grep -q '/include/simrv/core/MachineConfig.hpp$' packages/development-deb-contents.txt
           grep -q '/libsimrv-runtime.a$' packages/development-deb-contents.txt
           grep -q '/cmake/SimRV/SimRVConfig.cmake$' packages/development-deb-contents.txt
@@ -688,7 +731,7 @@ jobs:
           test -f rpm-packages/repodata/repomd.xml
           grep -q 'type="primary"' rpm-packages/repodata/repomd.xml
           (cd deb-packages && dpkg-scanpackages . /dev/null > Packages)
-          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 4
+          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 5
           grep -q '^Package: simrv-devel$' deb-packages/Packages
           grep -q '^Filename: \./simrv' deb-packages/Packages
           grep -q '^Depends: simrv ' deb-packages/Packages

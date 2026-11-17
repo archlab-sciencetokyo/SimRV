@@ -16,8 +16,8 @@ simrv -m examples/isa/bin/demo.elf
 simrv --ca --pipeline 5stage -m examples/isa/bin/demo.elf
 
 # Boot Linux interactively with graphical/serial console
-simrv --os -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
-      -D linux-images/rv64/alpine-gui/rootfs.img
+simrv --os -m images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      -D images/rv64/alpine-gui/rootfs.img
 ```
 
 ---

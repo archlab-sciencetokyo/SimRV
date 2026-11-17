@@ -115,7 +115,7 @@ struct BranchPredictorConfig {
     /// redirect resolution, matching predictors whose output changes on the following edge.
     bool registered_btb_read = false;
     /// Initial 2-bit saturating counter value loaded into every BHT entry on reset.
-    /// 0 = Strongly Not Taken (matches CFU-Proving-Ground / RVProc RTL `initial btb[i]=0`).
+    /// 0 = Strongly Not Taken (matches a legacy CFU RTL reset state `initial btb[i]=0`).
     /// 1 = Weakly Not Taken (default for all other profiles).
     uint8_t bht_initial_state = 1;
 };

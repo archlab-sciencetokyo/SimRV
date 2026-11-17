@@ -67,7 +67,7 @@ auto CfuUnit::load_plugin(std::string_view path) -> bool {
 
     auto init_fn = reinterpret_cast<SimRvCfuPluginInitFn>(dlsym(handle, "simrv_cfu_init"));
     if (init_fn == nullptr) {
-        // Fallback: check for native CFU-Proving-Ground / CFU-Playground cfu_op symbol
+        // Fallback: check for native legacy CFU plugin cfu_op symbol
         auto cfu_op_fn = reinterpret_cast<RawCfuOpFn>(dlsym(handle, "cfu_op"));
         if (cfu_op_fn == nullptr) {
             cfu_op_fn = reinterpret_cast<RawCfuOpFn>(dlsym(handle, "cfu_execute"));
@@ -77,7 +77,7 @@ auto CfuUnit::load_plugin(std::string_view path) -> bool {
             raw_cfu_op_ = cfu_op_fn;
             raw_cfu_reset_ = reinterpret_cast<RawCfuResetFn>(dlsym(handle, "cfu_reset"));
             plugin_path_ = std::move(path_str);
-            simrv::log::info("Loaded CFU-Proving-Ground compatible plugin from '{}'", plugin_path_);
+            simrv::log::info("Loaded legacy CFU plugin from '{}'", plugin_path_);
             return true;
         }
 
@@ -153,7 +153,7 @@ auto CfuUnit::execute(uint32_t funct7, uint32_t funct3, simrv::xlen::Register sr
         }
     }
 
-    // Default built-in CFU behavior matching CFU-Proving-Ground's cfu.v:
+    // Default built-in CFU behavior matching the legacy CFU interface:
     // assign rslt_o = (en_i) ? src1_i | src2_i : 0;
     last_latency_ = default_latency_;
     return src1 | src2;
@@ -186,7 +186,7 @@ auto CfuUnit::query_latency(uint32_t funct7, uint32_t funct3) const -> simrv::xl
 
 auto CfuUnit::plugin_name() const noexcept -> std::string_view {
     if (raw_cfu_op_ != nullptr) {
-        return "cfu-provingground-compat";
+        return "legacy-cfu-compat";
     }
     if (plugin_ != nullptr && plugin_->api_version >= SIMRV_CFU_PLUGIN_API_VERSION &&
         plugin_->name != nullptr) {

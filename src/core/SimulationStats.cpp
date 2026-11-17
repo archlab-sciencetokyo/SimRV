@@ -10,15 +10,14 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/Bus.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/Bus.hpp"
 
 namespace simrv::core {
 
 auto take_stats_snapshot(const Machine& machine) -> MachineStatsSnapshot {
     MachineStatsSnapshot snapshot{};
-    snapshot.total_retired_instructions = machine.retired_instruction_count();
 
     const size_t num_harts = machine.num_harts();
     snapshot.harts.reserve(num_harts);
@@ -28,6 +27,7 @@ auto take_stats_snapshot(const Machine& machine) -> MachineStatsSnapshot {
         HartStatsSnapshot hs{};
         hs.hart_id = simrv::xlen::HartId{static_cast<uint32_t>(h)};
         hs.retired_instructions = cpu.e_icount;
+        snapshot.total_retired_instructions += hs.retired_instructions;
         hs.cycles = cpu.clint_mmio.mcycle;
         if (hs.cycles > 0) {
             hs.ipc = static_cast<double>(hs.retired_instructions) / static_cast<double>(hs.cycles);

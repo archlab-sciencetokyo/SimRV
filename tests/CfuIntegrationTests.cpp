@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <string_view>
@@ -39,35 +40,32 @@ using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::CpuModelPreset;
 using simrv::pipeline::PipelineType;
 
-auto load_cfu_provingground_profile() -> simrv::pipeline::CpuModelConfig {
-    const auto path = simrv::core::resolve_cpu_model_path("cfu-provingground");
-    TEST_CHECK(path.has_value());
+auto load_test_cfu_profile() -> simrv::pipeline::CpuModelConfig {
     simrv::pipeline::CpuModelConfig profile{};
-    TEST_CHECK(simrv::core::parse_cpu_config(*path, profile));
+    TEST_CHECK(simrv::core::parse_cpu_config(
+        std::filesystem::path(TEST_CFU_CONFIG_PATH), profile));
     return profile;
 }
 
-void test_cfu_provingground_profile() {
-    std::cout << "[Test] cfu-provingground config from configs/models/cfu-provingground.cfg...\n";
+void test_generic_cfu_profile() {
+    std::cout << "[Test] generic custom CFU test config...\n";
 
-    const auto profile = load_cfu_provingground_profile();
-    TEST_CHECK(profile.name == "cfu-provingground");
+    const auto profile = load_test_cfu_profile();
+    TEST_CHECK(profile.name == "test-cfu");
     TEST_CHECK(profile.supported_xlen == 32);
 
-    const auto path = simrv::core::resolve_cpu_model_path("cfu-provingground");
-    TEST_CHECK(path.has_value());
-
     simrv::pipeline::CpuModelConfig loaded{};
-    TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
+    TEST_CHECK(simrv::core::parse_cpu_config(
+        std::filesystem::path(TEST_CFU_CONFIG_PATH), loaded));
     TEST_CHECK(profile.validate().has_value());
 
     // 5-stage in-order core
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding);
     TEST_CHECK(profile.pipeline.mul_latency == 2);
-    TEST_CHECK(profile.pipeline.div_latency == 35);
+    TEST_CHECK(profile.pipeline.div_latency == 34);
     TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 3);
-    TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 2);
+    TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 1);
 
     // Bimodal branch predictor (2048 BTB entries, 2048 BHT entries, no RAS)
     TEST_CHECK(profile.pipeline.branch_predictor.type == BranchPredictorType::Bimodal);
@@ -211,12 +209,12 @@ void test_cfu_abi_layout() {
 }
 
 void test_cfu_provingground_raw_plugin() {
-    std::cout << "[Test] Raw CFU-Proving-Ground / CFU-Playground plugin compatibility...\n";
+    std::cout << "[Test] Legacy raw CFU plugin compatibility...\n";
 #ifdef TEST_RAW_CFU_PLUGIN_PATH
     CfuUnit cfu;
     TEST_CHECK(cfu.load_plugin(TEST_RAW_CFU_PLUGIN_PATH));
     TEST_CHECK(cfu.has_plugin());
-    TEST_CHECK(cfu.plugin_name() == "cfu-provingground-compat");
+    TEST_CHECK(cfu.plugin_name() == "legacy-cfu-compat");
 
     // funct3 = 0, funct7 = 4, rs1 = 20, rs2 = 10 -> (20 + 10) ^ 4 = 30 ^ 4 = 26
     const auto res0 = cfu.execute(4, 0, 20, 10);
@@ -256,7 +254,7 @@ void test_cfu_pipeline_hazard_timing() {
     };
 
     // 1. Back-to-back dependent instruction:
-    // In CFU-ProvingGround (RVProc), CFU output is registered at EX/MEM.
+    // In a pipelined CFU configuration, output is registered at EX/MEM.
     // Back-to-back dependency causes a 1-cycle Decode hazard stall.
     if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
@@ -268,7 +266,7 @@ void test_cfu_pipeline_hazard_timing() {
         cpu.machine_ = &machine;
         cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-        const auto profile = load_cfu_provingground_profile();
+        const auto profile = load_test_cfu_profile();
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
@@ -321,7 +319,7 @@ void test_cfu_pipeline_hazard_timing() {
         cpu.machine_ = &machine;
         cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-        const auto profile = load_cfu_provingground_profile();
+        const auto profile = load_test_cfu_profile();
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
@@ -350,22 +348,22 @@ void test_cfu_pipeline_hazard_timing() {
 void test_bram_prewarm_and_cli() {
     std::cout << "[Test] BRAM pre-warm CLI options and cache population...\n";
 
-    // 1. CLI default for cfu-provingground: bram_prewarm is true
+    // 1. Generic balanced default leaves BRAM pre-warming disabled
     {
         std::array<char*, 4> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
                                      const_cast<char*>("--cpu-preset"),
-                                     const_cast<char*>("cfu-provingground")};
+                                     const_cast<char*>("balanced")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
         const auto cfg = res->options.to_machine_config();
-        TEST_CHECK(cfg.bram_prewarm);
+        TEST_CHECK(!cfg.bram_prewarm);
     }
 
     // Explicit predictor overrides survive machine initialization/profile application.
     {
         std::array<char*, 6> argv = {
             const_cast<char*>("SimRV"),        const_cast<char*>("--tui"),
-            const_cast<char*>("--cpu-preset"), const_cast<char*>("cfu-provingground"),
+            const_cast<char*>("--cpu-preset"), const_cast<char*>("balanced"),
             const_cast<char*>("--bpred"),      const_cast<char*>("none")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
@@ -377,7 +375,7 @@ void test_bram_prewarm_and_cli() {
     {
         std::array<char*, 5> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
                                      const_cast<char*>("--cpu-preset"),
-                                     const_cast<char*>("cfu-provingground"),
+                                     const_cast<char*>("balanced"),
                                      const_cast<char*>("--no-bram-prewarm")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
@@ -407,7 +405,7 @@ void test_bram_prewarm_and_cli() {
         cpu.machine_ = &machine;
         cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-        const auto profile = load_cfu_provingground_profile();
+        const auto profile = load_test_cfu_profile();
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
@@ -454,7 +452,10 @@ void test_bram_prewarm_and_cli() {
         machine.prewarm_bram_caches();
         const simrv::xlen::PhysAddr base{machine.memory_geometry().dram_base};
         TEST_CHECK(cpu.icache.line_state(base) == simrv::memory::MesiState::Shared);
-        TEST_CHECK(cpu.dcache.line_state(base) == simrv::memory::MesiState::Shared);
+        const auto expected_data_state = machine.num_harts() == 1
+                                             ? simrv::memory::MesiState::Exclusive
+                                             : simrv::memory::MesiState::Shared;
+        TEST_CHECK(cpu.dcache.line_state(base) == expected_data_state);
     }
 
     // Rounding a segment's end must not wrap and skip valid high-address lines.
@@ -478,15 +479,15 @@ void test_bram_prewarm_and_cli() {
 }  // namespace
 
 auto main() -> int {
-    std::cout << "=== Running CFU-ProvingGround Tests ===\n";
+    std::cout << "=== Running generic CFU tests ===\n";
     test_cfu_abi_layout();
-    test_cfu_provingground_profile();
+    test_generic_cfu_profile();
     test_cfu_instruction_decode_and_traits();
     test_cfu_unit_default_execution();
     test_cfu_unit_plugin_loading();
     test_cfu_provingground_raw_plugin();
     test_cfu_pipeline_hazard_timing();
     test_bram_prewarm_and_cli();
-    std::cout << "=== All CFU-ProvingGround Tests Passed Successfully ===\n";
+    std::cout << "=== All generic CFU tests passed ===\n";
     return 0;
 }

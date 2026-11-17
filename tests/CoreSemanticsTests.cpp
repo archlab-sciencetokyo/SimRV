@@ -5830,7 +5830,8 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_s512_sig0 = env.run_32(ir_s512_sig0);
         if (dec_s512_sig0) {
             expect(ok_s512_sig0, "sha512sig0 executed on RV64");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x3012976480000000ULL,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) ==
+                       static_cast<simrv::xlen::Register>(0x3012976480000000ULL),
                    "sha512sig0 computes exact FIPS 180-4 64-bit sigma0");
         } else {
             expect(c.state().mcause ==
@@ -5844,7 +5845,8 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_s512_sig1 = env.run_32(ir_s512_sig1);
         if (dec_s512_sig1) {
             expect(ok_s512_sig1, "sha512sig1 executed on RV64");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x0a9699a24c700003ULL,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) ==
+                       static_cast<simrv::xlen::Register>(0x0a9699a24c700003ULL),
                    "sha512sig1 computes exact FIPS 180-4 64-bit sigma1");
         } else {
             expect(c.state().mcause ==
@@ -5860,7 +5862,8 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_s512_sum0 = env.run_32(ir_s512_sum0);
         if (dec_s512_sum0) {
             expect(ok_s512_sum0, "sha512sum0 executed on RV64");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x08c4db56aac80c2aULL,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) ==
+                       static_cast<simrv::xlen::Register>(0x08c4db56aac80c2aULL),
                    "sha512sum0 computes exact FIPS 180-4 64-bit Sum0");
         } else {
             expect(c.state().mcause ==
@@ -5876,7 +5879,8 @@ void test_wave2_tier1_scalar_crypto() {
         const bool ok_s512_sum1 = env.run_32(ir_s512_sum1);
         if (dec_s512_sum1) {
             expect(ok_s512_sum1, "sha512sum1 executed on RV64");
-            expect(c.state().regs.read(simrv::xlen::RegId::A0) == 0x9427e33bb5c9dbcaULL,
+            expect(c.state().regs.read(simrv::xlen::RegId::A0) ==
+                       static_cast<simrv::xlen::Register>(0x9427e33bb5c9dbcaULL),
                    "sha512sum1 computes exact FIPS 180-4 64-bit Sum1");
         } else {
             expect(c.state().mcause ==

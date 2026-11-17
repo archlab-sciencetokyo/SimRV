@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        simrv::util::RuntimeOptions opts;
+        simrv::util::BenchmarkOptions opts;
         opts.fn_memimg = resolved;
         opts.fn_benchmark_elf = resolved;
         opts.benchmark_runs = runs;

@@ -81,14 +81,7 @@ void CPU::run_memory_stage(Machine& machine) {
             if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
             ctx.memory_load_complete = true;
         }
-        bool match = false;
-        if constexpr (simrv::xlen::kIsXLen64) {
-            match = (state_.regs.xlen == 32)
-                        ? (static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrs1))
-                        : (ctx.mem_rdata == ctx.rrs1);
-        } else {
-            match = (ctx.mem_rdata == ctx.rrs1);
-        }
+        const bool match = ctx.mem_rdata == ctx.rrs1;
         if (!match) {
             ctx.pending_exception = ExceptionCode::SoftwareCheck;
             ctx.pending_tval = 3;

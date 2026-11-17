@@ -1,6 +1,6 @@
 /**
  * @file TestDevicePlugin.cpp
- * @brief Dynamic external MMIO device plugin for SimRV testing and rvcomp-mmc simulation.
+ * @brief Dynamic external MMIO device plugin for SimRV testing and example-mmc simulation.
  */
 #include <cstdint>
 #include <cstdio>
@@ -165,8 +165,8 @@ void mmc_destroy(void* raw_ctx) {
 
 const SimRvExternalDevice kDevice = {
     .api_version = SIMRV_EXTERNAL_DEVICE_API_VERSION,
-    .name = "rvcomp-mmc",
-    .compatible = "isct,rvcomp-mmc",
+    .name = "example-mmc",
+    .compatible = "example,mmc",
     .default_base = 0xa0000000ULL,
     .default_size = 0x2000ULL,
     .init = mmc_init,

@@ -24,7 +24,7 @@ extensions = "zkn,zkr,zkt"
 enabled = true
 opcode = "custom-0"
 default_latency = 1
-rtl_module = "rvproc_cfu"
+rtl_module = "my_cfu"
 interface = "rs1-rs2-rd"
 ```
 
@@ -91,7 +91,7 @@ clang -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
 Run SimRV with the compiled accelerator plugin:
 
 ```bash
-simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=cfu-provingground target_program.elf
+simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=balanced target_program.elf
 ```
 
 ### Dual Extension Architecture: CFU vs. External Device Plugins

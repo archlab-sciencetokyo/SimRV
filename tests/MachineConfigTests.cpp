@@ -25,12 +25,14 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/ShellCompletion.hpp"
 #include "simrv/util/SoCManifest.hpp"
 
 namespace {
@@ -670,15 +672,15 @@ auto main() -> int {
                "ambiguous --trace-pc is rejected directing to --trace-pc-range");
     }
     {
-        std::array<std::string, 5> config_str = {"SimRV", "--config", "rvcomp", "-m", "guest.bin"};
+        std::array<std::string, 5> config_str = {"SimRV", "--config", "virt-mmio", "-m", "guest.bin"};
         std::array<char*, 5> config_args{};
         for (size_t i = 0; i < config_str.size(); ++i) config_args[i] = config_str[i].data();
         const auto parsed = simrv::util::parse_command_line(config_args);
-        expect(parsed.has_value() && parsed->options.config_target == "rvcomp",
+        expect(parsed.has_value() && parsed->options.config_target == "virt-mmio",
                "canonical --config option selects platform preset");
     }
     {
-        std::array<std::string, 5> retired_soc_str = {"SimRV", "--soc", "rvcomp", "-m",
+        std::array<std::string, 5> retired_soc_str = {"SimRV", "--soc", "unknown", "-m",
                                                       "guest.bin"};
         std::array<char*, 5> retired_soc_args{};
         for (size_t i = 0; i < retired_soc_str.size(); ++i)
@@ -700,7 +702,7 @@ auto main() -> int {
                "retired --cpu-config option is rejected");
     }
     {
-        std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "rvcomp", "-m"};
+        std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "unknown", "-m"};
         std::array<char*, 4> legacy_platform_args{};
         for (size_t i = 0; i < legacy_platform_str.size(); ++i)
             legacy_platform_args[i] = legacy_platform_str[i].data();
@@ -1299,39 +1301,20 @@ auto main() -> int {
             return simrv::util::parse_command_line(args);
         };
 
-        auto validate_cfg = parse_cli({"SimRV", "--validate-config", "configs/models/rvcomp.cfg"});
-        expect(validate_cfg.has_value(), "CLI accepts --validate-config");
-        if (validate_cfg) {
-            expect(validate_cfg->action == simrv::util::CliAction::ValidateCpuModel,
-                   "--validate-config sets CliAction::ValidateCpuModel");
-            expect(validate_cfg->options.dump_cpu_model_preset == "configs/models/rvcomp.cfg",
-                   "--validate-config sets target configuration file");
-        }
+        expect(!parse_cli({"SimRV", "--validate-config", "configs/models/ibex.cfg"}).has_value(),
+               "configuration validation is delegated to simrv-config-wizard");
 
-        auto validate_cpu_cfg =
-            parse_cli({"SimRV", "--validate-cpu-config", "configs/models/rvcomp.cfg"});
-        expect(validate_cpu_cfg.has_value(), "CLI accepts --validate-cpu-config");
-
-        expect(!parse_cli({"SimRV", "--check-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+        expect(!parse_cli({"SimRV", "--check-cpu-model", "configs/models/ibex.cfg"}).has_value(),
                "CLI rejects retired alias --check-cpu-model");
-        expect(!parse_cli({"SimRV", "--verify-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+        expect(!parse_cli({"SimRV", "--verify-cpu-model", "configs/models/ibex.cfg"}).has_value(),
                "CLI rejects retired alias --verify-cpu-model");
         expect(!parse_cli({"SimRV", "--export-soc-manifest", "virt-pcie"}).has_value(),
                "CLI rejects retired alias --export-soc-manifest");
         expect(!parse_cli({"SimRV", "--export-cpu-model", "tiny"}).has_value(),
                "CLI rejects retired alias --export-cpu-model");
 
-        auto validate_soc_preset = parse_cli({"SimRV", "--validate-config", "virt-pcie"});
-        expect(validate_soc_preset.has_value() &&
-                   validate_soc_preset->action == simrv::util::CliAction::ValidateCpuModel &&
-                   validate_soc_preset->options.dump_cpu_model_preset == "virt-pcie",
-               "CLI accepts --validate-config with built-in SoC preset name");
-
-        auto validate_cpu_preset = parse_cli({"SimRV", "--validate-config", "balanced"});
-        expect(validate_cpu_preset.has_value() &&
-                   validate_cpu_preset->action == simrv::util::CliAction::ValidateCpuModel &&
-                   validate_cpu_preset->options.dump_cpu_model_preset == "balanced",
-               "CLI accepts --validate-config with built-in CPU preset name");
+        expect(!parse_cli({"SimRV", "config", "validate", "virt-pcie"}).has_value(),
+               "configuration subcommands are delegated to simrv-config-wizard");
     }
 
     {
@@ -1389,6 +1372,14 @@ auto main() -> int {
     }
 
     {
+        const auto profile = simrv::isa::parse_isa_spec("rv64gcbvh");
+        expect(profile.has_value() &&
+                   simrv::debug::spike_isa_string(profile->misa_bits) ==
+                       std::format("rv{}gcbvh", simrv::xlen::kXLenBits),
+               "Spike ISA string uses canonical C/B/V/H ordering");
+    }
+
+    {
         // Stdin platform config parsing with unified [cpu] and [soc] sections
         std::istringstream combined_stream(
             "[cpu]\nname = \"piped_core\"\nisa_preset = \"gcv_zba_zbb_zbs\"\n"
@@ -1406,27 +1397,28 @@ auto main() -> int {
     }
 
     {
-        // Output streaming via '-' for dump-cpu-model, scaffold-cpu-model, and dump-soc-manifest
+        // CPU model export stays in the simulator; scaffolding belongs to simrv-tools.
         std::array<std::string, 4> dump_cpu_str = {"SimRV", "--dump-cpu-model", "balanced", "-"};
         std::array<char*, 4> dump_cpu_args = {dump_cpu_str[0].data(), dump_cpu_str[1].data(),
                                               dump_cpu_str[2].data(), dump_cpu_str[3].data()};
         auto parsed_dump = simrv::util::parse_command_line(dump_cpu_args);
-        expect(parsed_dump.has_value() && parsed_dump->options.dump_cpu_model_output == "-",
-               "--dump-cpu-model captures '-' as stdout output target");
+        expect(parsed_dump.has_value() &&
+                   parsed_dump->action == simrv::util::CliAction::DumpCpuModel &&
+                   parsed_dump->options.dump_cpu_model_target == "balanced" &&
+                   parsed_dump->options.dump_cpu_model_output == "-",
+               "--dump-cpu-model exports a preset to standard output");
 
         std::array<std::string, 3> scaffold_str = {"SimRV", "--scaffold-cpu-model", "-"};
         std::array<char*, 3> scaffold_args = {scaffold_str[0].data(), scaffold_str[1].data(),
                                               scaffold_str[2].data()};
         auto parsed_scaffold = simrv::util::parse_command_line(scaffold_args);
-        expect(parsed_scaffold.has_value() && parsed_scaffold->options.dump_cpu_model_output == "-",
-               "--scaffold-cpu-model captures '-' as stdout output target");
+        expect(!parsed_scaffold.has_value(), "simrv rejects the removed CPU scaffold flag");
 
-        std::array<std::string, 4> soc_str = {"SimRV", "--dump-soc-manifest", "virt-pcie", "-"};
-        std::array<char*, 4> soc_args = {soc_str[0].data(), soc_str[1].data(), soc_str[2].data(),
-                                         soc_str[3].data()};
-        auto parsed_soc = simrv::util::parse_command_line(soc_args);
-        expect(parsed_soc.has_value() && parsed_soc->options.soc_manifest_output == "-",
-               "--dump-soc-manifest captures '-' as stdout output target");
+        std::array<std::string, 3> soc_flag = {"SimRV", "--dump-soc-manifest", "virt-pcie"};
+        std::array<char*, 3> soc_flag_args = {soc_flag[0].data(), soc_flag[1].data(),
+                                              soc_flag[2].data()};
+        expect(!simrv::util::parse_command_line(soc_flag_args).has_value(),
+               "SoC manifest export has a single config subcommand");
 
         // -r/--trace-range diagnostics refer to -r
         std::array<std::string, 4> trace_range_str = {"SimRV", "-r", "invalid_start", "100"};
@@ -1676,12 +1668,8 @@ auto main() -> int {
         std::array<char*, 3> completion_args = {completion_args_str[0].data(),
                                                 completion_args_str[1].data(),
                                                 completion_args_str[2].data()};
-        auto parsed_completion = simrv::util::parse_command_line(completion_args);
-        expect(parsed_completion.has_value() &&
-                   parsed_completion->action == simrv::util::CliAction::GenerateCompletion &&
-                   parsed_completion->options.completion_shell == "zsh",
-               "completion subcommand maps to CliAction::GenerateCompletion with requested "
-               "shell");
+        expect(!simrv::util::parse_command_line(completion_args).has_value(),
+               "completion generation is a standalone tool");
         expect(simrv::util::generate_shell_completion("zsh").find("#compdef simrv") !=
                    std::string::npos,
                "generate_shell_completion produces valid zsh completion script");
@@ -1755,30 +1743,28 @@ auto main() -> int {
                                            bench_args_str[4].data(), bench_args_str[5].data(),
                                            bench_args_str[6].data()};
         auto parsed_bench = simrv::util::parse_command_line(bench_args);
-        expect(parsed_bench.has_value() &&
-                   parsed_bench->action == simrv::util::CliAction::RunBenchmark &&
-                   parsed_bench->options.fn_benchmark_elf == "guest.elf" &&
-                   parsed_bench->options.benchmark_runs == 12 &&
-                   parsed_bench->options.benchmark_warmups == 3,
-               "bench subcommand maps to CliAction::RunBenchmark with custom iteration count");
+        expect(!parsed_bench.has_value(), "benchmarking is delegated to simrv-benchmark");
 
         std::array<std::string, 4> config_args_str = {"simrv", "config", "validate", "virt-pcie"};
         std::array<char*, 4> cfg_val_args = {config_args_str[0].data(), config_args_str[1].data(),
                                              config_args_str[2].data(), config_args_str[3].data()};
         auto parsed_config = simrv::util::parse_command_line(cfg_val_args);
-        expect(parsed_config.has_value() &&
-                   parsed_config->action == simrv::util::CliAction::ValidateCpuModel &&
-                   parsed_config->options.dump_cpu_model_preset == "virt-pcie",
-               "config validate subcommand maps to CliAction::ValidateCpuModel");
+        expect(!parsed_config.has_value(), "config tooling is delegated to simrv-config-wizard");
+
+        std::array<std::string, 4> export_args_str = {"simrv", "config", "export-soc", "virt-pcie"};
+        std::array<char*, 4> export_args = {export_args_str[0].data(), export_args_str[1].data(),
+                                            export_args_str[2].data(), export_args_str[3].data()};
+        const auto parsed_export = simrv::util::parse_command_line(export_args);
+        expect(parsed_export.has_value() &&
+                   parsed_export->action == simrv::util::CliAction::ExportSoCManifest &&
+                   parsed_export->options.soc_manifest_preset == "virt-pcie",
+               "config export-soc is the canonical SoC manifest command");
 
         std::array<std::string, 4> scaffold_args_str = {"simrv", "scaffold", "cpu", "rv64gc"};
         std::array<char*, 4> scaf_args = {scaffold_args_str[0].data(), scaffold_args_str[1].data(),
                                           scaffold_args_str[2].data(), scaffold_args_str[3].data()};
-        auto parsed_scaffold = simrv::util::parse_command_line(scaf_args);
-        expect(parsed_scaffold.has_value() &&
-                   parsed_scaffold->action == simrv::util::CliAction::DumpCpuModel &&
-                   parsed_scaffold->options.dump_cpu_model_preset == "rv64gc",
-               "scaffold cpu subcommand maps to CliAction::DumpCpuModel");
+        expect(!simrv::util::parse_command_line(scaf_args).has_value(),
+               "scaffolding subcommand has moved out of simrv");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

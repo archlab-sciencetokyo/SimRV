@@ -338,7 +338,6 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
                 case GeneralSetting::DeviceLog:
-                    if (machine && machine->appmode_enabled()) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
                 case GeneralSetting::Count:
@@ -499,7 +498,6 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         add_row_cb("");
 
         const bool bp_disabled = !draft.cycle_accurate;
-        const bool dlog_disabled = machine.appmode_enabled();
         const bool lockstep_disabled = machine.spike_binary().empty();
 
         std::string profile_str;
@@ -547,9 +545,8 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                           : "\033[90m[OFF]\033[0m",
             draft.traplog_mode ? "\033[1;32m[ON (<trace-dir>/traplog.txt)]\033[0m"
                                : "\033[90m[OFF]\033[0m",
-            dlog_disabled ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
-                          : (draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
-                                             : "\033[90m[OFF]\033[0m"),
+            draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
+                            : "\033[90m[OFF]\033[0m",
         };
 
         int const cursor = draft.tab_cursor[0];

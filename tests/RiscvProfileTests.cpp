@@ -1717,7 +1717,8 @@ void test_sha_hypervisor_virtual_load_store() {
 void test_sha_guest_exception_routing() {
     const auto h_bit = simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
     {
-        simrv::core::CPU cpu;
+        auto cpu_ptr = std::make_unique<simrv::core::CPU>();
+        auto& cpu = *cpu_ptr;
         auto& state = cpu.state();
         state.misa |= h_bit;
         state.virt = true;
@@ -1736,7 +1737,8 @@ void test_sha_guest_exception_routing() {
         TEST_ASSERT(state.pc == 0x2000);
     }
     {
-        simrv::core::CPU cpu;
+        auto cpu_ptr = std::make_unique<simrv::core::CPU>();
+        auto& cpu = *cpu_ptr;
         auto& state = cpu.state();
         state.misa |= h_bit;
         state.virt = true;
@@ -1755,7 +1757,8 @@ void test_sha_guest_exception_routing() {
         TEST_ASSERT(state.pc == 0x3000);
     }
     {
-        simrv::core::CPU cpu;
+        auto cpu_ptr = std::make_unique<simrv::core::CPU>();
+        auto& cpu = *cpu_ptr;
         auto& state = cpu.state();
         state.misa |= h_bit;
         state.virt = true;
@@ -1773,7 +1776,8 @@ void test_sha_guest_exception_routing() {
         TEST_ASSERT(state.pc == 0x7000);
     }
     {
-        simrv::core::CPU cpu;
+        auto cpu_ptr = std::make_unique<simrv::core::CPU>();
+        auto& cpu = *cpu_ptr;
         auto& state = cpu.state();
         state.misa |= h_bit;
         state.virt = true;

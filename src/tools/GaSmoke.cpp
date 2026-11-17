@@ -94,13 +94,13 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // 2. Check capabilities / ISA info
-    auto [c_code, c_out] = run_cmd(simrv_path.string() + " --isa-info");
+    auto [c_code, c_out] = run_cmd(simrv_path.string() + " --capabilities");
     if (c_code != 0) {
         std::println(std::cerr, "error: --isa-info failed:\n{}", c_out);
         return 1;
     }
-    if (c_out.find("RV32GCBV") == std::string::npos ||
-        c_out.find("RV64GCBV") == std::string::npos) {
+    if (c_out.find("RVA23U/S64") == std::string::npos ||
+        c_out.find("RVB23U/S64") == std::string::npos) {
         std::println(std::cerr, "error: capability report does not advertise both public profiles");
         return 1;
     }
@@ -118,8 +118,8 @@ auto main(int argc, char* argv[]) -> int {
     fs::create_directories(temp_dir, ec);
     const fs::path manifest_path = temp_dir / "soc.json";
 
-    auto [m_code, m_out] =
-        run_cmd(simrv_path.string() + " --dump-soc-manifest virt-pcie " + manifest_path.string());
+    auto [m_code, m_out] = run_cmd(simrv_path.string() + " config export-soc virt-pcie " +
+                                   manifest_path.string());
     if (m_code != 0) {
         std::println(std::cerr, "error: failed to dump SoC manifest:\n{}", m_out);
         fs::remove_all(temp_dir, ec);

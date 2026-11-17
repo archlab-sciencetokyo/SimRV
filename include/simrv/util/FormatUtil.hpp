@@ -189,7 +189,7 @@ class TerminalModeGuard {
         }
     }
 
-    auto enable_raw_mode() -> bool {
+    auto enable_raw_mode(bool disable_signal_keys = false) -> bool {
         struct termios tty{};
         if (tcgetattr(STDIN_FILENO, &tty) != 0) {
             return false;
@@ -200,6 +200,7 @@ class TerminalModeGuard {
         tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
         tty.c_oflag |= OPOST;
         tty.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN);
+        if (disable_signal_keys) tty.c_lflag &= ~ISIG;
         tty.c_cflag &= ~(CSIZE | PARENB);
         tty.c_cflag |= CS8;
         tty.c_cc[VMIN] = 1;

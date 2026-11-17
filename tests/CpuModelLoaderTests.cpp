@@ -25,19 +25,11 @@ using simrv::pipeline::PipelineType;
 
 void test_resolve_cpu_model_path() {
     std::cout << "[Test] resolve_cpu_model_path...\n";
-    const auto rvcomp_res = simrv::core::resolve_cpu_model_path("rvcomp");
-    TEST_CHECK(rvcomp_res.has_value());
-    TEST_CHECK(rvcomp_res->ends_with("rvcomp.cfg"));
-
-    const auto cfu_res = simrv::core::resolve_cpu_model_path("cfu-provingground");
-    TEST_CHECK(cfu_res.has_value());
-    TEST_CHECK(cfu_res->ends_with("cfu-provingground.cfg"));
-
     const auto rv32e_res = simrv::core::resolve_cpu_model_path("rv32e");
     TEST_CHECK(rv32e_res.has_value());
     TEST_CHECK(rv32e_res->ends_with("rv32e.cfg"));
 
-    const auto direct_res = simrv::core::resolve_cpu_model_path("configs/models/rvcomp.cfg");
+    const auto direct_res = simrv::core::resolve_cpu_model_path("configs/models/ibex.cfg");
     TEST_CHECK(direct_res.has_value());
 
     // Generic presets are compiled-in defaults, not config files
@@ -49,98 +41,16 @@ void test_resolve_cpu_model_path() {
     TEST_CHECK(!nonexistent.has_value());
 }
 
-void test_load_canonical_rvcomp_cfg() {
-    std::cout << "[Test] Loading configs/models/rvcomp.cfg...\n";
-    const auto path = simrv::core::resolve_cpu_model_path("rvcomp");
-    TEST_CHECK(path.has_value());
-
+void test_load_custom_cfu_cfg() {
     simrv::pipeline::CpuModelConfig config{};
-    const bool ok = simrv::core::parse_cpu_config(*path, config);
-    TEST_CHECK(ok);
-
-    TEST_CHECK(config.name == "rvcomp");
+    TEST_CHECK(simrv::core::parse_cpu_config(std::filesystem::path(TEST_CFU_CONFIG_PATH), config));
+    TEST_CHECK(config.name == "test-cfu");
     TEST_CHECK(config.supported_xlen == 32);
     TEST_CHECK(config.preset == CpuModelPreset::Custom);
-    TEST_CHECK(config.isa.misa_bits == simrv::isa::parse_isa_spec("ima").value().misa_bits);
-
-    simrv::pipeline::CpuModelConfig loaded{};
-    TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
-    TEST_CHECK(config.validate().has_value());
-
-    TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
-    TEST_CHECK(config.pipeline.enable_forwarding == true);
-    TEST_CHECK(config.pipeline.mul_latency == 2);
-    TEST_CHECK(config.pipeline.div_latency == 34);
-    TEST_CHECK(config.pipeline.branch_mispredict_penalty == 4);
-    TEST_CHECK(config.pipeline.host_interface_latency == 21);
-    TEST_CHECK(config.pipeline.host_interface_phase_period == 2);
-
-    const auto& bp = config.pipeline.branch_predictor;
-    TEST_CHECK(bp.type == BranchPredictorType::Bimodal);
-    TEST_CHECK(bp.btb_entries == 512);
-    TEST_CHECK(bp.bht_entries == 8192);
-    TEST_CHECK(bp.pc_shift == 2);
-    TEST_CHECK(bp.untagged_btb == true);
-    TEST_CHECK(bp.predict_non_control == true);
-    TEST_CHECK(bp.jump_uses_direction_counter == false);
-    TEST_CHECK(bp.jump_uses_current_btb == false);
-    TEST_CHECK(bp.registered_btb_read == false);
-    TEST_CHECK(bp.bht_initial_state == 1);
-
-    TEST_CHECK(config.instruction_cache.capacity_bytes == 16384);
-    TEST_CHECK(config.instruction_cache.associativity == 1);
-    TEST_CHECK(config.instruction_cache.line_bytes == 32);
-    TEST_CHECK(config.instruction_cache.hit_latency == 1);
-    TEST_CHECK(config.instruction_cache.miss_latency == 1);
-    TEST_CHECK(config.instruction_front_cache.capacity_bytes == 1024);
-    TEST_CHECK(config.instruction_front_cache.line_bytes == 16);
-    TEST_CHECK(config.instruction_front_cache.freeze_pipeline_on_refill);
-    TEST_CHECK(config.interconnect.startup_data_response_latency == 27);
-
-    TEST_CHECK(config.data_cache.capacity_bytes == 16384);
-    TEST_CHECK(config.data_cache.associativity == 1);
-    TEST_CHECK(config.data_cache.line_bytes == 32);
-    TEST_CHECK(config.data_cache.hit_latency == 4);
-}
-
-void test_load_canonical_cfu_provingground_cfg() {
-    std::cout << "[Test] Loading configs/models/cfu-provingground.cfg...\n";
-    const auto path = simrv::core::resolve_cpu_model_path("cfu-provingground");
-    TEST_CHECK(path.has_value());
-
-    simrv::pipeline::CpuModelConfig config{};
-    const bool ok = simrv::core::parse_cpu_config(*path, config);
-    TEST_CHECK(ok);
-
-    TEST_CHECK(config.name == "cfu-provingground");
-    TEST_CHECK(config.supported_xlen == 32);
-    TEST_CHECK(config.preset == CpuModelPreset::Custom);
-    TEST_CHECK(config.isa.misa_bits == simrv::isa::parse_isa_spec("im").value().misa_bits);
-    TEST_CHECK(config.isa_extensions.size() == 1);
-    TEST_CHECK(config.has_isa_extension("x-cfu"));
     TEST_CHECK(config.cfu.enabled);
     TEST_CHECK(config.cfu.opcode == "custom-0");
     TEST_CHECK(config.cfu.default_latency == 1);
-    TEST_CHECK(config.cfu.rtl_module == "rvproc_cfu");
-
-    simrv::pipeline::CpuModelConfig loaded{};
-    TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(config.validate().has_value());
-    TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
-    TEST_CHECK(config.pipeline.mul_latency == 2);
-    TEST_CHECK(config.pipeline.div_latency == 35);
-    TEST_CHECK(config.pipeline.branch_mispredict_penalty == 3);
-    TEST_CHECK(config.pipeline.cycle_counter_start_delay == 2);
-
-    const auto& bp = config.pipeline.branch_predictor;
-    TEST_CHECK(bp.type == BranchPredictorType::Bimodal);
-    TEST_CHECK(bp.btb_entries == 2048);
-    TEST_CHECK(bp.bht_entries == 2048);
-    TEST_CHECK(bp.predict_non_control == true);
-    TEST_CHECK(bp.jump_uses_direction_counter == true);
-    TEST_CHECK(bp.jump_uses_current_btb == true);
-    TEST_CHECK(bp.registered_btb_read == true);
-    TEST_CHECK(bp.bht_initial_state == 0);
 }
 
 void test_multi_letter_isa_extensions() {
@@ -192,7 +102,7 @@ void test_removed_soc_config_section_aliases() {
 
     simrv::core::SoCConfig soc{};
     std::istringstream canonical(
-        "[soc]\nname = rvcomp\n[device.uart]\nname = uart0\nbase = 0x10000000\n");
+        "[soc]\nname = test-platform\n[device.uart]\nname = uart0\nbase = 0x10000000\n");
     TEST_CHECK(simrv::core::parse_soc_config_stream(canonical, soc));
     TEST_CHECK(soc.devices.size() == 1);
     TEST_CHECK(soc.devices.front().name == "uart0");
@@ -357,11 +267,6 @@ void test_dynamic_isa_spec_and_model_discovery_and_extends() {
 
     const auto discovered = simrv::core::discover_cpu_models();
     TEST_CHECK(!discovered.empty());
-    bool found_rvcomp = false;
-    for (const auto& entry : discovered) {
-        if (entry.name == "rvcomp") found_rvcomp = true;
-    }
-    TEST_CHECK(found_rvcomp);
 
     simrv::pipeline::CpuModelConfig extended{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
@@ -377,8 +282,7 @@ void test_dynamic_isa_spec_and_model_discovery_and_extends() {
 
 int main() {
     test_resolve_cpu_model_path();
-    test_load_canonical_rvcomp_cfg();
-    test_load_canonical_cfu_provingground_cfg();
+    test_load_custom_cfu_cfg();
     test_multi_letter_isa_extensions();
     test_zero_execution_stall_cycles_are_valid();
     test_removed_soc_config_section_aliases();

@@ -14,6 +14,18 @@
 
 namespace simrv::util {
 
+/** Benchmark-only options; simulator runtime configuration is inherited separately. */
+struct BenchmarkOptions : RuntimeOptions {
+    std::string fn_benchmark_elf;
+    uint32_t benchmark_runs = 5;
+    uint32_t benchmark_warmups = 2;
+    std::string benchmark_json_out;
+    std::string benchmark_spike_bin;
+    bool benchmark_nanobench = false;
+    std::string benchmark_suite;
+    std::string benchmark_isa_str;
+};
+
 /**
  * @struct BenchmarkIterationResult
  * @brief Metrics recorded for a single benchmark run.
@@ -91,7 +103,7 @@ auto resolve_benchmark_elf(const std::string& name) -> std::string;
  * @param options Runtime options configured from CLI arguments.
  * @return 0 on success, non-zero host exit code on failure.
  */
-auto run_benchmark(const RuntimeOptions& options) -> int;
+auto run_benchmark(const BenchmarkOptions& options) -> int;
 
 /**
  * @brief Run Spike benchmark iterations for an ELF binary.
@@ -112,6 +124,6 @@ void print_comparative_table(const BenchmarkReport& simrv_report,
  * @param options Runtime options configured from CLI arguments.
  * @return 0 on success, non-zero host exit code on failure.
  */
-auto run_nanobenchmark(const RuntimeOptions& options) -> int;
+auto run_nanobenchmark(const BenchmarkOptions& options) -> int;
 
 }  // namespace simrv::util

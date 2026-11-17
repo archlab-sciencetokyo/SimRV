@@ -34,15 +34,15 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
 
     [[nodiscard]] auto read8(simrv::memory::MmioOffset offset)
         -> simrv::memory::MmioData8 override {
-        return kind_ == Kind::Csr ? 0
-                                  : static_cast<simrv::memory::MmioData8>(
-                                        owner_.read_buffer(kind_ == Kind::Tx, offset, 1));
+        return static_cast<simrv::memory::MmioData8>(
+            kind_ == Kind::Csr ? owner_.read_csr_lanes(offset, 1)
+                               : owner_.read_buffer(kind_ == Kind::Tx, offset, 1));
     }
     [[nodiscard]] auto read16(simrv::memory::MmioOffset offset)
         -> simrv::memory::MmioData16 override {
-        return kind_ == Kind::Csr ? 0
-                                  : static_cast<simrv::memory::MmioData16>(
-                                        owner_.read_buffer(kind_ == Kind::Tx, offset, 2));
+        return static_cast<simrv::memory::MmioData16>(
+            kind_ == Kind::Csr ? owner_.read_csr_lanes(offset, 2)
+                               : owner_.read_buffer(kind_ == Kind::Tx, offset, 2));
     }
     [[nodiscard]] auto read32(simrv::memory::MmioOffset offset)
         -> simrv::memory::MmioData32 override {
@@ -52,14 +52,23 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
     }
     [[nodiscard]] auto read64(simrv::memory::MmioOffset offset)
         -> simrv::memory::MmioData64 override {
-        return kind_ == Kind::Csr ? 0 : owner_.read_buffer(kind_ == Kind::Tx, offset, 8);
+        return kind_ == Kind::Csr ? owner_.read_csr_lanes(offset, 8)
+                                  : owner_.read_buffer(kind_ == Kind::Tx, offset, 8);
     }
 
     void write8(simrv::memory::MmioOffset offset, simrv::memory::MmioData8 value) override {
-        if (kind_ != Kind::Csr) owner_.write_buffer(kind_ == Kind::Tx, offset, value, 1);
+        if (kind_ == Kind::Csr) {
+            owner_.write_csr_lanes(offset, value, 1);
+        } else {
+            owner_.write_buffer(kind_ == Kind::Tx, offset, value, 1);
+        }
     }
     void write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16 value) override {
-        if (kind_ != Kind::Csr) owner_.write_buffer(kind_ == Kind::Tx, offset, value, 2);
+        if (kind_ == Kind::Csr) {
+            owner_.write_csr_lanes(offset, value, 2);
+        } else {
+            owner_.write_buffer(kind_ == Kind::Tx, offset, value, 2);
+        }
     }
     void write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 value) override {
         if (kind_ == Kind::Csr) {
@@ -138,6 +147,55 @@ void RingBufferEthernetMmio::write_csr(simrv::memory::MmioOffset offset, uint32_
         default:
             break;
     }
+}
+
+auto RingBufferEthernetMmio::read_csr_lanes(simrv::memory::MmioOffset offset, uint32_t width)
+    -> uint64_t {
+    if (width != 1U && width != 2U && width != 4U && width != 8U) return 0;
+    uint64_t value = 0;
+    for (uint32_t byte = 0; byte < width; ++byte) {
+        const auto address = offset + byte;
+        const auto aligned = simrv::memory::MmioOffset{address.raw() & ~simrv::xlen::Address{3}};
+        const auto reg = read_csr(aligned);
+        const auto lane = static_cast<uint32_t>(address.raw() & 3U);
+        value |= static_cast<uint64_t>((reg >> (lane * 8U)) & 0xffU) << (byte * 8U);
+    }
+    return value;
+}
+
+void RingBufferEthernetMmio::write_csr_lanes(simrv::memory::MmioOffset offset, uint64_t value,
+                                             uint32_t width) {
+    if (width != 1U && width != 2U && width != 4U && width != 8U) return;
+    // A guest's 32-bit MMIO write can arrive as four byte stores. Commit TX only after
+    // the final lane so drain_tx never observes a partially written end pointer.
+    bool commit_tx = false;
+    for (uint32_t byte = 0; byte < width; ++byte) {
+        const auto address = offset + byte;
+        const auto index = static_cast<size_t>(address.raw() / 4U);
+        const auto lane = static_cast<uint32_t>(address.raw() & 3U);
+        if (index >= csr_.size()) continue;
+        const uint32_t lane_mask = uint32_t{0xff} << (lane * 8U);
+        const uint32_t lane_value = static_cast<uint32_t>((value >> (byte * 8U)) & 0xffU)
+                                    << (lane * 8U);
+        switch (index) {
+            case 0:
+                csr_[0] =
+                    ((csr_[0] & ~lane_mask) | lane_value) & static_cast<uint32_t>(rx_size_ - 1);
+                update_rx_irq();
+                break;
+            case 2:
+                csr_[2] = (csr_[2] & ~lane_mask) | lane_value;
+                break;
+            case 6:
+                csr_[6] = (csr_[6] & ~lane_mask) | lane_value;
+                csr_[6] &= static_cast<uint32_t>(tx_size_ - 1) & ~3U;
+                commit_tx = width > 1U || lane == 3U;
+                break;
+            default:
+                break;
+        }
+    }
+    if (commit_tx) drain_tx();
 }
 
 auto RingBufferEthernetMmio::read_buffer(bool tx, simrv::memory::MmioOffset offset, uint32_t width)

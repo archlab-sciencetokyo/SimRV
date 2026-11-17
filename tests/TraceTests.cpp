@@ -47,6 +47,8 @@ concept SymbolLookupAddress = requires(const simrv::debug::SymbolTable& table, T
     table.lookup(address);
 };
 static_assert(SymbolLookupAddress<simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::RetirementEvent::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::TimingDivergence::pc), simrv::xlen::VirtAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::PhysAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::Address>);
 template <typename T>
@@ -65,8 +67,6 @@ static_assert(LockstepPc<simrv::xlen::VirtAddr>);
 static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
 static_assert(!LockstepPc<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::rtl::RetirementEvent::pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::rtl::TimingDivergence::pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::core::PipelineStallRecord::pc), simrv::xlen::VirtAddr>);
 template <typename T>
 concept TrapTracePc =

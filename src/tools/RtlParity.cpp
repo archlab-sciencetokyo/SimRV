@@ -19,18 +19,15 @@
 namespace {
 
 void print_help(const char* prog) {
-    std::println("SimRV RTL Parity & Hardware Model Evaluation Tool");
-    std::println("Usage: {} [options] [target]", prog);
-    std::println("\nTargets:");
-    std::println("  rvcomp          RVComp five-stage RV32IM core");
-    std::println("  cfu-pg          CFU Proving Ground RVProc core");
-    std::println("  <plugin-name>   Dynamic RTL target loaded via --plugin");
+    std::println("SimRV RTL Parity Evaluation Tool");
+    std::println("Usage: {} [options] <target>", prog);
+    std::println("\nLoad an adapter with --plugin and select its registered target name.");
     std::println("\nOptions:");
     std::println("  --list-targets        List all registered and discovered RTL targets");
     std::println("  --plugin <LIB.so>     Load an external RTL parity target adapter plugin");
     std::println("  --simrv <PATH>        Explicit path to SimRV executable");
-    std::println("  --target-dir <PATH>   Path to RTL checkout (or set RVCOMP_DIR / CFU_PG_DIR)");
-    std::println("  --target-bin <PATH>   Explicit path to compiled Verilator simulator binary");
+    std::println("  --target-dir <PATH>   Path to target source or build directory");
+    std::println("  --target-bin <PATH>   Explicit path to target simulator binary");
     std::println("  --config <PATH>       Custom SimRV SoC/CPU configuration file (.cfg)");
     std::println("  --trace-dir <PATH>    Directory to save traces and pinpoint divergence");
     std::println("  --work-dir <PATH>     Work directory for build and test artifacts");
@@ -77,11 +74,6 @@ int main(int argc, char** argv) {
     bool apply_tune = false;
     bool verbose = false;
 
-    std::string prog_name = std::filesystem::path(argv[0]).filename().string();
-    if (prog_name.find("tune") != std::string::npos) {
-        tune_mode = true;
-    }
-
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
@@ -93,10 +85,9 @@ int main(int argc, char** argv) {
             plugin_path = argv[++i];
         } else if (arg == "--simrv" && i + 1 < argc) {
             simrv_path = argv[++i];
-        } else if ((arg == "--target-dir" || arg == "--rvcomp-dir" || arg == "--cfu-dir") &&
-                   i + 1 < argc) {
+        } else if (arg == "--target-dir" && i + 1 < argc) {
             target_dir = argv[++i];
-        } else if ((arg == "--target-bin" || arg == "--rvcomp-bin") && i + 1 < argc) {
+        } else if (arg == "--target-bin" && i + 1 < argc) {
             target_bin = argv[++i];
         } else if (arg == "--config" && i + 1 < argc) {
             config_path = argv[++i];
@@ -141,7 +132,8 @@ int main(int argc, char** argv) {
     }
 
     if (target_name.empty()) {
-        target_name = "rvcomp";  // Default target
+        std::println(std::cerr, "Error: Select a target name. Run with --list-targets.");
+        return 2;
     }
 
     auto* target = registry.get_target(target_name);
@@ -195,9 +187,7 @@ int main(int argc, char** argv) {
 
     if (!target->prepare(ctx)) {
         std::println(std::cerr, "\033[1;31mError: Target preparation failed.\033[0m");
-        std::println(std::cerr,
-                     "Ensure simulator directory or executable is provided via --target-dir / "
-                     "--target-bin.");
+        std::println(std::cerr, "Ensure target-specific sources or binaries are provided.");
         return 1;
     }
 

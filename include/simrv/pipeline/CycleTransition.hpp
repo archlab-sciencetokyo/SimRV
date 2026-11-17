@@ -70,6 +70,7 @@ struct HartCycleState {
     TimedPageWalkState data_walk{};
     uint64_t pending_host_value = 0;
     uint8_t pending_host_write_kind = 0;
+    simrv::xlen::LatencyCycles host_write_fallback_cycles = 4;
     simrv::xlen::LatencyCycles host_write_remaining = 0;
     bool host_write_pending = false;
 
@@ -89,6 +90,7 @@ struct HartCycleState {
         data_walk.reset();
         pending_host_value = 0;
         pending_host_write_kind = 0;
+        host_write_fallback_cycles = 4;
         host_write_remaining = 0;
         host_write_pending = false;
     }

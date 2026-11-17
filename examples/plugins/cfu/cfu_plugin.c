@@ -8,7 +8,7 @@
  *   funct3 = 2: Bitwise Hamming distance (popcount(rs1 ^ rs2))
  *   funct3 = 3: Multiply-accumulate into internal accumulator
  *
- * Compatible with both SimRV CFU v2 ABI and CFU-Proving-Ground / CFU-Playground.
+ * Implements the versioned SimRV CFU plugin ABI.
  */
 #include <stdint.h>
 #include <stdlib.h>
@@ -43,25 +43,19 @@ static inline uint32_t simd_sad(uint32_t a, uint32_t b) {
     return sum;
 }
 
-/* CFU-Proving-Ground / CFU-Playground compatible entry point */
-uint32_t cfu_op(int funct3, int funct7, uint32_t rs1, uint32_t rs2) {
-    (void)funct7;
+static uint32_t cfu_execute_word(uint32_t funct3, uint32_t rs1, uint32_t rs2) {
     switch (funct3) {
-        case 0:
-            return (uint32_t)simd_dot_product(rs1, rs2);
-        case 1:
-            return simd_sad(rs1, rs2);
-        case 2:
-            return (uint32_t)__builtin_popcount(rs1 ^ rs2);
+        case 0: return (uint32_t)simd_dot_product(rs1, rs2);
+        case 1: return simd_sad(rs1, rs2);
+        case 2: return (uint32_t)__builtin_popcount(rs1 ^ rs2);
         case 3:
             s_accumulator += (uint64_t)rs1 * (uint64_t)rs2;
             return (uint32_t)s_accumulator;
-        default:
-            return rs1 | rs2;
+        default: return rs1 | rs2;
     }
 }
 
-void cfu_reset(void) { s_accumulator = 0; }
+static void cfu_v2_reset(void) { s_accumulator = 0; }
 
 /* SimRV CFU v2 ABI entry points */
 static uint32_t cfu_v2_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
@@ -70,7 +64,8 @@ static uint32_t cfu_v2_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, 
         // Dot product and popcount take 1 cycle; SAD takes 2 cycles
         *latency_cycles = (funct3 == 1) ? 2 : 1;
     }
-    return cfu_op((int)funct3, (int)funct7, src1, src2);
+    (void)funct7;
+    return cfu_execute_word(funct3, src1, src2);
 }
 
 static uint64_t cfu_v2_execute64(uint32_t funct7, uint32_t funct3, uint64_t src1, uint64_t src2,
@@ -86,7 +81,8 @@ static uint64_t cfu_v2_execute64(uint32_t funct7, uint32_t funct3, uint64_t src1
         return s_accumulator;
     }
     // For 32-bit SIMD operations in 64-bit mode, operate on lower 32 bits
-    return (uint64_t)cfu_op((int)funct3, (int)funct7, (uint32_t)src1, (uint32_t)src2);
+    (void)funct7;
+    return (uint64_t)cfu_execute_word(funct3, (uint32_t)src1, (uint32_t)src2);
 }
 
 static uint32_t cfu_v2_query_latency(uint32_t funct7, uint32_t funct3) {
@@ -97,7 +93,7 @@ static uint32_t cfu_v2_query_latency(uint32_t funct7, uint32_t funct3) {
 static const struct SimRvCfuPlugin s_plugin_descriptor = {
     .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
     .execute = cfu_v2_execute,
-    .reset = cfu_reset,
+    .reset = cfu_v2_reset,
     .execute64 = cfu_v2_execute64,
     .query_latency = cfu_v2_query_latency,
     .name = "reference-simd-cfu",

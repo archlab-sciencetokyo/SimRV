@@ -33,6 +33,32 @@ struct FdtCustomDevice {
     uint64_t size = 0;
 };
 
+struct FdtImportedDevice {
+    std::string name;
+    std::string compatible;
+    simrv::xlen::PhysAddr base{};
+    uint64_t size = 0;
+    uint32_t irq = 0;
+    uint64_t clock_hz = 0;
+    bool included = true;
+};
+
+struct FdtPlatformDescription {
+    simrv::xlen::PhysAddr dram_base{};
+    uint64_t dram_size = 0;
+    uint32_t hart_count = 1;
+    uint64_t cpu_clock_hz = 0;
+    uint64_t timebase_hz = 0;
+    std::string cpu_isa;
+    std::string bootargs;
+    std::vector<FdtImportedDevice> devices;
+    std::vector<std::string> warnings;
+};
+
+/** Read the subset of a DTB that can seed a SimRV platform configuration. */
+auto read_fdt_platform(std::span<const uint8_t> blob)
+    -> std::expected<FdtPlatformDescription, std::string>;
+
 /** Reject CPU ISA extensions advertised by an FDT when they are disabled in the selected MISA. */
 auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
     -> std::expected<void, std::string>;

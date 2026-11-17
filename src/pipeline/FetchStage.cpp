@@ -397,6 +397,20 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             }
             return;
         }
+        if (machine.ram_view().contains(ctx.padr1, sizeof(uint16_t))) {
+            uint16_t lo = 0;
+            std::memcpy(&lo, machine.ram_view().unchecked_ptr(ctx.padr1), sizeof(lo));
+            if ((lo & 0x3U) != 0x3U) {
+                ctx.ir_org = lo;
+                return;
+            }
+            if (machine.ram_view().contains(ctx.padr2, sizeof(uint16_t))) {
+                uint16_t hi = 0;
+                std::memcpy(&hi, machine.ram_view().unchecked_ptr(ctx.padr2), sizeof(hi));
+                ctx.ir_org = (static_cast<uint32_t>(hi) << 16) | lo;
+                return;
+            }
+        }
     }
 
     if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
@@ -431,6 +445,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     pf_req.source = simrv::memory::make_tl_source(
                         pf_req.hart, simrv::memory::TlPort::Instruction);
                     pf_req.address = next_line;
+                    pf_req.mask =
+                        simrv::memory::TlChannelA::compute_mask(pf_req.size, pf_req.address);
                     if (machine.memory_.system_bus().send_request(pf_req)) {
                         ca_state.instruction_prefetch.active = true;
                         ca_state.instruction_prefetch.request_pending = true;
@@ -445,6 +461,50 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             (ctx.padr2 == ctx.padr1 + 2) &&
             ((ctx.padr1.raw() & icache.line_mask()) <= (icache.line_bytes() - 4u));
         if (single_line) {
+            if (!machine.memory_.system_bus().has_coherence()) {
+                const auto fetch_halfword =
+                    [&](simrv::xlen::PhysAddr address,
+                        simrv::xlen::VirtAddr vaddr) -> std::optional<uint16_t> {
+                    if (machine.ram_view().contains(address, sizeof(uint16_t))) {
+                        uint16_t halfword = 0;
+                        std::memcpy(&halfword, machine.ram_view().unchecked_ptr(address),
+                                    sizeof(halfword));
+                        return halfword;
+                    }
+                    simrv::memory::TlChannelA half_req{};
+                    half_req.opcode = simrv::memory::TlOpcodeA::Get;
+                    half_req.size = static_cast<uint8_t>(Funct3::Lhu) & 0x3;
+                    half_req.hart = hart_id();
+                    half_req.source = simrv::memory::make_tl_source(
+                        half_req.hart, simrv::memory::TlPort::Instruction);
+                    half_req.address = address;
+                    half_req.mask =
+                        simrv::memory::TlChannelA::compute_mask(half_req.size, half_req.address);
+                    if (!machine.memory_.system_bus().send_request(half_req)) {
+                        ctx.pending_exception = ExceptionCode::FaultFetch;
+                        ctx.pending_tval = vaddr.raw();
+                        return std::nullopt;
+                    }
+                    simrv::memory::TlChannelD half_resp{};
+                    if (!machine.memory_.system_bus().get_response(half_req.source, half_resp) ||
+                        half_resp.failed()) {
+                        ctx.pending_exception = ExceptionCode::FaultFetch;
+                        ctx.pending_tval = vaddr.raw();
+                        return std::nullopt;
+                    }
+                    return static_cast<uint16_t>(half_resp.data);
+                };
+                const auto lo = fetch_halfword(ctx.padr1, state_.pc);
+                if (!lo) return;
+                if ((*lo & 0x3) != 0x3) {
+                    ctx.ir_org = *lo;
+                    return;
+                }
+                const auto hi = fetch_halfword(ctx.padr2, state_.pc + 2);
+                if (!hi) return;
+                ctx.ir_org = (static_cast<uint32_t>(*hi) << 16) | *lo;
+                return;
+            }
             uint32_t w_data = 0;
             if (!refill_in_progress) {
                 const auto misses_before = icache.miss_count();
@@ -515,6 +575,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.hart = hart_id();
                 req.source = fill.source;
                 req.address = line_base;
+                req.mask = simrv::memory::TlChannelA::compute_mask(req.size, req.address);
                 if (!machine.memory_.system_bus().send_request(req)) {
                     ca_state.waiting_for_interconnect = false;
                     ctx.pending_exception = ExceptionCode::FaultFetch;
@@ -536,6 +597,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             req.source =
                 simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
             req.address = line_base;
+            req.mask = simrv::memory::TlChannelA::compute_mask(req.size, req.address);
             simrv::memory::TlChannelD resp{};
             if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
                 resp.failed()) {
@@ -559,6 +621,32 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         auto fetch_halfword = [&](simrv::xlen::PhysAddr paddr,
                                   simrv::xlen::VirtAddr vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
+            if (!machine.memory_.system_bus().has_coherence()) {
+                if (machine.ram_view().contains(paddr, sizeof(uint16_t))) {
+                    std::memcpy(&h_data, machine.ram_view().unchecked_ptr(paddr), sizeof(h_data));
+                    return h_data;
+                }
+                simrv::memory::TlChannelA req{};
+                req.opcode = simrv::memory::TlOpcodeA::Get;
+                req.size = static_cast<uint8_t>(Funct3::Lhu) & 0x3;
+                req.hart = hart_id();
+                req.source =
+                    simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
+                req.address = paddr;
+                req.mask = simrv::memory::TlChannelA::compute_mask(req.size, req.address);
+                if (!machine.memory_.system_bus().send_request(req)) {
+                    ctx.pending_exception = ExceptionCode::FaultFetch;
+                    ctx.pending_tval = vaddr.raw();
+                    return std::nullopt;
+                }
+                simrv::memory::TlChannelD resp{};
+                if (!machine.memory_.system_bus().get_response(req.source, resp) || resp.failed()) {
+                    ctx.pending_exception = ExceptionCode::FaultFetch;
+                    ctx.pending_tval = vaddr.raw();
+                    return std::nullopt;
+                }
+                return static_cast<uint16_t>(resp.data);
+            }
             const simrv::xlen::PhysAddr h_line_base =
                 paddr & ~(static_cast<simrv::xlen::Address>(icache.line_mask()));
             const bool h_refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
@@ -625,6 +713,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.hart = hart_id();
                 req.source = fill.source;
                 req.address = h_line_base;
+                req.mask = simrv::memory::TlChannelA::compute_mask(req.size, req.address);
                 if (!machine.memory_.system_bus().send_request(req)) {
                     ca_state.waiting_for_interconnect = false;
                     ctx.pending_exception = ExceptionCode::FaultFetch;
@@ -645,6 +734,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             req.source =
                 simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
             req.address = h_line_base;
+            req.mask = simrv::memory::TlChannelA::compute_mask(req.size, req.address);
             simrv::memory::TlChannelD resp{};
             if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
                 resp.failed()) {

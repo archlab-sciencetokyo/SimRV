@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+#define SIMRV_RTL_PLUGIN_ABI_VERSION 1
+
 /**
  * @brief Execution context provided by SimRV to an RTL target adapter plugin.
  */
@@ -48,6 +50,8 @@ typedef struct SimRvParityResult {
  * @brief RTL Parity target descriptor exposed by plugins.
  */
 typedef struct SimRvRtlTarget {
+    uint32_t abi_version; /**< Must be SIMRV_RTL_PLUGIN_ABI_VERSION. */
+    uint32_t struct_size;  /**< Size of this descriptor in bytes. */
     const char* name;
     const char* description;
 

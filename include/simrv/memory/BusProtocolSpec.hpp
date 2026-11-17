@@ -113,10 +113,10 @@ inline constexpr BusProtocolSpec kDefaultAxi4LiteSpec{
     .separate_write_response = true,
 };
 
-// RVComp's AXI4-Lite based fabric couples AW and W handshakes. Its cache refill
+// An AXI4-Lite based fabric may couple AW and W handshakes. A cache refill
 // port also accepts block-sized simulator requests, which are expanded internally
 // into ordinary single-beat Lite transactions. Atomics are executed at the memory
-// endpoint, as they are in RVComp's L2, and are not exposed as AXI transactions.
+// endpoint and are not exposed as AXI transactions.
 inline constexpr BusProtocolSpec kAxi4LiteUnifiedSpec{
     .protocol = BusProtocol::Axi4LiteUnified,
     .beat_bytes = 16,
@@ -201,7 +201,7 @@ inline constexpr std::array<BusCatalogEntry, 6> kBusCatalog = {{
     if (ieq(name, "axi4lite") || ieq(name, "axi-lite")) {
         return find_bus_catalog_entry(BusProtocol::Axi4Lite);
     }
-    if (ieq(name, "rvcomp-axi-lite") || ieq(name, "axi4-lite-unified")) {
+    if (ieq(name, "axi4-lite-unified")) {
         return find_bus_catalog_entry(BusProtocol::Axi4LiteUnified);
     }
     for (const auto& entry : kBusCatalog) {

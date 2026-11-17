@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "simrv/xlen/AddressTypes.hpp"
@@ -60,21 +61,13 @@ namespace simrv::debug {
 
     if (is_g) {
         s += 'g';
-        // Append any extension beyond IMAFD
-        for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << i)) == 0) continue;
-            const char c = static_cast<char>('a' + i);
-            if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd' || c == 'x') continue;
-            if (c == 's' || c == 'u') continue;
-            s += c;
+        // Follow Spike's canonical single-letter ordering (not ASCII order).
+        for (const char c : std::string_view("qlcbkjtpvnh")) {
+            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << (c - 'a'))) != 0) s += c;
         }
     } else {
-        for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << i)) != 0) {
-                const char c = static_cast<char>('a' + i);
-                if (c == 's' || c == 'u' || c == 'x') continue;
-                s += c;
-            }
+        for (const char c : std::string_view("iemafdqlcbkjtpvnh")) {
+            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << (c - 'a'))) != 0) s += c;
         }
     }
     return s;

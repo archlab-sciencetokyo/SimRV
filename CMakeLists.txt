@@ -12,6 +12,7 @@ project(
   DESCRIPTION "SimCore/RISC-V Functional Simulator"
   HOMEPAGE_URL "https://github.com/archlab-sciencetokyo/SimRV"
   LANGUAGES C CXX)
+include(GNUInstallDirs)
 
 # Keep source installs self-contained by default. Native distro packages set
 # CPACK_PACKAGING_INSTALL_PREFIX independently, and callers can still override
@@ -220,12 +221,18 @@ set_property(CACHE SIMRV_XLEN PROPERTY STRINGS "32" "64")
 if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
   message(FATAL_ERROR "SIMRV_XLEN must be 32 or 64 (got: ${SIMRV_XLEN})")
 endif()
-set(_SIMRV_LEGACY_LINUX_IMAGES_DIR
+set(_SIMRV_LINUX_IMAGES_ROOT
+    "${PROJECT_SOURCE_DIR}/images/rv${SIMRV_XLEN}")
+set(_SIMRV_PREVIOUS_LINUX_IMAGES_DIR
     "${PROJECT_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}")
-set(_SIMRV_DEFAULT_LINUX_IMAGES_DIR
+set(_SIMRV_PREVIOUS_DEFAULT_LINUX_IMAGES_DIR
     "${PROJECT_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/alpine-gui")
+set(_SIMRV_DEFAULT_LINUX_IMAGES_DIR
+    "${PROJECT_SOURCE_DIR}/images/rv${SIMRV_XLEN}/alpine-gui")
 if(NOT DEFINED SIMRV_LINUX_IMAGES_DIR
-   OR "${SIMRV_LINUX_IMAGES_DIR}" STREQUAL "${_SIMRV_LEGACY_LINUX_IMAGES_DIR}")
+   OR "${SIMRV_LINUX_IMAGES_DIR}" STREQUAL "${_SIMRV_LINUX_IMAGES_ROOT}"
+   OR "${SIMRV_LINUX_IMAGES_DIR}" STREQUAL "${_SIMRV_PREVIOUS_LINUX_IMAGES_DIR}"
+   OR "${SIMRV_LINUX_IMAGES_DIR}" STREQUAL "${_SIMRV_PREVIOUS_DEFAULT_LINUX_IMAGES_DIR}")
   set(SIMRV_LINUX_IMAGES_DIR
       "${_SIMRV_DEFAULT_LINUX_IMAGES_DIR}"
       CACHE PATH "Path to reproducible Linux test images" FORCE)
@@ -284,11 +291,6 @@ add_subdirectory(src/tui)
 # Runtime is the composition target and must be declared after all component
 # object targets.
 add_subdirectory(src/core)
-option(SIMRV_BUILD_PLUGINS "Build dynamic external device plugins" ON)
-if(SIMRV_BUILD_PLUGINS)
-  add_subdirectory(plugins)
-endif()
-
 add_executable(SimRV src/Main.cpp)
 add_executable(SimRV::cli ALIAS SimRV)
 target_include_directories(SimRV PRIVATE ${PROJECT_SOURCE_DIR}/include
@@ -305,10 +307,45 @@ function(simrv_add_tool target source)
   set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
 endfunction()
 
-simrv_add_tool(simrv-cpu-wizard src/tools/CpuWizard.cpp)
+# Host-side generators and runners are deliberately kept out of the simulator runtime.
+add_library(simrv-tooling STATIC
+  src/util/Scaffolding.cpp
+  src/util/UefiDiskGenerator.cpp
+  src/util/MissionTools.cpp
+  src/util/BenchmarkRunner.cpp
+  src/util/ShellCompletion.cpp)
+target_include_directories(simrv-tooling PUBLIC ${PROJECT_SOURCE_DIR}/include
+                                                 ${PROJECT_BINARY_DIR}/generated)
+target_link_libraries(simrv-tooling PUBLIC simrv-runtime)
+simrv_apply_options(simrv-tooling)
+set_property(TARGET simrv-tooling PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
+
+simrv_add_tool(simrv-config-wizard src/tools/ConfigWizard.cpp)
+simrv_add_tool(simrv-tools src/tools/SimrvTools.cpp)
+target_link_libraries(simrv-tools PRIVATE simrv-tooling)
+target_link_libraries(simrv-config-wizard PRIVATE simrv-tooling)
 simrv_add_tool(simrv-benchmark src/tools/BenchmarkTool.cpp)
+target_link_libraries(simrv-benchmark PRIVATE simrv-tooling)
 simrv_add_tool(simrv-act src/tools/ActRunner.cpp)
 simrv_add_tool(simrv-vector src/tools/VectorRunner.cpp)
+add_executable(simrv-parity src/tools/RtlParity.cpp src/rtl/ParityRegistry.cpp)
+target_include_directories(simrv-parity PRIVATE ${PROJECT_SOURCE_DIR}/include
+                                                ${PROJECT_BINARY_DIR}/generated)
+target_link_libraries(simrv-parity PRIVATE simrv-runtime ${CMAKE_DL_LIBS})
+simrv_apply_options(simrv-parity)
+set_property(TARGET simrv-parity PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
+if(SIMRV_ENABLE_LINUX_TOOLS AND UNIX)
+  add_executable(simrv-linux-builder-post-build src/tools/BuildrootPostBuild.cpp)
+  simrv_apply_options(simrv-linux-builder-post-build)
+  add_executable(simrv-linux-builder src/tools/LinuxBuilder.cpp)
+  target_compile_definitions(
+    simrv-linux-builder PRIVATE
+    SIMRV_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    SIMRV_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
+    SIMRV_BUILDROOT_POST_BUILD_PATH="$<TARGET_FILE:simrv-linux-builder-post-build>")
+  add_dependencies(simrv-linux-builder simrv-linux-builder-post-build)
+  simrv_apply_options(simrv-linux-builder)
+endif()
 
 if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   simrv_add_tool(simrv-smoke src/tools/GaSmoke.cpp)
@@ -316,22 +353,6 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   simrv_add_tool(simrv-evidence src/tools/ReleaseEvidence.cpp)
   simrv_add_tool(simrv-check-artifacts src/tools/CheckLinuxArtifacts.cpp)
 endif()
-
-add_executable(simrv-parity
-  src/tools/RtlParity.cpp
-  src/rtl/ParityRegistry.cpp
-  src/rtl/targets/RvcompTarget.cpp
-  src/rtl/targets/CfuPgTarget.cpp)
-target_include_directories(simrv-parity PRIVATE ${PROJECT_SOURCE_DIR}/include
-                                                ${PROJECT_BINARY_DIR}/generated)
-target_link_libraries(simrv-parity PRIVATE simrv-runtime ${CMAKE_DL_LIBS})
-simrv_apply_options(simrv-parity)
-set_property(TARGET simrv-parity PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
-add_executable(simrv-rtl-parity ALIAS simrv-parity)
-add_custom_target(simrv-tune ALL
-  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:simrv-parity>
-          "${CMAKE_CURRENT_BINARY_DIR}/simrv-tune"
-  DEPENDS simrv-parity)
 
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
 if(COMPILER_SUPPORTS_FROUNDING_MATH)

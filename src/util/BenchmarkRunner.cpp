@@ -356,13 +356,20 @@ auto resolve_benchmark_elf(const std::string& name) -> std::string {
     }
 
     std::vector<std::string> suffixes = {".riscv", ".elf", ""};
-    std::vector<fs::path> dirs = {
-        "tests/riscv-tests/benchmarks",
-        "/home/ren/workspace/lab/tests/riscv-tests/benchmarks",
-        "/home/ren/workspace/lab/tests/coremark",
-        "../../tests/riscv-tests/benchmarks",
-        "../../tests/coremark",
-    };
+    // Search order: explicit environment overrides first, then in-tree and sibling-workspace
+    // layouts. No machine-specific absolute paths belong here.
+    std::vector<fs::path> dirs;
+    if (const char* bench_dir = std::getenv("SIMRV_BENCH_DIR"); bench_dir && *bench_dir) {
+        dirs.emplace_back(bench_dir);
+    }
+    if (const char* tests_dir = std::getenv("RISCV_TESTS_DIR"); tests_dir && *tests_dir) {
+        dirs.emplace_back(fs::path(tests_dir) / "benchmarks");
+        dirs.emplace_back(fs::path(tests_dir) / "share/riscv-tests/benchmarks");
+    }
+    for (const char* rel : {"tests/riscv-tests/benchmarks", "tests/coremark",
+                            "../../tests/riscv-tests/benchmarks", "../../tests/coremark"}) {
+        dirs.emplace_back(rel);
+    }
 
     for (const auto& dir : dirs) {
         for (const auto& sfx : suffixes) {
@@ -532,7 +539,7 @@ void print_comparative_table(const BenchmarkReport& simrv_report,
         cyan("================================================================================"));
 }
 
-auto run_nanobenchmark(const RuntimeOptions& options) -> int {
+auto run_nanobenchmark(const BenchmarkOptions& options) -> int {
     const std::string target_elf =
         !options.fn_benchmark_elf.empty() ? options.fn_benchmark_elf : options.fn_memimg;
     if (target_elf.empty()) {
@@ -609,7 +616,7 @@ auto run_nanobenchmark(const RuntimeOptions& options) -> int {
     return 0;
 }
 
-auto run_benchmark(const RuntimeOptions& options) -> int {
+auto run_benchmark(const BenchmarkOptions& options) -> int {
     const std::string target_elf =
         !options.fn_benchmark_elf.empty() ? options.fn_benchmark_elf : options.fn_memimg;
     if (target_elf.empty()) {

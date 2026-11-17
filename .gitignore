@@ -32,7 +32,7 @@ build*
 !examples/**/build-*/
 !examples/**/build-*/*
 linux-build
-linux-images/
+/images/
 CMakeUserPresets.json
 compile_commands.json
 

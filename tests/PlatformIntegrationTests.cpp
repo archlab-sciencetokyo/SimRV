@@ -2012,7 +2012,11 @@ void test_tilelink_c_prefetch_intent() {
 
     const simrv::xlen::Address line = (simrv::memory::kDramBaseAddress + 0x300).raw();
     const uint32_t val = 0x87654321;
+    for (size_t index = 0; index < simrv::memory::CoherenceHub::kLineBytes; ++index)
+        ram[0x300 + index] = static_cast<simrv::xlen::Byte>((index * 17u + 3u) & 0xffu);
     std::memcpy(ram.data() + 0x300, &val, sizeof(val));
+    std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> expected{};
+    std::memcpy(expected.data(), ram.data() + 0x300, expected.size());
     auto& bus = machine.memory().system_bus();
 
     simrv::memory::TlChannelA intent{};
@@ -2039,6 +2043,21 @@ void test_tilelink_c_prefetch_intent() {
     uint32_t l3_val = 0;
     std::memcpy(&l3_val, l3_buf.data(), sizeof(l3_val));
     check(l3_val == val);
+
+    // The configured L3 may use 32-byte lines while TileLink coherence blocks are 64 bytes.
+    // A later acquire must reassemble both cached halves rather than zeroing the upper half.
+    simrv::memory::TlChannelA acquire{};
+    acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+    acquire.grow = simrv::memory::TlGrow::NtoB;
+    acquire.source = 21;
+    acquire.hart = simrv::xlen::HartId{0};
+    acquire.address = simrv::xlen::PhysAddr{line};
+    acquire.size = simrv::memory::kTlBlockSize;
+    acquire.mask = simrv::memory::TlChannelA::compute_mask(acquire.size, acquire.address);
+    std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> acquired{};
+    check(bus.acquire_block(acquire, resp, acquired));
+    check(acquired == expected);
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
 
     std::cout << "[PASS] test_tilelink_c_prefetch_intent\n";
 }
@@ -3369,11 +3388,11 @@ void test_dynamic_mode_switching_cache_behavior() {
     check(machine.cpu.icache.line_state(simrv::xlen::PhysAddr{pc}) ==
           simrv::memory::MesiState::Shared);
     check(machine.cpu.dcache.line_state(simrv::xlen::PhysAddr{data_address}) ==
-          simrv::memory::MesiState::Shared);
+          simrv::memory::MesiState::Exclusive);
     const auto prewarmed_data_dir =
         machine.memory().system_bus().coherence_hub().get_directory_state(
             simrv::xlen::PhysAddr{data_address});
-    check(prewarmed_data_dir.state == simrv::memory::MesiState::Shared);
+    check(prewarmed_data_dir.state == simrv::memory::MesiState::Exclusive);
     check(prewarmed_data_dir.sharers_mask == 1);
 
     // Step in cycle mode through addi, sw, and lw

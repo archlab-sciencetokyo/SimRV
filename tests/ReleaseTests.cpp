@@ -117,8 +117,9 @@ int main() {
     "packaging_and_zero_python_dependencies"_test = [&] {
         const auto cmake_packaging = read_file_string(root / "cmake/SimRVPackaging.cmake");
         expect(!cmake_packaging.empty());
-        expect(cmake_packaging.find("CPACK_COMPONENTS_ALL Runtime Tools Tests Development") !=
-               std::string::npos);
+        expect(
+            cmake_packaging.find("CPACK_COMPONENTS_ALL Runtime Tools Tests Development") !=
+            std::string::npos);
         expect(cmake_packaging.find("SimRVBuildMetadata.json") != std::string::npos);
         expect(cmake_packaging.find(R"(set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests"))") !=
                std::string::npos);
@@ -133,6 +134,7 @@ int main() {
             std::string::npos);
         expect(cmake_packaging.find(R"(set(CPACK_RPM_DEVELOPMENT_PACKAGE_NAME "simrv-devel"))") !=
                std::string::npos);
+        expect(cmake_packaging.find("simrv-plugins") == std::string::npos);
         // Packaging must have zero python runtime dependencies
         expect(cmake_packaging.find(", python3") == std::string::npos);
     };

@@ -26,11 +26,7 @@ simrv_add_component(simrv-core
   CpuFastOs.cpp
   BlockCache.cpp
   ../util/CliParser.cpp
-  ../util/Scaffolding.cpp
   ../util/ThirdPartyNotices.cpp
-  ../util/UefiDiskGenerator.cpp
-  ../util/MissionTools.cpp
-  ../util/BenchmarkRunner.cpp
   ../util/HostCache.cpp
   ../explain/CsrCatalog.cpp
   ../explain/ScalarSpecCatalog.cpp

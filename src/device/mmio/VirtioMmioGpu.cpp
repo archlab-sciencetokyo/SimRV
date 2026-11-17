@@ -39,7 +39,7 @@ void VirtioMmioGpu::on_queue_notify(uint32_t q_idx) {
     };
     auto notify_complete = [this]() { trigger_irq(); };
 
-    virtio::process_gpu_queue(q, dma_read, dma_write, notify_complete);
+    virtio::process_gpu_queue(q, gpu_state_, machine(), dma_read, dma_write, notify_complete);
 }
 
 }  // namespace simrv::device

@@ -116,10 +116,12 @@ struct CpuConfig {
     uint64_t startup_instruction_offset = 0;
     simrv::xlen::LatencyCycles host_interface_latency = 0;
     simrv::xlen::LatencyCycles host_interface_phase_period = 0;
+    simrv::xlen::LatencyCycles tohost_pair_fallback_cycles = 4;
     bool enable_forwarding = true;
     bool enable_instruction_prefetch = false;
     bool record_snapshots = false;
     bool divider_early_out = false;
+    bool tohost_requires_high_word = false;
     PipelineType pipeline_type = PipelineType::FiveStage;
     BranchPredictorConfig branch_predictor{};
 };

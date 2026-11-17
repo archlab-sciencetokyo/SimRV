@@ -1,0 +1,14 @@
+name: General feedback
+description: Ask a question or share your experience using SimRV
+title: "[feedback]: "
+body:
+  - type: textarea
+    attributes:
+      label: What would you like to share?
+      description: Ask a question, share feedback, or tell us about your experience.
+    validations: {required: true}
+  - type: textarea
+    attributes:
+      label: Helpful details (optional)
+      description: Add the SimRV version, what you were doing, or anything else that may help us understand.
+    validations: {required: false}

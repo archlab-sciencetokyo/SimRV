@@ -303,8 +303,8 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
             load_buildroot_mode ? "Enter Buildroot output folder:" : "Enter binary image filepath:",
             input,
             load_buildroot_mode
-                ? "e.g. linux-build/buildroot-output-rv64 or linux-images/rv64/buildroot-fpga"
-                : "e.g. img/hello.bin, linux-images/rv64/alpine-gui/opensbi-linux-payload.elf");
+                ? "e.g. linux-build/buildroot-output-rv64 or images/rv64/buildroot"
+                : "e.g. img/hello.bin, images/rv64/alpine-gui/opensbi-linux-payload.elf");
         content_rows.push_back("");
         content_rows.push_back(std::format("  {}[Tab] Complete path{}", kThemeMuted, "\033[0m"));
         append_completion_preview();
@@ -324,7 +324,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
             {{.key = "[Enter]", .action = "Load Image"}, {.key = "[Esc]", .action = "Cancel"}}));
     } else if (type == ModalType::LoadDiskImage) {
         build_text_input_rows(content_rows, "Enter disk image filepath:", input,
-                              "e.g. linux-images/rv64/alpine-gui/rootfs.img or rootfs.ext4");
+                              "e.g. images/rv64/alpine-gui/rootfs.img or rootfs.ext4");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
         append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));

@@ -401,13 +401,13 @@ panels; the minimum terminal height is 10 rows.
 Use the built-in subcommand to create a starter lesson template, then edit the generated text file as needed:
 
 ```bash
-simrv --create-mission lessons/my-lesson.mission
+simrv-tools mission create lessons/my-lesson.mission
 ```
 
 Check the mission structure before using it. The checker validates steps, speed settings, panel layouts, checkpoint labels, and prints a formatted step preview:
 
 ```bash
-simrv --check-mission lessons/my-lesson.mission
+simrv-tools mission check lessons/my-lesson.mission
 ```
 
 The creator asks for an optional learning target on each step, then prints a grouped lesson-flow

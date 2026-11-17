@@ -6,6 +6,7 @@
 
 #include "simrv/device/mmio/VirtioMmioDevice.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/device/virtio/VirtioGpuQueue.hpp"
 
 namespace simrv::device {
 
@@ -18,6 +19,7 @@ class VirtioMmioGpu : public VirtioMmioDevice {
     VirtioMmioGpu(simrv::xlen::PhysAddr base_address, uint32_t irq_num, core::Machine* machine);
 
    protected:
+    virtio::VirtioGpuState gpu_state_{};
     void on_queue_notify(uint32_t q_idx) override;
     auto read_device_config(simrv::memory::MmioOffset offset, std::size_t size)
         -> uint64_t override;

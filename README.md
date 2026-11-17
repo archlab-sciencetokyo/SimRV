@@ -137,15 +137,18 @@ SimRV can be extended at runtime without modifying or recompiling the simulator:
 Scaffold starter projects directly from the CLI:
 
 ```bash
-# Starter CPU/SoC model configuration
-simrv --scaffold-cpu-model my_core.cfg
+# Starter CPU model configuration
+simrv-tools scaffold cpu balanced my_core.cfg
 
 # Starter Custom Function Unit (CFU) plugin C project
-simrv --scaffold-cfu-plugin my_cfu ./my_cfu_plugin/
+simrv-tools scaffold cfu my_cfu ./my_cfu_plugin/
 
 # Starter external MMIO device plugin C project
-simrv --scaffold-device-plugin my_device ./my_device_plugin/
+simrv-tools scaffold device my_device ./my_device_plugin/
 ```
+
+To seed a device plugin from an MMIO node in a board DTB, run
+`simrv-tools scaffold device --from-dtb board.dtb [output-directory]` and select a node.
 
 See [Custom Extensions & CFU Plugins](https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extensions/) and [Extending CPU Presets & MMIO Platforms](https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extending-platforms/) for the full C ABI and configuration reference.
 

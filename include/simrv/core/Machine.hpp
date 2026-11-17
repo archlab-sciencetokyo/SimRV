@@ -324,7 +324,11 @@ class Machine final : public core::IInterruptController {
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Publish an HTIF register write, preserving split 32-bit writes on RV64.
-    void publish_tohost_write(uint64_t value, TohostWriteKind kind) noexcept;
+    void publish_tohost_write(uint64_t value, TohostWriteKind kind,
+                              uint32_t low_word_fallback_cycles = 4) noexcept;
+    [[nodiscard]] auto tohost_low_word_pending() const noexcept -> bool {
+        return tohost_low_word_pending_.load(std::memory_order_acquire);
+    }
     /// Stop the simulation loop.
     void stop(StopReason reason = StopReason::ExternalStop);
     /// Get current atomic execution state.

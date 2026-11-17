@@ -1,20 +1,20 @@
-name: Reproducibility failure
-description: Report a failure to reproduce release or experiment evidence
+name: Reproducibility problem
+description: Report when a published result or experiment cannot be reproduced
 title: "[repro]: "
 labels: ["reproducibility"]
 body:
   - type: textarea
     attributes:
-      label: Expected evidence
-      description: Name the release, table, figure, suite, or claim.
+      label: What result were you trying to reproduce?
+      description: Name the release, experiment, test suite, table, figure, or claim.
     validations: {required: true}
   - type: textarea
     attributes:
-      label: Command and result
-      description: Include the exact command, error, and relevant log excerpt.
+      label: What did you run, and what happened?
+      description: Share the command and the result or error. A short log excerpt can help.
     validations: {required: true}
   - type: textarea
     attributes:
-      label: Provenance
-      description: Attach evidence JSON or list SimRV revision, host, compiler, XLEN, MISA, VLEN, and dependency revisions.
-    validations: {required: true}
+      label: Setup and evidence
+      description: Attach an evidence file if available. Otherwise share the SimRV version, operating system, compiler, RV32 or RV64, enabled extensions, and dependency versions you know.
+    validations: {required: false}

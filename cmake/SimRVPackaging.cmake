@@ -38,14 +38,31 @@ install(
   COMPONENT Runtime)
 
 install(
-  TARGETS simrv-cpu-wizard simrv-parity simrv-benchmark
+  TARGETS simrv-config-wizard simrv-tools simrv-parity simrv-benchmark
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
-install(
-  CODE
-    "file(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
-     file(CREATE_LINK \"simrv-parity\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/simrv-tune\" SYMBOLIC)"
-  COMPONENT Tools)
+if(TARGET simrv-linux-builder)
+  install(
+    TARGETS simrv-linux-builder simrv-linux-builder-post-build
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Tools)
+  install(
+    FILES scripts/linux-versions.conf
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts
+    COMPONENT Tools)
+  install(
+    DIRECTORY scripts/templates/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts/templates
+    COMPONENT Tools)
+  install(
+    DIRECTORY scripts/linux/templates/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts/linux/templates
+    COMPONENT Tools)
+  install(
+    DIRECTORY configs/buildroot/simrv-buildroot/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/configs/buildroot/simrv-buildroot
+    COMPONENT Tools)
+endif()
 install(
   TARGETS simrv-act simrv-vector
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -57,33 +74,21 @@ install(
 # full project independently.
 add_custom_target(
   simrv-package-binaries
-  DEPENDS SimRV simrv-cpu-wizard simrv-parity simrv-benchmark simrv-act
-          simrv-vector)
-if(SIMRV_BUILD_PLUGINS)
-  set(_simrv_package_plugin_targets)
-  if(SIMRV_BUILD_RVCOMP_PLUGINS)
-    list(APPEND _simrv_package_plugin_targets simrv-mmc simrv-reset simrv-ethernet
-         simrv-rvcomp-uart simrv-rv98-keyboard)
-  endif()
-  if(SIMRV_BUILD_CFU_PLUGINS)
-    list(APPEND _simrv_package_plugin_targets simrv-cfu-provingground)
-  endif()
-  if(_simrv_package_plugin_targets)
-    add_dependencies(simrv-package-binaries ${_simrv_package_plugin_targets})
-  endif()
+  DEPENDS SimRV simrv-config-wizard simrv-tools simrv-parity simrv-benchmark
+          simrv-act simrv-vector)
+if(TARGET simrv-linux-builder)
+  add_dependencies(simrv-package-binaries simrv-linux-builder)
 endif()
-
-install(
-  FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl
-  COMPONENT Development)
-
 install(
   DIRECTORY configs/models/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/models
   COMPONENT Runtime
   FILES_MATCHING
   PATTERN "*.cfg")
+install(
+  FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl
+  COMPONENT Development)
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/SimRVBuildMetadata.json"
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV
@@ -116,8 +121,8 @@ install(
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
         COMPONENT Runtime)
 install(
-  FILES docs/man/simrv-cpu-wizard.1 docs/man/simrv-parity.1
-       docs/man/simrv-tune.1 docs/man/simrv-benchmark.1
+  FILES docs/man/simrv-tools.1 docs/man/simrv-config-wizard.1 docs/man/simrv-parity.1
+       docs/man/simrv-benchmark.1
   DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
   COMPONENT Tools)
 install(
@@ -184,7 +189,7 @@ set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
     "Explainable RISC-V simulator runtime for RV64 and RV32 guests.")
 set(CPACK_COMPONENT_TOOLS_DISPLAY_NAME "SimRV architecture and benchmarking tools")
 set(CPACK_COMPONENT_TOOLS_DESCRIPTION
-    "Optional CPU model, RTL parity, tuning, and benchmark measurement tools.")
+    "Optional configuration, Linux image building, and benchmark tools.")
 set(CPACK_COMPONENT_TESTS_DISPLAY_NAME "SimRV compliance test runners")
 set(CPACK_COMPONENT_TESTS_DESCRIPTION
     "Optional RISC-V architectural compliance test drivers (ACT4 and Vector).")

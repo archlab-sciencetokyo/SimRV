@@ -1059,7 +1059,9 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     const int source_width = static_cast<int>(machine_.framebuffer_width());
     const int source_height = static_cast<int>(machine_.framebuffer_height());
     constexpr int palette_side = 6;
-    constexpr int palette_size = palette_side * palette_side * palette_side;
+    constexpr int cube_size = palette_side * palette_side * palette_side;
+    constexpr int grayscale_size = 40;
+    constexpr int palette_size = cube_size + grayscale_size;
     const int cell_width = std::max(1, cell_width_px_);
     const int cell_height = std::max(1, cell_height_px_);
     // Fit the framebuffer to the panel's pixel rectangle, adapting to the terminal
@@ -1085,12 +1087,23 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         std::string header;
         header.reserve(palette_size * 20);
         for (int color = 0; color < palette_size; ++color) {
-            const int red = (color / (palette_side * palette_side)) % palette_side;
-            const int green = (color / palette_side) % palette_side;
-            const int blue = color % palette_side;
-            header +=
-                std::format("#{};2;{};{};{}", color, red * 100 / (palette_side - 1),
-                            green * 100 / (palette_side - 1), blue * 100 / (palette_side - 1));
+            int red = 0;
+            int green = 0;
+            int blue = 0;
+            if (color < cube_size) {
+                red = (color / (palette_side * palette_side)) % palette_side;
+                green = (color / palette_side) % palette_side;
+                blue = color % palette_side;
+                red = red * 100 / (palette_side - 1);
+                green = green * 100 / (palette_side - 1);
+                blue = blue * 100 / (palette_side - 1);
+            } else {
+                const int gray = (color - cube_size) * 100 / (grayscale_size - 1);
+                red = gray;
+                green = gray;
+                blue = gray;
+            }
+            header += std::format("#{};2;{};{};{}", color, red, green, blue);
         }
         return header;
     }();
@@ -1190,16 +1203,26 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         }
 
         auto get_sixel_color = [bpp](const uint8_t* p) -> uint8_t {
+            auto map_rgb = [](uint8_t r, uint8_t g, uint8_t b) -> uint8_t {
+                const auto [minimum, maximum] = std::minmax({r, g, b});
+                if (maximum - minimum <= 8) {
+                    const int gray = (static_cast<int>(r) * 30 + static_cast<int>(g) * 59 +
+                                      static_cast<int>(b) * 11 + 50) /
+                                     100;
+                    return static_cast<uint8_t>(cube_size +
+                                                (gray * (grayscale_size - 1) + 127) / 255);
+                }
+                return static_cast<uint8_t>((kColorLut[r] * palette_side * palette_side) +
+                                            (kColorLut[g] * palette_side) + kColorLut[b]);
+            };
             if (bpp == 2) {
                 const uint16_t v = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
                 const uint8_t r = static_cast<uint8_t>(((v >> 11) & 0x1f) * 255 / 31);
                 const uint8_t g = static_cast<uint8_t>(((v >> 5) & 0x3f) * 255 / 63);
                 const uint8_t b = static_cast<uint8_t>((v & 0x1f) * 255 / 31);
-                return static_cast<uint8_t>((kColorLut[r] * 36) + (kColorLut[g] * 6) +
-                                            kColorLut[b]);
+                return map_rgb(r, g, b);
             }
-            return static_cast<uint8_t>((kColorLut[p[2]] * 36) + (kColorLut[p[1]] * 6) +
-                                        kColorLut[p[0]]);
+            return map_rgb(p[2], p[1], p[0]);
         };
 
         std::array<const uint8_t*, 6> row_ptrs;
@@ -2914,6 +2937,15 @@ void Tui::write_guest_input(uint8_t byte) {
         return;
     }
 
+    // Terminals encode Enter as CR (and sometimes LF), both of which fall in the
+    // control-character range below. Handle them first so Enter becomes KEY_ENTER
+    // instead of Ctrl+M or Ctrl+J on guest keyboards.
+    if (byte == '\r' || byte == '\n') {
+        machine_.send_input_key(28 /* KEY_ENTER */, true);
+        machine_.send_input_key(28 /* KEY_ENTER */, false);
+        return;
+    }
+
     if (byte >= 1 && byte <= 26) {
         const auto [keycode, unused_shift] =
             ascii_to_linux_keycode_and_shift(static_cast<uint8_t>('a' + byte - 1));
@@ -2941,6 +2973,46 @@ void Tui::write_guest_input(uint8_t byte) {
         }
     }
 }
+
+namespace {
+
+auto forward_guest_vt_switch(core::Machine& machine, int function_key) -> void {
+    constexpr uint16_t kLeftCtrl = 29;
+    constexpr uint16_t kLeftAlt = 56;
+    uint16_t function_keycode = 0;
+    if (function_key >= 1 && function_key <= 10) {
+        function_keycode = static_cast<uint16_t>(58 + function_key);
+    } else if (function_key == 11) {
+        function_keycode = 87;
+    } else if (function_key == 12) {
+        function_keycode = 88;
+    }
+    if (function_keycode == 0) return;
+
+    machine.send_input_key(kLeftCtrl, true);
+    machine.send_input_key(kLeftAlt, true);
+    machine.send_input_key(function_keycode, true);
+    machine.send_input_key(function_keycode, false);
+    machine.send_input_key(kLeftAlt, false);
+    machine.send_input_key(kLeftCtrl, false);
+}
+
+auto guest_vt_switch_function_key(std::string_view sequence) -> int {
+    constexpr std::array<std::pair<std::string_view, int>, 24> kSequences{{
+        {"\033[1;7P", 1},  {"\033[1;7Q", 2},   {"\033[1;7R", 3},   {"\033[1;7S", 4},
+        {"\033[15;7~", 5}, {"\033[17;7~", 6},  {"\033[18;7~", 7},  {"\033[19;7~", 8},
+        {"\033[20;7~", 9}, {"\033[21;7~", 10}, {"\033[23;7~", 11}, {"\033[24;7~", 12},
+        {"\033OP", 1},     {"\033OQ", 2},      {"\033OR", 3},      {"\033OS", 4},
+        {"\033[15~", 5},   {"\033[17~", 6},    {"\033[18~", 7},    {"\033[19~", 8},
+        {"\033[20~", 9},   {"\033[21~", 10},   {"\033[23~", 11},   {"\033[24~", 12},
+    }};
+    for (const auto& [candidate, function_key] : kSequences) {
+        if (sequence == candidate) return function_key;
+    }
+    return 0;
+}
+
+}  // namespace
 
 auto Tui::is_page_visible(TuiRegPage page) const noexcept -> bool {
     if (!workbench_slots_.empty()) {
@@ -3630,10 +3702,15 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         return;
     }
     if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        if (focused_page() == TuiRegPage::DISPLAY) {
+            write_guest_input(byte == 0 ? '\r' : byte);
+            return;
+        }
         reset_scroll();
         return;
     }
-    if (key == simrv::tui::TuiKey::CtrlC && focused_page() == TuiRegPage::DISPLAY) {
+    if (key == simrv::tui::TuiKey::CtrlC &&
+        (focused_page() == TuiRegPage::DISPLAY || focused_page() == TuiRegPage::CONSOLE)) {
         write_guest_input(3);
         return;
     }
@@ -4486,6 +4563,14 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         render(true);
         return true;
+    }
+
+    if (focused_page() == TuiRegPage::DISPLAY) {
+        const int function_key = guest_vt_switch_function_key(esc_buf_);
+        if (function_key != 0) {
+            forward_guest_vt_switch(machine_, function_key);
+            return true;
+        }
     }
 
     struct winsize mouse_size{};

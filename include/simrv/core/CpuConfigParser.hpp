@@ -527,6 +527,17 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 }
                 continue;
             }
+            if (key == "tohost_requires_high_word") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.tohost_requires_high_word = *b;
+                }
+                continue;
+            }
+            if (key == "tohost_pair_fallback_cycles") {
+                config.pipeline.tohost_pair_fallback_cycles =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
             if (key == "mul_latency") {
                 config.pipeline.mul_latency =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
@@ -555,8 +566,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             if (key == "cycle_counter_start_delay") {
                 config.pipeline.cycle_counter_start_delay =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
             } else if (key == "startup_cycle_offset") {
                 config.pipeline.startup_cycle_offset = std::stoull(std::string(val_str));
+                continue;
             } else if (key == "startup_instruction_offset") {
                 config.pipeline.startup_instruction_offset = std::stoull(std::string(val_str));
                 continue;
@@ -568,6 +581,17 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             }
             if (key == "host_interface_phase_period") {
                 config.pipeline.host_interface_phase_period =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "tohost_requires_high_word") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.tohost_requires_high_word = *b;
+                }
+                continue;
+            }
+            if (key == "tohost_pair_fallback_cycles") {
+                config.pipeline.tohost_pair_fallback_cycles =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
                 continue;
             }
@@ -1125,6 +1149,12 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 if (const auto* entry = simrv::memory::find_bus_catalog_entry(value)) {
                     config.bus_protocol = entry->protocol;
                 }
+            } else if (key == "cpu_clock_hz") {
+                if (const auto parsed = detail::parse_scaled_u64(value))
+                    config.cpu_clock_hz = *parsed;
+            } else if (key == "timebase_hz") {
+                if (const auto parsed = detail::parse_scaled_u64(value))
+                    config.timebase_hz = *parsed;
             }
         } else if (section == Section::Bus) {
             if (key == "protocol" || key == "bus_protocol" || key == "type") {
@@ -1172,7 +1202,9 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 }
             }
         } else if (section == Section::Boot) {
-            if (const auto parsed = detail::parse_scaled_u64(value)) {
+            if (key == "bootargs") {
+                config.bootargs = std::string(value);
+            } else if (const auto parsed = detail::parse_scaled_u64(value)) {
                 if (key == "reset_pc" || key == "start_pc") {
                     if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
                     config.reset_pc =
@@ -1478,6 +1510,9 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     }
     out << "host_interface_latency = " << config.pipeline.host_interface_latency << "\n";
     out << "host_interface_phase_period = " << config.pipeline.host_interface_phase_period << "\n";
+    out << "tohost_requires_high_word = "
+        << (config.pipeline.tohost_requires_high_word ? "true" : "false") << "\n";
+    out << "tohost_pair_fallback_cycles = " << config.pipeline.tohost_pair_fallback_cycles << "\n";
     out << "csr_flush_penalty = " << config.pipeline.csr_flush_penalty << "\n";
     out << "fence_flush_penalty = " << config.pipeline.fence_flush_penalty << "\n";
     out << "\n";

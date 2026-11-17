@@ -33,11 +33,11 @@
 #include "simrv/device/pflash/PFlash.hpp"
 #include "simrv/device/virtio/HostAudioSink.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
-#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/device/virtio/VirtioRngQueue.hpp"
 #include "simrv/device/virtio/VirtioSoundBackend.hpp"
-#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/Bus.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/Scaffolding.hpp"
 
@@ -222,7 +222,7 @@ void test_external_input_plugin_translates_key_events() {
     simrv::core::SoCDeviceConfig config{};
     config.kind = simrv::core::SoCDeviceKind::CustomMmio;
     config.name = "keyboard";
-    config.compatible = "isct,rv98-keyboard";
+    config.compatible = "example,keyboard";
     config.base = simrv::xlen::PhysAddr{0x1d000000};
     config.size = 0x1000;
     machine_config.soc.devices.push_back(config);
@@ -732,6 +732,89 @@ void test_ring_buffer_ethernet_subword_and_net_bounds() {
     TEST_CHECK(popped == simrv::device::virtio::NetBackend::kMaxRxQueuePackets);
 }
 
+void test_ring_buffer_ethernet_dhcp_round_trip() {
+    simrv::core::Machine machine{};
+    constexpr std::array<uint8_t, 6> mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    simrv::device::RingBufferEthernetMmio eth(machine, "eth", simrv::xlen::PhysAddr{0x14000000},
+                                              0x4000, 2, simrv::xlen::PhysAddr{0x18000000}, 0x4000,
+                                              simrv::xlen::PhysAddr{0x1c000000}, 0x2000, mac,
+                                              simrv::device::virtio::NetBackend::Mode::User);
+    auto* csr = dynamic_cast<simrv::memory::MmioDevice*>(eth.csr_node());
+    auto* rx = dynamic_cast<simrv::memory::MmioDevice*>(eth.rx_node());
+    auto* tx = dynamic_cast<simrv::memory::MmioDevice*>(eth.tx_node());
+    TEST_CHECK(csr != nullptr && rx != nullptr && tx != nullptr);
+
+    constexpr std::size_t kIpOffset = 14;
+    constexpr std::size_t kUdpOffset = kIpOffset + 20;
+    constexpr std::size_t kBootpOffset = kUdpOffset + 8;
+    std::array<uint8_t, kBootpOffset + 244> discover{};
+    std::fill_n(discover.begin(), 6, uint8_t{0xFF});
+    std::copy(mac.begin(), mac.end(), discover.begin() + 6);
+    discover[12] = 0x08;
+    discover[13] = 0x00;
+    discover[kIpOffset] = 0x45;
+    discover[kIpOffset + 2] = 0x01;
+    discover[kIpOffset + 3] = 0x10;  // 20-byte IPv4 + 8-byte UDP + 244-byte BOOTP
+    discover[kIpOffset + 8] = 64;
+    discover[kIpOffset + 9] = 17;
+    std::fill(discover.begin() + static_cast<std::ptrdiff_t>(kIpOffset + 16),
+              discover.begin() + static_cast<std::ptrdiff_t>(kIpOffset + 20), 0xFF);
+    uint32_t checksum = 0;
+    for (std::size_t offset = kIpOffset; offset < kIpOffset + 20; offset += 2) {
+        checksum += (static_cast<uint32_t>(discover[offset]) << 8U) | discover[offset + 1];
+    }
+    while ((checksum >> 16U) != 0) checksum = (checksum & 0xFFFFU) + (checksum >> 16U);
+    const auto ip_checksum = static_cast<uint16_t>(~checksum);
+    discover[kIpOffset + 10] = static_cast<uint8_t>(ip_checksum >> 8U);
+    discover[kIpOffset + 11] = static_cast<uint8_t>(ip_checksum);
+    discover[kUdpOffset + 1] = 68;
+    discover[kUdpOffset + 2] = 0;
+    discover[kUdpOffset + 3] = 67;
+    discover[kUdpOffset + 4] = 0;
+    discover[kUdpOffset + 5] = 0xFC;
+    auto* bootp = discover.data() + kBootpOffset;
+    bootp[0] = 1;
+    bootp[1] = 1;
+    bootp[2] = 6;
+    bootp[4] = 0x12;
+    bootp[5] = 0x34;
+    bootp[6] = 0x56;
+    bootp[7] = 0x78;
+    bootp[10] = 0x80;
+    std::copy(mac.begin(), mac.end(), bootp + 28);
+    bootp[236] = 0x63;
+    bootp[237] = 0x82;
+    bootp[238] = 0x53;
+    bootp[239] = 0x63;
+    bootp[240] = 53;
+    bootp[241] = 1;
+    bootp[242] = 1;
+    bootp[243] = 255;
+
+    const auto aligned_size = (discover.size() + 3U) & ~std::size_t{3};
+    tx->write32(simrv::memory::MmioOffset{0}, static_cast<uint32_t>(discover.size()));
+    for (std::size_t offset = 0; offset < aligned_size; offset += 4) {
+        uint32_t word = 0;
+        for (std::size_t byte = 0; byte < 4 && offset + byte < discover.size(); ++byte) {
+            word |= static_cast<uint32_t>(discover[offset + byte]) << (byte * 8U);
+        }
+        tx->write32(simrv::memory::MmioOffset{static_cast<uint32_t>(offset + 4)}, word);
+    }
+    const auto tx_end = static_cast<uint32_t>(aligned_size + 4);
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+        csr->write8(simrv::memory::MmioOffset{24 + lane},
+                    static_cast<uint8_t>(tx_end >> (lane * 8U)));
+    }
+    TEST_CHECK(csr->read8(simrv::memory::MmioOffset{24}) == static_cast<uint8_t>(tx_end));
+    eth.poll_backend();
+
+    const auto rx_end = csr->read32(simrv::memory::MmioOffset{4});
+    TEST_CHECK(rx_end >= discover.size());
+    TEST_CHECK((rx->read32(simrv::memory::MmioOffset{12}) & 0xFFFFU) == 0x0008U);
+    const auto offer_type_word = rx->read32(simrv::memory::MmioOffset{284});
+    TEST_CHECK((offer_type_word & 0xFFU) == 2U);
+}
+
 void test_machine_reinitialize_and_reset_cleans_up_devices() {
     struct State {
         uint32_t reset_calls = 0;
@@ -1144,6 +1227,7 @@ int main() {
     test_scaffolding_and_formalized_configs();
     test_external_mmio_bounds_and_dma_overflow();
     test_ring_buffer_ethernet_subword_and_net_bounds();
+    test_ring_buffer_ethernet_dhcp_round_trip();
     test_machine_reinitialize_and_reset_cleans_up_devices();
     test_memory_safety_audit_and_cxx_profiles();
 #ifdef TEST_TIMER_PLUGIN_PATH

@@ -40,6 +40,8 @@ class RingBufferEthernetMmio final {
 
     auto read_csr(simrv::memory::MmioOffset offset) -> uint32_t;
     void write_csr(simrv::memory::MmioOffset offset, uint32_t value);
+    auto read_csr_lanes(simrv::memory::MmioOffset offset, uint32_t width) -> uint64_t;
+    void write_csr_lanes(simrv::memory::MmioOffset offset, uint64_t value, uint32_t width);
     auto read_buffer(bool tx, simrv::memory::MmioOffset offset, uint32_t width) -> uint64_t;
     void write_buffer(bool tx, simrv::memory::MmioOffset offset, uint64_t value, uint32_t width);
     void drain_tx();

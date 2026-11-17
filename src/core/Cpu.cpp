@@ -28,9 +28,6 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     if (e_icount == 0 && state_.minstret == 0 && clint_mmio.mcycle == 0) {
         e_icount = pipeline_sim.config.startup_instruction_offset;
         state_.minstret = pipeline_sim.config.startup_instruction_offset;
-        state_.minstret = pipeline_sim.config.startup_instruction_offset;
-        state_.minstret = pipeline_sim.config.startup_instruction_offset;
-        state_.minstret = pipeline_sim.config.startup_instruction_offset;
         clint_mmio.mcycle = pipeline_sim.config.startup_cycle_offset;
     }
     // BaseCache has bounded 16 KiB / 8-way backing, enough for the shipped FPGA profiles.
@@ -374,7 +371,7 @@ void CPU::evaluate_timer_interrupt() {
 void CPU::fast_forward_wfi(Machine& machine) {
     // mtime is shared by all harts. Advancing it from one hart's WFI is only sound
     // when no other hart can independently advance or observe the virtual deadline.
-    if (!machine.appmode_enabled() || machine.num_harts() != 1 || (state_.mip & state_.mie) != 0) {
+    if (machine.num_harts() != 1 || (state_.mip & state_.mie) != 0) {
         return;
     }
     auto& primary_clint = machine.primary_hart().clint_mmio;

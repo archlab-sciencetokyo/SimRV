@@ -20,13 +20,19 @@ int main() {
 
     constexpr int kXlen = SIMRV_XLEN;
     const auto root = simrv::test::resolve_repo_root();
-    const auto simrv_bin = simrv::test::resolve_simrv_binary(kXlen);
+    const char* tools_bin_env = std::getenv("SIMRV_TOOLS_BIN");
+    const auto tools_bin = tools_bin_env != nullptr
+        ? std::filesystem::path(tools_bin_env)
+        : root / std::format("build/rv{}-release/simrv-tools", kXlen);
     const auto hello_elf = simrv::test::find_example_elf("hello", kXlen);
     const auto arithmetic_elf = simrv::test::find_example_elf("arithmetic", kXlen);
     const auto traps_elf = simrv::test::find_example_elf("traps", kXlen);
 
     auto run = [&](const std::vector<std::string>& args) {
         return simrv::test::run_simrv(args, kXlen);
+    };
+    auto run_tools = [&](const std::vector<std::string>& args) {
+        return simrv::test::run_process(tools_bin, args);
     };
 
     // =========================================================================
@@ -40,8 +46,8 @@ int main() {
 
         auto res_isa = run({"--isa-info"});
         expect(res_isa.exit_code == 0_i);
-        expect(res_isa.stdout_output.contains("RV64GCBV") ||
-               res_isa.stdout_output.contains("RV32GCBV"));
+        expect(res_isa.stdout_output.contains("RVA23") ||
+               res_isa.stdout_output.contains("RVI20"));
     };
 
     "tier1: built-in third-party notices"_test = [&] {
@@ -81,26 +87,27 @@ int main() {
         expect(res.exit_code == 0_i);
     } | std::vector<int>{1, 2, 4};
 
-    "tier1: mission tools subcommand"_test = [&] {
+    "tier1: simrv-tools mission commands"_test = [&] {
         simrv::test::ScopedTempDir temp_dir("mission_e2e");
         auto mission_file = temp_dir.path() / "test_lesson.mission";
 
-        auto create_res = run({"--create-mission", mission_file.string()});
+        auto create_res = run_tools({"mission", "create", mission_file.string()});
         expect(create_res.exit_code == 0_i);
         expect(std::filesystem::is_regular_file(mission_file));
 
-        auto check_res = run({"--check-mission", mission_file.string()});
+        auto check_res = run_tools({"mission", "check", mission_file.string()});
         expect(check_res.exit_code == 0_i);
         expect(check_res.stdout_output.contains("Mission 'lesson'"));
         expect(check_res.stdout_output.contains("Observe Instruction Flow"));
     };
 
-    "tier1: uefi disk generator subcommand"_test = [&] {
+    "tier1: simrv-tools UEFI disk generator"_test = [&] {
         if (!hello_elf) return;
         simrv::test::ScopedTempDir temp_dir("disk_e2e");
         auto disk_file = temp_dir.path() / "esp.img";
 
-        auto res = run({"--create-disk", disk_file.string(), "-m", hello_elf->string()});
+        auto res = run_tools({"disk", "create", disk_file.string(), "--kernel",
+                              hello_elf->string()});
         expect(res.exit_code == 0_i);
         expect(std::filesystem::is_regular_file(disk_file));
         expect(std::filesystem::file_size(disk_file) >= 64 * 1024 * 1024);

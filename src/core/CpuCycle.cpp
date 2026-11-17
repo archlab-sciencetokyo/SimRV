@@ -982,16 +982,20 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 ctx.mem_rdata =
                     simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
                 if (funct5 == Funct5Amo::Cas) {
-                    const auto f3 = std::to_underlying(ctx.funct3);
-                    if (f3 == 0) {
-                        ctx.cas_matched =
-                            static_cast<uint8_t>(ctx.mem_rdata) == static_cast<uint8_t>(ctx.rrd);
-                    } else if (f3 == 1) {
-                        ctx.cas_matched =
-                            static_cast<uint16_t>(ctx.mem_rdata) == static_cast<uint16_t>(ctx.rrd);
-                    } else if (f3 == 2) {
-                        ctx.cas_matched =
-                            static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrd);
+                    if constexpr (simrv::xlen::kIsXLen64) {
+                        const auto f3 = std::to_underlying(ctx.funct3);
+                        if (f3 == 0) {
+                            ctx.cas_matched = static_cast<uint8_t>(ctx.mem_rdata) ==
+                                              static_cast<uint8_t>(ctx.rrd);
+                        } else if (f3 == 1) {
+                            ctx.cas_matched = static_cast<uint16_t>(ctx.mem_rdata) ==
+                                              static_cast<uint16_t>(ctx.rrd);
+                        } else if (f3 == 2) {
+                            ctx.cas_matched = static_cast<uint32_t>(ctx.mem_rdata) ==
+                                              static_cast<uint32_t>(ctx.rrd);
+                        } else {
+                            ctx.cas_matched = ctx.mem_rdata == ctx.rrd;
+                        }
                     } else {
                         ctx.cas_matched = (ctx.mem_rdata == ctx.rrd);
                     }
@@ -1086,9 +1090,14 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                                                       (ctx.mem_wdata & 0xFFFFFFFFULL))
                                                    : ctx.mem_wdata;
                         machine.publish_tohost_write(
-                            value, ctx.funct3 == Funct3::Sw && state_.regs.xlen != 32
+                            value,
+                            ctx.funct3 == Funct3::Sw && state_.regs.xlen != 32
+                                ? Machine::TohostWriteKind::LowWord
+                                : (ctx.funct3 == Funct3::Sw &&
+                                           pipeline_sim.config.tohost_requires_high_word
                                        ? Machine::TohostWriteKind::LowWord
-                                       : Machine::TohostWriteKind::Full);
+                                       : Machine::TohostWriteKind::Full),
+                            static_cast<uint32_t>(pipeline_sim.config.tohost_pair_fallback_cycles));
                     }
                 } else if (simrv::compiler::unlikely(ctx.funct3 == Funct3::Sw &&
                                                      (addr == machine.isa_test_tohost() + 4 ||

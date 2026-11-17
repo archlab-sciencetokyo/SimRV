@@ -79,7 +79,8 @@ class CoherenceHub {
     void invalidate_line_external(simrv::xlen::PhysAddr line_base);
 
     /// Register a clean line populated directly during machine startup prewarming.
-    void register_preloaded_line(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart);
+    void register_preloaded_line(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart,
+                                 MesiState initial_state = MesiState::Shared);
 
     [[nodiscard]] auto stats() const -> const CoherenceStats& { return stats_; }
     void reset_stats() { stats_ = {}; }

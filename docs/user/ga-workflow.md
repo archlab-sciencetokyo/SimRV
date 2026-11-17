@@ -33,7 +33,7 @@ framebuffer behavior is validated independently of terminal graphics rendering.
 ## Export a compatible SoC description
 
 ```bash
-simrv --dump-soc-manifest virt-pcie soc.json
+simrv config export-soc virt-pcie soc.json
 ```
 
 The manifest contains both `schema_version` and `manifest_version`. Consumers should reject an

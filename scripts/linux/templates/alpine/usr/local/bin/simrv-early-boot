@@ -1,0 +1,13 @@
+#!/bin/sh
+
+log() {
+    echo "[INIT] $*" > /dev/ttyS0
+}
+
+log "Setting hostname from /etc/hostname"
+if ! /bin/hostname -F /etc/hostname; then
+    log "ERROR: could not set the guest hostname"
+    exit 1
+fi
+
+log "Early setup complete; network setup will run in the background"

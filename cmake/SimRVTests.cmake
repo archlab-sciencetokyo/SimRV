@@ -80,6 +80,7 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-machine-config-tests tests/MachineConfigTests.cpp machine-config
     "gate;regress;core;config")
+  target_link_libraries(simrv-machine-config-tests PRIVATE simrv-tooling)
   simrv_add_runtime_test(simrv-gdb-stub-tests tests/GdbStubTests.cpp gdb-stub
                          "gate;regress;debug;thread")
   set_tests_properties(gdb-stub PROPERTIES TIMEOUT 30)
@@ -90,8 +91,7 @@ if(BUILD_TESTING)
                          "gate;regress;core;trace")
   simrv_add_runtime_test(
     simrv-rtl-parity-tests tests/ParityTests.cpp rtl-parity "gate;regress;trace;rtl"
-    src/rtl/ParityRegistry.cpp src/rtl/targets/RvcompTarget.cpp
-    src/rtl/targets/CfuPgTarget.cpp)
+    src/rtl/ParityRegistry.cpp)
   if(SIMRV_ENABLE_TSAN)
     set_property(
       TEST platform-integration
@@ -112,6 +112,10 @@ if(BUILD_TESTING)
   simrv_add_test_plugin(simrv-test-raw-cfu-plugin test-raw-cfu-plugin tests/TestRawCfuPlugin.c)
   simrv_add_test_plugin(simrv-test-mmc-plugin test-device-plugin tests/TestDevicePlugin.cpp)
   simrv_add_test_plugin(simrv-test-serial-plugin test-serial-plugin tests/TestSerialPlugin.cpp)
+  simrv_add_test_plugin(simrv-test-parity-plugin test-parity-plugin tests/TestParityPlugin.c)
+  target_compile_definitions(
+    simrv-rtl-parity-tests PRIVATE TEST_PARITY_PLUGIN_PATH="$<TARGET_FILE:simrv-test-parity-plugin>")
+  add_dependencies(simrv-rtl-parity-tests simrv-test-parity-plugin)
   simrv_add_test_plugin(simrv-demo-timer demo-timer examples/plugins/timer/timer_plugin.c)
   simrv_add_test_plugin(simrv-demo-dma-accel demo-dma-accel examples/plugins/dma_accel/dma_accel_plugin.c)
 
@@ -123,35 +127,28 @@ if(BUILD_TESTING)
     PRIVATE TEST_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-cfu-plugin>"
             TEST_LEGACY_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-legacy-cfu-plugin>"
             TEST_WIDE_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-wide-cfu-plugin>"
-            TEST_RAW_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-raw-cfu-plugin>")
+            TEST_RAW_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-raw-cfu-plugin>"
+            TEST_CFU_CONFIG_PATH="${PROJECT_SOURCE_DIR}/tests/fixtures/cfu-test.cfg")
   add_dependencies(simrv-cfu-integration-tests simrv-test-cfu-plugin simrv-test-raw-cfu-plugin simrv-test-legacy-cfu-plugin simrv-test-wide-cfu-plugin)
 
   simrv_add_runtime_test(simrv-microarchitecture-tests tests/MicroarchitectureTests.cpp microarchitecture
-                         "gate;regress;pipeline;rvcomp")
+                         "gate;regress;pipeline")
+  target_link_libraries(simrv-microarchitecture-tests PRIVATE simrv-tooling)
   simrv_add_runtime_test(simrv-device-plugin-tests tests/DevicePluginTests.cpp device-plugins
                          "gate;regress;device;plugin")
+  target_link_libraries(simrv-device-plugin-tests PRIVATE simrv-tooling)
   target_compile_definitions(simrv-device-plugin-tests PRIVATE
                              TEST_SERIAL_PLUGIN_PATH="$<TARGET_FILE:simrv-test-serial-plugin>"
                              TEST_LEGACY_DEVICE_PLUGIN_PATH="$<TARGET_FILE:simrv-test-legacy-device-plugin>"
                              TEST_TIMER_PLUGIN_PATH="$<TARGET_FILE:simrv-demo-timer>"
                              TEST_DMA_PLUGIN_PATH="$<TARGET_FILE:simrv-demo-dma-accel>")
   add_dependencies(simrv-device-plugin-tests simrv-test-serial-plugin simrv-demo-timer simrv-demo-dma-accel simrv-test-legacy-device-plugin)
-  if(TARGET simrv-rv98-keyboard)
-    target_compile_definitions(simrv-device-plugin-tests PRIVATE
-                               TEST_RV98_KEYBOARD_PLUGIN_PATH="$<TARGET_FILE:simrv-rv98-keyboard>")
-    add_dependencies(simrv-device-plugin-tests simrv-rv98-keyboard)
-  endif()
-  if(TARGET simrv-mmc)
-    add_dependencies(simrv-microarchitecture-tests simrv-mmc)
-  endif()
-  if(TARGET simrv-rvcomp-uart)
-    add_dependencies(simrv-microarchitecture-tests simrv-rvcomp-uart simrv-reset)
-    target_compile_definitions(simrv-microarchitecture-tests PRIVATE SIMRV_TEST_RVCOMP_UART=1)
-  endif()
 
   simrv_add_runtime_test(
     simrv-cpu-model-loader-tests tests/CpuModelLoaderTests.cpp cpu-model-loader
     "gate;regress;pipeline;model")
+  target_compile_definitions(simrv-cpu-model-loader-tests PRIVATE
+                             TEST_CFU_CONFIG_PATH="${PROJECT_SOURCE_DIR}/tests/fixtures/cfu-test.cfg")
 
   simrv_add_runtime_test(
     simrv-bus-protocol-tests tests/BusProtocolTests.cpp bus-protocol
@@ -245,6 +242,7 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(simrv-e2e-tests tests/E2ETests.cpp
                          e2e-suite "regress;e2e")
   set_tests_properties(e2e-suite PROPERTIES TIMEOUT 120)
+  set_tests_properties(e2e-suite PROPERTIES ENVIRONMENT "SIMRV_TOOLS_BIN=$<TARGET_FILE:simrv-tools>")
 
   # RVA23 Architectural Compatibility Tests (ACT4)
   if(SIMRV_XLEN STREQUAL "64")
@@ -622,7 +620,7 @@ if(BUILD_TESTING)
 
   add_executable(simrv-microbenchmarks tests/Microbenchmarks.cpp)
   set_property(GLOBAL APPEND PROPERTY SIMRV_NATIVE_TEST_TARGETS simrv-microbenchmarks)
-  target_link_libraries(simrv-microbenchmarks PRIVATE simrv-runtime)
+  target_link_libraries(simrv-microbenchmarks PRIVATE simrv-tooling)
   simrv_configure_native_test(simrv-microbenchmarks)
   target_include_directories(simrv-microbenchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   add_test(NAME microbenchmarks COMMAND simrv-microbenchmarks)
@@ -639,8 +637,6 @@ if(BUILD_TESTING)
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR} -D
       SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR}
-      -D SIMRV_BUILD_PLUGINS=${SIMRV_BUILD_PLUGINS}
-      -D SIMRV_BUILD_RVCOMP_PLUGINS=${SIMRV_BUILD_RVCOMP_PLUGINS}
       -D "CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       -D "CMAKE_CXX_FLAGS=${_consumer_cxx_flags}"
       -D "CMAKE_EXE_LINKER_FLAGS=${_consumer_exe_linker_flags}" -P

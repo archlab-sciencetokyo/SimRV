@@ -36,15 +36,11 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/util/BenchmarkRunner.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/HostCache.hpp"
-#include "simrv/util/MissionTools.hpp"
-#include "simrv/util/Scaffolding.hpp"
 #include "simrv/util/SoCManifest.hpp"
 #include "simrv/util/ThirdPartyNotices.hpp"
-#include "simrv/util/UefiDiskGenerator.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 using namespace simrv::util;
@@ -73,10 +69,6 @@ class UartTranscriptSink final : public simrv::core::IConsoleSink {
     std::ofstream stream_;
     std::shared_ptr<simrv::core::IConsoleSink> downstream_;
 };
-
-auto terminal_style(int fd, std::string_view code) -> std::string_view {
-    return simrv::util::terminal_color_enabled(fd) ? code : std::string_view{};
-}
 
 auto lifecycle_event_name(simrv::core::LifecycleEventKind kind) -> std::string_view {
     switch (kind) {
@@ -403,13 +395,26 @@ auto print_doctor() -> int {
         images_status = std::filesystem::is_directory(guest_images, ec)
                             ? std::format("{} (active)", guest_images)
                             : std::format("{} (not found)", guest_images);
-    } else if (std::filesystem::is_directory(
-                   std::format("linux-images/rv{}/alpine-gui", simrv::xlen::kXLenBits), ec)) {
-        images_status =
-            std::format("linux-images/rv{}/alpine-gui (auto-detected)", simrv::xlen::kXLenBits);
     } else {
-        images_status = std::format("(unset; defaults to linux-images/rv{}/alpine-gui)",
-                                    simrv::xlen::kXLenBits);
+        auto defaultImages = std::filesystem::path{"images"} /
+                             std::format("rv{}/alpine-gui", simrv::xlen::kXLenBits);
+        if (!std::filesystem::is_directory(defaultImages, ec)) {
+            const char* dataHome = std::getenv("XDG_DATA_HOME");
+            const char* home = std::getenv("HOME");
+            const auto userData =
+                dataHome != nullptr && *dataHome != '\0'
+                    ? std::filesystem::path{dataHome}
+                    : std::filesystem::path{home != nullptr && *home != '\0' ? home : "."} /
+                          ".local/share";
+            defaultImages =
+                userData / "SimRV/images" / std::format("rv{}/alpine-gui", simrv::xlen::kXLenBits);
+        }
+        if (std::filesystem::is_directory(defaultImages, ec)) {
+            images_status = std::format("{} (auto-detected)", defaultImages.string());
+        } else {
+            images_status =
+                std::format("(unset; defaults to images/rv{}/alpine-gui)", simrv::xlen::kXLenBits);
+        }
     }
 
     std::println("  guest build dir  : {}", build_status);
@@ -458,7 +463,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                    arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
                    arg == "--notices" || arg == "--third-party" || arg == "--check-mission" ||
                    arg == "--create-mission" || arg == "--create-disk" ||
-                   arg == "--dump-soc-manifest" || arg == "completion" || arg == "--completion") {
+                   arg == "completion" || arg == "--completion") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
             skip_banner = true;
@@ -523,43 +528,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::ShowThirdPartyNotices:
                 simrv::util::print_third_party_notices();
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
-            case CliAction::CheckMission: {
-                bool const ok =
-                    simrv::util::check_mission_file(parsed->options.fn_mission_check, true);
-                std::exit(
-                    simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
-                                                 : simrv::core::HostExitCode::ConfigurationError));
-            }
-            case CliAction::CreateMission: {
-                bool const ok =
-                    simrv::util::create_mission_scaffold(parsed->options.fn_mission_create);
-                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
-                                                       : simrv::core::HostExitCode::GeneralError));
-            }
-            case CliAction::CreateUefiDisk: {
-                std::string const kernel = !parsed->options.fn_uefi_disk_kernel.empty()
-                                               ? parsed->options.fn_uefi_disk_kernel
-                                               : parsed->options.fn_memimg;
-                std::string const rootfs = !parsed->options.fn_uefi_disk_rootfs.empty()
-                                               ? parsed->options.fn_uefi_disk_rootfs
-                                               : parsed->options.fn_dskimg;
-                if (parsed->options.fn_uefi_disk_out.empty() || kernel.empty()) {
-                    std::println(std::cerr,
-                                 "Error: --create-disk requires an output image and a kernel "
-                                 "payload (-m or --kernel)");
-                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::UsageError));
-                }
-                simrv::util::UefiDiskConfig disk_cfg{
-                    .output_image = parsed->options.fn_uefi_disk_out,
-                    .kernel_payload = kernel,
-                    .rootfs_payload = rootfs.empty() ? std::nullopt
-                                                     : std::optional{std::filesystem::path(rootfs)},
-                    .esp_size_mb = parsed->options.uefi_disk_size_mb,
-                };
-                bool const ok = simrv::util::generate_uefi_disk(disk_cfg);
-                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
-                                                       : simrv::core::HostExitCode::GeneralError));
-            }
             case CliAction::ExplainQuery: {
                 const auto query_type = parsed->options.explain_query_type;
                 const std::string_view query_type_name =
@@ -573,184 +541,63 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                                        : simrv::core::HostExitCode::UsageError));
             }
             case CliAction::DumpCpuModel: {
-                if (!simrv::util::scaffold_cpu_model(parsed->options.dump_cpu_model_preset,
-                                                     parsed->options.dump_cpu_model_output)) {
-                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
+                const std::string target = parsed->options.dump_cpu_model_target;
+                simrv::pipeline::CpuModelConfig model{};
+                const auto path = simrv::core::resolve_cpu_model_path(target);
+                bool loaded = false;
+                if (path) loaded = simrv::core::load_cpu_config(*path, model);
+                else if (std::filesystem::exists(target))
+                    loaded = simrv::core::load_cpu_config(target, model);
+                else if (const auto preset = simrv::pipeline::parse_cpu_model_preset(target)) {
+                    model = simrv::pipeline::make_cpu_model_preset(*preset);
+                    loaded = true;
+                }
+                if (!loaded) {
+                    simrv::log::error("Unknown CPU model preset or config: {}", target);
+                    std::exit(simrv::core::to_exit_code(
+                        simrv::core::HostExitCode::ConfigurationError));
+                }
+                if (!parsed->options.dump_cpu_model_output.empty() &&
+                    parsed->options.dump_cpu_model_output != "-") {
+                    if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, model,
+                                                      target)) {
+                        simrv::log::error("Failed to write CPU model config to {}",
+                                          parsed->options.dump_cpu_model_output);
+                        std::exit(simrv::core::to_exit_code(
+                            simrv::core::HostExitCode::GeneralError));
+                    }
+                    std::println("Wrote CPU model configuration to {}",
+                                 parsed->options.dump_cpu_model_output);
+                } else {
+                    simrv::core::serialize_cpu_config(model, std::cout, target);
                 }
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
             case CliAction::ExportSoCManifest: {
                 const auto target = parsed->options.soc_manifest_preset;
                 auto config = simrv::core::SoCConfig::preset(target);
-                if (!config.has_value()) {
-                    if (const auto resolved = simrv::core::resolve_cpu_model_path(target)) {
+                if (!config) {
+                    if (const auto path = simrv::core::resolve_cpu_model_path(target)) {
                         simrv::core::SoCConfig loaded{};
-                        if (simrv::core::load_soc_config(*resolved, loaded)) {
-                            config = loaded;
-                        }
+                        if (simrv::core::load_soc_config(*path, loaded)) config = loaded;
                     }
                 }
-                if (!config.has_value()) {
-                    simrv::log::error("Unknown SoC preset or invalid config file: {}", target);
-                    std::exit(
-                        simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
+                if (!config) {
+                    simrv::log::error("Unknown SoC preset or config file: {}", target);
+                    std::exit(simrv::core::to_exit_code(
+                        simrv::core::HostExitCode::ConfigurationError));
                 }
-                if (const auto valid = config->validate(); !valid) {
-                    simrv::log::error("Invalid SoC configuration '{}': {}", target, valid.error());
-                    std::exit(
-                        simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
-                }
-                if (parsed->options.soc_manifest_output.empty() ||
-                    parsed->options.soc_manifest_output == "-") {
-                    if (!simrv::util::serialize_soc_manifest(*config, std::cout)) {
-                        simrv::log::error("Failed to write SoC manifest");
-                        std::exit(
-                            simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
-                    }
-                } else if (!simrv::util::save_soc_manifest(parsed->options.soc_manifest_output,
-                                                           *config)) {
-                    simrv::log::error("Failed to write SoC manifest to {}",
-                                      parsed->options.soc_manifest_output);
+                const bool ok = parsed->options.soc_manifest_output.empty() ||
+                                parsed->options.soc_manifest_output == "-"
+                    ? simrv::util::serialize_soc_manifest(*config, std::cout)
+                    : simrv::util::save_soc_manifest(parsed->options.soc_manifest_output, *config);
+                if (!ok) {
+                    simrv::log::error("Failed to export SoC manifest for {}", target);
                     std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
-                } else {
+                }
+                if (!parsed->options.soc_manifest_output.empty() &&
+                    parsed->options.soc_manifest_output != "-")
                     std::println("Wrote SoC manifest to {}", parsed->options.soc_manifest_output);
-                }
-                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
-            }
-            case CliAction::ValidateCpuModel: {
-                std::string target = parsed->options.dump_cpu_model_preset;
-                if (target.empty()) {
-                    simrv::log::error("No configuration path or preset specified to validate.");
-                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::UsageError));
-                }
-                auto resolved = simrv::core::resolve_cpu_model_path(target);
-                std::string path_str = resolved.value_or(target);
-                simrv::pipeline::CpuModelConfig cfg{};
-                simrv::core::SoCConfig soc{};
-                bool has_cpu = false;
-                bool has_soc = false;
-
-                if (target == "-") {
-                    std::string const content((std::istreambuf_iterator<char>(std::cin)),
-                                              std::istreambuf_iterator<char>());
-                    std::istringstream stream_cpu{content};
-                    std::istringstream stream_soc{content};
-                    has_cpu = simrv::core::parse_cpu_config_stream(stream_cpu, cfg);
-                    has_soc = simrv::core::parse_soc_config_stream(stream_soc, soc);
-                    path_str = "<stdin>";
-                } else if (std::filesystem::exists(path_str)) {
-                    has_cpu = simrv::core::parse_cpu_config(path_str, cfg);
-                    has_soc = simrv::core::load_soc_config(path_str, soc);
-                } else if (auto soc_preset = simrv::core::SoCConfig::preset(target)) {
-                    soc = *soc_preset;
-                    has_soc = true;
-                    path_str = target + " (built-in SoC preset)";
-                } else if (auto cpu_preset = simrv::pipeline::parse_cpu_model_preset(target)) {
-                    cfg = simrv::pipeline::make_cpu_model_preset(*cpu_preset);
-                    has_cpu = true;
-                    path_str = target + " (built-in CPU preset)";
-                } else {
-                    std::println(std::cerr,
-                                 "{}[ERROR]{} Configuration file or preset not found: '{}'",
-                                 terminal_style(STDERR_FILENO, "\033[1;31m"),
-                                 terminal_style(STDERR_FILENO, "\033[0m"), target);
-                    std::exit(
-                        simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
-                }
-                if (!has_cpu && !has_soc) {
-                    std::println(std::cerr, "{}[INVALID]{} Syntax or parse error reading '{}'",
-                                 terminal_style(STDERR_FILENO, "\033[1;31m"),
-                                 terminal_style(STDERR_FILENO, "\033[0m"),
-                                 simrv::util::terminal_path_label(path_str, STDERR_FILENO));
-                    std::exit(
-                        simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
-                }
-                std::println("{}=== Validating Configuration: {} ==={}",
-                             terminal_style(STDOUT_FILENO, "\033[1;34m"),
-                             simrv::util::terminal_path_label(path_str, STDOUT_FILENO),
-                             terminal_style(STDOUT_FILENO, "\033[0m"));
-                if (has_cpu) {
-                    std::println("  Model Name      : {}",
-                                 cfg.name.empty() ? "(unnamed)" : cfg.name);
-                    std::println("  Description     : {}",
-                                 cfg.description.empty() ? "(none)" : cfg.description);
-                    std::println("  Required XLEN   : {}",
-                                 cfg.supported_xlen == 0 ? "Any (RV32 or RV64)"
-                                                         : std::format("RV{}", cfg.supported_xlen));
-                    std::println("  Simulator XLEN  : RV{}", simrv::xlen::kXLenBits);
-                    std::println("  MISA Profile    : {}", cfg.isa.canonical_string());
-                    std::println("  Pipeline Type   : {}",
-                                 simrv::pipeline::pipeline_type_name(cfg.pipeline.pipeline_type));
-                    std::println("  Branch Predictor: {}",
-                                 simrv::pipeline::to_string(cfg.pipeline.branch_predictor.type));
-                    std::println(
-                        "  ICache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
-                        cfg.instruction_cache.capacity_bytes / 1024,
-                        cfg.instruction_cache.line_bytes, cfg.instruction_cache.associativity,
-                        cfg.instruction_cache.hit_latency, cfg.instruction_cache.miss_latency);
-                    std::println(
-                        "  DCache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
-                        cfg.data_cache.capacity_bytes / 1024, cfg.data_cache.line_bytes,
-                        cfg.data_cache.associativity, cfg.data_cache.hit_latency,
-                        cfg.data_cache.miss_latency);
-
-                    auto res = cfg.validate();
-                    if (!res.has_value()) {
-                        std::println(std::cerr, "{}[INVALID]{} CPU model: {}",
-                                     terminal_style(STDERR_FILENO, "\033[1;31m"),
-                                     terminal_style(STDERR_FILENO, "\033[0m"), res.error());
-                        std::exit(simrv::core::to_exit_code(
-                            simrv::core::HostExitCode::ConfigurationError));
-                    }
-                }
-                if (has_soc) {
-                    std::println("  SoC Name        : {}", soc.name);
-                    std::println("  Device Policy   : {}",
-                                 soc.disable_unlisted_devices ? "explicit" : "implicit defaults");
-                    if (soc.dram_base.has_value() && soc.dram_size.has_value()) {
-                        std::println("  SoC DRAM Base   : {:#x} (size: {:#x})",
-                                     soc.dram_base->raw(), *soc.dram_size);
-                    }
-                    std::println("  SoC Devices     : {} configured", soc.devices.size());
-
-                    auto soc_res = soc.validate();
-                    if (!soc_res.has_value()) {
-                        std::println(std::cerr, "{}[INVALID]{} SoC configuration: {}",
-                                     terminal_style(STDERR_FILENO, "\033[1;31m"),
-                                     terminal_style(STDERR_FILENO, "\033[0m"), soc_res.error());
-                        std::exit(simrv::core::to_exit_code(
-                            simrv::core::HostExitCode::ConfigurationError));
-                    }
-                }
-                std::println(
-                    "{}[VALID]{} Configuration is fully valid and compatible with this simulator.",
-                    terminal_style(STDOUT_FILENO, "\033[1;32m"),
-                    terminal_style(STDOUT_FILENO, "\033[0m"));
-                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
-            }
-            case CliAction::ScaffoldDevicePlugin: {
-                if (!simrv::util::scaffold_device_plugin(
-                        parsed->options.scaffold_device_plugin_name,
-                        parsed->options.scaffold_device_plugin_output)) {
-                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
-                }
-                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
-            }
-            case CliAction::ScaffoldCfuPlugin: {
-                if (!simrv::util::scaffold_cfu_plugin(parsed->options.scaffold_cfu_plugin_name,
-                                                      parsed->options.scaffold_cfu_plugin_output)) {
-                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
-                }
-                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
-            }
-            case CliAction::RunBenchmark: {
-                const int code = simrv::util::run_benchmark(parsed->options);
-                std::exit(code);
-            }
-            case CliAction::GenerateCompletion: {
-                std::string const script =
-                    simrv::util::generate_shell_completion(parsed->options.completion_shell);
-                std::print("{}", script);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
             case CliAction::Run:
@@ -872,7 +719,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         // attempt raw mode at all.
         TerminalModeGuard terminal_mode;
         const bool owns_terminal = simrv::util::owns_interactive_terminal();
-        if (!sim_machine->tui_enabled() && owns_terminal && !terminal_mode.enable_raw_mode()) {
+        const bool forward_ctrl_c = sim_machine->uart_device() != nullptr;
+        if (!sim_machine->tui_enabled() && owns_terminal &&
+            !terminal_mode.enable_raw_mode(forward_ctrl_c)) {
             simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
         }
         if (sim_machine->tui_enabled()) {
