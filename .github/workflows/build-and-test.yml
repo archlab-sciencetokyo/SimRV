@@ -200,7 +200,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     container:
       image: fedora:44
       options: --security-opt seccomp=unconfined
@@ -211,7 +211,7 @@ jobs:
           - sanitizer: asan-ubsan
             preset: rv64-asan
             build_dir: /tmp/simrv-build/rv64-asan
-            build_jobs: 2
+            build_jobs: 3
             cmake_extra: -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
             ctest_label: regress
             needs_setarch: false
