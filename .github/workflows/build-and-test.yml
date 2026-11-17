@@ -212,7 +212,10 @@ jobs:
             preset: rv64-asan
             build_dir: /tmp/simrv-build/rv64-asan
             build_jobs: 3
-            cmake_extra: -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
+            cmake_extra: >-
+              -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
+              -DCMAKE_JOB_POOLS=simrv_link_pool=1
+              -DCMAKE_JOB_POOL_LINK=simrv_link_pool
             ctest_label: regress
             needs_setarch: false
           - sanitizer: tsan
