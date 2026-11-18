@@ -20,8 +20,8 @@ namespace {
 using CoherenceBlock = std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>;
 
 template <typename Cache>
-auto read_coherence_block(Cache& cache, simrv::xlen::PhysAddr block_base,
-                          CoherenceBlock& data, MesiState* block_state = nullptr) -> bool {
+auto read_coherence_block(Cache& cache, simrv::xlen::PhysAddr block_base, CoherenceBlock& data,
+                          MesiState* block_state = nullptr) -> bool {
     const auto line_bytes = cache.line_bytes();
     if (line_bytes == 0 || CoherenceHub::kLineBytes % line_bytes != 0) return false;
     for (uint32_t offset = 0; offset < CoherenceHub::kLineBytes; offset += line_bytes) {
@@ -584,11 +584,9 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
 
     if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
         if (l3_enabled_)
-            (void)write_coherence_block(l3_cache_, line_base, *release_data,
-                                        MesiState::Exclusive);
+            (void)write_coherence_block(l3_cache_, line_base, *release_data, MesiState::Exclusive);
         if (auto* l2 = l2_cache_for_hart(req.hart))
-            (void)write_coherence_block(l2->cache, line_base, *release_data,
-                                        MesiState::Exclusive);
+            (void)write_coherence_block(l2->cache, line_base, *release_data, MesiState::Exclusive);
         auto* dram_ptr = machine_.ram_data();
         const auto geometry = machine_.memory_geometry();
         if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
@@ -654,7 +652,15 @@ auto CoherenceHub::service_uncached_shared_cache(simrv::xlen::HartId hart,
     }
 
     if (l2 != nullptr) {
-        if (l3_enabled_ && l3_cache_.lookup_line(l3_line_base, line_buf, state)) {
+        if (l3_enabled_ && l2->cache.line_bytes() <= l3_cache_.line_bytes() &&
+            l3_cache_.lookup_line(l3_line_base, line_buf, state)) {
+            const auto l2_in_l3_offset =
+                static_cast<size_t>((l2_line_base.raw() - l3_line_base.raw()));
+            if (l2_in_l3_offset != 0 &&
+                l2_in_l3_offset + l2->cache.line_bytes() <= line_buf.size()) {
+                std::memmove(line_buf.data(), line_buf.data() + l2_in_l3_offset,
+                             l2->cache.line_bytes());
+            }
             l2->cache.write_line(l2_line_base, line_buf, MesiState::Exclusive);
             out_hit_latency = l2->config.miss_latency + topology_.l3.hit_latency - 1;
             return true;

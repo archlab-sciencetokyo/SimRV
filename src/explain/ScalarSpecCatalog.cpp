@@ -919,6 +919,68 @@ void populate_scalar_descriptions(OpDescTable& arr) {
     arr[HSV_W] = {"HSV.W", "Hypervisor Store Word. Stores a word to guest-physical memory."};
     arr[HSV_D] = {"HSV.D",
                   "Hypervisor Store Doubleword. Stores a doubleword to guest-physical memory."};
+
+    // Smrnmi & Hypervisor Svinval
+    arr[MNRET] = {"MNRET",
+                  "Machine Resumable NMI Return. Restores PC from mnepc, privilege mode from "
+                  "mnstatus.MNPP, and sets mnstatus.NMIE."};
+    arr[HINVAL_VVMA] = {"HINVAL.VVMA",
+                        "Hypervisor Invalidate Virtual-Address Translation. Fine-grained VS-stage "
+                        "TLB invalidation ordered between SFENCE.W.INVAL and SFENCE.INVAL.IR."};
+    arr[HINVAL_GVMA] = {
+        "HINVAL.GVMA",
+        "Hypervisor Invalidate Guest-Physical Translation. Fine-grained G-stage TLB "
+        "invalidation ordered between SFENCE.W.INVAL and SFENCE.INVAL.IR."};
+
+    // Scalar Cryptography (Zknd / Zkne / Zknh / Zksed / Zksh)
+    arr[AES32DSI] = {"AES32DSI", "AES Middle/Final Round Decryption (RV32, Zknd)."};
+    arr[AES32DSMI] = {"AES32DSMI", "AES Middle Round Decryption with MixColumns (RV32, Zknd)."};
+    arr[AES32ESI] = {"AES32ESI", "AES Final Round Encryption (RV32, Zkne)."};
+    arr[AES32ESMI] = {"AES32ESMI", "AES Middle Round Encryption (RV32, Zkne)."};
+    arr[AES64DS] = {"AES64DS", "AES Final Round Decryption (RV64, Zknd)."};
+    arr[AES64DSM] = {"AES64DSM", "AES Middle Round Decryption (RV64, Zknd)."};
+    arr[AES64ES] = {"AES64ES", "AES Final Round Encryption (RV64, Zkne)."};
+    arr[AES64ESM] = {"AES64ESM", "AES Middle Round Encryption (RV64, Zkne)."};
+    arr[AES64IM] = {"AES64IM", "AES Inverse MixColumns Transformation (RV64, Zknd)."};
+    arr[AES64KS1I] = {"AES64KS1I", "AES Key Schedule Generation Step 1 (RV64, Zkne/Zknd)."};
+    arr[AES64KS2] = {"AES64KS2", "AES Key Schedule Generation Step 2 (RV64, Zkne/Zknd)."};
+    arr[SHA256SIG0] = {"SHA256SIG0", "SHA-256 Sigma0 Transformation (Zknh)."};
+    arr[SHA256SIG1] = {"SHA256SIG1", "SHA-256 Sigma1 Transformation (Zknh)."};
+    arr[SHA256SUM0] = {"SHA256SUM0", "SHA-256 Sum0 Transformation (Zknh)."};
+    arr[SHA256SUM1] = {"SHA256SUM1", "SHA-256 Sum1 Transformation (Zknh)."};
+    arr[SHA512SIG0] = {"SHA512SIG0", "SHA-512 Sigma0 Transformation (RV64, Zknh)."};
+    arr[SHA512SIG1] = {"SHA512SIG1", "SHA-512 Sigma1 Transformation (RV64, Zknh)."};
+    arr[SHA512SUM0] = {"SHA512SUM0", "SHA-512 Sum0 Transformation (RV64, Zknh)."};
+    arr[SHA512SUM1] = {"SHA512SUM1", "SHA-512 Sum1 Transformation (RV64, Zknh)."};
+    arr[SHA512SIG0L] = {"SHA512SIG0L", "SHA-512 Sigma0 Low Half (RV32, Zknh)."};
+    arr[SHA512SIG0H] = {"SHA512SIG0H", "SHA-512 Sigma0 High Half (RV32, Zknh)."};
+    arr[SHA512SIG1L] = {"SHA512SIG1L", "SHA-512 Sigma1 Low Half (RV32, Zknh)."};
+    arr[SHA512SIG1H] = {"SHA512SIG1H", "SHA-512 Sigma1 High Half (RV32, Zknh)."};
+    arr[SHA512SUM0R] = {"SHA512SUM0R", "SHA-512 Sum0 Low Word (RV32, Zknh)."};
+    arr[SHA512SUM1R] = {"SHA512SUM1R", "SHA-512 Sum1 Low Word (RV32, Zknh)."};
+    arr[SM4ED] = {"SM4ED", "SM4 Block Cipher Encryption/Decryption Round Step (Zksed)."};
+    arr[SM4KS] = {"SM4KS", "SM4 Key Schedule Generation Step (Zksed)."};
+    arr[SM3P0] = {"SM3P0", "SM3 Permutation Function P0 (Zksh)."};
+    arr[SM3P1] = {"SM3P1", "SM3 Permutation Function P1 (Zksh)."};
+
+    // Zcmp / Zcmt (Code-Size Reduction)
+    arr[CM_PUSH] = {"CM.PUSH", "Create stack frame and push saved registers (Zcmp)."};
+    arr[CM_POP] = {"CM.POP", "Pop saved registers and deallocate stack frame (Zcmp)."};
+    arr[CM_POPRET] = {"CM.POPRET",
+                      "Pop saved registers, deallocate stack frame, and return (Zcmp)."};
+    arr[CM_POPRETZ] = {"CM.POPRETZ",
+                       "Pop saved registers, zero a0, deallocate frame, and return (Zcmp)."};
+    arr[CM_MVA01S] = {"CM.MVA01S", "Move two saved registers into a0 and a1 (Zcmp)."};
+    arr[CM_MVSA01] = {"CM.MVSA01", "Move a0 and a1 into two saved registers (Zcmp)."};
+    arr[CM_JT] = {"CM.JT", "Jump through jump-vector table without linking (Zcmt)."};
+    arr[CM_JALT] = {"CM.JALT", "Jump and link through jump-vector table (Zcmt)."};
+
+    // Zicfiss (Shadow Stack)
+    arr[SSPUSH] = {"SSPUSH", "Push return address onto shadow stack (Zicfiss)."};
+    arr[SSPOPCHK] = {"SSPOPCHK", "Pop and compare return address from shadow stack (Zicfiss)."};
+    arr[SSRDP] = {"SSRDP", "Read shadow stack pointer ssp into rd (Zicfiss)."};
+    arr[SSAMOSWAP_W] = {"SSAMOSWAP.W", "Atomic swap word in shadow stack memory (Zicfiss)."};
+    arr[SSAMOSWAP_D] = {"SSAMOSWAP.D", "Atomic swap doubleword in shadow stack memory (Zicfiss)."};
 }
 
 }  // namespace detail
@@ -1069,6 +1131,8 @@ auto get_spec_formula(OperationId op_id) -> std::string_view {
             return "t = CSRs[csr]; x[rd] = t; if (uimm != 0) CSRs[csr] = t & ~zext(uimm[4:0])";
         case MRET:
             return "PC = mepc; priv = mstatus.MPP; mstatus.MIE = mstatus.MPIE";
+        case MNRET:
+            return "PC = mnepc; priv = mnstatus.MNPP; mnstatus.NMIE = 1";
         case SRET:
             return "PC = sepc; priv = sstatus.SPP; sstatus.SIE = sstatus.SPIE";
         case HFENCE_VVMA:
@@ -1077,6 +1141,10 @@ auto get_spec_formula(OperationId op_id) -> std::string_view {
         case HFENCE_GVMA:
             return "order(prior_stores, later_g_stage_page_table_accesses); invalidate(gaddr, "
                    "vmid)";
+        case HINVAL_VVMA:
+            return "invalidate_vs_stage_tlb(vaddr = x[rs1], asid = x[rs2])";
+        case HINVAL_GVMA:
+            return "invalidate_g_stage_tlb(gaddr = x[rs1], vmid = x[rs2])";
         case URET:
             return "PC = uepc; priv = User";
         case WFI:
@@ -1137,6 +1205,15 @@ auto get_spec_formula(OperationId op_id) -> std::string_view {
             if (op_id >= FLW && op_id <= FCVT_D_LU) {
                 return "f[rd] / x[rd] = fp_op(rs1, rs2, rm)";
             }
+            if (op_id >= AES32DSI && op_id <= SM3P1) {
+                return "x[rd] = zk_crypto_op(x[rs1], x[rs2])";
+            }
+            if (op_id >= CM_PUSH && op_id <= CM_JALT) {
+                return "zcmp_zcmt_sequence()";
+            }
+            if (op_id >= SSPUSH && op_id <= SSAMOSWAP_D) {
+                return "shadow_stack_op(ssp, x[rs1], x[rs2])";
+            }
             if (isa::is_vector_op(op_id)) {
                 return "for i in 0..vl-1: vd[i] = vec_op(vs2[i], vs1/rs1/imm)";
             }
@@ -1151,12 +1228,14 @@ auto get_spec_section(std::string_view ext, OperationId op_id) -> SpecReference 
     std::string_view doc = kUnprivSpecDoc;
     std::string_view sec = "Vol. I: Ch. 1 (RV32I Base Integer Instruction Set)";
 
-    if (ext == "Privileged" || ext == "Svinval" || ext == "H") {
+    if (ext == "Privileged" || ext == "Svinval" || ext == "H" || ext == "Smrnmi") {
         doc = kPrivSpecDoc;
         if (op_id == SFENCE_VMA) {
             sec = "Vol. II: Ch. 11 (Supervisor-Level ISA: Supervisor Memory-Management Fence)";
         } else if (op_id >= SINVAL_VMA && op_id <= SFENCE_INVAL_IR) {
             sec = "Vol. II: Ch. 15 (Svinval Fine-Grained Address-Translation Cache Invalidation)";
+        } else if (ext == "Smrnmi") {
+            sec = "Vol. II: Ch. 17 (Smrnmi Resumable Non-Maskable Interrupts)";
         } else if (ext == "H") {
             sec = "Vol. II: Ch. 14 (H Extension for Hypervisor Support)";
         } else {
@@ -1181,8 +1260,8 @@ auto get_spec_section(std::string_view ext, OperationId op_id) -> SpecReference 
         sec = "Vol. I: Ch. 5 (Zicsr Control and Status Register Instructions)";
     } else if (ext == "RV32M" || ext == "RV64M" || ext == "M") {
         sec = "Vol. I: Ch. 11 (M Integer Multiplication and Division)";
-    } else if (ext == "RV32A" || ext == "RV64A" || ext == "A") {
-        sec = "Vol. I: Ch. 12 (A Atomic Instructions)";
+    } else if (ext == "RV32A" || ext == "RV64A" || ext == "A" || ext == "Zabha" || ext == "Zacas") {
+        sec = "Vol. I: Ch. 12 (A Atomic Instructions and Zacas/Zabha Extensions)";
     } else if (ext == "RV32F" || ext == "F") {
         sec = "Vol. I: Ch. 20 (F Single-Precision Floating-Point)";
     } else if (ext == "RV32D" || ext == "D") {
@@ -1203,13 +1282,19 @@ auto get_spec_section(std::string_view ext, OperationId op_id) -> SpecReference 
         sec = "Vol. I: Ch. 29 (B Standard Extension for Bit Manipulation)";
     } else if (ext == "Zbkb") {
         sec = "Vol. I: Ch. 29, Sec. 29.1.6 (Zbkb Bit-Manipulation for Cryptography)";
+    } else if (ext == "Zknd" || ext == "Zkne" || ext == "Zknh" || ext == "Zksed" || ext == "Zksh") {
+        sec = "Vol. I: Ch. 29 (Scalar Cryptography Extensions)";
+    } else if (ext == "Zcmp" || ext == "Zcmt") {
+        sec = "Vol. I: Ch. 27 (Zc* Code Size Reduction Extensions)";
+    } else if (ext == "Zicfiss") {
+        sec = "Vol. I: Ch. 28 (Control-Flow Integrity: Zicfiss Shadow Stack)";
     } else if (ext == "Zicond") {
         sec = "Vol. I: Ch. 10 (Zicond Integer Conditional Operations)";
     } else if (ext == "Zicbom/Zicboz/Zicbop") {
         sec = "Vol. I: Ch. 19 (CMO Cache-Block Management Operations)";
-    } else if (ext == "Vector") {
+    } else if (ext == "Vector" || ext == "Zvfbfmin" || ext == "Zvfbfwma") {
         sec = "Vol. I: Ch. 30 (V Standard Extension for Vector Operations)";
-    } else if (ext == "Zvbb" || ext == "Zvbc") {
+    } else if (ext == "Zvbb" || ext == "Zvbc" || ext == "Zvk") {
         sec = "Vol. I: Ch. 32 (Vector Cryptography and Bit-Manipulation Extensions)";
     } else if (ext == "Custom") {
         sec = "Vol. I: Extending RISC-V, custom-0 opcode space";
@@ -1254,6 +1339,9 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
                 return "RV32I";
         }
     }
+    if (op_id == MNRET) {
+        return "Smrnmi";
+    }
     if (op_id >= URET && op_id <= SFENCE_VMA) {
         return "Privileged";
     }
@@ -1285,7 +1373,7 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
     if (op_id == CZERO_EQZ || op_id == CZERO_NEZ) {
         return "Zicond";
     }
-    if (op_id >= CBO_INVAL && op_id <= PREFETCH_W) {
+    if (op_id >= CBO_ZERO && op_id <= PREFETCH_W) {
         return "Zicbom/Zicboz/Zicbop";
     }
     if (op_id >= MUL && op_id <= REMUW) {
@@ -1349,6 +1437,41 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
                 return "Zbb";
         }
     }
+    if (isa::is_zk_op(op_id)) {
+        switch (op_id) {
+            case AES32DSI:
+            case AES32DSMI:
+            case AES64DS:
+            case AES64DSM:
+            case AES64IM:
+                return "Zknd";
+            case AES32ESI:
+            case AES32ESMI:
+            case AES64ES:
+            case AES64ESM:
+                return "Zkne";
+            case AES64KS1I:
+            case AES64KS2:
+                return "Zknd";
+            case SM4ED:
+            case SM4KS:
+                return "Zksed";
+            case SM3P0:
+            case SM3P1:
+                return "Zksh";
+            default:
+                return "Zknh";
+        }
+    }
+    if (op_id >= CM_PUSH && op_id <= CM_MVSA01) {
+        return "Zcmp";
+    }
+    if (op_id == CM_JT || op_id == CM_JALT) {
+        return "Zcmt";
+    }
+    if (op_id >= SSPUSH && op_id <= SSAMOSWAP_D) {
+        return "Zicfiss";
+    }
     if (isa::is_vector_op(op_id)) {
         if (op_id == VCLMUL_VV || op_id == VCLMUL_VX || op_id == VCLMULH_VV ||
             op_id == VCLMULH_VX) {
@@ -1356,6 +1479,15 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
         }
         if ((op_id >= VANDN_VV && op_id <= VREV8_V) || (op_id >= VWSLL_VV && op_id <= VWSLL_VI)) {
             return "Zvbb";
+        }
+        if (op_id == VFWCVTBF16_F_F_V || op_id == VFNCVTBF16_F_F_W) {
+            return "Zvfbfmin";
+        }
+        if (op_id == VFWMACCBF16_VV || op_id == VFWMACCBF16_VF) {
+            return "Zvfbfwma";
+        }
+        if (isa::is_vector_crypto_op(op_id)) {
+            return "Zvk";
         }
         return "Vector";
     }

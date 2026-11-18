@@ -48,7 +48,8 @@ class PlatformDeviceRegistry final {
         }
         auto device = factory(machine, config);
         if (!device || (config.base != 0 && device->base_address() != config.base) ||
-            (config.size != 0 && device->size() != config.size)) return {};
+            (config.size != 0 && device->size() != config.size))
+            return {};
         return device;
     }
 

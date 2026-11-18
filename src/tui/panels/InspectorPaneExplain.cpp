@@ -135,9 +135,10 @@ auto render_field_decoded_values(const InstructionExplanation& expl, int width)
     }
     if (expl.control.has_value() &&
         (expl.format == InstFormat::B || expl.format == InstFormat::J)) {
-        rows.push_back(format_to_width(std::format("  target : 0x{:0{}x}", expl.control->target_pc.raw(),
-                                                   simrv::xlen::kXLenHexDigits),
-                                       width));
+        rows.push_back(
+            format_to_width(std::format("  target : 0x{:0{}x}", expl.control->target_pc.raw(),
+                                        simrv::xlen::kXLenHexDigits),
+                            width));
     }
     return rows;
 }
@@ -194,19 +195,20 @@ auto render_dataflow_breakdown(const InstructionExplanation& expl, int width)
                             width));
         if (mem.effective_paddr.has_value()) {
             rows.push_back(format_to_width(
-                std::format(
-                    "  {}Phys Address  : {}0x{:0{}x}\033[0m ({}-byte, {}, PMP: {})", kThemeText,
-                    kThemeVal, mem.effective_paddr->raw(), simrv::xlen::kXLenHexDigits, mem.access_bytes,
-                    mem.is_aligned ? "aligned" : "misaligned", mem.pmp_permitted ? "OK" : "FAULT"),
+                std::format("  {}Phys Address  : {}0x{:0{}x}\033[0m ({}-byte, {}, PMP: {})",
+                            kThemeText, kThemeVal, mem.effective_paddr->raw(),
+                            simrv::xlen::kXLenHexDigits, mem.access_bytes,
+                            mem.is_aligned ? "aligned" : "misaligned",
+                            mem.pmp_permitted ? "OK" : "FAULT"),
                 width));
         }
     }
     if (expl.control.has_value()) {
         const auto& ctrl = *expl.control;
-        rows.push_back(
-            format_to_width(std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText,
-                                        kThemeSky, ctrl.target_pc.raw(), simrv::xlen::kXLenHexDigits),
-                            width));
+        rows.push_back(format_to_width(
+            std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText, kThemeSky,
+                        ctrl.target_pc.raw(), simrv::xlen::kXLenHexDigits),
+            width));
         if (ctrl.is_conditional && !ctrl.condition_relation.empty()) {
             rows.push_back(format_to_width(std::format("  {}Branch Eval : {}{}\033[0m", kThemeText,
                                                        kThemeMint, ctrl.condition_relation),
@@ -312,8 +314,7 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& cpu = current_cpu();
     auto& st = cpu.state();
 
-    const simrv::xlen::VirtAddr target_pc =
-        (explain_pc_ != 0) ? explain_pc_ : st.pc;
+    const simrv::xlen::VirtAddr target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
 
     auto hex_addr = [](simrv::xlen::VirtAddr address) -> std::string {
         const auto v = address.raw();

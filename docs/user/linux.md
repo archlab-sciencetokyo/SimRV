@@ -19,7 +19,8 @@ Every build also publishes standalone `Image`, `opensbi-dynamic.bin`, `devicetre
 the standalone OpenSBI/Linux/DTB/rootfs set and supply the next-stage handoff.
 
 Pre-built images are grouped by architecture and profile under
-`images/<arch>/<rootfs>-<profile>/` (for example, `images/rv64/alpine-gui/`). The
+`images/<arch>/<rootfs>-<profile>/` (for example, `images/rv64/alpine-gui/`, or
+`images/rv64/buildroot/` when rootfs and profile match). The
 native `simrv-linux-builder` program automates building them from source. The historical
 `build-linux-image.sh` command remains as a compatibility launcher and passes options to that
 program.
@@ -149,7 +150,7 @@ make output.
 After building, export the image paths:
 
 ```bash
-source ./images/rv32/alpine-gui/setup.sh
+source ./images/rv64/alpine-gui/setup.sh
 ```
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.

@@ -3,6 +3,7 @@
  * @brief Native Boost.UT regression tests for release metadata, packaging, schemas, and catalogs.
  */
 #include <boost/ut.hpp>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <regex>
@@ -46,15 +47,35 @@ auto get_source_version(const fs::path& root) -> std::string {
 }
 
 auto artifact_contains_version(const std::string& artifact, const std::string& version) -> bool {
-    if (artifact.find(version) != std::string::npos) return true;
     const auto dash = version.find('-');
     if (dash != std::string::npos) {
+        if (artifact.find(version) != std::string::npos) return true;
         const auto base = version.substr(0, dash);
         const auto prerelease = version.substr(dash + 1);
         const auto deb_candidate = base + "~" + prerelease;
         const auto rpm_candidate = base + "-0." + prerelease;
         if (artifact.find(deb_candidate) != std::string::npos) return true;
         if (artifact.find(rpm_candidate) != std::string::npos) return true;
+        return false;
+    }
+    size_t pos = 0;
+    while ((pos = artifact.find(version, pos)) != std::string::npos) {
+        const bool left_ok =
+            pos == 0 || !std::isdigit(static_cast<unsigned char>(artifact[pos - 1]));
+        const size_t end = pos + version.size();
+        const bool right_ok =
+            end == artifact.size() ||
+            (artifact[end] != '~' &&
+             !(artifact[end] == '-' && end + 1 < artifact.size() &&
+               (artifact[end + 1] == '0' ||
+                std::isalpha(static_cast<unsigned char>(artifact[end + 1])))) &&
+             !std::isdigit(static_cast<unsigned char>(artifact[end])) &&
+             !(artifact[end] == '.' && end + 1 < artifact.size() &&
+               std::isdigit(static_cast<unsigned char>(artifact[end + 1]))));
+        if (left_ok && right_ok) {
+            return true;
+        }
+        pos = end;
     }
     return false;
 }
@@ -121,9 +142,9 @@ int main() {
             cmake_packaging.find("CPACK_COMPONENTS_ALL Runtime Tools Tests Development") !=
             std::string::npos);
         expect(cmake_packaging.find("SimRVBuildMetadata.json") != std::string::npos);
-        expect(cmake_packaging.find(R"(set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests"))") !=
+        expect(cmake_packaging.find(R"(set(CPACK_DEBIAN_TOOLS_PACKAGE_NAME "simrv-tools"))") !=
                std::string::npos);
-        expect(cmake_packaging.find(R"(set(CPACK_RPM_TESTS_PACKAGE_NAME "simrv-tests"))") !=
+        expect(cmake_packaging.find(R"(set(CPACK_RPM_TOOLS_PACKAGE_NAME "simrv-tools"))") !=
                std::string::npos);
         expect(cmake_packaging.find(R"(set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests"))") !=
                std::string::npos);
@@ -193,6 +214,14 @@ int main() {
         expect(artifact_contains_version("simrv_3.0.0~rc.19_amd64.deb", version));
         expect(artifact_contains_version("simrv-3.0.0-0.rc.19.x86_64.rpm", version));
         expect(!artifact_contains_version("simrv-3.0.0-0.beta.3.x86_64.rpm", version));
+
+        const std::string ga_version = "3.0.0";
+        expect(artifact_contains_version("SimRV-linux-x86_64-v3.0.0.tar.gz", ga_version));
+        expect(artifact_contains_version("simrv_3.0.0_amd64.deb", ga_version));
+        expect(artifact_contains_version("simrv-3.0.0-1.x86_64.rpm", ga_version));
+        expect(!artifact_contains_version("SimRV-v3.0.0-rc.20.tar.gz", ga_version));
+        expect(!artifact_contains_version("simrv_3.0.0~rc.20_amd64.deb", ga_version));
+        expect(!artifact_contains_version("simrv-3.0.0-0.rc.20.x86_64.rpm", ga_version));
     };
 
     "guest_capabilities_dts_templates"_test = [&] {

@@ -21,7 +21,8 @@ class ExecuteUnitInt {
    public:
     /// Execute integer ALU or M-extension operation.
     static auto aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2, isa::OperationId op_id,
-                       unsigned xlen = simrv::xlen::kXLenBits) -> simrv::xlen::Register;
+                       unsigned xlen = simrv::xlen::kXLenBits, uint32_t funct7 = 0)
+        -> simrv::xlen::Register;
 
     /// Execute RV64 W-class integer operations with 32-bit result semantics.
     static auto aluIntW(simrv::xlen::Register in1, simrv::xlen::Register in2,
@@ -29,7 +30,7 @@ class ExecuteUnitInt {
 
     /// Execute 32-bit integer arithmetic.
     static auto aluInt32(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                         isa::OperationId op_id) -> simrv::xlen::Register;
+                         isa::OperationId op_id, uint32_t funct7 = 0) -> simrv::xlen::Register;
 
     /// Evaluate branch condition and return taken flag.
     static auto branchTaken(simrv::xlen::Register in1, simrv::xlen::Register in2,

@@ -131,7 +131,7 @@ simrv -m program.elf
 | `--cpu-preset <preset>` | Select a built-in CPU model preset (`tiny`, `balanced`, `performance`). |
 | `simrv-config-wizard --validate <file|preset>` | Validate a CPU model or SoC platform configuration. |
 | `--isa <string>` | Select a supported base ISA preset; recognized ratified Z extensions may be listed with optional supported versions. |
-| `--pipeline <type>` | Pipeline microarchitecture target (`3stage`, `5stage`). |
+| `--pipeline <type>` | Pipeline microarchitecture target (`2stage`, `3stage`, `5stage`, `6stage-issue`, `6stage-fetch`, `6stage-mem`). |
 | `-H, --tohost-addr <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle, interrupt, and DMA events for automation. |
@@ -587,11 +587,8 @@ The `simrv-benchmark` suite measures simulation throughput (KIPS/MIPS), memory f
 # Run standard real-world benchmarks
 simrv-benchmark --suite realworld
 
-# Compare performance against Spike
-simrv-benchmark --suite realworld --spike $(which spike) --output results.json
-
-# Generate LaTeX performance comparison table
-simrv-benchmark --suite realworld --latex-table
+# Compare performance against Spike and export JSON metrics
+simrv-benchmark --suite realworld --spike "$(which spike)" --json results.json
 ```
 
 ---

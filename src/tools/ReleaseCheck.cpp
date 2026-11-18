@@ -3,6 +3,7 @@
  * @brief Native C++ release qualification and metadata verification utility for SimRV.
  */
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -57,17 +58,33 @@ auto source_version(const fs::path& root) -> std::string {
 }
 
 auto artifact_contains_version(const std::string& artifact, const std::string& version) -> bool {
-    if (artifact.find(version) != std::string::npos) return true;
     const auto dash = version.find('-');
     if (dash != std::string::npos) {
+        if (artifact.find(version) != std::string::npos) return true;
         const auto base = version.substr(0, dash);
         const auto prerelease = version.substr(dash + 1);
         const auto deb_candidate = base + "~" + prerelease;
         const auto rpm_candidate = base + "-0." + prerelease;
-        if (artifact.find(deb_candidate) != std::string::npos ||
-            artifact.find(rpm_candidate) != std::string::npos) {
+        return artifact.find(deb_candidate) != std::string::npos ||
+               artifact.find(rpm_candidate) != std::string::npos;
+    }
+    size_t pos = 0;
+    while ((pos = artifact.find(version, pos)) != std::string::npos) {
+        const bool left_ok =
+            pos == 0 || !std::isdigit(static_cast<unsigned char>(artifact[pos - 1]));
+        const size_t end = pos + version.size();
+        const bool right_ok = end == artifact.size() ||
+                              (artifact[end] != '~' &&
+                               !(artifact[end] == '-' && end + 1 < artifact.size() &&
+                                 (artifact[end + 1] == '0' ||
+                                  std::isalpha(static_cast<unsigned char>(artifact[end + 1])))) &&
+                               !std::isdigit(static_cast<unsigned char>(artifact[end])) &&
+                               !(artifact[end] == '.' && end + 1 < artifact.size() &&
+                                 std::isdigit(static_cast<unsigned char>(artifact[end + 1]))));
+        if (left_ok && right_ok) {
             return true;
         }
+        pos = end;
     }
     return false;
 }
@@ -87,10 +104,11 @@ auto run_cmd(const std::string& cmd) -> std::pair<int, std::string> {
     return {exit_code, result};
 }
 
-void verify_metadata(const fs::path& root) {
-    const auto manifest_path = root / "release/release-manifest.json";
+void verify_metadata(const fs::path& root, const fs::path& manifest_override) {
+    const auto manifest_path =
+        manifest_override.empty() ? (root / "release/release-manifest.json") : manifest_override;
     if (!fs::exists(manifest_path)) {
-        fail("missing release/release-manifest.json");
+        fail("missing release manifest: " + manifest_path.string());
     }
     const auto manifest = read_file_string(manifest_path);
     if (manifest.find(R"("schema_version": 2)") == std::string::npos &&
@@ -138,6 +156,9 @@ void verify_metadata(const fs::path& root) {
         if (!artifact_contains_version(art, version)) {
             fail("artifact does not match version: " + art);
         }
+        if (manifest.find(art) == std::string::npos) {
+            fail("manifest missing required artifact: " + art);
+        }
     }
 
     // Check package support
@@ -149,13 +170,17 @@ void verify_metadata(const fs::path& root) {
     }
 }
 
-void verify_binary(const fs::path& binary_path, const fs::path& guest_path) {
+void verify_binary(const fs::path& binary_path, const fs::path& guest_path,
+                   const std::string& version) {
     if (!fs::is_regular_file(binary_path)) {
         fail("simrv binary does not exist: " + binary_path.string());
     }
 
     auto [v_code, v_out] = run_cmd(binary_path.string() + " --version");
     if (v_code != 0) fail("binary --version failed:\n" + v_out);
+    if (v_out.find(version) == std::string::npos) {
+        fail("binary --version output does not match version " + version + ":\n" + v_out);
+    }
 
     auto [c_code, c_out] = run_cmd(binary_path.string() + " --isa-info");
     if (c_code != 0) fail("binary --isa-info failed:\n" + c_out);
@@ -188,6 +213,7 @@ void print_help(std::string_view prog) {
 auto main(int argc, char* argv[]) -> int {
     std::string_view prog = argc > 0 ? argv[0] : "simrv-release-check";
     fs::path root_dir;
+    fs::path manifest_path;
     fs::path guest_path;
     std::vector<fs::path> binaries;
 
@@ -204,6 +230,10 @@ auto main(int argc, char* argv[]) -> int {
             guest_path = argv[++i];
         } else if (arg.starts_with("--guest=")) {
             guest_path = arg.substr(8);
+        } else if (arg == "--manifest" && i + 1 < argc) {
+            manifest_path = argv[++i];
+        } else if (arg.starts_with("--manifest=")) {
+            manifest_path = arg.substr(11);
         } else if (arg == "--root" && i + 1 < argc) {
             root_dir = argv[++i];
         } else if (arg.starts_with("--root=")) {
@@ -215,10 +245,11 @@ auto main(int argc, char* argv[]) -> int {
         root_dir = find_project_root();
     }
 
-    verify_metadata(root_dir);
+    verify_metadata(root_dir, manifest_path);
 
+    const auto version = source_version(root_dir);
     for (const auto& binary : binaries) {
-        verify_binary(binary, guest_path);
+        verify_binary(binary, guest_path, version);
     }
 
     std::println("release-check: metadata and binary checks passed.");

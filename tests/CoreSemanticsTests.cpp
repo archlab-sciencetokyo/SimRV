@@ -5278,19 +5278,23 @@ namespace wave2 {
 namespace enc {
 
 // Track 2B: RV32 AES (Zkne / Zknd)
-[[maybe_unused]] inline auto aes32esi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs) -> uint32_t {
+[[maybe_unused]] inline auto aes32esi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs)
+    -> uint32_t {
     return ((bs & 3U) << 30U) | (0x11U << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) |
            ((rd & 0x1FU) << 7U) | 0x33U;
 }
-[[maybe_unused]] inline auto aes32esmi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs) -> uint32_t {
+[[maybe_unused]] inline auto aes32esmi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs)
+    -> uint32_t {
     return ((bs & 3U) << 30U) | (0x13U << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) |
            ((rd & 0x1FU) << 7U) | 0x33U;
 }
-[[maybe_unused]] inline auto aes32dsi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs) -> uint32_t {
+[[maybe_unused]] inline auto aes32dsi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs)
+    -> uint32_t {
     return ((bs & 3U) << 30U) | (0x15U << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) |
            ((rd & 0x1FU) << 7U) | 0x33U;
 }
-[[maybe_unused]] inline auto aes32dsmi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs) -> uint32_t {
+[[maybe_unused]] inline auto aes32dsmi(uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t bs)
+    -> uint32_t {
     return ((bs & 3U) << 30U) | (0x17U << 25U) | ((rs2 & 0x1FU) << 20U) | ((rs1 & 0x1FU) << 15U) |
            ((rd & 0x1FU) << 7U) | 0x33U;
 }
@@ -6696,6 +6700,160 @@ void test_wave2_tier4_real_world_scenarios() {
     }
 }
 
+void test_ga_audit_regressions() {
+    using namespace wave2;
+
+    // 1. Zfinx fast-path DecodeCache execution & fcsr access without dirtying mstatus.FS
+    {
+        Wave2TestEnv env;
+        auto& c = env.cpu();
+        c.state().misa &= ~(misa_extension_bit(simrv::isa::IsaExtension::F) |
+                            misa_extension_bit(simrv::isa::IsaExtension::D));
+        c.state().mstatus &= ~simrv::core::MstatusBit::Fs;
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zfinx);
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zdinx);
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zhinx);
+        c.state().refresh_misa_status();
+        c.sync_decode_context();
+        env.machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+
+        const uint32_t fadd_s_x12 =
+            (0x00U << 25U) | (11U << 20U) | (10U << 15U) | (0U << 12U) | (12U << 7U) | 0x53U;
+        const uint32_t csrrs_fcsr =
+            (0x003U << 20U) | (0U << 15U) | (2U << 12U) | (13U << 7U) | 0x73U;
+        const uint32_t csrrw_fcsr =
+            (0x003U << 20U) | (14U << 15U) | (1U << 12U) | (0U << 7U) | 0x73U;
+
+        c.state().regs.write(simrv::xlen::RegId::A0, 0x3FC00000U);  // 1.5f
+        c.state().regs.write(simrv::xlen::RegId::A1, 0x40100000U);  // 2.25f
+        // Execute twice at same PC so the second execution exercises the DecodeCache fast path.
+        expect(env.run_32(fadd_s_x12), "Zfinx fadd.s executes on first fetch");
+        expect((c.state().regs.read(simrv::xlen::RegId::A2) & 0xFFFFFFFFU) == 0x40700000U,
+               "Zfinx fadd.s first run writes 3.75f to GPR a2");
+        c.state().pc = simrv::xlen::VirtAddr{0x80001000ULL};
+        c.state().regs.write(simrv::xlen::RegId::A2, 0U);
+        c.run_cycle(env.machine);
+        expect(c.state().mcause == 0, "Zfinx fadd.s cached execution does not trap");
+        expect((c.state().regs.read(simrv::xlen::RegId::A2) & 0xFFFFFFFFU) == 0x40700000U,
+               "Zfinx fadd.s DecodeCache fast path writes result to GPR instead of bypassing FP");
+        expect((c.state().mstatus & simrv::core::MstatusBit::Fs) == 0,
+               "Zfinx execution keeps mstatus.FS clean/off");
+
+        c.state().regs.write(simrv::xlen::RegId::A4, 0x05U);
+        expect(env.run_32(csrrw_fcsr), "Zfinx allows fcsr write without F extension");
+        expect(env.run_32(csrrs_fcsr), "Zfinx allows fcsr read without F extension");
+        expect((c.state().regs.read(simrv::xlen::RegId::A3) & 0xFFU) == 0x05U,
+               "fcsr preserves written rounding/flag bits under Zfinx");
+        expect((c.state().mstatus & simrv::core::MstatusBit::Fs) == 0,
+               "fcsr writes under Zfinx do not dirty mstatus.FS");
+    }
+
+    // 2. Scalar crypto SM4ED with bs=2 in CycleAccurate pipeline matches detailed mode
+    {
+        Wave2TestEnv env;
+        auto& c = env.cpu();
+        const uint32_t ir_sm4 = enc::sm4ed(10, 11, 12, 2);
+        c.state().regs.write(simrv::xlen::RegId::A1, 0x01234567U);
+        c.state().regs.write(simrv::xlen::RegId::A2, 0x89ABCDEFU);
+        env.machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
+        expect(env.run_32(ir_sm4), "SM4ED bs=2 executes in detailed mode");
+        const auto expected_a0 = c.state().regs.read(simrv::xlen::RegId::A0);
+
+        env.machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        c.reset();
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zksed);
+        c.state().refresh_misa_status();
+        c.sync_decode_context();
+        c.state().pc = simrv::xlen::VirtAddr{0x80001000ULL};
+        c.state().regs.write(simrv::xlen::RegId::A1, 0x01234567U);
+        c.state().regs.write(simrv::xlen::RegId::A2, 0x89ABCDEFU);
+        const uint32_t nop = 0x00000013U;
+        std::memcpy(env.ram.data() + 0x1000U, &ir_sm4, sizeof(ir_sm4));
+        std::memcpy(env.ram.data() + 0x1004U, &nop, sizeof(nop));
+        c.decode_cache.flush();
+        const auto start_icount = c.e_icount;
+        for (uint32_t cycle = 0; cycle < 64 && c.e_icount == start_icount; ++cycle) {
+            c.run_cycle(env.machine);
+            env.machine.memory().system_bus().advance_cycle();
+        }
+        expect(c.e_icount > start_icount, "CycleAccurate retired SM4ED instruction");
+        expect(c.state().regs.read(simrv::xlen::RegId::A0) == expected_a0,
+               "CycleAccurate SM4ED forwards bs=2 from funct7 to ALU");
+    }
+
+    // 3. Zcmp CM.MVA01S rejects s2..s7 (r1s >= 2) under RV32E
+    {
+        Wave2TestEnv env;
+        auto& c = env.cpu();
+        c.state().misa =
+            simrv::isa::misa_with_mxl(misa_extension_bit(simrv::isa::IsaExtension::E) |
+                                          misa_extension_bit(simrv::isa::IsaExtension::C),
+                                      32);
+        c.state().enabled_extensions = {};
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zcmp);
+        c.state().refresh_misa_status();
+        c.state().initialize_lower_xlen_fields();
+        c.sync_decode_context();
+        env.machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
+        const bool ok = env.run_16(enc::cm_mva01s(2, 1));
+        expect(!ok && c.state().mcause ==
+                          static_cast<simrv::xlen::CsrValue>(ExceptionCode::IllegalInstruction),
+               "RV32E rejects cm.mva01s referencing s2 (x18 >= x16)");
+    }
+
+    // 4. Vector widening destinations (VWSLL.VV, VFWCVTBF16.F.F.V, VFWMACCBF16.VV) write back in
+    // pipeline
+    {
+        Wave2TestEnv env;
+        auto& c = env.cpu();
+        c.state().misa |= misa_extension_bit(simrv::isa::IsaExtension::F) |
+                          misa_extension_bit(simrv::isa::IsaExtension::V);
+        c.state().mstatus |= simrv::core::MstatusBit::Fs | simrv::core::MstatusBit::Vs;
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zvbb);
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zvfbfmin);
+        c.state().enabled_extensions.set(simrv::isa::MultiLetterExtension::Zvfbfwma);
+        c.state().refresh_misa_status();
+        c.sync_decode_context();
+        env.machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
+
+        auto& regs = c.state().regs;
+        auto& v1 = regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(1)));
+        auto& v2 = regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(2)));
+        auto& v4 = regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(4)));
+
+        // VWSLL.VV v4, v2, v1 (SEW=8 -> 16)
+        c.state().vtype = 0U;
+        c.state().vl = 1U;
+        v2.u8[0] = 0x81U;
+        v1.u8[0] = 0x01U;
+        v4.u16[0] = 0U;
+        const uint32_t ir_vwsll = (0x35U << 26U) | (1U << 25U) | (2U << 20U) | (1U << 15U) |
+                                  (0U << 12U) | (4U << 7U) | 0x57U;
+        expect(env.run_32(ir_vwsll), "VWSLL.VV retires cleanly");
+        expect(v4.u16[0] == 0x0102U, "VWSLL.VV writes widened 16-bit result into vd");
+
+        // VFWCVTBF16.F.F.V v4, v2 (BF16 1.5 -> FP32 1.5)
+        c.state().vtype = (1U << 3U);
+        c.state().vl = 1U;
+        v2.u16[0] = 0x3FC0U;
+        v4.u32[0] = 0U;
+        const uint32_t ir_bf16cvt = (0x12U << 26U) | (1U << 25U) | (2U << 20U) | (13U << 15U) |
+                                    (1U << 12U) | (4U << 7U) | 0x57U;
+        expect(env.run_32(ir_bf16cvt), "VFWCVTBF16.F.F.V retires cleanly");
+        expect(v4.u32[0] == 0x3FC00000U, "VFWCVTBF16.F.F.V writes widened FP32 element into vd");
+
+        // VFWMACCBF16.VV v4, v1, v2 (1.0 + 2.0 * 3.0 = 7.0f)
+        v1.u16[0] = 0x4000U;      // BF16 2.0
+        v2.u16[0] = 0x4040U;      // BF16 3.0
+        v4.u32[0] = 0x3F800000U;  // FP32 1.0
+        const uint32_t ir_bf16mac = (0x3BU << 26U) | (1U << 25U) | (2U << 20U) | (1U << 15U) |
+                                    (1U << 12U) | (4U << 7U) | 0x57U;
+        expect(env.run_32(ir_bf16mac), "VFWMACCBF16.VV retires cleanly");
+        expect(v4.u32[0] == 0x40E00000U,
+               "VFWMACCBF16.VV accumulates widened BF16 product into FP32 vd");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -6766,6 +6924,7 @@ int main() {
     test_wave2_tier1_vector_crypto();
     test_wave2_tier2_boundary_and_corner_cases();
     test_wave2_tier4_real_world_scenarios();
+    test_ga_audit_regressions();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "Core semantic tests passed\n";
     return EXIT_SUCCESS;

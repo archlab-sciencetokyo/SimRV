@@ -39,7 +39,7 @@ Browse the **[SimRV stable documentation](https://archlab-sciencetokyo.github.io
     </td>
     <td width="50%" valign="top">
       <h3><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architecture &amp; Compliance</a></h3>
-      <p>Core execution units, 3/5-stage pipelines, TileLink-C cache coherence, and ISA compliance scope.</p>
+      <p>Core execution units, 2/3/5/6-stage pipelines, TileLink-C cache coherence, and ISA compliance scope.</p>
       <ul>
         <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">System &amp; Pipeline Overview</a></li>
         <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/tilelink/">TileLink-C Coherence</a></li>
@@ -110,7 +110,7 @@ simrv -b -m hello.elf
 # Headless execution with an instruction limit
 simrv --cli -b -m hello.elf --steps 200000
 
-# Cycle-accurate 5-stage or 3-stage pipeline execution
+# Cycle-accurate pipeline execution (2stage, 3stage, 5stage, 6stage-issue, 6stage-fetch, 6stage-mem)
 simrv --cli -b -m hello.elf --mode cycle-accurate --pipeline 5stage
 simrv --cli -b -m hello.elf --mode cycle-accurate --pipeline 3stage
 
@@ -160,18 +160,17 @@ The TUI supports interactive stepping, breakpoints, live register/pipeline/cache
 
 | Hotkey | Action |
 | --- | --- |
-| `[s]` / `[Space]` | Single instruction step |
-| `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
+| `[F6]` / `[s]` / `[Space]` | Single instruction step |
+| `[F5]` / `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
 | `[o]` / `[Alt-O]` | Open Binary / Disk image loader modal |
-| `[,]` / `[Alt-S]` | Simulator Settings modal (mode, SMP, scheduler, diagnostics) |
-| `[Alt-M]` | Configure `misa` CSR modal (extensions & VLEN) |
-| `[y]` | Cycle-Accurate Microarchitecture & Cache Config modal |
-| `[i]` | Memory inspector modal |
-| `[m]` | Manage breakpoints and watchpoints |
-| `[l]` / `[r]` | Cycle subsystem inspector tab / register bank tab |
-| `[e]` / `[?]` | Toggle instruction explanation / open contextual glossary |
-| `[v]` / `[x]` | Toggle trace capture / export inspection report while paused |
-| `[Tab]` | Switch right pane (Guest Terminal / Log Buffer) |
+| `[F2]` / `[,]` / `[Alt-S]` | Simulator Settings modal (General, MISA, uArch) |
+| `[v]` | Toggle Precision (IA / CA) |
+| `[i]` / `[w]` | Inspect memory address / set watchpoint |
+| `[m]` / `[F8]` | Manage breakpoints & watchpoints / toggle PC breakpoint |
+| `[F3]` / `[F11]` | Cycle Register Pages / Cycle Tool Tabs |
+| `[e]` / `[?]` / `[F9]` | Instruction Explainer / open Glossary |
+| `[x]` / `[t]` | Export inspection report while paused / cycle Theme |
+| `[Tab]` / `[Ctrl-W]` | Change column focus / open Column Tool Picker |
 | `[F1]` / `[h]` / `[Esc]` | Help shortcuts / close active modal |
 
 ---
@@ -186,11 +185,11 @@ The TUI supports interactive stepping, breakpoints, live register/pipeline/cache
 | **M** | ✅ Supported | Integer multiplication, division, and remainder |
 | **A** | ✅ Supported | Atomic memory operations (`LR`/`SC`, `AMO` word/doubleword) |
 | **C** | ✅ Supported | Compressed 16-bit instruction decode and execution |
-| **F / D** | ⚠️ Qualification ongoing | Single/double precision and FP CSRs; RMM rounding remains a documented gap |
+| **F / D** | ✅ Supported | Single/double precision, FP CSRs, and RNE/RTZ/RDN/RUP/RMM rounding modes |
 | **V** | ⚠️ Partial | Substantial RVV 1.0 subset with configurable VLEN (32–1024 bits); see compliance scope |
 | **B** | ✅ Supported | Bit manipulation (`Zba`, `Zbb`, `Zbc`, `Zbs`) |
-| **Privileged** | ✅ Supported | Machine, Supervisor, User modes (`M`/`S`/`U`), CSRs, traps, PMP |
-| **Sv32 / Sv39 / Sv48** | ✅ Supported | Hardware MMU page table walker & TLB translation |
+| **Privileged** | ✅ Supported | Machine, Supervisor, User, and Hypervisor modes (`M`/`S`/`U`/`H`), CSRs, traps, PMP |
+| **Sv32 / Sv39** | ✅ Supported | Hardware MMU page table walker & TLB translation (plus Bare mode) |
 
 ---
 

@@ -1240,7 +1240,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
                          "\"instruction\":\"0x{:x}\",\"operation\":{},"
                          "\"register_file\":\"vector\",\"index\":{},"
-                         "\"before_bits\":{},\"after_bits\":{},\"vlen\":{},"
+                         "\"before_bits\":\"{}\",\"after_bits\":\"{}\",\"vlen\":{},"
                          "\"vl\":{},\"vtype\":\"0x{:x}\"}}",
                          hart_id.raw(), cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
                          static_cast<uint32_t>(retiring_context.ir),

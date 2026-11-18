@@ -25,7 +25,9 @@ namespace simrv::core {
     const auto csr = op.funct12();
     return csr == csr_addr(Csr::Cycle) || csr == csr_addr(Csr::Cycleh) ||
            csr == csr_addr(Csr::Mcycle) || csr == csr_addr(Csr::Mcycleh) ||
-           csr == csr_addr(Csr::Time) || csr == csr_addr(Csr::Timeh);
+           csr == csr_addr(Csr::Time) || csr == csr_addr(Csr::Timeh) ||
+           csr == csr_addr(Csr::Mcyclecfg) || csr == csr_addr(Csr::Mcyclecfgh) ||
+           csr == csr_addr(Csr::Mcountinhibit);
 }
 
 [[nodiscard]] constexpr auto is_cached_memory_access(const CachedOp& op) noexcept -> bool {

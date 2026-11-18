@@ -56,11 +56,11 @@ if(BUILD_TESTING)
     VERBATIM USES_TERMINAL)
 endif()
 
-if(SIMRV_ENABLE_TOOLING)
+if(SIMRV_ENABLE_TOOLING OR BUILD_TESTING)
   add_custom_target(
     release-check
-    COMMAND $<TARGET_FILE:simrv-release-tests>
-    DEPENDS simrv-release-tests
+    COMMAND $<TARGET_FILE:simrv-release-check> --binary $<TARGET_FILE:SimRV>
+    DEPENDS simrv-release-check SimRV
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Validating SimRV release metadata and binary"
     VERBATIM)

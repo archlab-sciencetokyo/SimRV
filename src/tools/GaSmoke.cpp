@@ -118,8 +118,8 @@ auto main(int argc, char* argv[]) -> int {
     fs::create_directories(temp_dir, ec);
     const fs::path manifest_path = temp_dir / "soc.json";
 
-    auto [m_code, m_out] = run_cmd(simrv_path.string() + " config export-soc virt-pcie " +
-                                   manifest_path.string());
+    auto [m_code, m_out] =
+        run_cmd(simrv_path.string() + " config export-soc virt-pcie " + manifest_path.string());
     if (m_code != 0) {
         std::println(std::cerr, "error: failed to dump SoC manifest:\n{}", m_out);
         fs::remove_all(temp_dir, ec);

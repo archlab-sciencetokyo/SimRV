@@ -26,6 +26,9 @@
         "portable_static": {"type": "array", "minItems": 1, "items": {"type": "string"}}
       }
     },
+    "guest_profiles": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "compliance_scope": {"type": "string"},
+    "optional_features": {"type": "array", "items": {"type": "string"}},
     "dependencies": {
       "type": "object",
       "additionalProperties": {

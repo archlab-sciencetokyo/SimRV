@@ -33,8 +33,7 @@ jobs:
               - '**'
               - '!docs/**'
               - '!zensical.yml'
-              - '!pyproject.toml'
-              - '!uv.lock'
+              - '!.github/requirements-docs.txt'
               - '!cmake/SimRVPackaging.cmake'
               - '!.github/workflows/build-and-test.yml'
               - '!.github/workflows/docs.yml'
@@ -62,9 +61,9 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             mapfile -t FILES < <(git diff --name-only --diff-filter=ACMR \
-              "${{ github.event.pull_request.base.sha }}...HEAD" -- '*.cpp' '*.hpp')
+              "${{ github.event.pull_request.base.sha }}...HEAD" -- '*.cpp' '*.hpp' ':(exclude)*/third_party/*' ':(exclude)tests/third_party/*')
           else
-            mapfile -t FILES < <(git ls-files -- 'include/**/*.hpp' 'src/**/*.cpp' 'src/**/*.hpp' 'tests/**/*.cpp' 'tests/**/*.hpp')
+            mapfile -t FILES < <(git ls-files -- 'include/**/*.hpp' 'include/*.hpp' 'src/**/*.cpp' 'src/**/*.hpp' 'tests/**/*.cpp' 'tests/**/*.hpp' ':(exclude)*/third_party/*' ':(exclude)tests/third_party/*')
           fi
           if (( ${#FILES[@]} )); then
             clang-format --dry-run --Werror "${FILES[@]}"

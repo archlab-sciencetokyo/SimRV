@@ -68,7 +68,7 @@ same `--vlen 128` setting to SimRV. Generated ACT4 ELFs, logs, and reports stay
 in `ACT_WORKDIR`, separate from disposable CMake build output; do not commit the
 generated binaries.
 
-The rc.19 workflow resolves the current upstream `act4` branch head when the run
+The release workflow resolves the current upstream `act4` branch head when the run
 starts and checks that it has not moved before and after qualification. The latest locally
 verified head is `1c3e9f2a89e103eeed0a3e6ba1bc699f100fd481` (2026-11-14). Its full
 RVA23S64 suite generated 3202 ELFs at VLEN=128 and passed **3202/3202**, with zero

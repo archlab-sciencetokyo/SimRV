@@ -886,18 +886,18 @@ consteval auto generate_operation_info() {
               ctrl_none, side_none);
 
     // Track 2C: Code-Size (Zcmp / Zcmt)
-    set_props({CM_PUSH}, exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
+    set_props({CM_PUSH}, exec_def, {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none},
               mem_store, ctrl_none, side_serial);
-    set_props({CM_POP}, exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
+    set_props({CM_POP}, exec_def, {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none},
               mem_load, ctrl_none, side_serial);
     set_props({CM_POPRET, CM_POPRETZ}, exec_def,
-              {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load, ctrl_jump,
+              {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_load, ctrl_jump,
               side_serial);
     set_props({CM_MVA01S, CM_MVSA01}, exec_def,
-              {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_none, ctrl_none,
-              side_none);
+              {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,
+              side_serial);
     set_props({CM_JT, CM_JALT}, exec_def,
-              {.rd = b_int, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_load, ctrl_jump,
+              {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_load, ctrl_jump,
               side_serial);
 
     for (std::size_t i = 0; i < isa::kOperationIdCount; ++i) {

@@ -40,7 +40,6 @@ void print_help(const char* prog) {
     std::println("  --isa <ISA>           Guest ISA string override (e.g. rv64gc, rv64gcv)");
     std::println("  --vlen <N>            Vector register length in bits");
     std::println("  --json <PATH>         Export benchmark metrics to JSON file");
-    std::println("  --timeout <SEC>       Execution timeout in seconds");
     std::println("\nComparison Mode:");
     std::println("  compare <A> <B>       Compare two benchmark JSON outputs and compute speedup");
     std::println("\nGeneral Options:");
@@ -58,8 +57,8 @@ auto extract_json_number(const std::string& key, const std::string& text) -> dou
     if (number_pos == std::string::npos) return 0.0;
 
     double value{};
-    const auto [end, error] = std::from_chars(text.data() + number_pos,
-                                              text.data() + text.size(), value);
+    const auto [end, error] =
+        std::from_chars(text.data() + number_pos, text.data() + text.size(), value);
     if (error != std::errc{} || end == text.data() + number_pos) return 0.0;
     return value;
 }

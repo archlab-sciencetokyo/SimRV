@@ -121,9 +121,7 @@ the reusable programs under [`examples/isa/`](https://github.com/archlab-science
 - Introduce memory operations: observe when memory accesses read or write guest state and how the
   bus activity panel reflects peripheral transactions.
 - Use `--inspection-output <path>` to capture machine state at key execution milestones;
-  students can submit these JSON snapshots as lab evidence. A reference script is provided in
-  `scripts/` to validate student inspection files against a golden run without relying on an ad-hoc
-  classroom command.
+  students can submit these JSON snapshots (validated against `schemas/inspection-report.schema.json`) as lab evidence.
 
 Guest programs can write to the 16550A UART to place prompts, intermediate values, or questions in
 the TUI virtual terminal. The [`uart-output.S`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/examples/isa/uart-output.S) example is a minimal

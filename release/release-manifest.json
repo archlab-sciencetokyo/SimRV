@@ -30,6 +30,7 @@
   },
   "guest_profiles": [
     "RVA23",
+    "RVB23",
     "RV32GCBV",
     "RV64GCBV"
   ],
@@ -46,8 +47,8 @@
       "redistribute": false
     },
     "act_tests": {
-      "url": "https://github.com/riscv-non-isa/riscv-arch-test.git",
-      "revision": "v3.0.0",
+      "url": "https://github.com/riscv/riscv-arch-test.git",
+      "revision": "1c3e9f2a89e103eeed0a3e6ba1bc699f100fd481",
       "license": "BSD-3-Clause",
       "redistribute": false
     },

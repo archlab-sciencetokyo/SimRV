@@ -117,8 +117,9 @@ sudo apt install ./simrv-deb/simrv_*_amd64.deb
 simrv --version
 ```
 
-The optional `simrv-devel` package provides the C++ SDK; the tools, tests, and plugins packages
-also depend on the matching `simrv` version. Install the needed `.deb` files with the same command.
+The optional `simrv-devel` package provides the C++ SDK; the `simrv-tools` and `simrv-tests`
+packages also depend on the matching `simrv` version. Install the needed `.deb` files with the
+same command.
 Upgrade from a newer bundle or remove packages with
 `sudo apt remove simrv simrv-devel simrv-tools simrv-tests`.
 

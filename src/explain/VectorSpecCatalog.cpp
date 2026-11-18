@@ -696,6 +696,22 @@ void populate_vector_descriptions(OpDescTable& arr) {
     arr[VSHA2MS_VV] = {"VSHA2MS.VV", "Vector SHA-2 Message Schedule (SEW=32/64, EGW=128/256)."};
     arr[VSHA2CH_VV] = {"VSHA2CH.VV", "Vector SHA-2 Two-Round Compression High (SEW=32/64)."};
     arr[VSHA2CL_VV] = {"VSHA2CL.VV", "Vector SHA-2 Two-Round Compression Low (SEW=32/64)."};
+    arr[VFWCVTBF16_F_F_V] = {
+        "VFWCVTBF16.F.F.V",
+        "Vector Widening Convert BF16 to FP32. Converts SEW=16 BF16 elements in vs2 to SEW=32 "
+        "single-precision elements in vd."};
+    arr[VFNCVTBF16_F_F_W] = {
+        "VFNCVTBF16.F.F.W",
+        "Vector Narrowing Convert FP32 to BF16. Rounds SEW=32 single-precision elements in vs2 "
+        "to SEW=16 BF16 elements in vd."};
+    arr[VFWMACCBF16_VV] = {
+        "VFWMACCBF16.VV",
+        "Vector Widening BF16 Multiply-Accumulate (Vector-Vector). Accumulates BF16 products "
+        "vs1 * vs2 into FP32 elements of vd."};
+    arr[VFWMACCBF16_VF] = {
+        "VFWMACCBF16.VF",
+        "Vector Widening BF16 Multiply-Accumulate (Vector-Scalar). Accumulates BF16 products "
+        "f[rs1] * vs2 into FP32 elements of vd."};
     arr[VSM3ME_VV] = {"VSM3ME.VV", "Vector SM3 Message Expansion (EGW=256)."};
     arr[VSM3C_VI] = {"VSM3C.VI", "Vector SM3 Two-Round Compression (EGW=256)."};
     arr[VSM4K_VI] = {"VSM4K.VI", "Vector SM4 Key Schedule Expansion (EGW=128)."};

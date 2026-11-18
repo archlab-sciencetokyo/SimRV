@@ -15,7 +15,7 @@
       "required": ["hart_count", "mode", "synchronization_quantum", "l3", "clusters"],
       "properties": {
         "hart_count": { "type": "integer", "minimum": 1, "maximum": 16 },
-        "mode": { "enum": ["cycle-accurate", "cycle-oriented"] },
+        "mode": { "enum": ["single-threaded", "multi-threaded"] },
         "synchronization_quantum": { "type": "integer", "minimum": 1 },
         "l3": { "$ref": "#/$defs/cache" },
         "clusters": {
@@ -145,7 +145,7 @@
         "enabled": { "type": "boolean" },
         "capacity_bytes": { "type": "integer", "minimum": 0 },
         "associativity": { "type": "integer", "minimum": 1 },
-        "line_bytes": { "const": 32 },
+        "line_bytes": { "type": "integer", "minimum": 16 },
         "hit_latency": { "type": "integer", "minimum": 1 },
         "miss_latency": { "type": "integer", "minimum": 1 }
       },

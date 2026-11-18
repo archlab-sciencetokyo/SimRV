@@ -169,8 +169,7 @@ auto CfuUnit::query_latency(uint32_t funct7, uint32_t funct3) const -> simrv::xl
             uint32_t lat = plugin_->query_latency(funct7, funct3);
             return lat > 0 ? lat : 1;
         }
-        if (plugin_->api_version >= SIMRV_CFU_PLUGIN_API_VERSION &&
-            plugin_->execute64 != nullptr) {
+        if (plugin_->api_version >= SIMRV_CFU_PLUGIN_API_VERSION && plugin_->execute64 != nullptr) {
             uint32_t latency = 1;
             plugin_->execute64(funct7, funct3, 0, 0, &latency);
             return latency > 0 ? latency : 1;

@@ -5181,6 +5181,76 @@ int main() {
     test_track2b_scalar_crypto_gating();
     std::cout << "[PASS] test_track2b_scalar_crypto_gating" << std::endl;
 
+    // 3.0.0 GA Audit Regressions: Hosted-RV32 CSR high-half preservation & Ssaia/Hvien access
+    {
+        using namespace simrv;
+        using namespace simrv::core;
+        using namespace simrv::isa;
+        using namespace simrv::xlen;
+
+        if constexpr (SIMRV_XLEN == 64) {
+            MachineConfig cfg{};
+            const auto spec = parse_isa_spec("rv32gc_smcntrpmf_sstc").value();
+            cfg.isa.misa_xlen = 32;
+            cfg.isa.isa_preset = spec.misa_bits;
+            cfg.isa.enabled_extensions = spec.extension_set;
+            cfg.isa.misa_override = true;
+            Machine machine(cfg);
+            auto& cpu = machine.primary_hart();
+            cpu.state().misa = misa_with_mxl(spec.misa_bits, 32);
+            cpu.state().enabled_extensions = spec.extension_set;
+            cpu.state().refresh_misa_status();
+            cpu.state().initialize_lower_xlen_fields();
+            cpu.state().priv = PrivilegeLevel::Machine;
+
+            TEST_ASSERT(cpu.csr_file.write(Csr::Menvcfgh, 1U << 31U).has_value());
+            TEST_ASSERT(cpu.csr_file.write(Csr::Menvcfg, 0xF0U).has_value());
+            const auto menvcfgh_rd = cpu.csr_file.read(Csr::Menvcfgh);
+            const auto menvcfg_rd = cpu.csr_file.read(Csr::Menvcfg);
+            TEST_ASSERT(menvcfgh_rd.has_value() && ((*menvcfgh_rd & (1U << 31U)) != 0));
+            TEST_ASSERT(menvcfg_rd.has_value() && ((*menvcfg_rd & 0xF0U) == 0xF0U));
+
+            TEST_ASSERT(cpu.csr_file.write(Csr::Mcyclecfgh, 1U << 30U).has_value());
+            TEST_ASSERT(cpu.csr_file.write(Csr::Mcyclecfg, 0U).has_value());
+            const auto mcyclecfgh_rd = cpu.csr_file.read(Csr::Mcyclecfgh);
+            TEST_ASSERT(mcyclecfgh_rd.has_value() && ((*mcyclecfgh_rd & (1U << 30U)) != 0));
+        }
+
+        {
+            MachineConfig cfg{};
+            const auto spec =
+                parse_isa_spec((SIMRV_XLEN == 64) ? "rv64imafdch_smaia_ssaia_smcsrind_sscsrind"
+                                                  : "rv32imafdch_smaia_ssaia_smcsrind_sscsrind")
+                    .value();
+            cfg.isa.isa_preset = spec.misa_bits;
+            cfg.isa.enabled_extensions = spec.extension_set;
+            cfg.isa.misa_override = true;
+            Machine machine(cfg);
+            auto& cpu = machine.primary_hart();
+            cpu.state().misa = misa_with_mxl(spec.misa_bits, SIMRV_XLEN);
+            cpu.state().enabled_extensions = spec.extension_set;
+            cpu.state().refresh_misa_status();
+            cpu.state().priv = PrivilegeLevel::Supervisor;
+            cpu.state().virt = false;
+            cpu.state().mstateen[0] = uint64_t{1} << 60U;  // CSRIND
+
+            TEST_ASSERT(!TrapController::check_csr_access(cpu.state(),
+                                                          CsrNumber{csr_addr(Csr::Siselect)}, true)
+                             .has_value());
+            TEST_ASSERT(!TrapController::check_csr_access(cpu.state(),
+                                                          CsrNumber{csr_addr(Csr::Stopi)}, false)
+                             .has_value());
+            TEST_ASSERT(!TrapController::check_csr_access(cpu.state(),
+                                                          CsrNumber{csr_addr(Csr::Hvien)}, true)
+                             .has_value());
+
+            cpu.state().virt = true;
+            TEST_ASSERT(TrapController::check_csr_access(cpu.state(),
+                                                         CsrNumber{csr_addr(Csr::Hvien)}, false) ==
+                        ExceptionCode::VirtualInstruction);
+        }
+    }
+
     std::cout << "\nAll RVA23 Profile unit tests passed successfully!\n";
     return simrv::test::failures() == 0 ? 0 : 1;
 }

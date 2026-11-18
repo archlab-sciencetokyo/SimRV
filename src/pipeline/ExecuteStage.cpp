@@ -97,6 +97,12 @@ void CPU::execute_core(Machine& machine) {
             case OperationId::CM_MVA01S: {
                 const uint32_t r1s = (ir16 >> 7U) & 7U;
                 const uint32_t r2s = (ir16 >> 2U) & 7U;
+                if (misa_has_extension(state_.misa, IsaExtension::E) && state_.regs.xlen == 32 &&
+                    (r1s >= 2U || r2s >= 2U)) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ir16;
+                    return;
+                }
                 const auto v1 = state_.regs.read(sreg_from_3bit(r1s));
                 const auto v2 = state_.regs.read(sreg_from_3bit(r2s));
                 state_.regs.write(simrv::xlen::RegId::A0, v1);
@@ -106,7 +112,8 @@ void CPU::execute_core(Machine& machine) {
             case OperationId::CM_MVSA01: {
                 const uint32_t r1s = (ir16 >> 7U) & 7U;
                 const uint32_t r2s = (ir16 >> 2U) & 7U;
-                if (r1s == r2s) {
+                if (r1s == r2s || (misa_has_extension(state_.misa, IsaExtension::E) &&
+                                   state_.regs.xlen == 32 && (r1s >= 2U || r2s >= 2U))) {
                     ctx.pending_exception = ExceptionCode::IllegalInstruction;
                     ctx.pending_tval = ir16;
                     return;
@@ -177,6 +184,10 @@ void CPU::execute_core(Machine& machine) {
                     const auto ra = state_.regs.read(simrv::xlen::RegId::Ra);
                     ctx.tkn = 1;
                     ctx.jmp_pc = simrv::xlen::VirtAddr{ra & ~static_cast<simrv::xlen::Register>(1)};
+                    if (state_.regs.xlen == 32) {
+                        ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+                            static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
+                    }
                 }
                 break;
             }
@@ -194,6 +205,10 @@ void CPU::execute_core(Machine& machine) {
                 }
                 ctx.tkn = 1;
                 ctx.jmp_pc = simrv::xlen::VirtAddr{target & ~static_cast<simrv::xlen::Register>(1)};
+                if (state_.regs.xlen == 32) {
+                    ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+                        static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
+                }
                 break;
             }
             default:
@@ -235,13 +250,13 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Op:
             ctx.tkn = false;
-            ctx.wb_data =
-                execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id, state_.regs.xlen);
+            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id,
+                                                       state_.regs.xlen, ctx.funct7);
             break;
         case Opcode::OpImm:
             ctx.tkn = false;
-            ctx.wb_data =
-                execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id, state_.regs.xlen);
+            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id,
+                                                       state_.regs.xlen, ctx.funct7);
             break;
         case Opcode::OpImm32:
             ctx.tkn = false;
@@ -655,9 +670,11 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 FpFmt src2_fmt = fmt;
                 FpFmt dst_fmt = fmt;
                 const bool rs1_is_int =
-                    (ctx.funct7 == 0x68 || ctx.funct7 == 0x69 || ctx.funct7 == 0x6A);
-                if (ctx.funct7 == 0x20 || ctx.funct7 == 0x21 || ctx.funct7 == 0x22) {
-                    // FCVT.<dst>.<src>
+                    (ctx.funct7 == 0x68 || ctx.funct7 == 0x69 || ctx.funct7 == 0x6A ||
+                     ctx.funct7 == 0x78 || ctx.funct7 == 0x79 || ctx.funct7 == 0x7A);
+                if ((ctx.funct7 == 0x20 || ctx.funct7 == 0x21 || ctx.funct7 == 0x22) &&
+                    rs2_idx <= 2U) {
+                    // FCVT.<dst>.<src> (exclude FROUND/FROUNDNX which encode rs2=4/5)
                     src1_fmt = (rs2_idx == 1U) ? FpFmt::Double
                                                : (rs2_idx == 2U ? FpFmt::Half : FpFmt::Single);
                 }

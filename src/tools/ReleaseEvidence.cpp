@@ -2,6 +2,8 @@
  * @file ReleaseEvidence.cpp
  * @brief Native C++ release qualification evidence collector for SimRV.
  */
+#include <sys/utsname.h>
+
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -14,6 +16,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "simrv/core/BuildInfo.hpp"
 
 namespace {
 
@@ -184,10 +188,26 @@ auto main(int argc, char* argv[]) -> int {
         root = fs::current_path();
     }
 
-    // Default release suites based on architecture and manifest
+    // Map manifest and gate suite IDs to their CTest labels.
+    auto resolve_suite_label = [](std::string_view id) -> std::string_view {
+        if (id == "native") return "regress";
+        if (id == "isa") return "isa";
+        if (id == "rva23-act") return "rva23";
+        if (id == "vector") return "vector";
+        if (id == "linux-pty") return "linux";
+        if (id == "asan-ubsan") return "regress";
+        if (id == "tsan") return "thread";
+        if (id == "package") return "package";
+        if (id == "release-suite") return "gate";
+        if (id == "simrv-release-tests") return "release";
+        return id;
+    };
+
     std::vector<std::pair<std::string, std::string>> suites;
-    if (arch == 64) {
-        suites = {{"release-suite", "gate"}, {"simrv-release-tests", "release"}};
+    if (!requested_suites.empty()) {
+        for (const auto& req : requested_suites) {
+            suites.emplace_back(req, std::string(resolve_suite_label(req)));
+        }
     } else {
         suites = {{"release-suite", "gate"}, {"simrv-release-tests", "release"}};
     }
@@ -199,16 +219,6 @@ auto main(int argc, char* argv[]) -> int {
     int total_unavailable = 0;
 
     for (const auto& [id, label] : suites) {
-        if (!requested_suites.empty()) {
-            bool found = false;
-            for (const auto& req : requested_suites) {
-                if (req == id) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) continue;
-        }
         auto res = run_ctest_suite(build_dir, id, label);
         total_passed += res.passed;
         total_failed += res.failed;
@@ -226,16 +236,38 @@ auto main(int argc, char* argv[]) -> int {
         return 1;
     }
 
+    struct utsname uts{};
+    const bool has_uname = (::uname(&uts) == 0);
+    const std::string_view host_system = has_uname ? std::string_view(uts.sysname) : "Linux";
+    const std::string_view host_machine = has_uname ? std::string_view(uts.machine) : "unknown";
+
     out << "{\n";
     out << "  \"schema_version\": 1,\n";
     out << "  \"simrv\": {\n";
-    out << "    \"version\": \"3.0.0-rc.19\",\n";
-    out << "    \"commit\": \"" << git_rev(root) << "\"\n";
+    out << "    \"version\": \"" << escape_json(simrv::buildinfo::kVersion) << "\",\n";
+    out << "    \"revision\": \"" << escape_json(git_rev(root)) << "\"\n";
     out << "  },\n";
-    out << "  \"configuration\": {\n";
-    out << "    \"arch\": " << arch << ",\n";
-    out << "    \"compiler\": \"" << compiler << "\"\n";
+    out << "  \"host\": {\n";
+    out << "    \"system\": \"" << escape_json(host_system) << "\",\n";
+    out << "    \"machine\": \"" << escape_json(host_machine) << "\"\n";
     out << "  },\n";
+    out << "  \"dependencies\": {";
+    if (!dependencies.empty()) {
+        out << "\n";
+        for (size_t i = 0; i < dependencies.size(); ++i) {
+            out << "    \"" << escape_json(dependencies[i].first) << "\": \""
+                << escape_json(dependencies[i].second) << "\""
+                << (i + 1 < dependencies.size() ? "," : "") << "\n";
+        }
+        out << "  ";
+    }
+    out << "},\n";
+    out << "  \"configurations\": [\n";
+    out << "    {\n";
+    out << "      \"arch\": " << arch << ",\n";
+    out << "      \"compiler\": \"" << escape_json(compiler) << "\"\n";
+    out << "    }\n";
+    out << "  ],\n";
     out << "  \"summary\": {\n";
     out << "    \"status\": \"" << summary_status << "\",\n";
     out << "    \"passed\": " << total_passed << ",\n";

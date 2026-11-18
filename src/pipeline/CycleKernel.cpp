@@ -81,8 +81,8 @@ const bool g_cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
 const bool g_branch_trace = std::getenv("SIMRV_BRANCH_TRACE") != nullptr;
 
 void trace_branch(const pipeline::PipelineContext& context,
-                  const simrv::pipeline::BranchPrediction& prediction,
-                  simrv::xlen::VirtAddr target, bool mispredict) {
+                  const simrv::pipeline::BranchPrediction& prediction, simrv::xlen::VirtAddr target,
+                  bool mispredict) {
     if (!g_branch_trace) return;
     std::println(stderr,
                  "BRTRACE pc={:08x} ir={:08x} taken={} target={:08x} pred_taken={} "
@@ -469,14 +469,14 @@ void CPU::run_ca_pipeline_cycle_impl(Machine& machine) {
                     switch (ctx.opcode) {
                         case isa::Opcode::OpImm:
                             ctx.tkn = false;
-                            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id,
-                                                                       state_.regs.xlen);
+                            ctx.wb_data = execute::ExecuteUnit::aluInt(
+                                ctx.rrs1, ctx.imm, ctx.op_id, state_.regs.xlen, ctx.funct7);
                             executed_fast = true;
                             break;
                         case isa::Opcode::Op:
                             ctx.tkn = false;
-                            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2,
-                                                                       ctx.op_id, state_.regs.xlen);
+                            ctx.wb_data = execute::ExecuteUnit::aluInt(
+                                ctx.rrs1, ctx.rrs2, ctx.op_id, state_.regs.xlen, ctx.funct7);
                             executed_fast = true;
                             break;
                         case isa::Opcode::OpImm32:

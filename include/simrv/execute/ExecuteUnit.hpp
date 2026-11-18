@@ -19,9 +19,9 @@ namespace simrv::execute {
 class ExecuteUnit {
    public:
     static inline auto aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                              isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits)
-        -> simrv::xlen::Register {
-        return ExecuteUnitInt::aluInt(in1, in2, op_id, xlen);
+                              isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits,
+                              uint32_t funct7 = 0) -> simrv::xlen::Register {
+        return ExecuteUnitInt::aluInt(in1, in2, op_id, xlen, funct7);
     }
 
     static inline auto aluIntW(simrv::xlen::Register in1, simrv::xlen::Register in2,
@@ -30,8 +30,9 @@ class ExecuteUnit {
     }
 
     static inline auto aluInt32(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                                isa::OperationId op_id) -> simrv::xlen::Register {
-        return ExecuteUnitInt::aluInt32(in1, in2, op_id);
+                                isa::OperationId op_id, uint32_t funct7 = 0)
+        -> simrv::xlen::Register {
+        return ExecuteUnitInt::aluInt32(in1, in2, op_id, funct7);
     }
 
     static inline auto branchTaken(simrv::xlen::Register in1, simrv::xlen::Register in2,

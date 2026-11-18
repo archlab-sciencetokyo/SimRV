@@ -1271,6 +1271,11 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     const auto eff_priv = cpu.effective_data_privilege();
     const unsigned active_xlen = cpu.effective_data_xlen();
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (active_xlen == 32) {
+            addr = simrv::xlen::VirtAddr{static_cast<uint32_t>(addr.raw())};
+        }
+    }
     addr = apply_user_pointer_mask(cpu, addr, active_xlen);
 
     // 1. Permission checks (M-mode menvcfg -> IllegalInstruction; H-mode henvcfg/VS senvcfg ->
@@ -1303,8 +1308,8 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         return;
     }
 
-    constexpr simrv::xlen::Address kLineSize = simrv::cache::DCache::kLineBytes;
-    const simrv::xlen::VirtAddr vaddr = addr & ~(kLineSize - 1u);
+    const simrv::xlen::Address line_size = cpu.dcache.line_bytes();
+    const simrv::xlen::VirtAddr vaddr = addr & ~(line_size - 1u);
     const simrv::xlen::Word active_satp = cpu.active_satp();
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
@@ -1366,25 +1371,25 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     // PMP verification
     const core::PmpAccessType pmp_access =
         op == isa::OperationId::CBO_ZERO ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-    if (!core::pmp::check_access(cpu.state(), paddr, kLineSize, pmp_access, eff_priv)) {
+    if (!core::pmp::check_access(cpu.state(), paddr, line_size, pmp_access, eff_priv)) {
         cpu.active_context().pending_exception = ExceptionCode::FaultStore;
         cpu.active_context().pending_tval = vaddr.raw();
         return;
     }
 
     const auto& geometry = mem.memory_geometry();
-    if (!geometry.contains(paddr, kLineSize)) {
+    if (!geometry.contains(paddr, line_size)) {
         cpu.active_context().pending_exception = ExceptionCode::FaultStore;
         cpu.active_context().pending_tval = vaddr.raw();
         return;
     }
 
-    std::array<simrv::xlen::Byte, kLineSize> dirty_line{};
+    std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> dirty_line{};
 
     if (op == isa::OperationId::CBO_ZERO) {
-        if (geometry.contains(paddr, kLineSize)) {
-            mem.reservation_table().invalidate_range(paddr, kLineSize, cpu.hart_id());
-            std::memset(cpu.machine_->ram_view().unchecked_ptr(paddr), 0, kLineSize);
+        if (geometry.contains(paddr, line_size)) {
+            mem.reservation_table().invalidate_range(paddr, line_size, cpu.hart_id());
+            std::memset(cpu.machine_->ram_view().unchecked_ptr(paddr), 0, line_size);
         }
         // The broadcast removes the directory entry. Drop our copy as well so it cannot
         // remain modified and untracked when another hart acquires the zeroed block.
@@ -1395,16 +1400,16 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         }
     } else if (op == isa::OperationId::CBO_CLEAN) {
         if (cpu.dcache.probe_line(paddr, simrv::memory::MesiState::Exclusive, &dirty_line)) {
-            if (geometry.contains(paddr, kLineSize)) {
+            if (geometry.contains(paddr, line_size)) {
                 std::memcpy(cpu.machine_->ram_view().unchecked_ptr(paddr), dirty_line.data(),
-                            kLineSize);
+                            line_size);
             }
         }
     } else if (op == isa::OperationId::CBO_FLUSH) {
         if (cpu.dcache.probe_line(paddr, simrv::memory::MesiState::Invalid, &dirty_line)) {
-            if (geometry.contains(paddr, kLineSize)) {
+            if (geometry.contains(paddr, line_size)) {
                 std::memcpy(cpu.machine_->ram_view().unchecked_ptr(paddr), dirty_line.data(),
-                            kLineSize);
+                            line_size);
             }
         }
     } else if (op == isa::OperationId::CBO_INVAL) {

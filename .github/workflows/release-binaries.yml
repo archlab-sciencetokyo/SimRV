@@ -735,7 +735,7 @@ jobs:
           test -f rpm-packages/repodata/repomd.xml
           grep -q 'type="primary"' rpm-packages/repodata/repomd.xml
           (cd deb-packages && dpkg-scanpackages . /dev/null > Packages)
-          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 5
+          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 4
           grep -q '^Package: simrv-devel$' deb-packages/Packages
           grep -q '^Filename: \./simrv' deb-packages/Packages
           grep -q '^Depends: simrv ' deb-packages/Packages
