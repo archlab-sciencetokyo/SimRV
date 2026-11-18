@@ -9,6 +9,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/ReservationTable.hpp"
 #include "simrv/xlen/Constants.hpp"
 
 namespace simrv::memory {
@@ -146,37 +147,41 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
     }
 
     const simrv::xlen::Word mode = simrv::xlen::satp_mode(satp, xlen);
-    int levels = 0;
-    if (xlen == 32 && mode == 1) {
-        levels = 2;
-        state.pte_size = 4;
-        state.vpn_bits_per_level = 10;
-    } else if (xlen == 64 && (mode == 8 || mode == 9 || mode == 10)) {
-        levels = mode == 8 ? 3 : (mode == 9 ? 4 : 5);
-        state.pte_size = 8;
-        state.vpn_bits_per_level = 9;
-    } else {
-        return state;
-    }
-    state.level = levels - 1;
-    const GuestPhysAddr root{
-        static_cast<simrv::xlen::Word>(simrv::xlen::satp_root_ppn(satp, xlen) << 12)};
-    state.satp_root = root.raw();
+    auto init_mode = [&]<SvModeSpec Spec>() {
+        state.pte_size = Spec.pte_bytes;
+        state.vpn_bits_per_level = Spec.vpn_bits;
+        state.level = Spec.levels - 1;
+        const GuestPhysAddr root{
+            static_cast<simrv::xlen::Word>(simrv::xlen::satp_root_ppn(satp, xlen) << 12)};
+        state.satp_root = root.raw();
 
-    if (!state.guest_stage_enabled && xlen == 64 && mode == 8) {
-        // Sv39 Page Directory Cache lookup: 2 MiB region (VPN[2..1], bits 38:21)
-        const simrv::xlen::Word vpn_prefix = (v_addr.raw() >> 21) & 0x3FFFFU;
-        const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
-        const auto& entry = pdc_[pdc_idx];
-        if (entry.epoch == pdc_epoch_ && entry.satp_root == state.satp_root &&
-            entry.vpn_prefix == vpn_prefix) {
-            state.level = entry.target_level;
-            select_next_pte(state, GuestPhysAddr{entry.table_address.raw()});
-            return state;
+        if constexpr (Spec.has_pdc) {
+            if (!state.guest_stage_enabled) {
+                // Sv39 Page Directory Cache lookup: 2 MiB region (VPN[2..1], bits 38:21)
+                const simrv::xlen::Word vpn_prefix = (v_addr.raw() >> 21) & 0x3FFFFU;
+                const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
+                const auto& entry = pdc_[pdc_idx];
+                if (entry.epoch == pdc_epoch_ && entry.satp_root == state.satp_root &&
+                    entry.vpn_prefix == vpn_prefix) {
+                    state.level = entry.target_level;
+                    select_next_pte(state, GuestPhysAddr{entry.table_address.raw()});
+                    return;
+                }
+            }
         }
-    }
 
-    select_next_pte(state, root);
+        select_next_pte(state, root);
+    };
+
+    if (xlen == 32 && mode == kSv32Spec.satp_mode) {
+        init_mode.template operator()<kSv32Spec>();
+    } else if (xlen == 64 && mode == kSv39Spec.satp_mode) {
+        init_mode.template operator()<kSv39Spec>();
+    } else if (xlen == 64 && mode == kSv48Spec.satp_mode) {
+        init_mode.template operator()<kSv48Spec>();
+    } else if (xlen == 64 && mode == kSv57Spec.satp_mode) {
+        init_mode.template operator()<kSv57Spec>();
+    }
     return state;
 }
 
@@ -546,6 +551,9 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
             const simrv::xlen::Word current = simrv::memory::host_read_fast(
                 pte_ptr, state.pte_size == 4 ? static_cast<simrv::xlen::Instruction>(Funct3::Lw)
                                              : static_cast<simrv::xlen::Instruction>(Funct3::Ld));
+            if (reservations_ != nullptr) {
+                reservations_->invalidate_range(state.pte_address, state.pte_size);
+            }
             simrv::memory::host_write_fast(pte_ptr, current | state.pte_update_mask, operation);
             accept_write(state);
         }

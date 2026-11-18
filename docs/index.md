@@ -14,7 +14,7 @@
 </section>
 
 <div class="simrv-badges" aria-label="Project status">
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="SimRV CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml/badge.svg?branch=dev" alt="Build and Test"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <a href="architecture/compliance/"><img src="https://img.shields.io/badge/profile-RVA23%20Target-blue.svg" alt="Profile RVA23 Target"/></a>
@@ -32,7 +32,7 @@
     Features inlined per-cycle transition kernels for **3-stage** and **5-stage** pipelines with an authoritative hardware register scoreboard (tracking INT, FP, and Vector dependencies), configurable branch predictors (Bimodal, GShare, Tournament), and multi-level L1/L2/L3 MESI directory cache coherence.
 
 === "Hardware RTL Parity"
-    Validated bit-for-bit against physical Verilog implementations (such as CFU-Proving-Ground RVProc and Archlab RVComp) through Verilator. SimRV matches cycle-by-cycle retirement traces and hardware performance counters.
+    Supports optional parity target plugins through a versioned C ABI, with editable platform models and trace comparison.
 
 === "Interactive TUI & Education"
     Interactive split-screen terminal monitor displaying live register files, pipeline stages, cache tags, hazard graphs, disassembly explainers, and an interactive Linux PTY console. Includes student guidance and instruction-level explanation.
@@ -98,9 +98,9 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
     ```bash
     # Boot Linux with its supplied device tree
     ./build/rv64-release/simrv --cli \
-      -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
-      --dtb linux-images/rv64/alpine-gui/devicetree.dtb \
-      -D linux-images/rv64/alpine-gui/rootfs.img \
+      -m images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      --dtb images/rv64/alpine-gui/devicetree.dtb \
+      -D images/rv64/alpine-gui/rootfs.img \
       -s 20000000
     ```
 
@@ -140,14 +140,6 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 
 ## Citation
 
-If you use SimRV in your academic research, please cite:
-
-```bibtex
-@software{simrv,
-  title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
-  author = {{SimRV Contributors}},
-  url = {https://github.com/archlab-sciencetokyo/SimRV},
-  note = {Cite the exact tagged release used for the experiment},
-  year = {2026}
-}
-```
+If you use SimRV in academic work, use GitHub’s **Cite this repository** option to generate a
+citation from [`CITATION.cff`](https://github.com/archlab-sciencetokyo/SimRV/blob/main/CITATION.cff).
+Cite the exact release tag used for your work so readers can identify the version.

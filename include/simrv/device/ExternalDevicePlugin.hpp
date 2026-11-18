@@ -81,7 +81,7 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
 /**
  * @brief Resolves a logical plugin name or path into an absolute file path.
  * Searches current directory, plugins/, executable directory, and SIMRV_PLUGIN_PATH.
- * @param name_or_path Logical name (e.g. "mmc", "rvcomp-mmc") or filename/path.
+ * @param name_or_path Logical name (e.g. "mmc", "example-mmc") or filename/path.
  * @return Resolved absolute filesystem path if found, or std::nullopt.
  */
 auto resolve_device_plugin_path(std::string_view name_or_path) -> std::optional<std::string>;
@@ -89,7 +89,7 @@ auto resolve_device_plugin_path(std::string_view name_or_path) -> std::optional<
 /**
  * @brief Auto-discovers and loads an external device plugin matching a DeviceTree compatible
  * string.
- * @param compatible DeviceTree compatible property (e.g. "isct,rvcomp-mmc").
+ * @param compatible DeviceTree compatible property (e.g. "example,mmc").
  * @param default_args Default argument string to pass to the plugin if initialized.
  * @param registry PlatformDeviceRegistry to register the loaded device with.
  * @return True if a matching plugin was found and loaded.

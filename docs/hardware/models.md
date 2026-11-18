@@ -42,20 +42,10 @@ SimRV automatically resolves CPU models by preset name or direct file path:
 
 ```bash
 # Run with canonical pre-installed model preset
-simrv --ca --cpu-preset rvcomp -m program.elf
+simrv --ca --cpu-preset balanced -m program.elf
 
 # Run with an explicit custom configuration file
 simrv --ca --config configs/models/my_core.cfg -m program.elf
-```
-
-Hardware-backed presets can also describe the complete SoC in the same file. For example,
-[`configs/models/rvcomp.cfg`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/configs/models/rvcomp.cfg)
-is an example based on the [ArchLab RVComp repository](https://github.com/archlab-sciencetokyo/RVComp)
-and its paper, [“Design and implementation of a high-performance RISC-V SoC for FPGAs with Linux support”](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025).
-It contains CPU timing, DRAM/boot metadata, a UART map, and an explicit device policy:
-
-```bash
-simrv --config rvcomp --ca -m program.elf
 ```
 
 Use `--config` to select a complete platform preset or custom configuration file. Combined CPU/SoC model files use `[soc]` for
@@ -158,81 +148,11 @@ declaration.
 To export the resolved registry for tooling or HDL-generation scripts:
 
 ```bash
-simrv --dump-soc-manifest rvcomp build/rvcomp-soc.json
+simrv config export-soc virt-mmio build/virt-mmio-soc.json
 ```
 
 The output follows `schemas/soc-manifest.schema.json` and contains the effective platform, memory,
 boot, transport, address, and interrupt metadata after preset-file overrides are applied.
-
-### Example: RVComp RTL address map
-
-This example uses the [RVComp RTL](https://github.com/archlab-sciencetokyo/RVComp), described in the
-[RVComp paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025).
-Its preset describes the devices SimRV can register at their RTL addresses: UART at
-`0x10000000`, CLINT at `0x02000000`, PLIC at `0x0c000000`, software reset at `0x10000100`, and
-the custom Ethernet MAC at `0x14000000`. The UART descriptor uses its 16-byte register window and
-PLIC source 1. The Ethernet model uses PLIC source 2 and the RTL-compatible CSR/RX/TX windows; its
-packet transport reuses SimRV's user-mode libslirp backend or can be disabled. The model reproduces the
-guest-visible register and ring-buffer behavior, while external packet transport and PHY
-serialization are not cycle-by-cycle RTL emulation. The RTL's broader
-address decode also contains these board resources:
-
-The RVComp preset loads the `rvcomp-uart` serial plugin for the board's data, TX-full, and
-RX-empty registers. This is a distinct register interface from the built-in 16550. The plugin
-delivers transmitted bytes to the host immediately; its serial timing is not cycle-accurate.
-An empty data-register read returns zero rather than stalling, so software should check RX-empty
-first. The plugin is installed with the optional tools component.
-
-!!! info "Decode map and modeled devices are different views"
-    The table includes the RTL's decoded address regions, including resources SimRV does not
-    allocate or emulate. In particular, the SD-backed RAM row is reference information only; it
-    does not add memory to the RVComp preset.
-
-| RTL region | Address range | Size / detail | SimRV model status |
-| :--- | :--- | :--- | :--- |
-| Boot ROM | `0x00010000–0x00011fff` | 8 KiB | Not registered; RVComp preset starts directly at DRAM. |
-| CLINT | `0x02000000–0x020bffff` | 768 KiB decode window | Modeled at the RTL base. |
-| PLIC | `0x0c000000–0x0cffffff` | 16 MiB decode window | Modeled at the RTL base. |
-| UART | `0x10000000–0x1000000f` | 16-byte register window; PLIC source 1 | Modeled at the RTL base. |
-| Software reset | `0x10000100–0x10000103` | One control word | Any write requests a managed SimRV reboot; reads return zero. |
-| Ethernet CSRs | `0x14000000–0x14003fff` | 16 KiB | RVComp-specific MAC register model. |
-| Ethernet RX buffer | `0x18000000–0x18003fff` | 16 KiB | RX ring window for the RVComp MAC. |
-| Ethernet TX buffer | `0x1c000000–0x1c001fff` | 8 KiB | TX ring window for the RVComp MAC. |
-| DDR | `0x80000000–0x87ffffff` | 128 MiB on the selected Nexys build | SimRV's backing DRAM is configured separately. |
-| SD-backed RAM | `0xa0000000–0xbfffffff` | RTL decode window; RTL macro declares a 1.5 GiB controller capacity | RTL-only; not an additional SimRV RAM region. |
-
-The RVComp RTL calls its memory-mapped channel fabric AXI and routes the CPU through
-`axi_interconnect`. This is a custom valid/ready interface rather than full AXI4: stores present
-address, data, and byte strobes together, reads use address and response handshakes, and the fabric
-has independent read and write state machines that each handle one request at a time. The CPU data
-path is 32 bits, while the instruction/cache/DDR path is 128 bits. Address decode and target
-responses are implemented per device in the RTL.
-
-SimRV's CA execution routes accesses through its TileLink-style timing fabric and applies the
-RVComp model's calibrated request/response delays. It does not reproduce the RTL's valid/ready
-handshakes, per-target backpressure, or independent read/write state machines cycle by cycle.
-SimRV's `Axi4Bridge` is a separate adapter API; enabling it does not reproduce this custom fabric.
-The RVComp MAC does not use VirtIO registers: its model adapts RVComp's ring-buffer interface to the
-shared network packet backend. The RVComp model therefore leaves `[axi].enabled` false. A
-cycle-by-cycle fabric model must preserve the existing RTL parity gates while modeling the custom
-handshakes and address decode above.
-
-```mermaid
-flowchart LR
-    CPU[RVComp CPU]
-    FAB["axi_interconnect<br/>custom valid/ready fabric"]
-    CPU --> FAB
-    FAB --> DDR[DDR]
-    FAB --> CLINT[CLINT]
-    FAB --> PLIC[PLIC]
-    FAB --> UART[UART and software reset]
-    FAB --> MAC[Ethernet MAC and ring buffers]
-    MAC <-->|Ethernet frames| NET[SimRV network backend]
-    PLIC -->|interrupt| CPU
-```
-
-The diagram shows device relationships, not address proportions; use the table above for the
-exact RTL ranges.
 
 ### Generating a New Model Configuration
 
@@ -242,22 +162,22 @@ SimRV includes an interactive questionnaire tool that guides you through tailori
 
 ```bash
 # Interactive wizard
-python3 scripts/cpu_model_wizard.py --name custom_riscv
+simrv-config-wizard --name custom_riscv
 
 # Scaffold non-interactively from an existing template
-python3 scripts/cpu_model_wizard.py --template rvcomp --name rvcomp_tuned --output configs/models/rvcomp_tuned.cfg --non-interactive
+simrv-config-wizard --template balanced --name my_core --output configs/models/my_core.cfg --non-interactive
 ```
 
-#### Option B: Simulator Scaffolding Flags
+#### Option B: `simrv-tools scaffold` Command
 
-Generate an annotated `.cfg` configuration directly from the `simrv` executable:
+Generate an annotated `.cfg` configuration with the standalone tooling executable:
 
 ```bash
 # Dump an existing preset to stdout or a file
-simrv --dump-cpu-model rvcomp configs/models/rvcomp_copy.cfg
+simrv --dump-cpu-model balanced configs/models/balanced_copy.cfg
 
 # Scaffold a default balanced template
-simrv --scaffold-cpu-model configs/models/new_core.cfg
+simrv-tools scaffold cpu balanced configs/models/new_core.cfg
 ```
 
 #### Option C: In the Interactive TUI
@@ -286,62 +206,11 @@ SimRV looks for CPU model configuration files in the canonical `configs/models/`
 
 SimRV CPU model configurations follow a clean INI/TOML sectioned format with support for comments (`#` and `;`), unquoted numbers/booleans, and quoted strings.
 
-### Sample Configuration: RVComp example (`configs/models/rvcomp.cfg`)
+### Sample Configuration: user-defined model
 
-```ini
-# SimRV CPU Model Configuration: Archlab RVComp
-[cpu]
-name = "rvcomp"
-description = "Archlab RVComp 5-stage educational RISC-V processor"
-xlen = 32
-isa_preset = "ima"
-
-[pipeline]
-type = "five-stage"
-enable_forwarding = true
-mul_latency = 2
-div_latency = 34
-fp_alu_latency = 3
-fp_div_latency = 15
-branch_mispredict_penalty = 4
-cycle_counter_start_delay = 0
-csr_flush_penalty = 3
-fence_flush_penalty = 4
-
-[branch_predictor]
-type = "bimodal"
-btb_entries = 512
-bht_entries = 8192
-ras_entries = 16
-ghr_bits = 10
-pc_shift = 2
-enable_btb = true
-enable_ras = false
-untagged_btb = true
-predict_non_control = true
-registered_btb_read = false
-bht_initial_state = 1
-
-[instruction_cache]
-capacity_bytes = 16384
-associativity = 1
-line_bytes = 32
-hit_latency = 1
-miss_latency = 1
-
-[data_cache]
-capacity_bytes = 16384
-associativity = 1
-line_bytes = 32
-hit_latency = 4
-miss_latency = 1
-
-[interconnect]
-request_latency = 1
-response_latency = 1
-```
-
----
+The wizard creates an editable `.cfg` file from a generic CPU preset. Files may be used directly
+with `--cpu-preset` or combined with `[soc]` and `[device.*]` sections for a complete platform.
+Unknown device names and project-specific timing models are not compiled into SimRV.
 
 ## 4. Parameter Dictionary
 
@@ -425,71 +294,9 @@ coherent fabric's transfer size.
 
 ---
 
-## 5. Built-In Generic Presets vs. Model Configs
+## 5. Generic presets and external model files
 
-SimRV distinguishes between **compiled-in generic presets** and **hardware-specific `.cfg` models**:
-
-### Compiled-In Generic Presets
-
-Generic presets are compiled directly into the simulator runtime so no external files are required, keeping the project and configuration directories clean:
-
-1. **`balanced`** (default): Standard 5-stage core with bimodal branch prediction, integer forwarding, and balanced 4 KiB 2-way L1 caches. Works for both RV32 and RV64.
-2. **`tiny`**: Compact 3-stage in-order embedded microcontroller profile without operand forwarding and with static branch prediction. Works for both RV32 and RV64.
-3. **`performance`**: Aggressive 5-stage core with 4096-entry GShare predictor, low execution penalties, and 16 KiB 4-way L1 caches. Works for both RV32 and RV64.
-
-To scaffold or inspect any generic preset as an editable `.cfg`, use:
-
-```bash
-simrv --dump-cpu-model balanced my_balanced.cfg
-```
-
-### Hardware-Specific Models (`configs/models/`)
-
-The `configs/models/` folder contains authoritative configurations calibrated to specific hardware/FPGA processor RTL:
-
-1. **`rvcomp.cfg` example**: Calibrated to the [ArchLab RVComp](https://github.com/archlab-sciencetokyo/RVComp) five-stage SystemVerilog processor (`xlen = 32`, `isa_preset = "ima"`); see its [paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025). It features a 34-stall-cycle non-restoring divider (`div_latency = 34`), a multiplier with two stall cycles (`mul_latency = 2`), an untagged 512-entry BTB, an 8192-entry BHT with weak-not-taken reset state (`2'b01`), a 4-cycle branch mispredict penalty, and a 4-cycle L1 D-Cache hit latency.
-2. **`cfu-provingground.cfg` example**: Calibrated to the ArchLab [CFU Proving Ground repository](https://github.com/archlab-sciencetokyo/CFU-Proving-Ground) and its [paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=137514&expandable=3&ken_id=DC&lang=en&presen_date=2025-06-10&schedule_id=8710&society_cd=ISS&year=2025), targeting its RVProc FPGA core (`xlen = 32`, `isa_preset = "im"`). It features registered BTB reads (a one-cycle branch prediction bubble), a two-cycle counter reset delay, and a custom function unit (CFU) hardware interface.
-
----
-
-## 6. Example Case Study: Calibrating SimRV to [RVComp](https://github.com/archlab-sciencetokyo/RVComp)
-
-This case study uses the RVComp RTL and its [published paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025) as one calibration target. The model format, timing conventions, and calibration workflow described above are SimRV features and apply to other processors as well.
-
-To calibrate SimRV to an external RTL core:
-
-1. **Identify Hardware Latencies**:
-   - Inspect RTL modules (`multiplier.v`, `divider.v`, `lsu.v`).
-   - Pipeline `*_latency` settings count additional stall cycles after issue (they do not include the issue cycle). RVComp's non-restoring divider adds 34 stall cycles and its multiplier adds 2, so use `div_latency = 34` and `mul_latency = 2`.
-2. **Inspect Branch Predictor Microarchitecture**:
-   - Check reset initialization in `bimodal.v`: RVComp initializes `pht[i] = 2'b01;` (`bht_initial_state = 1`).
-   - Check BTB read timing: RVComp's `bpu_access_pc` is speculative lookahead (`r_pc + 4`), allowing 0-bubble predicted branch fetches (`registered_btb_read = false`).
-3. **Verify via Evaluation Tooling**:
-
-   ```bash
-   simrv-parity rvcomp --rvcomp-dir /path/to/RVComp \
-     --trace-dir build/rvcomp_traces
-   ```
-
-   Compare instruction counts, measured RTL `mcycle`, derived component estimates, and cache stalls
-   against Verilator simulation logs. The evaluator reports measured and estimated cycle deltas
-   separately; only a zero measured-cycle delta is exact parity.
-
-   The evaluator uses the RISC-V tools already on `PATH`; it does not assume a
-   site-specific toolchain directory. `--rvcomp-bin` can select a prebuilt RTL
-   simulator when the checkout's `obj_dir/rvcom` is not appropriate.
-
-4. **Automated Microarchitecture Calibration Optimizer**:
-
-   SimRV provides `simrv-tune` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
-
-   ```bash
-   simrv-tune rvcomp --config configs/models/rvcomp.cfg --apply
-   ```
-
-   The tuner performs multi-parameter coordinate descent across interconnect latencies, cache
-   capacities, and hit/miss timing, optimizing Mean Absolute Percentage Error (MAPE) against the
-   measured RTL `mcycle`. The current hierarchy-aware configuration measures **0.96% MAPE** across the five
-   evaluation kernels. The previously reported **2.39%** used the RTL testbench's derived
-   `minstret + stall counters` estimate, which is consistently 33 cycles above measured `mcycle`
-   for these kernels and must not be presented as exact cycle parity.
+The built-in `balanced`, `tiny`, and `performance` CPU presets provide starting points. A custom
+model file can extend a preset and set pipeline, cache, branch-predictor, interconnect, and custom
+function-unit parameters. Model files remain human-editable and can be distributed independently
+from the simulator.

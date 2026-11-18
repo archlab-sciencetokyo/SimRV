@@ -1,10 +1,11 @@
-if(SIMRV_ENABLE_LINUX_TOOLS)
+if(SIMRV_ENABLE_LINUX_TOOLS AND UNIX)
   function(simrv_add_linux_image_target target comment)
     add_custom_target(
       ${target}
-      COMMAND "${CMAKE_COMMAND}" -E env SIMRV_USE_LOCAL_SCRATCH=1 bash
-              "${PROJECT_SOURCE_DIR}/scripts/build-linux-image.sh" --arch
-              "rv${SIMRV_XLEN}" ${ARGN}
+      COMMAND "${CMAKE_COMMAND}" -E env SIMRV_USE_LOCAL_SCRATCH=1
+              $<TARGET_FILE:simrv-linux-builder> --arch "rv${SIMRV_XLEN}"
+              ${ARGN}
+      DEPENDS simrv-linux-builder
       WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
       COMMENT "${comment}"
       VERBATIM USES_TERMINAL)
@@ -13,11 +14,19 @@ if(SIMRV_ENABLE_LINUX_TOOLS)
   simrv_add_linux_image_target(
     linux-images "Building RV${SIMRV_XLEN}GC Linux kernel and rootfs images")
   simrv_add_linux_image_target(
-    linux-images-buildroot "Building RV${SIMRV_XLEN}GC Buildroot FPGA Linux profile"
-    --rootfs buildroot --profile fpga)
+    linux-images-buildroot "Building RV${SIMRV_XLEN}GC Buildroot Linux profile"
+    --rootfs buildroot --profile buildroot)
   simrv_add_linux_image_target(
     linux-images-debug "Building RV${SIMRV_XLEN}GC expanded Alpine debug Linux profile"
     --rootfs alpine --profile debug)
+
+  add_custom_target(
+    linux-images-configure
+    COMMAND $<TARGET_FILE:simrv-linux-builder> --arch "rv${SIMRV_XLEN}" --tui
+    DEPENDS simrv-linux-builder
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Configure and build Linux images interactively"
+    VERBATIM USES_TERMINAL)
 endif()
 
 add_custom_target(

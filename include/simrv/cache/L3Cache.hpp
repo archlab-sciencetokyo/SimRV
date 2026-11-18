@@ -13,7 +13,7 @@ namespace simrv::cache {
  * @class L3Cache
  * @brief Shared multi-hart Last-Level Cache (default 512 KiB, 64-byte lines, 16 ways).
  */
-class L3Cache : public BaseCache<8192, 64, 16> {
+class L3Cache : public BaseCache<16384, 64, 16> {
    public:
     L3Cache() = default;
 
@@ -27,7 +27,7 @@ class L3Cache : public BaseCache<8192, 64, 16> {
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
         if (cache_line != nullptr) {
             out_state = cache_line->state;
-            std::memcpy(out_data.data(), cache_line->data.data(), kLineBytes);
+            std::memcpy(out_data.data(), cache_line->data.data(), line_bytes());
             cache_line->last_used = ++access_tick_;
             ++hits_;
             last_access_was_hit_ = true;

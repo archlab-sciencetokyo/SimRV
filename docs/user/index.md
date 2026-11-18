@@ -74,10 +74,10 @@ separate `build/rv32-release/simrv` target is primarily retained for strict-widt
 | Goal | Guide |
 | --- | --- |
 | Explore Linux with the Alpine/JWM desktop | [Full-System Linux](linux.md) |
-| Build or boot a serial Buildroot guest | [Buildroot image workflow](linux.md#fpga-baseline-profile) |
+| Build or boot a serial Buildroot guest | [Buildroot image workflow](linux.md#generic-buildroot-profile) |
 | Build and validate SimRV from source | [Install and build](install.md#build-from-source) and [release validation workflow](ga-workflow.md) |
 | Create a CPU preset or custom SoC device | [Extending CPU presets and MMIO platforms](../hardware/extending-platforms.md) |
-| Compare architectural or cycle-level behavior | [Reference parity](../hardware/rtl_parity.md) |
+| Compare architectural or cycle-level behavior | [RTL parity extensions](../hardware/rtl_parity.md) |
 
 ### Installing System-Wide
 
@@ -88,7 +88,7 @@ sudo cmake --install build/rv64-release --prefix /usr/local
 
 Installed files include:
 
-- Executables: `/usr/local/bin/simrv`, `/usr/local/bin/simrv-cpu-wizard`, `/usr/local/bin/simrv-tune`, `/usr/local/bin/simrv-parity`, `/usr/local/bin/simrv-benchmark`
+- Executables: `/usr/local/bin/simrv`, `/usr/local/bin/simrv-config-wizard`, `/usr/local/bin/simrv-tools`, `/usr/local/bin/simrv-parity`, `/usr/local/bin/simrv-benchmark`
 - CPU Model Templates: `/usr/local/share/SimRV/models/`
 - JSON Schemas: `/usr/local/share/SimRV/schemas/`
 - Documentation & Man Page: `/usr/local/share/doc/SimRV/USER_GUIDE.md`, `/usr/local/share/man/man1/simrv.1`
@@ -109,7 +109,7 @@ simrv --cli -m program.elf
 simrv --cli --ca -m program.elf -s 1000000
 
 # Load a platform configuration or custom CPU model
-simrv --cli --ca --config configs/models/rvcomp.cfg -m program.elf
+simrv --cli --ca --config configs/models/my_core.cfg -m program.elf
 
 # Launch TUI workbench with loaded binary
 simrv -m program.elf
@@ -125,11 +125,11 @@ simrv -m program.elf
 | `--ca` | Select cycle-accurate pipeline simulation kernel. |
 | `--ia` | Select fast instruction-accurate simulation mode. |
 | `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
-| `--config <preset \| file>` | Select a platform preset (`virt-pcie`, `virt-mmio`, `rvcomp`) or custom configuration file. |
+| `--config <preset \| file>` | Select a platform preset (`virt-pcie`, `virt-mmio`) or custom configuration file. |
 | `--plugin <name\|file.so>[=args]` | Attach an external MMIO device simulation plugin (e.g. `mmc=disk.img`, `ethernet`). |
 | `--cfu-plugin <file.so>` | Load a dynamic Custom Function Unit (CFU) accelerator plugin for `custom-0`. |
 | `--cpu-preset <preset>` | Select a built-in CPU model preset (`tiny`, `balanced`, `performance`). |
-| `--validate-config <file>` | Validate and lint a CPU model or SoC platform configuration file. |
+| `simrv-config-wizard --validate <file|preset>` | Validate a CPU model or SoC platform configuration. |
 | `--isa <string>` | Select a supported base ISA preset; recognized ratified Z extensions may be listed with optional supported versions. |
 | `--pipeline <type>` | Pipeline microarchitecture target (`3stage`, `5stage`). |
 | `-H, --tohost-addr <addr>` | Specify physical address of `tohost` communication symbol for tests. |
@@ -166,7 +166,7 @@ automatically only when SimRV owns an interactive foreground terminal; it has no
 or shutdown banner. Warnings and errors remain visible in its message panel.
 
 SimRV provides built-in autocompletion script generation for Bash, Zsh, and Fish via
-`simrv completion [bash|zsh|fish]`.
+`simrv-tools completion [bash|zsh|fish]`.
 
 ### Automation summary
 
@@ -505,9 +505,9 @@ tree's RAM range and CPU status from the configured memory size and hart count.
 ```bash
 # Launch the bundled OpenSBI + Linux image with its root filesystem
 simrv --os \
-      -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
-      -D linux-images/rv64/alpine-gui/rootfs.img \
-      -f linux-images/rv64/alpine-gui/devicetree.dtb
+      -m images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      -D images/rv64/alpine-gui/rootfs.img \
+      -f images/rv64/alpine-gui/devicetree.dtb
 ```
 
 ### Full-System CLI Options
@@ -532,52 +532,46 @@ simrv --os \
 
 SimRV allows defining custom processor pipelines and timing parameters in human-editable `.cfg` files.
 
-### Interactive Model Wizard (`simrv-cpu-wizard`)
+### Configuration Wizard (`simrv-config-wizard`)
 
-Create and customize microarchitectural models interactively:
+Create CPU model configs or import a compiled DTB into a combined CPU/SoC config. With no options, the simple terminal UI offers both paths and reviews imported values before saving:
 
 ```bash
-# Run interactive CLI wizard
-simrv-cpu-wizard
+# Run the terminal UI
+simrv-config-wizard
 
-# Generate from a template directly
-simrv-cpu-wizard --template rvcomp --name my_core --output configs/models/my_core.cfg
+# Import a DTB; on a terminal, review and adjust the extracted settings
+simrv-config-wizard --from-dtb board.dtb --template balanced --name my_board
 
-# Validate configuration syntax against schema
-simrv-cpu-wizard --validate configs/models/my_core.cfg
+# Import without prompts
+simrv-config-wizard --from-dtb board.dtb --non-interactive --output configs/models/my_board.cfg
+
+# CPU-only config generation remains available
+simrv-config-wizard --template balanced --name my_core --output configs/models/my_core.cfg
 ```
 
-### Automatic Model Calibration (`simrv-tune`)
+Imported unknown MMIO devices are recorded as custom descriptors and do not imply device emulation.
 
-Automatically calibrate pipeline execution latencies, branch penalties, and cache configurations against RTL or hardware execution traces:
+### Target Calibration
+
+Calibrate a user-selected CPU configuration against a loaded parity target:
 
 ```bash
-simrv-tune --base-config configs/models/rvcomp.cfg --apply
+simrv-parity --tune --plugin ./libmy-reference.so --config ./my-platform.cfg --apply
 ```
 
 ---
 
 ## 8. Reference Parity Verification
 
-SimRV can compare architectural retirement against an ISA reference model and compare modeled
-cycles against cycle-producing implementations or measured hardware traces. These are separate
-checks: architectural references such as Spike establish instruction-level equivalence, while a
-cycle-accurate target or captured trace can establish timing parity for a configured CPU model.
-
-The `simrv-parity` runner currently supplies adapters for the RVComp and CFU Proving Ground RTL
-targets. Its trace comparison and adapter contract can also be reused when adding other
-cycle-producing references; architectural lockstep with Spike is available separately through
-`--spike` and the release gates.
+SimRV provides a generic parity runner. Load a target adapter plugin built against the public C
+ABI, then choose the target name and optional user-editable CPU/SoC `.cfg` file. SimRV includes no
+lab-specific parity adapters; those can be maintained and released separately.
 
 ```bash
-# List targets supported by the current cycle-parity runner
-simrv-parity --list-targets
-
-# Compare cycle traces against CFU Proving Ground RVProc
-simrv-parity cfu-pg --benchmark all
-
-# Compare cycle traces against RVComp
-simrv-parity rvcomp --quick
+simrv-parity --plugin ./libmy-reference.so --list-targets
+simrv-parity --plugin ./libmy-reference.so my-reference \
+  --config ./my-platform.cfg --work-dir ./parity-work
 ```
 
 For the adapter contract, parity levels, and guidance for adding another reference target, see
@@ -627,6 +621,6 @@ simrv-benchmark --suite realworld --latex-table
 - [System Architecture](../architecture/overview.md)
 - [Bare-Metal Guide](baremetal.md)
 - [CPU Model Configuration Reference](../hardware/models.md)
-- [RTL Parity Verification Guide](../hardware/rtl_parity.md)
+- [RTL parity extension guide](../hardware/rtl_parity.md)
 - [TileLink-C Profile & Cache Coherence](../architecture/tilelink.md)
 - [RISC-V Compliance Scope](../architecture/compliance.md)

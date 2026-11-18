@@ -5,7 +5,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstring>
 #include <limits>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -106,6 +108,29 @@ class SIMRV_GSL_POINTER RamView {
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto unchecked_ptr(
         simrv::xlen::PhysAddr address) const noexcept -> simrv::xlen::Byte* {
         return data_ + (address.raw() - base_.raw());
+    }
+
+    template <typename T>
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto read_fast(simrv::xlen::PhysAddr address) const noexcept
+        -> std::optional<T> {
+        const auto* ptr = try_get_ptr(address, sizeof(T));
+        if (simrv::compiler::unlikely(ptr == nullptr)) {
+            return std::nullopt;
+        }
+        T value{};
+        std::memcpy(&value, ptr, sizeof(T));
+        return value;
+    }
+
+    template <typename T>
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto write_fast(simrv::xlen::PhysAddr address,
+                                                      T value) const noexcept -> bool {
+        auto* ptr = try_get_ptr(address, sizeof(T));
+        if (simrv::compiler::unlikely(ptr == nullptr)) {
+            return false;
+        }
+        std::memcpy(ptr, &value, sizeof(T));
+        return true;
     }
 
    private:

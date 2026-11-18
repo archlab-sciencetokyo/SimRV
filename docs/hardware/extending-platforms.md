@@ -19,20 +19,28 @@ modeled.
 Copy a model close to the target, or scaffold a starter file:
 
 ```bash
-simrv --dump-cpu-model balanced configs/models/my-core.cfg
-# Or generate an annotated starter:
-simrv --scaffold-cpu-model configs/models/my-core.cfg
+simrv-tools scaffold cpu balanced configs/models/my-core.cfg
 ```
 
 You can also scaffold starter device plugins and CFU plugins:
 
 ```bash
 # Scaffold an external MMIO device plugin C project
-simrv --scaffold-device-plugin my_device ./my_device_plugin/
+simrv-tools scaffold device my_device ./my_device_plugin/
 
 # Scaffold a Custom Function Unit (CFU) plugin C project
-simrv --scaffold-cfu-plugin my_cfu ./my_cfu_plugin/
+simrv-tools scaffold cfu my_cfu ./my_cfu_plugin/
 ```
+
+To seed a device project from a board DTB, select one of its importable MMIO nodes:
+
+```bash
+simrv-tools scaffold device --from-dtb board.dtb ./my_device_plugin/
+```
+
+The compatible string, MMIO base/size, and simple IRQ are copied into the plugin and
+editable platform configuration. DTBs do not define register behavior, so implement
+the generated read/write handlers for the device.
 
 Edit the `[cpu]`, `[pipeline]`, cache, branch predictor, interconnect, and optional accelerator
 sections to describe the target. Use the parameter reference in [Microarchitectural Models &
@@ -69,9 +77,7 @@ irq = 1
 `device_policy = "explicit"` means only the configured device set is registered. Otherwise the
 platform's implicit defaults may remain enabled. Device kinds and configurable descriptor fields
 are defined by the current registry; a config entry cannot create a new device implementation or
-change its register semantics. The [ArchLab RVComp example platform](https://github.com/archlab-sciencetokyo/RVComp)
-(described in its [paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025)) includes the opt-in `reset-control` and
-`ring-buffer-ethernet` extensions. The Ethernet descriptor's `base` selects the CSR window; RX and
+change its register semantics. A project can add specialized device implementations as independent plugins. The following hardware-specific example is maintained outside the generic simulator. The Ethernet descriptor's `base` selects the CSR window; RX and
 TX ring windows are configurable with `region.rxbuf.base` / `region.rxbuf.size` and
 `region.txbuf.base` / `region.txbuf.size`. The `mac_address` field accepts a 48-bit hexadecimal
 value. These values feed the normalized SoC map used
@@ -79,10 +85,10 @@ for runtime registration and the SoC manifest. Linux device trees are supplied s
 user and should describe the configured guest devices. Check the resolved result with:
 
 ```bash
-simrv --dump-soc-manifest rvcomp /tmp/my-core-soc.json
+simrv config export-soc virt-mmio /tmp/my-core-soc.json
 ```
 
-Replace `rvcomp` with the applicable SoC preset. For custom CPU/SoC files, use the CPU model
+Use a built-in preset or your custom configuration file. For custom CPU/SoC files, use the CPU model
 configuration workflow and inspect the platform in a guest boot.
 
 ### Reserve a device window with a dummy model
@@ -98,14 +104,14 @@ size = 0x1000
 compatible = "acme,watchdog"
 read_value = 0
 
-[device.dummy-mmio.fpga-control]
+[device.dummy-mmio.board-control]
 base = 0x10011000
 size = 0x1000
-compatible = "acme,fpga-control"
+compatible = "acme,board-control"
 read_value = 0xffffffff
 ```
 
-Select an instance with `--trace-device watchdog` or `--trace-device fpga-control`, for example
+Select an instance with `--trace-device watchdog` or `--trace-device board-control`, for example
 `simrv --cli -m program.elf --arch-trace trace.jsonl --trace-level 1 --trace-device watchdog`.
 Select the `mmio_write` event when using trace event filters to retain writes to that window. Dummy
 windows appear in the SoC manifest, but do not implement the hardware named by their
@@ -208,7 +214,7 @@ it in only one code path:
 3. Construct and own the device during machine initialization, then register it on the system bus
    according to the device policy.
 4. Connect interrupts, DMA, reset, and any transport or backing storage it requires.
-5. Add `--dump-soc-manifest` representation when platform tooling needs to discover the device.
+5. Export the normalized registry with `simrv config export-soc` when platform tooling needs to discover the device.
    Update the supplied guest device tree separately when Linux needs to discover it.
 6. Add device-level register tests, address-map/config tests, and guest-facing integration
    coverage. Validate both RV32 and RV64 builds when the device is available in both.
@@ -258,9 +264,7 @@ A plugin can receive host keyboard events by exporting the optional
 `simrv/device/ExternalInputDevice.h`. This capability is independent of the existing device ABI;
 the plugin still exports `simrv_device_plugin_init` and implements the MMIO device. The
 `send_key` callback receives Linux input keycodes and a press/release flag on the simulation thread.
-Use it to translate host input into the device's guest-visible protocol. For example, the bundled
-`rv98-keyboard` plugin translates key events to PS/2 Set 2 scan codes without adding RV98-specific
-behavior to the simulator core.
+Use it to translate host input into the device's guest-visible protocol. A project-specific plugin can translate those events into the target system’s guest-visible protocol.
 
 ```c
 // my_device.c
@@ -383,7 +387,7 @@ SimRV provides multiple seamless ways to load plugins:
 
 ---
 
-## Custom Function Unit (CFU) Plugins & CFU-Proving-Ground Compatibility
+## Custom Function Unit (CFU) Plugins
 
 SimRV supports hardware accelerator instructions via the RISC-V Custom-0 (`0x0b`) opcode. Instructions are issued using the standard RISC-V R-type format:
 
@@ -395,17 +399,6 @@ SimRV supports hardware accelerator instructions via the RISC-V Custom-0 (`0x0b`
 ```
 
 CFU behavior is dynamically extensible via shared library plugins loaded with `--cfu <path.so>`.
-
-### CFU-Proving-Ground & CFU-Playground Drop-In Compatibility
-
-SimRV provides **native drop-in compatibility** for plugins compiled for [CFU-Playground](https://github.com/google/cfu-playground) and CFU-Proving-Ground. If a shared library exports standard CFU functions without any SimRV headers:
-
-```c
-uint32_t cfu_op(int funct3, int funct7, uint32_t rs1, uint32_t rs2);
-void cfu_reset(void);
-```
-
-SimRV automatically detects `cfu_op` and `cfu_reset`, translates instruction operand order, and executes custom instructions with zero wrappers, boilerplate, or recompilation.
 
 ### SimRV CFU Plugin ABI v2
 
@@ -472,7 +465,5 @@ target_link_libraries(my-plugin PRIVATE SimRV::simrv-devel)
 - Check that the supplied guest device tree and SoC manifest agree with registered runtime devices.
 - Exercise register side effects, invalid accesses, interrupts, reset, and DMA boundaries as
   applicable.
-- Run the relevant unit and integration tests plus RV32/RV64 release gates. See the
-  [Developer Guide](../development/contributing.md#5-adding-regression-tests) for gate commands.
 
-For the existing platform syntax and RVComp map, see [Microarchitectural Models & Tuning](models.md).
+For the platform syntax, see [CPU Model Configuration](models.md).

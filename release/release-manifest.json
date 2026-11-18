@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-rc.19",
-  "release_tag": "v3.0.0-rc.19",
+  "version": "3.0.0-rc.20",
+  "release_tag": "v3.0.0-rc.20",
   "host_support": {
     "os": "Linux",
     "architectures": ["x86_64", "aarch64"],
@@ -76,8 +76,8 @@
       "redistribute": false
     },
     "linux": {
-      "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz",
-      "revision": "v7.2.9",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.5.tar.xz",
+      "revision": "v7.3.5",
       "license": "GPL-2.0-only",
       "redistribute": false
     }
@@ -194,9 +194,9 @@
     ]
   },
   "artifacts": [
-    "SimRV-linux-x86_64-v3.0.0-rc.19.tar.gz",
-    "SimRV-linux-aarch64-v3.0.0-rc.19.tar.gz",
-    "SimRV-rpm-packages-v3.0.0-rc.19.tar.gz",
-    "SimRV-deb-packages-v3.0.0-rc.19.tar.gz"
+    "SimRV-linux-x86_64-v3.0.0-rc.20.tar.gz",
+    "SimRV-linux-aarch64-v3.0.0-rc.20.tar.gz",
+    "SimRV-rpm-packages-v3.0.0-rc.20.tar.gz",
+    "SimRV-deb-packages-v3.0.0-rc.20.tar.gz"
   ]
 }

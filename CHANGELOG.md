@@ -5,6 +5,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [v3.0.0-rc.20] — 2026-11-15
+
+- Replace hardcoded ISA and pipeline presets with dynamic `IsaSpec` parsing, model discovery (`configs/models/*.cfg` with `extends` inheritance), and `kPipelineCatalog` / `PipelineTopology` NTTP specialization.
+- Introduce protocol-neutral `Bus` interface with `TemplatedBus<BusProtocolSpec>` explicit instantiations for `tilelink-c`, `tilelink-uh`, `tilelink-ul`, `axi4`, and `axi4-lite`, plus `--bus <PROTOCOL>` CLI and `[bus]` SoC config support.
+- Specialize fast-path memory accesses (`MemoryTopologySpec`, `RamView::read_fast<T>`/`write_fast<T>`), MMU/PTW walks (`SvModeSpec` for Sv32/Sv39/Sv48/Sv57), and shared FP/vector helpers (`FloatTraits`, `dispatch_sew`, `for_each_active_element`).
+- Add `rvb23u64` / `rvb23s64` (`rvb23`) architecture profiles and `profile_default_isa_string` mapping across RVA20/RVA22/RVB23/RVA23.
+- Improve CoreMark throughput on `rv64-native-release` to 637.70 MIPS median (+6.7% faster than Spike).
+
 ## [v3.0.0-rc.19] — 2026-11-12
 
 - Modernize CLI execution summary with adaptive duration units, visual progress bars, peak/average MIPS tracking, and conditional RVC share display.

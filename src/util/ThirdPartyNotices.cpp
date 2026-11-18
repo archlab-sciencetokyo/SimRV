@@ -27,7 +27,8 @@ License: Boost Software License, Version 1.0 (https://www.boost.org/)
 
 3. ankerl::nanobench Microbenchmark Framework
 ---------------------------------------------
-SimRV vendors ankerl::nanobench (tests/third_party/nanobench.h) for microbenchmarks.
+SimRV vendors ankerl::nanobench (include/simrv/third_party/nanobench.h and
+tests/third_party/nanobench.h) for runtime benchmark reporting and microbenchmarks.
 Author: Martin Leitner-Ankerl
 License: MIT License (https://github.com/martinus/nanobench)
 

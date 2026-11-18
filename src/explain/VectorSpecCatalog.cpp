@@ -678,6 +678,30 @@ void populate_vector_descriptions(OpDescTable& arr) {
     arr[VWSLL_VI] = {"VWSLL.VI",
                      "Vector Widening Shift Left Logical (Vector-Immediate). Zero-extends "
                      "SEW-bit elements in vs2 to 2*SEW and shifts left by uimm."};
+
+    // Vector Cryptography (Zvkned, Zvkg, Zvknha/b, Zvksh, Zvksed)
+    arr[VAESEF_VV] = {"VAESEF.VV", "Vector AES Encrypt Final Round (Vector-Vector, EGW=128)."};
+    arr[VAESEF_VS] = {"VAESEF.VS", "Vector AES Encrypt Final Round (Vector-Scalar EG0, EGW=128)."};
+    arr[VAESDF_VV] = {"VAESDF.VV", "Vector AES Decrypt Final Round (Vector-Vector, EGW=128)."};
+    arr[VAESDF_VS] = {"VAESDF.VS", "Vector AES Decrypt Final Round (Vector-Scalar EG0, EGW=128)."};
+    arr[VAESEM_VV] = {"VAESEM.VV", "Vector AES Encrypt Middle Round (Vector-Vector, EGW=128)."};
+    arr[VAESEM_VS] = {"VAESEM.VS", "Vector AES Encrypt Middle Round (Vector-Scalar EG0, EGW=128)."};
+    arr[VAESDM_VV] = {"VAESDM.VV", "Vector AES Decrypt Middle Round (Vector-Vector, EGW=128)."};
+    arr[VAESDM_VS] = {"VAESDM.VS", "Vector AES Decrypt Middle Round (Vector-Scalar EG0, EGW=128)."};
+    arr[VAESZ_VS] = {"VAESZ.VS", "Vector AES Zero-Round AddRoundKey (Vector-Scalar EG0, EGW=128)."};
+    arr[VAESKF1_VI] = {"VAESKF1.VI", "Vector AES-128 Key Schedule Generation (EGW=128)."};
+    arr[VAESKF2_VI] = {"VAESKF2.VI", "Vector AES-256 Key Schedule Generation (EGW=128)."};
+    arr[VGHSH_VV] = {"VGHSH.VV", "Vector GHASH Add-Multiply over GF(2^128) (EGW=128)."};
+    arr[VGMUL_VV] = {"VGMUL.VV", "Vector GMUL Multiply over GF(2^128) (EGW=128)."};
+    arr[VSHA2MS_VV] = {"VSHA2MS.VV", "Vector SHA-2 Message Schedule (SEW=32/64, EGW=128/256)."};
+    arr[VSHA2CH_VV] = {"VSHA2CH.VV", "Vector SHA-2 Two-Round Compression High (SEW=32/64)."};
+    arr[VSHA2CL_VV] = {"VSHA2CL.VV", "Vector SHA-2 Two-Round Compression Low (SEW=32/64)."};
+    arr[VSM3ME_VV] = {"VSM3ME.VV", "Vector SM3 Message Expansion (EGW=256)."};
+    arr[VSM3C_VI] = {"VSM3C.VI", "Vector SM3 Two-Round Compression (EGW=256)."};
+    arr[VSM4K_VI] = {"VSM4K.VI", "Vector SM4 Key Schedule Expansion (EGW=128)."};
+    arr[VSM4R_VV] = {"VSM4R.VV", "Vector SM4 Four-Round Encryption/Decryption (Vector-Vector)."};
+    arr[VSM4R_VS] = {"VSM4R.VS",
+                     "Vector SM4 Four-Round Encryption/Decryption (Vector-Scalar EG0)."};
 }
 
 }  // namespace simrv::explain::detail

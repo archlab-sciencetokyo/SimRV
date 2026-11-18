@@ -15,7 +15,7 @@ namespace simrv::cache {
 /**
  * @brief Eight-way L1 instruction cache with configurable active geometry.
  */
-class ICache : public BaseCache<512, 64, 8> {
+class ICache : public BaseCache<1024, 64, 8> {
    public:
     ICache() = default;
 
@@ -45,8 +45,8 @@ class ICache : public BaseCache<512, 64, 8> {
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
         if (simrv::compiler::likely(cache_line != nullptr)) {
-            const uint32_t byte_offset = addr & (kLineBytes - 1u);
-            if (simrv::compiler::likely(byte_offset + sizeof(Value) <= kLineBytes)) {
+            const uint32_t byte_offset = addr & line_mask();
+            if (simrv::compiler::likely(byte_offset + sizeof(Value) <= line_bytes())) {
                 std::memcpy(&data, cache_line->data.data() + byte_offset, sizeof(Value));
                 cache_line->last_used = ++access_tick_;
                 ++hits_;

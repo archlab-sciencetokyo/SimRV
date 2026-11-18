@@ -1,6 +1,6 @@
 # RISC-V Compliance Scope
 
-SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural profile. RVA23 is the project's primary ISA target; RV32 and narrower compatibility presets are also supported for dual-width validation and workloads. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
+SimRV's primary 64-bit implementation target is the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`). The profile selector also recognizes all ratified RVI20, RVA20, RVA22, and RVB23 U/S profile names and supplies each profile's mandatory ISA string. Those profile descriptors do not imply implementation qualification: the conformance evidence below remains specific to RVA23S64. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
 
 **RVA23S64 is the implementation target.** Profile selection alone is not proof of conformance;
 the implementation claims below are tied to instruction suites, semantic tests, ACT results, and
@@ -16,7 +16,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 
 | Area | Implemented scope | Verification evidence |
 | --- | --- | --- |
-| Standard profiles | RVA23S64 target; profile support is tied to the qualification evidence below | Profile regression, ACT4 RVA23S64, vector suite at minimum VLEN, and extension-specific tests |
+| Standard profiles | RVI20U32/U64, RVA20U/S64, RVA22U/S64, RVA23U/S64, and RVB23U/S64 descriptors; RVA23S64 implementation target | Profile descriptor regressions; ACT4 and extension evidence applies to RVA23S64 only |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
 | Instruction-fetch fence | Zifencei `FENCE.I` orders prior explicit memory accesses before later instruction fetches on the same hart; remote harts require their own synchronization | RVA23 local instruction-state flush test; SMP instruction-fetch coherence tests |
@@ -81,14 +81,17 @@ requirements still apply.
 
 `G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
-therefore cannot describe individual `Zb*` subsets.
+therefore cannot describe individual `Zb*` subsets. MISA's S and U bits report privilege-mode
+support; they are not instruction-extension letters in an ISA naming string.
 
 The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's canonical
 extension preset is `gcv` (or `gc` for profiles without vector); RVA23 profile selection is the
 primary way to request the project's target architecture. XLEN-qualified forms
 such as `rv64gcv` and `rv64gc` are standard. Ratified Bitmanip sub-extensions (`zba`, `zbb`, `zbc`, `zbs`)
-are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). Historical draft shorthands such as `gcbv` and `rv64gcbv`
-are rejected with diagnostic guidance. Naming the preset explicitly does not override the vector qualification limits below.
+are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). The standard
+single-letter form `gcbv` is accepted as G, C, B, and V. Nonstandard `zb` shorthand is rejected;
+use the ratified sub-extension names. Naming the preset explicitly does not override the vector
+qualification limits below.
 
 For Vector 1.0, `vlenb` reflects the configured VLEN, `vstart` has enough writable bits for the
 maximum VLMAX, prestart elements remain undisturbed, and successful vector instructions clear

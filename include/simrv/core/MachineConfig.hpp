@@ -106,6 +106,7 @@ struct DebugConfig {
 struct IsaConfig {
     simrv::xlen::Address isatest_tohost = 0x80001000;
     simrv::xlen::CsrValue isa_preset = isa::kMisaDefault;
+    isa::ExtensionSet enabled_extensions{};
     bool misa_override = false;
     unsigned int misa_xlen = 0;
     unsigned int vlen = 0;
@@ -211,6 +212,10 @@ struct MachineConfig {
         }
         if (isa.misa_xlen != 0 && isa.misa_xlen != 32 && isa.misa_xlen != 64) {
             return std::unexpected("MISA XLEN must be 32, 64, or unspecified");
+        }
+        if (const auto* profile = simrv::isa::profile_info(execution.profile);
+            profile != nullptr && profile->xlen > simrv::xlen::kXLenBits) {
+            return std::unexpected("selected architecture profile exceeds the simulator XLEN");
         }
         if (isa.vlen != 0 &&
             (isa.vlen < 128 || isa.vlen > 1024 || (isa.vlen & (isa.vlen - 1U)) != 0)) {

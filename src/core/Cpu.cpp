@@ -25,11 +25,18 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     cfu_unit.set_default_latency(config.cfu.default_latency);
     pipeline_sim.config = config.pipeline;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
+    if (e_icount == 0 && state_.minstret == 0 && clint_mmio.mcycle == 0) {
+        e_icount = pipeline_sim.config.startup_instruction_offset;
+        state_.minstret = pipeline_sim.config.startup_instruction_offset;
+        clint_mmio.mcycle = pipeline_sim.config.startup_cycle_offset;
+    }
     // BaseCache has bounded 16 KiB / 8-way backing, enough for the shipped FPGA profiles.
     // A validated model is required to fit before this point.
     (void)icache.configure(config.instruction_cache.capacity_bytes,
-                           config.instruction_cache.associativity);
-    (void)dcache.configure(config.data_cache.capacity_bytes, config.data_cache.associativity);
+                           config.instruction_cache.associativity,
+                           config.instruction_cache.line_bytes);
+    (void)dcache.configure(config.data_cache.capacity_bytes, config.data_cache.associativity,
+                           config.data_cache.line_bytes);
     const simrv::cache::TimingLevelConfig instruction_level{
         .capacity_bytes = config.instruction_front_cache.capacity_bytes,
         .associativity = config.instruction_front_cache.associativity,
@@ -47,7 +54,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     branch_predictor.reset();
     const unsigned int target_xlen =
         (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
-    state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
+    state_.misa = isa::misa_with_mxl(config.isa.misa_bits, target_xlen);
     state_.refresh_misa_status();
     state_.initialize_lower_xlen_fields();
     sync_decode_context();
@@ -82,11 +89,13 @@ void CPU::reset() {
     cached_decode_context_ = 0xFF;
     dcache.flush();
     TLB_flush();
-    e_icount = 0;
+    e_icount = pipeline_sim.config.startup_instruction_offset;
+    state_.minstret = pipeline_sim.config.startup_instruction_offset;
     sbi_pmu_selector.fill(0);
     sbi_pmu_configured.fill(false);
     sbi_pmu_started.fill(false);
     e_ccount = 0;
+    clint_mmio.mcycle = pipeline_sim.config.startup_cycle_offset;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);
     perf_counters.reset();
@@ -254,6 +263,20 @@ void CPU::sret() {
     }
 }
 
+void CPU::mnret() {
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
+    const auto old_mstatus = state_.mstatus;
+    TrapController::mnret(state_);
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen ||
+                                  (((old_mstatus | state_.mstatus) & MstatusBit::Mprv) != 0 &&
+                                   ((old_mstatus ^ state_.mstatus) & MstatusBit::Mpv) != 0))) {
+        TLB_flush();
+    } else {
+        sync_decode_context();
+    }
+}
+
 void CPU::plic_update_mip() { plic_mmio.update_mip(); }
 
 void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, simrv::xlen::IrqLevel state) {
@@ -348,8 +371,7 @@ void CPU::evaluate_timer_interrupt() {
 void CPU::fast_forward_wfi(Machine& machine) {
     // mtime is shared by all harts. Advancing it from one hart's WFI is only sound
     // when no other hart can independently advance or observe the virtual deadline.
-    if (!machine.appmode_enabled() || machine.num_harts() != 1 ||
-        (state_.mip & state_.mie) != 0) {
+    if (machine.num_harts() != 1 || (state_.mip & state_.mie) != 0) {
         return;
     }
     auto& primary_clint = machine.primary_hart().clint_mmio;

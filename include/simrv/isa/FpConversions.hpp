@@ -1,6 +1,8 @@
 #pragma once
 
 #include <bit>
+#include <cfenv>
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 
@@ -121,6 +123,133 @@ template <typename UInt, unsigned FracBits, unsigned ExpBits, int Bias>
 
 [[nodiscard]] inline auto to_binary16(double value, RoundingMode rm) noexcept -> Binary16Result {
     return detail::to_binary16<uint64_t, 52, 11, 1023>(std::bit_cast<uint64_t>(value), rm);
+}
+
+[[nodiscard]] constexpr auto binary16_is_nan(uint16_t bits) noexcept -> bool {
+    return (bits & UINT16_C(0x7FFF)) > UINT16_C(0x7C00);
+}
+
+[[nodiscard]] constexpr auto binary16_is_snan(uint16_t bits) noexcept -> bool {
+    return binary16_is_nan(bits) && ((bits & UINT16_C(0x0200)) == 0);
+}
+
+[[nodiscard]] inline auto binary16_to_double(uint16_t bits) noexcept -> double {
+    const bool sign = (bits & UINT16_C(0x8000)) != 0;
+    const unsigned exp = (bits >> 10U) & 0x1FU;
+    const unsigned frac = bits & 0x03FFU;
+    if (exp == 0x1FU) {
+        if (frac == 0) {
+            return std::bit_cast<double>(sign ? UINT64_C(0xFFF0000000000000)
+                                              : UINT64_C(0x7FF0000000000000));
+        }
+        return std::bit_cast<double>(UINT64_C(0x7FF8000000000000));
+    }
+    if (exp == 0) {
+        if (frac == 0) {
+            return std::bit_cast<double>(sign ? UINT64_C(0x8000000000000000) : UINT64_C(0));
+        }
+        const double mag = std::ldexp(static_cast<double>(frac), -24);
+        return sign ? -mag : mag;
+    }
+    const double mag = std::ldexp(static_cast<double>(0x400U | frac), static_cast<int>(exp) - 25);
+    return sign ? -mag : mag;
+}
+
+[[nodiscard]] inline auto binary16_to_float(uint16_t bits) noexcept -> float {
+    const bool sign = (bits & UINT16_C(0x8000)) != 0;
+    const unsigned exp = (bits >> 10U) & 0x1FU;
+    const unsigned frac = bits & 0x03FFU;
+    if (exp == 0x1FU) {
+        if (frac == 0) {
+            return std::bit_cast<float>(sign ? UINT32_C(0xFF800000) : UINT32_C(0x7F800000));
+        }
+        return std::bit_cast<float>(UINT32_C(0x7FC00000));
+    }
+    if (exp == 0) {
+        if (frac == 0) {
+            return std::bit_cast<float>(sign ? UINT32_C(0x80000000) : UINT32_C(0));
+        }
+        const float mag = std::ldexp(static_cast<float>(frac), -24);
+        return sign ? -mag : mag;
+    }
+    const float mag = std::ldexp(static_cast<float>(0x400U | frac), static_cast<int>(exp) - 25);
+    return sign ? -mag : mag;
+}
+
+[[nodiscard]] constexpr auto bf16_is_nan(uint16_t bits) noexcept -> bool {
+    return (bits & UINT16_C(0x7FFF)) > UINT16_C(0x7F80);
+}
+
+[[nodiscard]] constexpr auto bf16_is_snan(uint16_t bits) noexcept -> bool {
+    return bf16_is_nan(bits) && ((bits & UINT16_C(0x0040)) == 0);
+}
+
+[[nodiscard]] constexpr auto bf16_to_float(uint16_t bits) noexcept -> float {
+    if (bf16_is_nan(bits)) {
+        return std::bit_cast<float>(UINT32_C(0x7FC00000));
+    }
+    return std::bit_cast<float>(static_cast<uint32_t>(bits) << 16U);
+}
+
+[[nodiscard]] constexpr auto to_bfloat16(float value, RoundingMode rm) noexcept -> Binary16Result {
+    const uint32_t raw = std::bit_cast<uint32_t>(value);
+    const uint32_t abs_raw = raw & UINT32_C(0x7FFFFFFF);
+    const bool sign = (raw >> 31U) != 0;
+    const uint16_t sign_bit = sign ? UINT16_C(0x8000) : 0;
+
+    if (abs_raw > UINT32_C(0x7F800000)) {
+        const auto flags = (raw & UINT32_C(0x00400000)) == 0
+                               ? static_cast<simrv::xlen::CsrValue>(FflagsBit::Nv)
+                               : simrv::xlen::CsrValue{0};
+        return {UINT16_C(0x7FC0), flags};
+    }
+    if (abs_raw == UINT32_C(0x7F800000) || abs_raw == 0) {
+        return {static_cast<uint16_t>(raw >> 16U), 0};
+    }
+
+    uint16_t abs_q = static_cast<uint16_t>(abs_raw >> 16U);
+    const uint32_t rem = abs_raw & UINT32_C(0xFFFF);
+    bool round_up = false;
+    if (rem != 0) {
+        switch (rm) {
+            case RoundingMode::Rtz:
+                round_up = false;
+                break;
+            case RoundingMode::Rdn:
+                round_up = sign;
+                break;
+            case RoundingMode::Rup:
+                round_up = !sign;
+                break;
+            case RoundingMode::Rmm:
+                round_up = rem >= UINT32_C(0x8000);
+                break;
+            case RoundingMode::Rne:
+            default:
+                round_up =
+                    (rem > UINT32_C(0x8000)) || (rem == UINT32_C(0x8000) && (abs_q & 1U) != 0U);
+                break;
+        }
+    }
+    if (round_up) {
+        ++abs_q;
+    }
+    simrv::xlen::CsrValue flags = 0;
+    if (abs_q >= UINT16_C(0x7F80)) {
+        const bool to_inf = (rm == RoundingMode::Rne) || (rm == RoundingMode::Rmm) ||
+                            (rm == RoundingMode::Rup && !sign) || (rm == RoundingMode::Rdn && sign);
+        abs_q = to_inf ? UINT16_C(0x7F80) : UINT16_C(0x7F7F);
+        flags = static_cast<simrv::xlen::CsrValue>(FflagsBit::Of) |
+                static_cast<simrv::xlen::CsrValue>(FflagsBit::Nx);
+        return {static_cast<uint16_t>(sign_bit | abs_q), flags};
+    }
+    if (rem != 0) {
+        flags |= static_cast<simrv::xlen::CsrValue>(FflagsBit::Nx);
+        if ((abs_q & UINT16_C(0x7F80)) == 0) {
+            flags |= static_cast<simrv::xlen::CsrValue>(FflagsBit::Uf);
+        }
+    }
+    return {static_cast<uint16_t>(sign_bit | abs_q), flags};
 }
 
 }  // namespace simrv::isa::fp

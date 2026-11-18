@@ -25,12 +25,14 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/ShellCompletion.hpp"
 #include "simrv/util/SoCManifest.hpp"
 
 namespace {
@@ -83,7 +85,14 @@ auto main() -> int {
         expect(check_isa("rv" + xlen + "g_zicntr").has_value(),
                "CLI accepts a canonical G ISA string with Zicntr");
         const auto g = check_isa("rv" + xlen + "g");
-        expect(g.has_value() && g->options.isa_preset == simrv::isa::IsaPreset::G,
+        const auto g_bits = simrv::isa::parse_isa_spec("g").value().misa_bits;
+        const auto gc_bits = simrv::isa::parse_isa_spec("gc").value().misa_bits;
+        const auto gcv_bits = simrv::isa::parse_isa_spec("gcv").value().misa_bits;
+        const auto gc_with_b_bits =
+            gc_bits | simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
+        const auto gcv_with_b_bits =
+            gcv_bits | simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
+        expect(g.has_value() && g->options.isa_spec.misa_bits == g_bits,
                "CLI accepts the standard G shorthand as distinct from GC");
         expect(check_isa("rv" + xlen + "g_zicntr2p0").has_value(),
                "CLI accepts standard multi-letter extensions after G");
@@ -93,43 +102,34 @@ auto main() -> int {
                "CLI accepts the canonical glued first multi-letter extension spelling");
         expect(check_isa("rv" + xlen + "gc_zicsr_zifencei_zicntr").has_value(),
                "CLI accepts explicit extensions implied by G");
-        expect(
-            check_isa("rv" + xlen + "gczb").has_value() &&
-                check_isa("rv" + xlen + "gczb")->options.isa_preset == simrv::isa::IsaPreset::GC &&
-                check_isa("rv" + xlen + "gczb")->options.has_zb_extensions,
-            "CLI accepts GC with bitmanip");
         expect(check_isa("rv" + xlen + "gcv").has_value() &&
-                   check_isa("rv" + xlen + "gcv")->options.isa_preset == simrv::isa::IsaPreset::GCV,
+                   check_isa("rv" + xlen + "gcv")->options.isa_spec.misa_bits == gcv_bits,
                "CLI accepts canonical GCV preset");
-        expect(check_isa("rv" + xlen + "gczbv").has_value() &&
-                   check_isa("rv" + xlen + "gczbv")->options.isa_preset ==
-                       simrv::isa::IsaPreset::GCV &&
-                   check_isa("rv" + xlen + "gczbv")->options.has_zb_extensions,
-               "CLI accepts GCV with bitmanip");
-        expect(check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
-                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_preset ==
-                       simrv::isa::IsaPreset::GC &&
-                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.has_zb_extensions,
-               "CLI accepts ratified bitmanip sub-extensions and enables GC with bitmanip");
         expect(
-            check_isa("rv" + xlen + "gc_zb").has_value() &&
-                check_isa("rv" + xlen + "gc_zb")->options.isa_preset == simrv::isa::IsaPreset::GC &&
-                check_isa("rv" + xlen + "gc_zb")->options.has_zb_extensions,
-            "CLI accepts ratified zb shorthand and enables GC with bitmanip");
+            check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
+                check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_spec.misa_bits ==
+                    gc_with_b_bits &&
+                !check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_spec.extensions.empty(),
+            "CLI accepts ratified bitmanip sub-extensions and enables GC with bitmanip");
         expect(check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs").has_value() &&
-                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.isa_preset ==
-                       simrv::isa::IsaPreset::GCV &&
-                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.has_zb_extensions,
+                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.isa_spec.misa_bits ==
+                       gcv_with_b_bits &&
+                   !check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")
+                        ->options.isa_spec.extensions.empty(),
                "CLI accepts ratified bitmanip with vector base and enables GCV with bitmanip");
         expect(check_isa("rv" + xlen + "gc_zk").has_value(),
                "CLI accepts ratified scalar crypto zk shorthand");
-        expect(!check_isa("rv" + xlen + "gcbv").has_value(),
-               "CLI rejects legacy draft shorthand rv{}gcbv");
-        expect(!check_isa("gcbv").has_value(), "CLI rejects legacy draft shorthand gcbv");
+        expect(check_isa("rv" + xlen + "gcbv").has_value(),
+               "CLI accepts canonical GCBV single-letter extensions");
+        expect(check_isa("gcbv").has_value(), "CLI accepts XLEN-inherited GCBV");
+        expect(!check_isa("rv" + xlen + "gczbv").has_value(),
+               "CLI rejects the non-standard ZB shorthand");
+        expect(!check_isa("rv" + xlen + "gc_zb").has_value(),
+               "CLI rejects the unratified zb aggregate name");
         expect(!check_isa("rv" + xlen + "gc_zfoo").has_value(),
                "CLI rejects unsupported multi-letter ISA extensions");
-        expect(!check_isa("rv" + xlen + "gc_xsimrvtrace").has_value(),
-               "CLI rejects the retired experimental Xsimrvtrace extension");
+        expect(check_isa("rv" + xlen + "gc_xsimrvtrace").has_value(),
+               "CLI preserves opaque custom X extension names");
         expect(!check_isa("rv" + xlen + "gc_zicntr2p1").has_value(),
                "CLI rejects unsupported extension versions");
         expect(!check_isa("rv" + xlen + "gc_zicntr_zicntr").has_value(),
@@ -140,12 +140,22 @@ auto main() -> int {
         std::array<char*, 5> args{};
         for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
         const auto parsed = simrv::util::parse_command_line(args);
-        expect(parsed.has_value(), "CLI accepts RVA23U64 profile selection");
+        if constexpr (simrv::xlen::kXLenBits == 64) {
+            expect(parsed.has_value(), "RV64 CLI accepts RVA23U64 profile selection");
+        } else {
+            expect(!parsed.has_value(), "RV32 CLI rejects an RV64 profile");
+        }
         if (parsed) {
             const auto cfg = parsed->options.to_machine_config();
             expect(cfg.execution.profile == simrv::isa::ArchitectureProfile::Rva23U64,
                    "selected ISA profile is preserved in machine configuration");
         }
+        std::array<std::string, 5> rv32_args_str = {"SimRV", "--profile", "rvi20u32", "-m",
+                                                    "guest.elf"};
+        std::array<char*, 5> rv32_args{};
+        for (size_t i = 0; i < rv32_args_str.size(); ++i) rv32_args[i] = rv32_args_str[i].data();
+        const auto rv32_profile = simrv::util::parse_command_line(rv32_args);
+        expect(rv32_profile.has_value(), "CLI accepts RVI20U32 profile selection");
     }
     expect(simrv::log::parse_format("text") == simrv::log::Format::Text,
            "text diagnostic format is accepted");
@@ -662,15 +672,15 @@ auto main() -> int {
                "ambiguous --trace-pc is rejected directing to --trace-pc-range");
     }
     {
-        std::array<std::string, 5> config_str = {"SimRV", "--config", "rvcomp", "-m", "guest.bin"};
+        std::array<std::string, 5> config_str = {"SimRV", "--config", "virt-mmio", "-m", "guest.bin"};
         std::array<char*, 5> config_args{};
         for (size_t i = 0; i < config_str.size(); ++i) config_args[i] = config_str[i].data();
         const auto parsed = simrv::util::parse_command_line(config_args);
-        expect(parsed.has_value() && parsed->options.config_target == "rvcomp",
+        expect(parsed.has_value() && parsed->options.config_target == "virt-mmio",
                "canonical --config option selects platform preset");
     }
     {
-        std::array<std::string, 5> retired_soc_str = {"SimRV", "--soc", "rvcomp", "-m",
+        std::array<std::string, 5> retired_soc_str = {"SimRV", "--soc", "unknown", "-m",
                                                       "guest.bin"};
         std::array<char*, 5> retired_soc_args{};
         for (size_t i = 0; i < retired_soc_str.size(); ++i)
@@ -692,7 +702,7 @@ auto main() -> int {
                "retired --cpu-config option is rejected");
     }
     {
-        std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "rvcomp", "-m"};
+        std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "unknown", "-m"};
         std::array<char*, 4> legacy_platform_args{};
         for (size_t i = 0; i < legacy_platform_str.size(); ++i)
             legacy_platform_args[i] = legacy_platform_str[i].data();
@@ -921,13 +931,17 @@ auto main() -> int {
         cfg.tui.enabled = true;
         simrv::core::Machine machine(cfg);
         expect(machine.initialize().has_value(), "default Machine initializes successfully");
-        expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
-                                              simrv::isa::IsaExtension::B),
-               "default Machine initial misa enables bitmanip extension (B)");
         if constexpr (simrv::xlen::kIsXLen64) {
+            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                  simrv::isa::IsaExtension::B),
+                   "default RVA23S64 profile enables bitmanip extension (B)");
             expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                                   simrv::isa::IsaExtension::H),
                    "default RVA23S64 profile enables the H extension");
+        } else {
+            expect(!simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                   simrv::isa::IsaExtension::B),
+                   "default RV32 profile (RVI20U32) does not enable bitmanip extension (B)");
         }
     }
 
@@ -1261,19 +1275,21 @@ auto main() -> int {
         expect(parsed.has_value(), "default CLI args parse");
         if (parsed) {
             auto cfg = parsed->options.to_machine_config();
-            expect(simrv::isa::misa_has_extension(cfg.isa.isa_preset, simrv::isa::IsaExtension::B),
-                   "default CLI MachineConfig enables bitmanip extension (B)");
             cfg.tui.enabled = true;
             simrv::core::Machine machine(cfg);
             expect(machine.initialize().has_value(),
                    "CLI-configured Machine initializes successfully");
-            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
-                                                  simrv::isa::IsaExtension::B),
-                   "CLI-configured Machine initial misa enables bitmanip extension (B)");
             if constexpr (simrv::xlen::kIsXLen64) {
+                expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                      simrv::isa::IsaExtension::B),
+                       "CLI-configured Machine initial misa enables bitmanip extension (B)");
                 expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                                       simrv::isa::IsaExtension::H),
                        "CLI default RVA23S64 profile enables the H extension");
+            } else {
+                expect(!simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                       simrv::isa::IsaExtension::B),
+                       "CLI default RVI20U32 profile omits bitmanip extension (B)");
             }
         }
     }
@@ -1285,68 +1301,49 @@ auto main() -> int {
             return simrv::util::parse_command_line(args);
         };
 
-        auto validate_cfg = parse_cli({"SimRV", "--validate-config", "configs/models/rvcomp.cfg"});
-        expect(validate_cfg.has_value(), "CLI accepts --validate-config");
-        if (validate_cfg) {
-            expect(validate_cfg->action == simrv::util::CliAction::ValidateCpuModel,
-                   "--validate-config sets CliAction::ValidateCpuModel");
-            expect(validate_cfg->options.dump_cpu_model_preset == "configs/models/rvcomp.cfg",
-                   "--validate-config sets target configuration file");
-        }
+        expect(!parse_cli({"SimRV", "--validate-config", "configs/models/ibex.cfg"}).has_value(),
+               "configuration validation is delegated to simrv-config-wizard");
 
-        auto validate_cpu_cfg =
-            parse_cli({"SimRV", "--validate-cpu-config", "configs/models/rvcomp.cfg"});
-        expect(validate_cpu_cfg.has_value(), "CLI accepts --validate-cpu-config");
-
-        expect(!parse_cli({"SimRV", "--check-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+        expect(!parse_cli({"SimRV", "--check-cpu-model", "configs/models/ibex.cfg"}).has_value(),
                "CLI rejects retired alias --check-cpu-model");
-        expect(!parse_cli({"SimRV", "--verify-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+        expect(!parse_cli({"SimRV", "--verify-cpu-model", "configs/models/ibex.cfg"}).has_value(),
                "CLI rejects retired alias --verify-cpu-model");
         expect(!parse_cli({"SimRV", "--export-soc-manifest", "virt-pcie"}).has_value(),
                "CLI rejects retired alias --export-soc-manifest");
         expect(!parse_cli({"SimRV", "--export-cpu-model", "tiny"}).has_value(),
                "CLI rejects retired alias --export-cpu-model");
 
-        auto validate_soc_preset = parse_cli({"SimRV", "--validate-config", "virt-pcie"});
-        expect(validate_soc_preset.has_value() &&
-                   validate_soc_preset->action == simrv::util::CliAction::ValidateCpuModel &&
-                   validate_soc_preset->options.dump_cpu_model_preset == "virt-pcie",
-               "CLI accepts --validate-config with built-in SoC preset name");
-
-        auto validate_cpu_preset = parse_cli({"SimRV", "--validate-config", "balanced"});
-        expect(validate_cpu_preset.has_value() &&
-                   validate_cpu_preset->action == simrv::util::CliAction::ValidateCpuModel &&
-                   validate_cpu_preset->options.dump_cpu_model_preset == "balanced",
-               "CLI accepts --validate-config with built-in CPU preset name");
+        expect(!parse_cli({"SimRV", "config", "validate", "virt-pcie"}).has_value(),
+               "configuration subcommands are delegated to simrv-config-wizard");
     }
 
     {
-        // CPU config parser ISA preset validation and Zb expansion
-        expect(!simrv::core::detail::parse_isa_preset_string("gcbv").has_value(),
-               "CpuConfigParser detail::parse_isa_preset_string rejects legacy draft gcbv");
-        expect(!simrv::core::detail::parse_isa_preset_string("rv64gcbv").has_value(),
-               "CpuConfigParser detail::parse_isa_preset_string rejects legacy draft rv64gcbv");
-        expect(simrv::core::detail::parse_isa_preset_string("gczbv") == simrv::isa::IsaPreset::GCV,
-               "CpuConfigParser detail::parse_isa_preset_string accepts ratified gczbv");
+        // CPU config parser ISA spec validation
+        expect(simrv::isa::parse_isa_spec("rv64gcbv").has_value(),
+               "isa::parse_isa_spec accepts canonical GCBV single-letter extensions");
+        const auto gcv_zb_spec = simrv::isa::parse_isa_spec("rv64gcv_zba_zbb_zbs");
+        expect(gcv_zb_spec.has_value() && gcv_zb_spec->has(simrv::isa::IsaExtension::V) &&
+                   !gcv_zb_spec->extensions.empty(),
+               "isa::parse_isa_spec accepts ratified GCV with explicit bitmanip extensions");
 
         std::istringstream stream(
-            "[cpu]\nname = \"test_core\"\nisa_preset = \"gczbv\"\n"
+            "[cpu]\nname = \"test_core\"\nisa_preset = \"gcv_zba_zbb_zbs\"\n"
             "[device.clint]\nname = \"clint0\"\nbase = 0x2000000\nsize = 0x10000\n"
             "[device.plic]\nname = \"plic0\"\nbase = 0xc000000\nsize = 0x400000\n"
             "[smp]\nhart_count = 2\n");
         simrv::pipeline::CpuModelConfig cfg{};
         expect(simrv::core::parse_cpu_config_stream(stream, cfg),
-               "parse_cpu_config_stream successfully parses config with gczbv and device/smp "
+               "parse_cpu_config_stream successfully parses config with gcv_zba_zbb_zbs and "
+               "device/smp "
                "sections");
-        expect(cfg.isa_preset == simrv::isa::IsaPreset::GCV, "gczbv config maps to IsaPreset::GCV");
+        expect(cfg.isa.has(simrv::isa::IsaExtension::V),
+               "gcv_zba_zbb_zbs config enables V extension in IsaSpec");
         expect(std::ranges::find(cfg.isa_extensions, "zba") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zba");
+               "gcv_zba_zbb_zbs config automatically includes zba");
         expect(std::ranges::find(cfg.isa_extensions, "zbb") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zbb");
-        expect(std::ranges::find(cfg.isa_extensions, "zbc") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zbc");
+               "gcv_zba_zbb_zbs config automatically includes zbb");
         expect(std::ranges::find(cfg.isa_extensions, "zbs") != cfg.isa_extensions.end(),
-               "gczbv config automatically includes zbs");
+               "gcv_zba_zbb_zbs config automatically includes zbs");
     }
 
     {
@@ -1375,9 +1372,17 @@ auto main() -> int {
     }
 
     {
+        const auto profile = simrv::isa::parse_isa_spec("rv64gcbvh");
+        expect(profile.has_value() &&
+                   simrv::debug::spike_isa_string(profile->misa_bits) ==
+                       std::format("rv{}gcbvh", simrv::xlen::kXLenBits),
+               "Spike ISA string uses canonical C/B/V/H ordering");
+    }
+
+    {
         // Stdin platform config parsing with unified [cpu] and [soc] sections
         std::istringstream combined_stream(
-            "[cpu]\nname = \"piped_core\"\nisa_preset = \"gczbv\"\n"
+            "[cpu]\nname = \"piped_core\"\nisa_preset = \"gcv_zba_zbb_zbs\"\n"
             "[soc]\nname = \"piped_soc\"\ndram_base = 0x80000000\ndram_size = 0x10000000\n");
         simrv::pipeline::CpuModelConfig cpu_cfg{};
         simrv::core::SoCConfig soc_cfg{};
@@ -1392,27 +1397,28 @@ auto main() -> int {
     }
 
     {
-        // Output streaming via '-' for dump-cpu-model, scaffold-cpu-model, and dump-soc-manifest
+        // CPU model export stays in the simulator; scaffolding belongs to simrv-tools.
         std::array<std::string, 4> dump_cpu_str = {"SimRV", "--dump-cpu-model", "balanced", "-"};
         std::array<char*, 4> dump_cpu_args = {dump_cpu_str[0].data(), dump_cpu_str[1].data(),
                                               dump_cpu_str[2].data(), dump_cpu_str[3].data()};
         auto parsed_dump = simrv::util::parse_command_line(dump_cpu_args);
-        expect(parsed_dump.has_value() && parsed_dump->options.dump_cpu_model_output == "-",
-               "--dump-cpu-model captures '-' as stdout output target");
+        expect(parsed_dump.has_value() &&
+                   parsed_dump->action == simrv::util::CliAction::DumpCpuModel &&
+                   parsed_dump->options.dump_cpu_model_target == "balanced" &&
+                   parsed_dump->options.dump_cpu_model_output == "-",
+               "--dump-cpu-model exports a preset to standard output");
 
         std::array<std::string, 3> scaffold_str = {"SimRV", "--scaffold-cpu-model", "-"};
         std::array<char*, 3> scaffold_args = {scaffold_str[0].data(), scaffold_str[1].data(),
                                               scaffold_str[2].data()};
         auto parsed_scaffold = simrv::util::parse_command_line(scaffold_args);
-        expect(parsed_scaffold.has_value() && parsed_scaffold->options.dump_cpu_model_output == "-",
-               "--scaffold-cpu-model captures '-' as stdout output target");
+        expect(!parsed_scaffold.has_value(), "simrv rejects the removed CPU scaffold flag");
 
-        std::array<std::string, 4> soc_str = {"SimRV", "--dump-soc-manifest", "virt-pcie", "-"};
-        std::array<char*, 4> soc_args = {soc_str[0].data(), soc_str[1].data(), soc_str[2].data(),
-                                         soc_str[3].data()};
-        auto parsed_soc = simrv::util::parse_command_line(soc_args);
-        expect(parsed_soc.has_value() && parsed_soc->options.soc_manifest_output == "-",
-               "--dump-soc-manifest captures '-' as stdout output target");
+        std::array<std::string, 3> soc_flag = {"SimRV", "--dump-soc-manifest", "virt-pcie"};
+        std::array<char*, 3> soc_flag_args = {soc_flag[0].data(), soc_flag[1].data(),
+                                              soc_flag[2].data()};
+        expect(!simrv::util::parse_command_line(soc_flag_args).has_value(),
+               "SoC manifest export has a single config subcommand");
 
         // -r/--trace-range diagnostics refer to -r
         std::array<std::string, 4> trace_range_str = {"SimRV", "-r", "invalid_start", "100"};
@@ -1662,12 +1668,8 @@ auto main() -> int {
         std::array<char*, 3> completion_args = {completion_args_str[0].data(),
                                                 completion_args_str[1].data(),
                                                 completion_args_str[2].data()};
-        auto parsed_completion = simrv::util::parse_command_line(completion_args);
-        expect(parsed_completion.has_value() &&
-                   parsed_completion->action == simrv::util::CliAction::GenerateCompletion &&
-                   parsed_completion->options.completion_shell == "zsh",
-               "completion subcommand maps to CliAction::GenerateCompletion with requested "
-               "shell");
+        expect(!simrv::util::parse_command_line(completion_args).has_value(),
+               "completion generation is a standalone tool");
         expect(simrv::util::generate_shell_completion("zsh").find("#compdef simrv") !=
                    std::string::npos,
                "generate_shell_completion produces valid zsh completion script");
@@ -1682,10 +1684,48 @@ auto main() -> int {
         std::array<char*, 3> explain_args = {explain_args_str[0].data(), explain_args_str[1].data(),
                                              explain_args_str[2].data()};
         auto parsed_explain = simrv::util::parse_command_line(explain_args);
-        expect(parsed_explain.has_value() &&
-                   parsed_explain->action == simrv::util::CliAction::ExplainInstruction &&
-                   parsed_explain->options.explain_inst_val == 0x13,
-               "explain subcommand decodes hex instruction value");
+        expect(
+            parsed_explain.has_value() &&
+                parsed_explain->action == simrv::util::CliAction::ExplainQuery &&
+                parsed_explain->options.explain_query == "0x13" &&
+                parsed_explain->options.explain_query_type == simrv::util::ExplainQueryType::Auto,
+            "explain subcommand accepts hexadecimal instruction query");
+
+        std::array<std::string, 4> explain_profile_args_str = {"simrv", "explain", "profile",
+                                                               "RVA23S64"};
+        std::array<char*, 4> explain_profile_args = {
+            explain_profile_args_str[0].data(), explain_profile_args_str[1].data(),
+            explain_profile_args_str[2].data(), explain_profile_args_str[3].data()};
+        auto parsed_explain_profile = simrv::util::parse_command_line(explain_profile_args);
+        expect(parsed_explain_profile.has_value() &&
+                   parsed_explain_profile->action == simrv::util::CliAction::ExplainQuery &&
+                   parsed_explain_profile->options.explain_query == "RVA23S64" &&
+                   parsed_explain_profile->options.explain_query_type ==
+                       simrv::util::ExplainQueryType::Profile,
+               "typed explain profile query is parsed");
+
+        std::array<std::string, 3> explain_instruction_args_str = {"simrv", "explain", "ADD"};
+        std::array<char*, 3> explain_instruction_args = {explain_instruction_args_str[0].data(),
+                                                         explain_instruction_args_str[1].data(),
+                                                         explain_instruction_args_str[2].data()};
+        auto parsed_explain_instruction = simrv::util::parse_command_line(explain_instruction_args);
+        expect(parsed_explain_instruction.has_value() &&
+                   parsed_explain_instruction->options.explain_query == "ADD" &&
+                   parsed_explain_instruction->options.explain_query_type ==
+                       simrv::util::ExplainQueryType::Auto,
+               "bare explain instruction query is parsed");
+
+        std::array<std::string, 3> removed_explain_flag_args_str = {"simrv", "--explain-inst",
+                                                                    "0x13"};
+        std::array<char*, 3> removed_explain_flag_args = {removed_explain_flag_args_str[0].data(),
+                                                          removed_explain_flag_args_str[1].data(),
+                                                          removed_explain_flag_args_str[2].data()};
+        expect(!simrv::util::parse_command_line(removed_explain_flag_args).has_value(),
+               "removed legacy explain flags are rejected");
+        removed_explain_flag_args_str[1] = "--explain";
+        removed_explain_flag_args[1] = removed_explain_flag_args_str[1].data();
+        expect(!simrv::util::parse_command_line(removed_explain_flag_args).has_value(),
+               "removed explain alias is rejected");
 
         std::array<std::string, 3> run_args_str = {"simrv", "run", "guest.elf"};
         std::array<char*, 3> run_args = {run_args_str[0].data(), run_args_str[1].data(),
@@ -1703,30 +1743,28 @@ auto main() -> int {
                                            bench_args_str[4].data(), bench_args_str[5].data(),
                                            bench_args_str[6].data()};
         auto parsed_bench = simrv::util::parse_command_line(bench_args);
-        expect(parsed_bench.has_value() &&
-                   parsed_bench->action == simrv::util::CliAction::RunBenchmark &&
-                   parsed_bench->options.fn_benchmark_elf == "guest.elf" &&
-                   parsed_bench->options.benchmark_runs == 12 &&
-                   parsed_bench->options.benchmark_warmups == 3,
-               "bench subcommand maps to CliAction::RunBenchmark with custom iteration count");
+        expect(!parsed_bench.has_value(), "benchmarking is delegated to simrv-benchmark");
 
         std::array<std::string, 4> config_args_str = {"simrv", "config", "validate", "virt-pcie"};
         std::array<char*, 4> cfg_val_args = {config_args_str[0].data(), config_args_str[1].data(),
                                              config_args_str[2].data(), config_args_str[3].data()};
         auto parsed_config = simrv::util::parse_command_line(cfg_val_args);
-        expect(parsed_config.has_value() &&
-                   parsed_config->action == simrv::util::CliAction::ValidateCpuModel &&
-                   parsed_config->options.dump_cpu_model_preset == "virt-pcie",
-               "config validate subcommand maps to CliAction::ValidateCpuModel");
+        expect(!parsed_config.has_value(), "config tooling is delegated to simrv-config-wizard");
+
+        std::array<std::string, 4> export_args_str = {"simrv", "config", "export-soc", "virt-pcie"};
+        std::array<char*, 4> export_args = {export_args_str[0].data(), export_args_str[1].data(),
+                                            export_args_str[2].data(), export_args_str[3].data()};
+        const auto parsed_export = simrv::util::parse_command_line(export_args);
+        expect(parsed_export.has_value() &&
+                   parsed_export->action == simrv::util::CliAction::ExportSoCManifest &&
+                   parsed_export->options.soc_manifest_preset == "virt-pcie",
+               "config export-soc is the canonical SoC manifest command");
 
         std::array<std::string, 4> scaffold_args_str = {"simrv", "scaffold", "cpu", "rv64gc"};
         std::array<char*, 4> scaf_args = {scaffold_args_str[0].data(), scaffold_args_str[1].data(),
                                           scaffold_args_str[2].data(), scaffold_args_str[3].data()};
-        auto parsed_scaffold = simrv::util::parse_command_line(scaf_args);
-        expect(parsed_scaffold.has_value() &&
-                   parsed_scaffold->action == simrv::util::CliAction::DumpCpuModel &&
-                   parsed_scaffold->options.dump_cpu_model_preset == "rv64gc",
-               "scaffold cpu subcommand maps to CliAction::DumpCpuModel");
+        expect(!simrv::util::parse_command_line(scaf_args).has_value(),
+               "scaffolding subcommand has moved out of simrv");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

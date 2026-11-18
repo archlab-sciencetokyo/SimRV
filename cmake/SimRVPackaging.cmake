@@ -38,13 +38,38 @@ install(
   COMPONENT Runtime)
 
 install(
-  TARGETS simrv-cpu-wizard simrv-parity simrv-benchmark
+  TARGETS simrv-config-wizard simrv-tools simrv-parity simrv-benchmark
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
-install(
-  CODE
-    "file(CREATE_LINK \"simrv-parity\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/simrv-tune\" SYMBOLIC)"
-  COMPONENT Tools)
+if(TARGET simrv-linux-builder)
+  install(
+    TARGETS simrv-linux-builder simrv-linux-builder-post-build
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Tools)
+  install(
+    FILES docs/man/simrv-linux-builder.1 docs/man/simrv-linux-builder-post-build.1
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+    COMPONENT Tools)
+  install(
+    FILES scripts/linux-versions.conf
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts
+    COMPONENT Tools)
+  install(
+    DIRECTORY scripts/templates/
+    USE_SOURCE_PERMISSIONS
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts/templates
+    COMPONENT Tools)
+  install(
+    DIRECTORY scripts/linux/templates/
+    USE_SOURCE_PERMISSIONS
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/scripts/linux/templates
+    COMPONENT Tools)
+  install(
+    DIRECTORY configs/buildroot/simrv-buildroot/
+    USE_SOURCE_PERMISSIONS
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/LinuxBuilder/configs/buildroot/simrv-buildroot
+    COMPONENT Tools)
+endif()
 install(
   TARGETS simrv-act simrv-vector
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -56,33 +81,21 @@ install(
 # full project independently.
 add_custom_target(
   simrv-package-binaries
-  DEPENDS SimRV simrv-cpu-wizard simrv-parity simrv-benchmark simrv-act
-          simrv-vector)
-if(SIMRV_BUILD_PLUGINS)
-  set(_simrv_package_plugin_targets)
-  if(SIMRV_BUILD_RVCOMP_PLUGINS)
-    list(APPEND _simrv_package_plugin_targets simrv-mmc simrv-reset simrv-ethernet
-         simrv-rvcomp-uart simrv-rv98-keyboard)
-  endif()
-  if(SIMRV_BUILD_CFU_PLUGINS)
-    list(APPEND _simrv_package_plugin_targets simrv-cfu-provingground)
-  endif()
-  if(_simrv_package_plugin_targets)
-    add_dependencies(simrv-package-binaries ${_simrv_package_plugin_targets})
-  endif()
+  DEPENDS SimRV simrv-config-wizard simrv-tools simrv-parity simrv-benchmark
+          simrv-act simrv-vector)
+if(TARGET simrv-linux-builder)
+  add_dependencies(simrv-package-binaries simrv-linux-builder)
 endif()
-
-install(
-  FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl
-  COMPONENT Development)
-
 install(
   DIRECTORY configs/models/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/models
   COMPONENT Runtime
   FILES_MATCHING
   PATTERN "*.cfg")
+install(
+  FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl
+  COMPONENT Development)
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/SimRVBuildMetadata.json"
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV
@@ -115,8 +128,8 @@ install(
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
         COMPONENT Runtime)
 install(
-  FILES docs/man/simrv-cpu-wizard.1 docs/man/simrv-parity.1
-       docs/man/simrv-tune.1 docs/man/simrv-benchmark.1
+  FILES docs/man/simrv-tools.1 docs/man/simrv-config-wizard.1 docs/man/simrv-parity.1
+       docs/man/simrv-benchmark.1
   DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
   COMPONENT Tools)
 install(
@@ -173,6 +186,8 @@ set(CPACK_GENERATOR "TGZ" CACHE STRING
     "Semicolon-separated CPack generators (for example TGZ;RPM;DEB)")
 set(CPACK_COMPONENTS_ALL Runtime Tools Tests Development)
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_THREADS 0)
+set(CPACK_STRIP_FILES TRUE)
 set(CPACK_COMPONENT_TOOLS_DEPENDS Runtime)
 set(CPACK_COMPONENT_TESTS_DEPENDS Runtime)
 set(CPACK_COMPONENT_DEVELOPMENT_DEPENDS Runtime)
@@ -181,7 +196,7 @@ set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
     "Explainable RISC-V simulator runtime for RV64 and RV32 guests.")
 set(CPACK_COMPONENT_TOOLS_DISPLAY_NAME "SimRV architecture and benchmarking tools")
 set(CPACK_COMPONENT_TOOLS_DESCRIPTION
-    "Optional CPU model, RTL parity, tuning, and benchmark measurement tools.")
+    "Optional configuration, Linux image building, and benchmark tools.")
 set(CPACK_COMPONENT_TESTS_DISPLAY_NAME "SimRV compliance test runners")
 set(CPACK_COMPONENT_TESTS_DESCRIPTION
     "Optional RISC-V architectural compliance test drivers (ACT4 and Vector).")
@@ -192,11 +207,24 @@ set(CPACK_COMPONENT_DEVELOPMENT_DESCRIPTION
 # Native Linux package metadata. CPack's RPM and DEB generators derive runtime
 # library dependencies from the installed ELF when the host packaging tools are
 # available; package creation never bundles a compiler or guest image.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  set(SIMRV_DEB_ARCH "amd64")
+  set(SIMRV_RPM_ARCH "x86_64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+  set(SIMRV_DEB_ARCH "arm64")
+  set(SIMRV_RPM_ARCH "aarch64")
+else()
+  set(SIMRV_DEB_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+  set(SIMRV_RPM_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
 set(CPACK_DEBIAN_PACKAGE_NAME "simrv")
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${SIMRV_DEB_ARCH}")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ArchLab Science Tokyo")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "${CPACK_PACKAGE_DESCRIPTION}")
 set(CPACK_DEBIAN_PACKAGE_SECTION "science")
+set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_SECTION "libdevel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 if(SIMRV_PACKAGE_PRERELEASE)
   set(CPACK_DEBIAN_PACKAGE_VERSION
@@ -207,19 +235,21 @@ endif()
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_TOOLS_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_TESTS_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "simrv")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "libc6, libgcc-s1, libstdc++6")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_NAME "simrv-tools")
 set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_NAME "simrv-devel")
 set(CPACK_DEBIAN_RUNTIME_FILE_NAME
-    "simrv_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
+    "simrv_${CPACK_DEBIAN_PACKAGE_VERSION}_${SIMRV_DEB_ARCH}.deb")
 set(CPACK_DEBIAN_TOOLS_FILE_NAME
-    "simrv-tools_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
+    "simrv-tools_${CPACK_DEBIAN_PACKAGE_VERSION}_${SIMRV_DEB_ARCH}.deb")
 set(CPACK_DEBIAN_TESTS_FILE_NAME
-    "simrv-tests_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
+    "simrv-tests_${CPACK_DEBIAN_PACKAGE_VERSION}_${SIMRV_DEB_ARCH}.deb")
 set(CPACK_DEBIAN_DEVELOPMENT_FILE_NAME
-    "simrv-devel_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
+    "simrv-devel_${CPACK_DEBIAN_PACKAGE_VERSION}_${SIMRV_DEB_ARCH}.deb")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS
@@ -228,6 +258,7 @@ set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 
 set(CPACK_RPM_PACKAGE_NAME "simrv")
+set(CPACK_RPM_PACKAGE_ARCHITECTURE "${SIMRV_RPM_ARCH}")
 set(CPACK_RPM_PACKAGE_SUMMARY "${CPACK_PACKAGE_DESCRIPTION_SUMMARY}")
 set(CPACK_RPM_PACKAGE_URL "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
@@ -236,9 +267,14 @@ set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_PACKAGE_DESCRIPTION "${CPACK_PACKAGE_DESCRIPTION}")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    /usr/include
+    /usr/lib
+    /usr/lib64
+    /usr/share/cmake
+    /usr/share/doc
+    /usr/share/licenses
     /usr/share/man
     /usr/share/man/man1)
-set(CPACK_STRIP_FILES "${CMAKE_INSTALL_BINDIR}/simrv")
 # Keep rpmbuild temporary files inside the caller-selected temporary area. This
 # avoids host-specific /var/tmp policy and makes local/CI package builds easier
 # to isolate.
@@ -255,13 +291,13 @@ set(CPACK_RPM_TOOLS_PACKAGE_NAME "simrv-tools")
 set(CPACK_RPM_TESTS_PACKAGE_NAME "simrv-tests")
 set(CPACK_RPM_DEVELOPMENT_PACKAGE_NAME "simrv-devel")
 set(CPACK_RPM_RUNTIME_FILE_NAME
-    "simrv-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.${SIMRV_RPM_ARCH}.rpm")
 set(CPACK_RPM_TOOLS_FILE_NAME
-    "simrv-tools-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-tools-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.${SIMRV_RPM_ARCH}.rpm")
 set(CPACK_RPM_TESTS_FILE_NAME
-    "simrv-tests-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-tests-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.${SIMRV_RPM_ARCH}.rpm")
 set(CPACK_RPM_DEVELOPMENT_FILE_NAME
-    "simrv-devel-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-devel-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.${SIMRV_RPM_ARCH}.rpm")
 set(CPACK_RPM_TOOLS_PACKAGE_REQUIRES
     "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_TESTS_PACKAGE_REQUIRES

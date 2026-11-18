@@ -1,0 +1,52 @@
+name: Workflow Lint
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - '.github/**'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - '.github/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: actionlint & shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          sha256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          archive="/tmp/actionlint.tar.gz"
+          curl --fail --location --silent --show-error --retry 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz" \
+            -o "$archive"
+          echo "${sha256}  ${archive}" | sha256sum --check --status
+          tar -xzf "$archive" -C /usr/local/bin actionlint
+          rm -f "$archive"
+
+      - name: Run actionlint
+        run: actionlint -color
+
+      - name: Run shellcheck on CI scripts
+        run: shellcheck .github/scripts/*.sh

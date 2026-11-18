@@ -258,12 +258,18 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         switch (s) {
             case simrv::pipeline::PipelineStage::Fetch:
                 return "IF ";
+            case simrv::pipeline::PipelineStage::Fetch2:
+                return "IF2";
             case simrv::pipeline::PipelineStage::Decode:
                 return "ID ";
+            case simrv::pipeline::PipelineStage::Issue:
+                return "IS ";
             case simrv::pipeline::PipelineStage::Execute:
                 return "EX ";
             case simrv::pipeline::PipelineStage::Memory:
                 return "MEM";
+            case simrv::pipeline::PipelineStage::Memory2:
+                return "M2 ";
             case simrv::pipeline::PipelineStage::Writeback:
                 return "WB ";
             case simrv::pipeline::PipelineStage::Commit:
@@ -369,8 +375,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                             kThemeText, kThemeMint),
                 width);
         }
-        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(
-            simrv::xlen::VirtAddr{f_reg.pc});
+        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(simrv::xlen::VirtAddr{f_reg.pc});
         std::string gauge;
         switch (counter) {
             case 0:

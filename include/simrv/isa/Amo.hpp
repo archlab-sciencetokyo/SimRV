@@ -22,12 +22,23 @@ namespace simrv::isa {
  * reserved and return zero so callers can reject them.
  */
 constexpr auto amo_operand_bytes(Funct3 funct3) -> unsigned {
-    if (funct3 == Funct3::Lw) return 4;
-    if (funct3 == Funct3::Ld) return 8;
-    return 0;
+    switch (std::to_underlying(funct3)) {
+        case 0:
+            return 1;
+        case 1:
+            return 2;
+        case 2:
+            return 4;
+        case 3:
+            return 8;
+        case 4:
+            return 16;
+        default:
+            return 0;
+    }
 }
 
-/** Return whether the AMO width exists for the build's architectural XLEN. */
+/** Return whether the base A-extension AMO width exists for the build's architectural XLEN. */
 constexpr auto amo_width_supported(Funct3 funct3) -> bool {
     return funct3 == Funct3::Lw || (simrv::xlen::kIsXLen64 && funct3 == Funct3::Ld);
 }
@@ -52,17 +63,19 @@ enum class AmoStatus : uint8_t {
  * @brief Represents the 5-bit atomic operation selector (bits [31:27] of AMO instructions).
  */
 enum class Funct5Amo : uint8_t {
-    Lr = 0x02,    ///< Load-Reserved
-    Sc = 0x03,    ///< Store-Conditional
-    Swap = 0x01,  ///< Atomic Swap
-    Add = 0x00,   ///< Atomic Add
-    And = 0x0c,   ///< Atomic Bitwise AND
-    Or = 0x08,    ///< Atomic Bitwise OR
-    Xor = 0x04,   ///< Atomic Bitwise XOR
-    Min = 0x10,   ///< Atomic Signed Minimum
-    Minu = 0x18,  ///< Atomic Unsigned Minimum
-    Max = 0x14,   ///< Atomic Signed Maximum
-    Maxu = 0x1c,  ///< Atomic Unsigned Maximum
+    Lr = 0x02,         ///< Load-Reserved
+    Sc = 0x03,         ///< Store-Conditional
+    Swap = 0x01,       ///< Atomic Swap
+    Cas = 0x05,        ///< Atomic Compare-and-Swap (Zacas)
+    Ssamoswap = 0x09,  ///< Shadow Stack Atomic Swap (Zicfiss)
+    Add = 0x00,        ///< Atomic Add
+    And = 0x0c,        ///< Atomic Bitwise AND
+    Or = 0x08,         ///< Atomic Bitwise OR
+    Xor = 0x04,        ///< Atomic Bitwise XOR
+    Min = 0x10,        ///< Atomic Signed Minimum
+    Minu = 0x18,       ///< Atomic Unsigned Minimum
+    Max = 0x14,        ///< Atomic Signed Maximum
+    Maxu = 0x1c,       ///< Atomic Unsigned Maximum
 };
 
 /**
@@ -74,6 +87,7 @@ constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
     using UnsignedT = std::make_unsigned_t<T>;
     switch (funct5) {
         case Funct5Amo::Swap:
+        case Funct5Amo::Ssamoswap:
             return reg_val;
         case Funct5Amo::Add:
             return mem_val + reg_val;

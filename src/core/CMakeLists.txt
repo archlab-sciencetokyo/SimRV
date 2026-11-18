@@ -26,17 +26,14 @@ simrv_add_component(simrv-core
   CpuFastOs.cpp
   BlockCache.cpp
   ../util/CliParser.cpp
-  ../util/Scaffolding.cpp
   ../util/ThirdPartyNotices.cpp
-  ../util/UefiDiskGenerator.cpp
-  ../util/MissionTools.cpp
-  ../util/BenchmarkRunner.cpp
   ../util/HostCache.cpp
   ../explain/CsrCatalog.cpp
   ../explain/ScalarSpecCatalog.cpp
   ../explain/VectorSpecCatalog.cpp
   ../explain/InstructionExplainer.cpp
   ../explain/ExplainCliPrinter.cpp
+  ../explain/ExplainQuery.cpp
 )
 add_library(simrv::core ALIAS simrv-core)
 

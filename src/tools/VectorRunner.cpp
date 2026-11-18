@@ -4,6 +4,7 @@
  */
 
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -313,11 +314,13 @@ auto compile_and_run_test(const TestContext& ctx) -> SingleTestResult {
         return result;
     }
 
-    if (sim_res.stdout_output.find("ISA TEST PASS") != std::string::npos) {
+    if (sim_res.stdout_output.find("Program Halted (SUCCESS / PASS)") != std::string::npos ||
+        sim_res.stdout_output.find("ISA TEST PASS") != std::string::npos) {
         result.status = "PASS";
         return result;
     }
-    if (sim_res.stdout_output.find("ISA TEST FAIL") != std::string::npos) {
+    if (sim_res.stdout_output.find("Program Halted (FAIL / EXIT code=") != std::string::npos ||
+        sim_res.stdout_output.find("ISA TEST FAIL") != std::string::npos) {
         result.status = "FAIL";
         result.error = sim_res.stdout_output + sim_res.stderr_output;
         return result;
@@ -400,6 +403,11 @@ int main(int argc, char* argv[]) {
         if (fs::exists(p1)) {
             generator_path = p1.string();
         } else if (fs::exists(p2)) {
+            generator_path = p2.string();
+        } else {
+            // The local generator is built into the work directory below.
+            // Set its output path before invoking `go build`; an empty -o
+            // argument otherwise succeeds without producing the expected binary.
             generator_path = p2.string();
         }
     }

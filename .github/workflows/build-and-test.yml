@@ -1,0 +1,394 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cpp: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.cpp }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Detect non-documentation changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            cpp:
+              - '**'
+              - '!docs/**'
+              - '!zensical.yml'
+              - '!pyproject.toml'
+              - '!uv.lock'
+              - '!cmake/SimRVPackaging.cmake'
+              - '!.github/workflows/build-and-test.yml'
+              - '!.github/workflows/docs.yml'
+              - '!.github/workflows/release-binaries.yml'
+              - '!.github/workflows/workflow-lint.yml'
+              - '!.github/dependabot.yml'
+
+  format-check:
+    name: Formatting
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: fedora:44
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install clang-format
+        run: dnf install -y --setopt=install_weak_deps=False git clang-tools-extra
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            mapfile -t FILES < <(git diff --name-only --diff-filter=ACMR \
+              "${{ github.event.pull_request.base.sha }}...HEAD" -- '*.cpp' '*.hpp')
+          else
+            mapfile -t FILES < <(git ls-files -- 'include/**/*.hpp' 'src/**/*.cpp' 'src/**/*.hpp' 'tests/**/*.cpp' 'tests/**/*.hpp')
+          fi
+          if (( ${#FILES[@]} )); then
+            clang-format --dry-run --Werror "${FILES[@]}"
+          else
+            echo "No C/C++ files to check."
+          fi
+
+  build:
+    name: Build & Gate (${{ matrix.arch }} / ${{ matrix.compiler }})
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: fedora:44
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [rv32, rv64]
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build tools
+        run: |
+          EXTRA_PKGS=()
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            EXTRA_PKGS+=(clang)
+          else
+            EXTRA_PKGS+=(golang)
+          fi
+          dnf install -y --setopt=install_weak_deps=False \
+            git cmake ninja-build boost-devel libslirp-devel \
+            gcc gcc-c++ mold ccache curl tar xz autoconf make which "${EXTRA_PKGS[@]}"
+
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: fedora44-${{ matrix.arch }}-${{ matrix.compiler }}
+
+      - name: Setup RISC-V GCC toolchain
+        uses: ./.github/actions/setup-riscv-toolchain
+
+      - name: Setup RISC-V tests
+        id: riscv-tests
+        uses: ./.github/actions/setup-riscv-tests
+        with:
+          arch: ${{ matrix.arch }}
+          with-vector-tests: ${{ matrix.compiler == 'gcc' }}
+
+      - name: Show toolchain versions
+        run: |
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            clang++ --version
+          else
+            g++ --version
+          fi
+          riscv-none-elf-gcc --version
+          cmake --version
+          ninja --version
+          ccache --version
+
+      - name: Configure CMake
+        env:
+          RISCV_TESTS_DIR: ${{ steps.riscv-tests.outputs.riscv-tests-dir }}
+        shell: bash
+        run: |
+          EXTRA_ARGS=()
+          EXTRA_ARGS+=("-DSIMRV_ENABLE_LTO=OFF")
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            CC=clang
+            CXX=clang++
+          else
+            CC=gcc
+            CXX=g++
+            EXTRA_ARGS+=("-DSIMRV_VECTOR_TESTS_DIR=${{ steps.riscv-tests.outputs.vector-tests-dir }}")
+          fi
+          cmake --preset ${{ matrix.arch }}-release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_LINKER_TYPE=MOLD \
+            -DSIMRV_WARNINGS_AS_ERRORS=ON \
+            "${EXTRA_ARGS[@]}"
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.arch }}-release
+
+      - name: Show ccache statistics
+        run: ccache --show-stats
+
+      - name: Run CTest gate suite
+        env:
+          RISCV_TESTS_DIR: ${{ steps.riscv-tests.outputs.riscv-tests-dir }}
+        run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
+
+      - name: Run release smoke checks
+        if: matrix.arch == 'rv64' && matrix.compiler == 'gcc'
+        run: |
+          build/rv64-release/simrv-smoke --simrv build/rv64-release/simrv
+          ctest --test-dir build/rv64-release --output-on-failure -L release
+
+      - name: Record required-suite evidence
+        shell: bash
+        run: |
+          export RISCV_TESTS_DIR="${{ steps.riscv-tests.outputs.riscv-tests-dir }}"
+          SUITES=(--suite native --suite isa)
+          DEPENDENCIES=(--dependency riscv_tests="${{ steps.riscv-tests.outputs.riscv-tests-dir }}")
+          if [[ "${{ matrix.arch }}" == "rv64" ]]; then
+            SUITES+=(--suite rva23-act)
+          fi
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            SUITES+=(--suite vector --suite package)
+            DEPENDENCIES+=(--dependency vector_tests="${{ steps.riscv-tests.outputs.vector-tests-dir }}")
+          fi
+          build/${{ matrix.arch }}-release/simrv-evidence \
+            --build-dir build/${{ matrix.arch }}-release \
+            --arch ${{ matrix.arch == 'rv32' && '32' || '64' }} \
+            --compiler ${{ matrix.compiler }} \
+            "${SUITES[@]}" "${DEPENDENCIES[@]}" \
+            --output evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-${{ matrix.compiler }}-${{ matrix.arch }}
+          path: evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
+          retention-days: 14
+
+  sanitizers:
+    name: Sanitizer (${{ matrix.sanitizer }})
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: fedora:44
+      options: --security-opt seccomp=unconfined
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: asan-ubsan
+            preset: rv64-asan
+            build_dir: /tmp/simrv-build/rv64-asan
+            build_jobs: 0
+            cmake_extra: >-
+              -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
+              -DSIMRV_ENABLE_LTO=OFF
+            ctest_label: regress
+            needs_setarch: false
+          - sanitizer: tsan
+            preset: rv64-tsan
+            build_dir: /tmp/simrv-build/rv64-tsan
+            build_jobs: 0
+            cmake_extra: -DSIMRV_ENABLE_LTO=OFF
+            ctest_label: thread
+            needs_setarch: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install sanitizer build tools
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            cmake ninja-build boost-devel libslirp-devel \
+            gcc gcc-c++ mold libasan libtsan libubsan ccache util-linux
+
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: fedora44-${{ matrix.sanitizer }}
+          cache-dir: /tmp/simrv-build/.ccache
+
+      - name: Configure ${{ matrix.sanitizer }}
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_LINKER_TYPE=MOLD
+          ${{ matrix.cmake_extra }}
+
+      - name: Build ${{ matrix.sanitizer }}
+        run: |
+          build_jobs=${{ matrix.build_jobs }}
+          if (( build_jobs > 0 )); then
+            cmake --build --preset ${{ matrix.preset }} --target simrv-sanitizer-binaries --parallel "$build_jobs"
+          else
+            cmake --build --preset ${{ matrix.preset }} --target simrv-sanitizer-binaries
+          fi
+
+      - name: Run ${{ matrix.sanitizer }} suite
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          if [[ "${{ matrix.needs_setarch }}" == "true" ]]; then
+            setarch "$(uname -m)" -R ctest --test-dir "${{ matrix.build_dir }}" --output-on-failure -L "${{ matrix.ctest_label }}"
+          else
+            ctest --test-dir "${{ matrix.build_dir }}" --output-on-failure -L "${{ matrix.ctest_label }}"
+          fi
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ matrix.runner }}-${{ matrix.arch }}-v1
+
+      - name: Install build tools
+        run: brew install boost libslirp cmake ninja gcc ccache
+
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: macos-${{ matrix.arch }}
+
+      - name: Configure macOS build
+        run: |
+          cmake -S . -B build/macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc-16 \
+            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSIMRV_XLEN=64 \
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_ENABLE_LTO=OFF
+
+      - name: Build simulator and gate tests
+        run: cmake --build build/macos --parallel "$(sysctl -n hw.ncpu)"
+
+      - name: Run macOS smoke and gate tests
+        run: |
+          build/macos/SimRV --help
+          ctest --test-dir build/macos --output-on-failure -L gate -LE isa
+
+      - name: Upload simulator binary
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: simrv-macos-${{ matrix.arch }}
+          path: build/macos/SimRV
+          if-no-files-found: error
+          retention-days: 7
+
+  native-arm64:
+    name: Linux Native ARM64
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    container:
+      image: fedora:44
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install native build tools
+        run: dnf install -y --setopt=install_weak_deps=False cmake ninja-build boost-devel libslirp-devel gcc gcc-c++ mold ccache
+
+      - name: Setup ccache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: fedora44-arm64-gcc
+
+      - name: Configure native ARM64 optimization
+        run: >-
+          cmake --preset rv64-gcc-release
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_LINKER_TYPE=MOLD
+          -DSIMRV_ENABLE_LTO=OFF
+          -DSIMRV_WARNINGS_AS_ERRORS=ON
+          -DSIMRV_NATIVE_HOST_OPTIMIZATIONS=ON
+
+      - name: Build native ARM64 simulator
+        run: cmake --build --preset rv64-gcc-release
+
+      - name: Run native ARM64 smoke and gate tests
+        run: |
+          build/rv64-gcc-release/simrv-smoke --simrv build/rv64-gcc-release/simrv
+          ctest --test-dir build/rv64-gcc-release --output-on-failure -L gate -LE isa
+
+  ci-status:
+    name: CI Gate Status
+    needs: [changes, format-check, build, sanitizers, macos, native-arm64]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate CI gate results
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.changes.outputs.cpp }}" != "true" ]]; then
+            echo "Documentation/non-C++ change only; C++ CI jobs skipped."
+            exit 0
+          fi
+          for job_result in \
+            "${{ needs.format-check.result }}" \
+            "${{ needs.build.result }}" \
+            "${{ needs.sanitizers.result }}" \
+            "${{ needs.macos.result }}" \
+            "${{ needs.native-arm64.result }}"; do
+            if [[ "$job_result" != "success" ]]; then
+              echo "Required CI job did not succeed (result: $job_result)." >&2
+              exit 1
+            fi
+          done
+          echo "All required CI jobs succeeded."

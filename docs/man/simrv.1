@@ -83,13 +83,16 @@ subsequent multi-letter extensions are separated by underscores. \fBG\fR implies
 Set the vector register length from 128 through 1024 bits.
 .TP
 .B \-\-config=\fIpreset|file\fR
-Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcomp\fR) or load a platform configuration file defining SoC topology and microarchitectural parameters.
+Select a complete platform preset (\fBvirt-pcie\fR or \fBvirt-mmio\fR) or load a platform configuration file defining SoC topology and microarchitectural parameters.
 .TP
 .B \-\-net=\fIbackend\fR
 Select user-mode NAT networking through libslirp or disable the VirtIO network with \fBnone\fR.
 .TP
-.B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
-Write the normalized SoC registry as JSON for a built-in preset or platform configuration file. Pass \fB\-\fR or omit output to stream JSON to stdout.
+.B config export-soc \fIPRESET|FILE\fR [\fIOUTPUT\fR]
+Export the resolved SoC registry as JSON. Omit OUTPUT or use \fB-\fR to write to standard output.
+.TP
+.B \-\-dump-cpu-model=\fIMODEL\fR [\fIFILE\fR]
+Export a normalized CPU model configuration. Omit FILE or use \fB-\fR to write to standard output.
 .SH EXECUTION AND PIPELINE
 .TP
 .B \-\-cpu\-clock=\fIhertz\fR, \-\-clock\-hz=\fIhertz\fR
@@ -119,15 +122,6 @@ Configure branch-history, branch-target-buffer, and return-address-stack sizes.
 .TP
 .B \-\-cpu-preset=\fIpreset\fR
 Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR).
-.TP
-.B \-\-dump-cpu-model=\fImodel\fR [\fIfile\fR]
-Export a normalized CPU model configuration. Pass \fB\-\fR or omit file to stream JSON to stdout.
-.TP
-.B \-\-scaffold-cpu-model [\fIfile\fR]
-Generate a starter CPU model configuration. Pass \fB\-\fR or omit file to stream JSON to stdout.
-.TP
-.B \-\-validate-config=\fIfile\fR, \-\-validate-cpu-config=\fIfile\fR
-Validate and lint a CPU model or unified SoC platform configuration.
 .TP
 .B \-\-cfu-plugin=\fIfile.so\fR
 Load a dynamic custom function-unit plugin.
@@ -238,8 +232,10 @@ Print the qualified ISA and frontend capabilities.
 .B \-\-doctor
 Diagnose terminal, runtime, and release-environment issues.
 .TP
-.B \-\-explain-inst=\fIhex\fR
-Disassemble and explain a 32-bit instruction encoding.
+.B simrv explain \fIQUERY\fR
+Explain an instruction word, instruction mnemonic, registered profile, or ISA extension. Use
+\fBinstruction\fR, \fBprofile\fR, or \fBextension\fR after \fBexplain\fR to disambiguate a
+name when needed.
 .TP
 .B \-\-license
 Display the MIT license and copyright notice.
@@ -309,12 +305,11 @@ The complete user guide.
 .I /usr/share/SimRV/SimRVBuildMetadata.json
 Installed build provenance manifest.
 .SH SHELL COMPLETIONS
-Runtime installs provide completion definitions for Bash, Zsh, and Fish. Native packages install
-them in the standard system completion directories; source installations place them below
-the selected install prefix's `share/` tree.
+The Tools package can generate completion scripts for Bash, Zsh, and Fish with
+\fBsimrv-tools completion\fR.
 .SH SEE ALSO
 .BR simrv\-cpu\-wizard (1),
-.BR simrv\-tune (1),
+.BR simrv\-tools (1),
 .BR simrv\-parity (1),
 .BR simrv\-benchmark (1)
 .PP
@@ -324,4 +319,4 @@ Full documentation is available in \fB/usr/share/doc/SimRV/USER_GUIDE.md\fR and 
 .SH AUTHORS
 Developed by the ArchLab team at Science Tokyo (formerly Tokyo Institute of Technology).
 .SH COPYRIGHT
-Copyright \(co 2024\-2026 ArchLab @ ScienceTokyo.  Released under the MIT License.
+Copyright \(co 2024\-2026 Lennart Trunk and ArchLab @ ScienceTokyo.  Released under the MIT License.

@@ -11,10 +11,12 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/isa/IsaConfig.hpp"
 #include "simrv/util/FdtGenerator.hpp"
@@ -159,7 +161,8 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "pci@30000000"), "PCIe ECAM node address present");
     expect(blob_contains_string(blob, "zihpm"), "Implemented HPM counter extension advertised");
     expect(blob_contains_string(blob, "zicntr"), "Base counters and timers advertised");
-    expect(blob_contains_string(blob, "sstc"), "Supervisor timer extension advertised");
+    expect(blob_contains_string(blob, "sstc") == simrv::xlen::kIsXLen64,
+           "Supervisor timer extension advertised when S-mode profile is active");
     expect(blob_contains_string(blob, std::string_view{"\0h\0", 3}) == simrv::xlen::kIsXLen64,
            "Hypervisor extension advertisement follows the hart ISA configuration");
     expect(blob_contains_string(blob, "zihintntl"), "Zihintntl extension advertised");
@@ -180,19 +183,23 @@ void test_generate_platform_fdt_pcie() {
                std::string(extension) + " mandatory RVA23 extension advertised");
     }
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
-    expect(blob_contains_string(blob, "svade"), "Svade page-fault behavior advertised");
-    expect(blob_contains_string(blob, "ssccptr"), "Ssccptr page-table reads advertised");
-    expect(blob_contains_string(blob, "sscounterenw"),
-           "Sscounterenw HPM counter enables advertised");
-    expect(blob_contains_string(blob, "sstvala"), "Sstvala supervisor trap values advertised");
-    expect(blob_contains_string(blob, "sstvecd"), "Sstvecd direct trap vectors advertised");
+    expect(blob_contains_string(blob, "svade") == simrv::xlen::kIsXLen64,
+           "Svade page-fault behavior advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "ssccptr") == simrv::xlen::kIsXLen64,
+           "Ssccptr page-table reads advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "sscounterenw") == simrv::xlen::kIsXLen64,
+           "Sscounterenw HPM counter enables advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "sstvala") == simrv::xlen::kIsXLen64,
+           "Sstvala supervisor trap values advertised when S-mode profile is active");
+    expect(blob_contains_string(blob, "sstvecd") == simrv::xlen::kIsXLen64,
+           "Sstvecd direct trap vectors advertised when S-mode profile is active");
     for (const auto extension : {"ssstateen", "shcounterenw", "shvstvala", "shtvala", "shvstvecd",
                                  "shvsatpa", "shgatpa"}) {
         expect(blob_contains_string(blob, extension) == simrv::xlen::kIsXLen64,
                std::string(extension) + " Sha component advertisement follows H support");
     }
-    expect(blob_contains_string(blob, "sscofpmf"),
-           "Sscofpmf overflow interrupt support advertised");
+    expect(blob_contains_string(blob, "sscofpmf") == simrv::xlen::kIsXLen64,
+           "Sscofpmf overflow interrupt support advertised when S-mode profile is active");
     expect(blob_contains_string(blob, "ziccrse"), "Ziccrse main-memory support advertised");
     expect(blob_contains_string(blob, "ziccif"), "Ziccif atomic fetch support advertised");
     expect(blob_contains_string(blob, "ssnpm") == simrv::xlen::kIsXLen64,
@@ -317,8 +324,8 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
     fdt.end_node();
 
     const auto original = fdt.serialize();
-    const auto incompatible_isa = simrv::util::validate_fdt_isa(
-        original, simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC));
+    const auto gc_bits = simrv::isa::parse_isa_spec("gc").value().misa_bits;
+    const auto incompatible_isa = simrv::util::validate_fdt_isa(original, gc_bits);
     expect(!incompatible_isa && incompatible_isa.error().find("extension 'b'") != std::string::npos,
            "FDT ISA validation rejects base extensions disabled by the selected ISA");
     const auto invalid_timebase =
@@ -455,7 +462,7 @@ void test_generated_fdt_uses_explicit_soc_devices() {
 void test_explicit_gc_fdt_does_not_advertise_rva23_extensions() {
     simrv::core::MachineConfig cfg{};
     cfg.isa.misa_override = true;
-    cfg.isa.isa_preset = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
+    cfg.isa.isa_preset = simrv::isa::parse_isa_spec("gc").value().misa_bits;
 
     const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
     const auto compatible_isa = simrv::util::validate_fdt_isa(blob, cfg.isa.isa_preset);
@@ -468,6 +475,24 @@ void test_explicit_gc_fdt_does_not_advertise_rva23_extensions() {
     expect(blob_contains_string(blob, "zicntr") && blob_contains_string(blob, "zicsr") &&
                blob_contains_string(blob, "zifencei"),
            "explicit RV64GC FDT retains its baseline unprivileged extensions");
+}
+
+void test_rvb23_fdt_does_not_advertise_vector_without_misa_v() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+    simrv::core::MachineConfig config{};
+    config.execution.profile = simrv::isa::ArchitectureProfile::Rvb23S64;
+    const auto profile = simrv::isa::parse_isa_spec(
+        simrv::isa::profile_default_isa_string(config.execution.profile));
+    expect(profile.has_value(), "RVB23S64 profile ISA parses");
+    if (!profile) return;
+    config.isa.isa_preset = profile->misa_bits;
+    config.isa.enabled_extensions = profile->extension_set;
+
+    const auto blob = simrv::util::generate_platform_fdt(config, nullptr);
+    expect(!blob_contains_string(blob, std::string_view{"\0v\0", 3}),
+           "RVB23S64 FDT does not advertise V when MISA.V is disabled");
+    expect(simrv::util::validate_fdt_isa(blob, config.isa.isa_preset).has_value(),
+           "RVB23S64 generated FDT advertises only MISA-supported single-letter extensions");
 }
 
 void test_patch_fdt_bootargs_override() {
@@ -501,6 +526,51 @@ void test_patch_fdt_bootargs_override() {
            "patched FDT contains overridden bootargs string");
 }
 
+void test_read_fdt_platform_for_config_wizard() {
+    simrv::core::MachineConfig config{};
+    config.memory.dram_base = simrv::xlen::PhysAddr{0x80000000};
+    config.memory.dram_size = 256ULL * 1024 * 1024;
+    config.execution.num_harts = 3;
+    config.execution.cpu_clock_hz = 50000000;
+    config.execution.timebase_hz = 10000000;
+    config.files.bootargs = "console=ttyS0 root=/dev/vda rw";
+    const auto blob = simrv::util::generate_platform_fdt(config, nullptr);
+    const auto imported = simrv::util::read_fdt_platform(blob);
+    expect(imported.has_value(), "generated DTB imports as a wizard platform description");
+    if (!imported) return;
+    expect(imported->dram_base.raw() == 0x80000000 && imported->dram_size == 256ULL * 1024 * 1024,
+           "DTB import extracts RAM base and size");
+    expect(imported->hart_count == 3 && imported->cpu_clock_hz == 50000000 &&
+               imported->timebase_hz == 10000000,
+           "DTB import extracts hart count and clock frequencies");
+    expect(imported->bootargs == "console=ttyS0 root=/dev/vda rw",
+           "DTB import extracts chosen bootargs");
+    expect(std::ranges::any_of(imported->devices,
+                               [](const auto& device) {
+                                   return device.compatible == "ns16550a" &&
+                                          device.base.raw() == 0x10000000;
+                               }),
+           "DTB import discovers compatible MMIO devices and ranges");
+
+    const std::array<uint8_t, 8> invalid{};
+    const auto malformed = simrv::util::read_fdt_platform(invalid);
+    expect(!malformed.has_value(), "DTB import rejects malformed headers");
+
+    simrv::core::SoCConfig soc{};
+    std::istringstream combined(
+        "[soc]\ncpu_clock_hz = 50000000\ntimebase_hz = 10000000\n"
+        "[memory]\ndram_base = 0x80000000\ndram_size = 256M\n"
+        "[boot]\nbootargs = \"console=ttyS0 root=/dev/vda rw\"\n"
+        "[smp]\nhart_count = 3\n");
+    expect(simrv::core::parse_soc_config_stream(combined, soc),
+           "combined config parser accepts wizard-imported platform fields");
+    expect(soc.cpu_clock_hz == 50000000 && soc.timebase_hz == 10000000 &&
+               soc.dram_base == simrv::xlen::PhysAddr{0x80000000} &&
+               soc.dram_size == 256ULL * 1024 * 1024 &&
+               soc.bootargs == "console=ttyS0 root=/dev/vda rw" && soc.smp.hart_count == 3,
+           "combined config parser retains DTB-derived values");
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -511,9 +581,11 @@ auto main() -> int {
     test_generate_platform_fdt_custom_pcie_topology();
     test_patch_fdt_advertises_zihintntl_and_64_byte_cmo();
     test_patch_fdt_bootargs_override();
+    test_read_fdt_platform_for_config_wizard();
     test_generate_platform_fdt_mmio();
     test_generated_fdt_uses_explicit_soc_devices();
     test_explicit_gc_fdt_does_not_advertise_rva23_extensions();
+    test_rvb23_fdt_does_not_advertise_vector_without_misa_v();
 
     if (failures != 0) {
         std::cerr << failures << " assertion(s) failed.\n";

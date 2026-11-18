@@ -106,7 +106,7 @@ struct LeftHeaderLayout {
     } else {
         auto const type = machine.hart(selected_hart).pipeline_sim.config.pipeline_type;
         result.mode = std::format("{} · CA {}-stage", environment,
-                                  type == simrv::pipeline::PipelineType::ThreeStage ? 3 : 5);
+                                  simrv::pipeline::pipeline_stage_count(type));
     }
     if (machine.num_harts() > 1) {
         const std::string smp_mode = machine.is_smp_enabled() ? "MT" : "ST";

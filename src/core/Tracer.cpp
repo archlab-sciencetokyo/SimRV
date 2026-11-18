@@ -44,6 +44,7 @@
 #include "simrv/isa/Priv.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
@@ -1766,7 +1767,9 @@ void Tracer::print_summary() {
     simrv::xlen::Counter ccount = 0;
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
         const auto& h = machine_.hart(hart);
-        icount += (h.state().minstret != 0 ? h.state().minstret : h.e_icount);
+        // minstret is guest-visible and may be inhibited by Linux. e_icount tracks
+        // every instruction retired by the simulator and matches the JSON report.
+        icount += h.e_icount;
         ccount += h.e_ccount;
     }
 

@@ -12,6 +12,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -24,20 +25,13 @@ enum class CliAction : uint8_t {
     ShowLicense,
     ShowIsaInfo,
     Doctor,
-    ExplainInstruction,
+    ExplainQuery,
     DumpCpuModel,
     ExportSoCManifest,
-    ValidateCpuModel,
-    ScaffoldDevicePlugin,
-    ScaffoldCfuPlugin,
     ShowThirdPartyNotices,
-    CheckMission,
-    CreateMission,
-    CreateUefiDisk,
-    RunBenchmark,
-    GenerateCompletion
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
+enum class ExplainQueryType : uint8_t { Auto, Instruction, Profile, Extension };
 
 struct RuntimeOptions {
     std::string fn_memimg;
@@ -79,10 +73,8 @@ struct RuntimeOptions {
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = 0UL;
     simrv::xlen::Address isatest_tohost = 0x80001000;
-    isa::IsaPreset isa_preset = isa::IsaPreset::GCV;
+    isa::IsaSpec isa_spec = isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
     isa::ArchitectureProfile profile = isa::kDefaultArchitectureProfile;
-    bool has_zb_extensions = false;
-    std::vector<std::string> isa_extensions{};
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 
@@ -114,6 +106,7 @@ struct RuntimeOptions {
     bool high_contrast = false;
     std::string mission;
     std::string pipeline_type = "5stage";
+    std::optional<simrv::memory::BusProtocol> bus_protocol;
     bool disable_forwarding = false;
     bool divider_early_out = false;
     std::string bpred_type;
@@ -129,35 +122,17 @@ struct RuntimeOptions {
     std::string spike_elf;
 
     std::string fn_config;
-    std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset;
-    std::string dump_cpu_model_preset;
+    std::string dump_cpu_model_target;
     std::string dump_cpu_model_output;
     std::string soc_manifest_preset;
     std::string soc_manifest_output;
-    std::string scaffold_device_plugin_name;
-    std::string scaffold_device_plugin_output;
-    std::string scaffold_cfu_plugin_name;
-    std::string scaffold_cfu_plugin_output;
-    std::string fn_mission_check;
-    std::string fn_mission_create;
-    std::string completion_shell;
-    std::string fn_benchmark_elf;
-    uint32_t benchmark_runs = 5;
-    uint32_t benchmark_warmups = 2;
-    std::string benchmark_json_out;
-    std::string benchmark_spike_bin;
-    bool benchmark_nanobench = false;
-    std::string benchmark_suite;
-    std::string benchmark_isa_str;
-    std::string fn_uefi_disk_kernel;
-    std::string fn_uefi_disk_out;
-    std::string fn_uefi_disk_rootfs;
-    uint32_t uefi_disk_size_mb = 64;
+    std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset;
     std::string fn_cfu_plugin;
     std::vector<std::string> device_plugins;
     std::optional<bool> bram_prewarm;
     uint64_t step_delay_us = 0;
-    uint32_t explain_inst_val = 0;
+    std::string explain_query;
+    ExplainQueryType explain_query_type = ExplainQueryType::Auto;
     unsigned int vlen = 0;
     uint32_t num_harts = 1;
     bool explicit_num_harts = false;
@@ -189,6 +164,5 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     std::string_view msg, simrv::core::HostExitCode status = simrv::core::HostExitCode::UsageError)
     -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
-auto generate_shell_completion(std::string_view shell) -> std::string;
 
 }  // namespace simrv::util

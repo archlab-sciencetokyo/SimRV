@@ -51,7 +51,9 @@ SimRV optionally integrates header-only hardware modeling utilities from the Boo
 
 ## 3. ankerl::nanobench Microbenchmarking Library
 
-SimRV vendors `ankerl::nanobench` (`tests/third_party/nanobench.h`) for nanosecond-precision microbenchmarks and hardware counter performance telemetry.
+SimRV vendors `ankerl::nanobench` in `include/simrv/third_party/nanobench.h` for runtime benchmark
+reporting and in `tests/third_party/nanobench.h` for microbenchmarks and hardware counter
+performance telemetry.
 
 - **Author**: Martin Leitner-Ankerl (<martin.ankerl@gmail.com>)
 - **Website**: <https://github.com/martinus/nanobench>

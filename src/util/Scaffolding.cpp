@@ -5,27 +5,64 @@
 #include "simrv/util/Scaffolding.hpp"
 
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <print>
 #include <sstream>
 #include <string>
+#include <iterator>
+#include <vector>
 
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/util/FdtPatcher.hpp"
 
 namespace simrv::util {
 
-auto scaffold_device_plugin(std::string_view name, std::string_view output) -> bool {
+namespace {
+struct DeviceSeed {
+    std::string compatible = "custom,device";
+    uint64_t base = 0x10050000ULL;
+    uint64_t size = 0x1000ULL;
+    uint32_t irq = 16;
+};
+
+auto escape_c_string(std::string_view value) -> std::string {
+    std::string escaped;
+    for (const char ch : value) {
+        if (ch == '\\' || ch == '"') escaped.push_back('\\');
+        if (ch == '\n') escaped += "\\n";
+        else if (ch == '\r') escaped += "\\r";
+        else if (ch == '\t') escaped += "\\t";
+        else escaped.push_back(ch);
+    }
+    return escaped;
+}
+}
+
+static auto scaffold_device_plugin_seeded(std::string_view name, std::string_view output,
+                                          const DeviceSeed& seed) -> bool {
     if (name.empty()) {
         simrv::log::error("No device plugin name specified for scaffolding.");
         return false;
     }
 
-    const std::string name_str(name);
+    std::string name_str(name);
+    for (auto& ch : name_str) {
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= '0' && ch <= '9') || ch == '_')) ch = '_';
+    }
+    if (name_str.empty() || (name_str.front() >= '0' && name_str.front() <= '9'))
+        name_str.insert(name_str.begin(), '_');
+    const std::string base_hex = std::format("0x{:x}", seed.base);
+    const std::string size_hex = std::format("0x{:x}", seed.size);
+    const std::string c_compatible = escape_c_string(seed.compatible);
 
-    auto generate_c_source = [&name_str]() -> std::string {
+    auto generate_c_source = [&name_str, &base_hex, &size_hex,
+                              &c_compatible]() -> std::string {
         std::ostringstream ss;
         ss << "/**\n"
            << " * @file " << name_str << "_plugin.c\n"
@@ -90,9 +127,9 @@ auto scaffold_device_plugin(std::string_view name, std::string_view output) -> b
            << "static const SimRvExternalDevice kDevice = {\n"
            << "    .api_version = SIMRV_EXTERNAL_DEVICE_API_VERSION,\n"
            << "    .name = \"" << name_str << "\",\n"
-           << "    .compatible = \"custom," << name_str << "\",\n"
-           << "    .default_base = 0x10050000ULL,\n"
-           << "    .default_size = 0x1000ULL,\n"
+           << "    .compatible = \"" << c_compatible << "\",\n"
+           << "    .default_base = " << base_hex << "ULL,\n"
+           << "    .default_size = " << size_hex << "ULL,\n"
            << "    .init = " << name_str << "_init,\n"
            << "    .reset = " << name_str << "_reset,\n"
            << "    .read = " << name_str << "_read,\n"
@@ -153,10 +190,10 @@ auto scaffold_device_plugin(std::string_view name, std::string_view output) -> b
              << name_str << " = \"./build/libsimrv-" << name_str << "-plugin.so\"\n\n"
              << "[device.custom-mmio." << name_str << "]\n"
              << "name = \"" << name_str << "\"\n"
-             << "compatible = \"custom," << name_str << "\"\n"
-             << "base = 0x10050000\n"
-             << "size = 0x1000\n"
-             << "irq = 16\n";
+             << "compatible = " << std::quoted(seed.compatible) << "\n"
+             << "base = " << base_hex << "\n"
+             << "size = " << size_hex << "\n"
+             << "irq = " << seed.irq << "\n";
 
     std::ofstream cmake_file(cmake_path);
     cmake_file << "cmake_minimum_required(VERSION 3.20)\n"
@@ -220,6 +257,50 @@ auto scaffold_device_plugin(std::string_view name, std::string_view output) -> b
 
     std::println("Generated device plugin project template in {}", out_path);
     return true;
+}
+
+auto scaffold_device_plugin(std::string_view name, std::string_view output) -> bool {
+    return scaffold_device_plugin_seeded(name, output, DeviceSeed{});
+}
+
+auto scaffold_device_plugin_from_dtb(std::string_view dtb_path, std::string_view output) -> bool {
+    std::ifstream input(std::string(dtb_path), std::ios::binary);
+    if (!input) {
+        simrv::log::error("Could not open DTB: {}", dtb_path);
+        return false;
+    }
+    std::vector<uint8_t> blob{std::istreambuf_iterator<char>(input), {}};
+    auto platform = read_fdt_platform(blob);
+    if (!platform) {
+        simrv::log::error("Could not read DTB: {}", platform.error());
+        return false;
+    }
+    if (platform->devices.empty()) {
+        simrv::log::error("DTB contains no importable MMIO device nodes.");
+        return false;
+    }
+    std::println("MMIO devices found in {}:", dtb_path);
+    for (size_t i = 0; i < platform->devices.size(); ++i) {
+        const auto& device = platform->devices[i];
+        std::println("  {}. {} ({}) base=0x{:x} size=0x{:x} irq={}", i + 1,
+                     device.name, device.compatible, device.base.raw(), device.size, device.irq);
+    }
+    size_t choice = 0;
+    if (platform->devices.size() == 1) {
+        choice = 1;
+    } else {
+        std::print("Select a device to scaffold [1-{}]: ", platform->devices.size());
+        if (!(std::cin >> choice)) choice = 0;
+    }
+    if (choice == 0 || choice > platform->devices.size()) {
+        simrv::log::error("Invalid device selection.");
+        return false;
+    }
+    const auto& selected = platform->devices[choice - 1];
+    DeviceSeed seed{selected.compatible, selected.base.raw(), selected.size, selected.irq};
+    std::println("\nNote: DTBs describe device identity and address ranges, not register layouts.\n"
+                 "The generated read/write handlers are editable starter examples.");
+    return scaffold_device_plugin_seeded(selected.name, output, seed);
 }
 
 auto scaffold_cfu_plugin(std::string_view name, std::string_view output) -> bool {
@@ -360,15 +441,13 @@ auto scaffold_cfu_plugin(std::string_view name, std::string_view output) -> bool
     std::ofstream readme_file(readme_path);
     readme_file << "# " << name_str << " Custom Function Unit (CFU) Plugin for SimRV\n\n"
                 << "This is a dynamic Custom Function Unit (CFU) accelerator plugin for SimRV.\n"
-                << "It supports both SimRV CFU ABI v2 and native CFU-Proving-Ground / "
-                   "CFU-Playground conventions (`cfu_op` and `cfu_reset`).\n\n"
+                << "It implements the versioned SimRV CFU C ABI.\n\n"
                 << "## Build Requirements\n"
                 << "Header files are required at build time only:\n"
                 << "- If `simrv-devel` is installed, CMake automatically links "
                    "`SimRV::simrv-devel`.\n"
                 << "- Otherwise, specify `-DSIMRV_DIR=<path-to-simrv>`.\n"
-                << "- For raw CFU-Proving-Ground mode (`cfu_op`/`cfu_reset`), only standard "
-                   "`<stdint.h>` is required.\n\n"
+                << "- The public CFU ABI header comes from the SimRV development package.\n\n"
                 << "## Runtime Requirements\n"
                 << "**None!** Developed plugins have zero runtime dependency on `simrv-devel`.\n"
                 << "The compiled `.so` can be loaded by any standard `simrv` installation.\n\n"

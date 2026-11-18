@@ -50,6 +50,10 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, simrv::xlen::Reg
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
     }
+    if (state_.zicfilp_enabled_in_current_mode() && op.rs1 != simrv::xlen::RegId::Ra &&
+        op.rs1 != simrv::xlen::RegId::T0 && op.rs1 != simrv::xlen::RegId::T2) {
+        state_.elp = true;
+    }
     state_.regs.write(op.rd, next_pc);
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
@@ -510,8 +514,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             simrv::memory::ram_write_fast(simrv::xlen::PhysAddr{phys_addr}, rrs2, kFunct3, ram);
             state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
-                    machine.memory_.reservation_table().may_have_reservations() &&
-                    machine.num_harts() > 1)) {
+                    machine.memory_.reservation_table().may_have_reservations())) {
                 machine.memory_.reservation_table().invalidate_range(
                     simrv::xlen::PhysAddr{phys_addr}, size_bytes, hart_id());
             }
@@ -542,8 +545,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                         static_cast<simrv::xlen::Instruction>(kFunct3));
                     state_.lr_reservation_active = false;
                     if (simrv::compiler::unlikely(
-                            machine.memory_.reservation_table().may_have_reservations() &&
-                            machine.num_harts() > 1)) {
+                            machine.memory_.reservation_table().may_have_reservations())) {
                         machine.memory_.reservation_table().invalidate_range(
                             simrv::xlen::PhysAddr{paddr}, size_bytes, hart_id());
                     }
@@ -578,8 +580,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                                 static_cast<simrv::xlen::Instruction>(kFunct3));
                             state_.lr_reservation_active = false;
                             if (simrv::compiler::unlikely(
-                                    machine.memory_.reservation_table().may_have_reservations() &&
-                                    machine.num_harts() > 1)) {
+                                    machine.memory_.reservation_table().may_have_reservations())) {
                                 machine.memory_.reservation_table().invalidate_range(
                                     simrv::xlen::PhysAddr{paddr}, size_bytes, hart_id());
                             }
@@ -611,8 +612,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     }
 
     state_.lr_reservation_active = false;
-    if (simrv::compiler::unlikely(machine.memory_.reservation_table().may_have_reservations() &&
-                                  machine.num_harts() > 1)) {
+    if (simrv::compiler::unlikely(machine.memory_.reservation_table().may_have_reservations())) {
         machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr, size_bytes,
                                                              hart_id());
     }
@@ -770,6 +770,24 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
         perf_counters.record_retire(op.op_id, 1);
+    }
+
+    if (simrv::compiler::unlikely(state_.elp && state_.zicfilp_enabled_in_current_mode())) {
+        const bool is_lpad = (op.op_id == isa::AUIPC && op.rd == simrv::xlen::RegId::Zero);
+        if (!is_lpad) {
+            raise_exception(ExceptionCode::SoftwareCheck, 2);
+            return;
+        }
+        const uint32_t imm20 = (op.ir >> 12U) & 0xFFFFFU;
+        const uint32_t label = static_cast<uint32_t>(
+            (static_cast<uint64_t>(state_.regs.read(simrv::xlen::RegId::T2)) >> 12U) & 0xFFFFFU);
+        if (imm20 != 0U && imm20 != label) {
+            raise_exception(ExceptionCode::SoftwareCheck, 2);
+            return;
+        }
+        state_.elp = false;
+        advance_cached_pc(op);
+        return;
     }
 
     // Control, memory, and uncommon instructions retain their precise cached/fallback paths.
@@ -1021,8 +1039,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
-                    machine.memory_.reservation_table().may_have_reservations() &&
-                    machine.num_harts() > 1)) {
+                    machine.memory_.reservation_table().may_have_reservations())) {
                 machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr,
                                                                      size_bytes, hart_id());
             }

@@ -60,6 +60,13 @@ auto InspectorPane::get_total_rows(int width) -> int {
     // pipeline page retains its complete 25-row canvas; single-column register
     // pages omit machine state entirely.
     int base_rows = performance_start_row(single_column) + performance_row_count();
+    if (page_ == TuiRegPage::DTREE) {
+        int device_rows = 4;
+        for (const auto& device : machine_.configuration().soc.devices) {
+            device_rows += 1 + static_cast<int>(device.regions.size());
+        }
+        base_rows = std::max(base_rows, device_rows + performance_row_count());
+    }
     int debug_rows = paused_ ? debug_state_row_count() : 0;
     return base_rows + debug_rows;
 }
@@ -275,6 +282,8 @@ auto InspectorPane::content_total_columns(int width) const -> int {
             int const min_bus = 48;
             return std::max(width, min_bus);
         }
+        case TuiRegPage::DTREE:
+            return std::max(width, 64);
         case TuiRegPage::TLB: {
             int const min_tlb = 48;
             return std::max(width, min_tlb);

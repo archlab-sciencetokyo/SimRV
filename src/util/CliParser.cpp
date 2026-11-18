@@ -31,8 +31,6 @@
 
 namespace simrv::util {
 
-using isa::IsaPreset;
-
 namespace {
 
 enum class CliArgumentForm : uint8_t { None, Required, Optional, RequiredThenOptional };
@@ -345,316 +343,33 @@ auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, st
         });
 }
 
-inline auto iequals(std::string_view a, std::string_view b) -> bool {
-    return std::ranges::equal(a, b, [](char c1, char c2) -> bool {
-        return std::tolower(static_cast<unsigned char>(c1)) ==
-               std::tolower(static_cast<unsigned char>(c2));
-    });
-}
-
-struct ParsedIsaPreset {
-    IsaPreset preset;
-    unsigned int xlen;
-    bool has_zb = false;
-};
-
-auto parse_isa_base_preset(std::string_view value)
-    -> std::expected<std::optional<ParsedIsaPreset>, std::string> {
-    // Reject legacy draft single-letter 'b' shorthands with a clear explanation
-    if (iequals(value, "gcbv") || iequals(value, "rv32gcbv") || iequals(value, "rv64gcbv") ||
-        iequals(value, "gcb") || iequals(value, "rv32gcb") || iequals(value, "rv64gcb")) {
-        return std::unexpected(std::format(
-            "legacy shorthand '{}' is not a ratified RISC-V ISA string; use ratified 'gcv', "
-            "'gc', or multi-letter extensions like 'rv64gcv_zba_zbb_zbs'",
-            value));
+auto parse_isa_spec_cli(std::string_view value) -> std::expected<isa::IsaSpec, std::string> {
+    auto spec = isa::parse_isa_spec(value);
+    if (!spec) {
+        return std::unexpected(
+            std::format("unsupported or malformed RISC-V ISA string '{}'", value));
     }
-
-    if (iequals(value, "i")) {
-        return ParsedIsaPreset{.preset = IsaPreset::I, .xlen = 0};
-    }
-    if (iequals(value, "e")) {
-        return ParsedIsaPreset{.preset = IsaPreset::E, .xlen = 32};
-    }
-    if (iequals(value, "em")) {
-        return ParsedIsaPreset{.preset = IsaPreset::EM, .xlen = 32};
-    }
-    if (iequals(value, "emac")) {
-        return ParsedIsaPreset{.preset = IsaPreset::EMAC, .xlen = 32};
-    }
-    if (iequals(value, "im")) {
-        return ParsedIsaPreset{.preset = IsaPreset::IM, .xlen = 0};
-    }
-    if (iequals(value, "ima")) {
-        return ParsedIsaPreset{.preset = IsaPreset::IMA, .xlen = 0};
-    }
-    if (iequals(value, "imac")) {
-        return ParsedIsaPreset{.preset = IsaPreset::IMAC, .xlen = 0};
-    }
-    if (iequals(value, "g")) {
-        return ParsedIsaPreset{.preset = IsaPreset::G, .xlen = 0};
-    }
-    if (iequals(value, "gc")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0};
-    }
-    if (iequals(value, "gcv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0};
-    }
-    if (iequals(value, "gczb")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0, .has_zb = true};
-    }
-    if (iequals(value, "gczbv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0, .has_zb = true};
-    }
-
-    unsigned int parsed_xlen = 0;
-    IsaPreset preset = IsaPreset::GCV;
-    bool has_zb = false;
-    bool valid = false;
-
-    if (iequals(value, "rv32e")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::E;
-        valid = true;
-    } else if (iequals(value, "rv32em")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::EM;
-        valid = true;
-    } else if (iequals(value, "rv32emac")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::EMAC;
-        valid = true;
-    } else if (iequals(value, "rv32i")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::I;
-        valid = true;
-    } else if (iequals(value, "rv64i")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::I;
-        valid = true;
-    } else if (iequals(value, "rv32im")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::IM;
-        valid = true;
-    } else if (iequals(value, "rv64im")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::IM;
-        valid = true;
-    } else if (iequals(value, "rv32ima")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::IMA;
-        valid = true;
-    } else if (iequals(value, "rv64ima")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::IMA;
-        valid = true;
-    } else if (iequals(value, "rv32imac")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::IMAC;
-        valid = true;
-    } else if (iequals(value, "rv64imac")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::IMAC;
-        valid = true;
-    } else if (iequals(value, "rv32g")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::G;
-        valid = true;
-    } else if (iequals(value, "rv64g")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::G;
-        valid = true;
-    } else if (iequals(value, "rv32gc")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GC;
-        valid = true;
-    } else if (iequals(value, "rv64gc")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GC;
-        valid = true;
-    } else if (iequals(value, "rv32gcv")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GCV;
-        valid = true;
-    } else if (iequals(value, "rv64gcv")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GCV;
-        valid = true;
-    } else if (iequals(value, "rv32gczb")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GC;
-        has_zb = true;
-        valid = true;
-    } else if (iequals(value, "rv64gczb")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GC;
-        has_zb = true;
-        valid = true;
-    } else if (iequals(value, "rv32gczbv")) {
-        parsed_xlen = 32;
-        preset = IsaPreset::GCV;
-        has_zb = true;
-        valid = true;
-    } else if (iequals(value, "rv64gczbv")) {
-        parsed_xlen = 64;
-        preset = IsaPreset::GCV;
-        has_zb = true;
-        valid = true;
-    }
-
-    if (valid) {
-        if (parsed_xlen == 64 && simrv::xlen::kXLenBits == 32) {
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        if (spec->xlen == 64) {
             return std::unexpected(std::format(
-                "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
+                "cannot run a 64-bit ISA string ({}) on a 32-bit simulator build", value));
         }
-        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen, .has_zb = has_zb};
     }
-
-    return std::nullopt;
+    return *spec;
 }
 
-auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
-    auto base_match = parse_isa_base_preset(value);
-    if (!base_match) return std::unexpected(base_match.error());
-    if (*base_match) return **base_match;
-
-    // Standard ISA strings may attach their first multi-letter extension directly
-    // to the single-letter base (e.g. RV64GCZicntr2p0 or RV64GCZba). Underscores separate later
-    // multi-letter extensions.
-    const auto extension_start = value.find_first_of("zZxX", 4);
-    if (extension_start != std::string_view::npos) {
-        auto base_end = extension_start;
-        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
-        const auto base = value.substr(0, base_end);
-        auto parsed = parse_isa_preset(base);
-        if (!parsed) return parsed;
-        auto extensions = value.substr(extension_start);
-        if (extensions.empty() || extensions.back() == '_') {
-            return std::unexpected("ISA string contains an empty extension name");
-        }
-        uint64_t seen_extensions = 0;
-        bool has_zb = false;
-        bool has_v = false;
-        while (!extensions.empty()) {
-            const auto next = extensions.find('_');
-            const auto extension = extensions.substr(0, next);
-            const auto supported_extension = [extension](std::string_view name) -> bool {
-                if (iequals(extension, name)) return true;
-                if (extension.size() <= name.size() ||
-                    !iequals(extension.substr(0, name.size()), name))
-                    return false;
-                const auto version = extension.substr(name.size());
-                return iequals(version, "1") || iequals(version, "1p0") || iequals(version, "2") ||
-                       iequals(version, "2p0");
-            };
-            const auto extension_id = [&]() -> uint64_t {
-                // CSR, Fence, Counters, Performance Monitoring
-                if (supported_extension("zicntr")) return 1ULL << 0;
-                if (supported_extension("zicsr")) return 1ULL << 1;
-                if (supported_extension("zifencei")) return 1ULL << 2;
-                if (supported_extension("zihpm")) return 1ULL << 3;
-
-                // Ratified Bitmanip (Zb)
-                if (supported_extension("zba")) return 1ULL << 4;
-                if (supported_extension("zbb")) return 1ULL << 5;
-                if (supported_extension("zbc")) return 1ULL << 6;
-                if (supported_extension("zbs")) return 1ULL << 7;
-                if (supported_extension("zb")) return 1ULL << 8;
-
-                // Cryptography Bitmanip & Scalar Crypto
-                if (supported_extension("zbkb")) return 1ULL << 9;
-                if (supported_extension("zbkc")) return 1ULL << 10;
-                if (supported_extension("zbkx")) return 1ULL << 11;
-                if (supported_extension("zknd")) return 1ULL << 12;
-                if (supported_extension("zkne")) return 1ULL << 13;
-                if (supported_extension("zknh")) return 1ULL << 14;
-                if (supported_extension("zksed")) return 1ULL << 15;
-                if (supported_extension("zksh")) return 1ULL << 16;
-                if (supported_extension("zkr")) return 1ULL << 17;
-                if (supported_extension("zkt")) return 1ULL << 18;
-                if (supported_extension("zkn")) return 1ULL << 19;
-                if (supported_extension("zks")) return 1ULL << 20;
-                if (supported_extension("zk")) return 1ULL << 21;
-
-                // Vector Sub-extensions
-                if (supported_extension("zve32x")) return 1ULL << 22;
-                if (supported_extension("zve32f")) return 1ULL << 23;
-                if (supported_extension("zve64x")) return 1ULL << 24;
-                if (supported_extension("zve64f")) return 1ULL << 25;
-                if (supported_extension("zve64d")) return 1ULL << 26;
-                if (supported_extension("zvl32b")) return 1ULL << 27;
-                if (supported_extension("zvl64b")) return 1ULL << 28;
-                if (supported_extension("zvl128b")) return 1ULL << 29;
-                if (supported_extension("zvl256b")) return 1ULL << 30;
-                if (supported_extension("zvl512b")) return 1ULL << 31;
-                if (supported_extension("zvl1024b")) return 1ULL << 32;
-
-                // Ratified Hints, Timers & Cache Management
-                if (supported_extension("zihintpause")) return 1ULL << 34;
-                if (supported_extension("sstc")) return 1ULL << 35;
-                if (supported_extension("zicbom")) return 1ULL << 36;
-                if (supported_extension("zicboz")) return 1ULL << 37;
-                if (supported_extension("zicbop")) return 1ULL << 38;
-
-                // Ratified Virtual Memory Extensions
-                if (supported_extension("svinval")) return 1ULL << 39;
-                if (supported_extension("svnapot")) return 1ULL << 40;
-                if (supported_extension("svpbmt")) return 1ULL << 41;
-                if (supported_extension("sscofpmf")) return 1ULL << 42;
-
-                return 0ULL;
-            }();
-            if (extension_id == 0) {
-                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
-            }
-            if ((seen_extensions & extension_id) != 0) {
-                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
-            }
-            seen_extensions |= extension_id;
-
-            if (extension_id >= (1ULL << 4) && extension_id <= (1ULL << 21)) {
-                has_zb = true;
-            }
-            if (extension_id >= (1ULL << 22) && extension_id <= (1ULL << 32)) {
-                has_v = true;
-            }
-
-            if (next == std::string_view::npos) break;
-            extensions.remove_prefix(next + 1);
-        }
-
-        const bool final_has_v = has_v || (parsed->preset == IsaPreset::GCV);
-        const bool final_has_zb = has_zb || parsed->has_zb;
-        parsed->has_zb = final_has_zb;
-
-        if (final_has_v && (parsed->preset == IsaPreset::GC || parsed->preset == IsaPreset::G)) {
-            parsed->preset = IsaPreset::GCV;
-        }
-        return parsed;
-    }
-
-    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    auto supported = std::format(
-        "e, em, emac, i, im, ima, imac, g, gc, gcv, gczb, gczbv, rv32e, rv32em, rv32emac, rv{}i, "
-        "rv{}im, "
-        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcv, rv{}gczb, rv{}gczbv",
-        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix,
-        xlen_suffix, xlen_suffix, xlen_suffix);
-    if constexpr (simrv::xlen::kIsXLen64) {
-        supported +=
-            ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcv, rv32gczb, rv32gczbv";
-    }
-    return std::unexpected(
-        std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
-}
-
-auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
+auto effective_isa_spec(const RuntimeOptions& options) -> isa::IsaSpec {
     if (options.misa_override) {
-        return options.isa_preset;
+        return options.isa_spec;
     }
     if (options.cpu_model_preset.has_value()) {
-        return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa_preset;
+        return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa;
     }
-    return IsaPreset::GCV;
+    if (const auto profile_isa =
+            isa::parse_isa_spec(isa::profile_default_isa_string(options.profile))) {
+        return *profile_isa;
+    }
+    return isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
 }
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
@@ -768,7 +483,7 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         } else if (!simrv::core::SoCConfig::preset(val).has_value()) {
             return std::unexpected(std::format(
                 "unknown platform configuration '{}'. Expected a file path or preset (virt-pcie, "
-                "virt-mmio, rvcomp).",
+                "virt-mmio).",
                 val));
         }
         return true;
@@ -925,11 +640,10 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     if (option_id == "--isa") {
         auto value = next_argument(args, i, "--isa");
         if (!value) return std::unexpected(value.error());
-        auto parsed_misa = parse_isa_preset(*value);
+        auto parsed_misa = parse_isa_spec_cli(*value);
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
-        result.options.isa_preset = parsed_misa->preset;
+        result.options.isa_spec = *parsed_misa;
         result.options.misa_xlen = parsed_misa->xlen;
-        result.options.has_zb_extensions = parsed_misa->has_zb;
         result.options.misa_override = true;
         return true;
     }
@@ -939,9 +653,16 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         auto parsed = isa::parse_architecture_profile(*value);
         if (!parsed) {
             return std::unexpected(
-                std::format("invalid architecture profile '{}' (valid: rva23, rva23s64, rva23u64, "
-                            "rva22, rva22s64, rva20, legacy)",
+                std::format("invalid architecture profile '{}' (valid: rvi20u32, rvi20u64, "
+                            "rva20u64, rva20s64, rva22u64, rva22s64, rva23u64, rva23s64, "
+                            "rvb23u64, rvb23s64)",
                             *value));
+        }
+        const auto* profile = isa::profile_info(*parsed);
+        if (profile != nullptr && profile->xlen > simrv::xlen::kXLenBits) {
+            return std::unexpected(
+                std::format("profile '{}' requires RV{} but this simulator was built for RV{}",
+                            *value, profile->xlen, simrv::xlen::kXLenBits));
         }
         result.options.profile = *parsed;
         return true;
@@ -1028,10 +749,31 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (!pipeline::parse_pipeline_type(*value).has_value()) {
+            std::string supported;
+            for (const auto& entry : pipeline::kPipelineCatalog) {
+                if (!supported.empty()) supported += ", ";
+                supported += entry.cli_name;
+            }
             return std::unexpected(
-                std::format("unsupported pipeline '{}' (supported: 3stage, 5stage)", *value));
+                std::format("unsupported pipeline '{}' (supported: {})", *value, supported));
         }
         result.options.pipeline_type = std::string(*value);
+        return true;
+    }
+    if (option_id == "--bus") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        const auto* entry = simrv::memory::find_bus_catalog_entry(*value);
+        if (entry == nullptr) {
+            std::string supported;
+            for (const auto& item : simrv::memory::kBusCatalog) {
+                if (!supported.empty()) supported += ", ";
+                supported += item.cli_name;
+            }
+            return std::unexpected(
+                std::format("unsupported bus protocol '{}' (supported: {})", *value, supported));
+        }
+        result.options.bus_protocol = entry->protocol;
         return true;
     }
     if (option_id == "--cpu-preset") {
@@ -1050,10 +792,15 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         }
         auto parsed = simrv::pipeline::parse_cpu_model_preset(*value);
         if (!parsed) {
+            std::string supported = "tiny, balanced, performance";
+            for (const auto& model : simrv::core::discover_cpu_models()) {
+                supported += ", ";
+                supported += model.name;
+            }
             return std::unexpected(
-                std::format("unsupported CPU model preset '{}' (supported presets: tiny, balanced, "
-                            "performance, or path/name of model .cfg)",
-                            *value));
+                std::format("unsupported CPU model preset '{}' (supported presets: {}, or "
+                            "path/name of model .cfg)",
+                            *value, supported));
         }
         result.options.cpu_model_preset = parsed;
         return true;
@@ -1164,18 +911,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.net_mode = std::string(net_opt);
         return true;
     }
-    if (option_id == "--explain-inst") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t raw_val = 0;
-        if (!parse_u32_base0(*value, raw_val)) {
-            return std::unexpected(
-                std::format("invalid hex instruction value for --explain-inst: {}", *value));
-        }
-        result.action = CliAction::ExplainInstruction;
-        result.options.explain_inst_val = raw_val;
-        return true;
-    }
     if (option_id == "--log-mmio") {
         result.options.dlog_mode = true;
         return true;
@@ -1184,136 +919,16 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.use_mix = true;
         return true;
     }
-    if (option_id == "--dump-cpu-model" || option_id == "--scaffold-cpu-model") {
+    if (option_id == "--dump-cpu-model") {
         result.action = CliAction::DumpCpuModel;
-        if (option_id == "--scaffold-cpu-model") {
-            result.options.dump_cpu_model_preset = "balanced";
-            if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-                (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
-                ++i;
-                result.options.dump_cpu_model_output = args[i];
-            }
-        } else {
-            auto value = next_argument(args, i, arg);
-            if (!value) return std::unexpected(value.error());
-            result.options.dump_cpu_model_preset = std::string(*value);
-            if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-                (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
-                ++i;
-                result.options.dump_cpu_model_output = args[i];
-            }
-        }
-        return true;
-    }
-    if (option_id == "--scaffold-device-plugin") {
-        result.action = CliAction::ScaffoldDevicePlugin;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        result.options.scaffold_device_plugin_name = std::string(*value);
+        result.options.dump_cpu_model_target = std::string(*value);
         if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
             (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
             ++i;
-            result.options.scaffold_device_plugin_output = args[i];
+            result.options.dump_cpu_model_output = args[i];
         }
-        return true;
-    }
-    if (option_id == "--scaffold-cfu-plugin") {
-        result.action = CliAction::ScaffoldCfuPlugin;
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.scaffold_cfu_plugin_name = std::string(*value);
-        if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
-            ++i;
-            result.options.scaffold_cfu_plugin_output = args[i];
-        }
-        return true;
-    }
-    if (option_id == "--dump-soc-manifest") {
-        result.action = CliAction::ExportSoCManifest;
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.soc_manifest_preset = std::string(*value);
-        if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
-            ++i;
-            result.options.soc_manifest_output = args[i];
-        }
-        return true;
-    }
-    if (option_id == "--validate-config") {
-        result.action = CliAction::ValidateCpuModel;
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.dump_cpu_model_preset = std::string(*value);
-        return true;
-    }
-    if (option_id == "--check-mission") {
-        result.action = CliAction::CheckMission;
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.fn_mission_check = std::string(*value);
-        return true;
-    }
-    if (option_id == "--create-mission") {
-        result.action = CliAction::CreateMission;
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.fn_mission_create = std::string(*value);
-        return true;
-    }
-    if (option_id == "--create-disk") {
-        result.action = CliAction::CreateUefiDisk;
-        if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            args[i + 1][0] != '-') {
-            ++i;
-            result.options.fn_uefi_disk_out = args[i];
-        }
-        return true;
-    }
-    if (option_id == "--disk-size-mb") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t mb = 0;
-        std::from_chars(value->data(), value->data() + value->size(), mb);
-        if (mb > 0) result.options.uefi_disk_size_mb = mb;
-        return true;
-    }
-    if (option_id == "--benchmark" || option_id == "-B") {
-        result.action = CliAction::RunBenchmark;
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.fn_benchmark_elf = std::string(*value);
-        result.options.fn_memimg = result.options.fn_benchmark_elf;
-        return true;
-    }
-    if (option_id == "--runs") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t runs = 0;
-        std::from_chars(value->data(), value->data() + value->size(), runs);
-        if (runs == 0) return std::unexpected("--runs must be a positive integer");
-        result.options.benchmark_runs = runs;
-        return true;
-    }
-    if (option_id == "--warmups") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t warmups = 0;
-        std::from_chars(value->data(), value->data() + value->size(), warmups);
-        result.options.benchmark_warmups = warmups;
-        return true;
-    }
-    if (option_id == "--json") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        result.options.benchmark_json_out = std::string(*value);
-        return true;
-    }
-    if (option_id == "--completion") {
-        result.action = CliAction::GenerateCompletion;
-        auto value = next_argument(args, i, arg);
-        result.options.completion_shell = (value ? std::string(*value) : "bash");
         return true;
     }
     return false;
@@ -1627,18 +1242,13 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                 if (opt_id == "--image" || opt_id == "--pc" || opt_id == "--bootargs" ||
                     opt_id == "--disk" || opt_id == "--virtiofs" || opt_id == "--dtb" ||
                     opt_id == "--isa" || opt_id == "--profile" || opt_id == "--mode" ||
-                    opt_id == "--pipeline" || opt_id == "--bpred" || opt_id == "--cpu-preset" ||
-                    opt_id == "--trace" || opt_id == "--arch-trace" ||
+                    opt_id == "--pipeline" || opt_id == "--bus" || opt_id == "--bpred" ||
+                    opt_id == "--cpu-preset" || opt_id == "--trace" || opt_id == "--arch-trace" ||
                     opt_id == "--checkpoint-every" || opt_id == "--trace-range" ||
                     opt_id == "--trace-pc-range" || opt_id == "--tohost-addr" ||
-                    opt_id == "--signature" || opt_id == "--explain-inst" ||
-                    opt_id == "--log-level" || opt_id == "--log-format" || opt_id == "--runs" ||
-                    opt_id == "--warmups" || opt_id == "--json" || opt_id == "--benchmark" ||
-                    opt_id == "--uefi" || opt_id == "--uefi-vars" || opt_id == "--disk-size-mb" ||
-                    opt_id == "--check-mission" || opt_id == "--create-mission" ||
-                    opt_id == "--create-disk" || opt_id == "--dump-soc-manifest" ||
-                    opt_id == "--scaffold-device-plugin" || opt_id == "--scaffold-cfu-plugin" ||
-                    opt_id == "--scaffold-cpu-model" || opt_id == "--completion") {
+                    opt_id == "--signature" || opt_id == "--log-level" ||
+                    opt_id == "--log-format" || opt_id == "--uefi" ||
+                    opt_id == "--uefi-vars") {
                     ++i;
                 }
             }
@@ -1658,165 +1268,71 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.action = CliAction::Doctor;
             return result;
         }
-        if (subcmd == "completion") {
-            result.action = CliAction::GenerateCompletion;
-            if (subcmd_pos + 1 < expanded_strings.size()) {
-                result.options.completion_shell = expanded_strings[subcmd_pos + 1];
-            } else {
-                result.options.completion_shell = "bash";
-            }
-            return result;
-        }
+        if (subcmd == "completion")
+            return std::unexpected("shell completion generation moved to simrv-tools completion");
         if (subcmd == "explain") {
             if (subcmd_pos + 1 >= expanded_strings.size()) {
                 return std::unexpected(
-                    "explain subcommand requires an instruction word (e.g. 'simrv explain "
-                    "0x00000013')");
+                    "explain requires a query: instruction, profile, extension, "
+                    "or hexadecimal instruction word");
             }
-            const std::string& hex_arg = expanded_strings[subcmd_pos + 1];
-            if (hex_arg == "-h" || hex_arg == "--help") {
+            const std::string& query_or_type = expanded_strings[subcmd_pos + 1];
+            if (query_or_type == "-h" || query_or_type == "--help") {
                 result.action = CliAction::ShowHelp;
                 return result;
             }
-            std::string_view hex = hex_arg;
-            if (hex.starts_with("0x") || hex.starts_with("0X")) hex.remove_prefix(2);
-            uint32_t val = 0;
-            auto [p, ec] = std::from_chars(hex.data(), hex.data() + hex.size(), val, 16);
-            if (ec != std::errc{} || p != hex.data() + hex.size()) {
+            result.action = CliAction::ExplainQuery;
+            result.options.explain_query = query_or_type;
+            const size_t query_pos = subcmd_pos + 1;
+            if (query_or_type == "instruction" || query_or_type == "profile" ||
+                query_or_type == "extension") {
+                if (query_pos + 1 >= expanded_strings.size()) {
+                    return std::unexpected(
+                        std::format("explain {} requires a name", query_or_type));
+                }
+                result.options.explain_query_type =
+                    query_or_type == "instruction" ? ExplainQueryType::Instruction
+                    : query_or_type == "profile"   ? ExplainQueryType::Profile
+                                                   : ExplainQueryType::Extension;
+                result.options.explain_query = expanded_strings[query_pos + 1];
+                if (query_pos + 2 < expanded_strings.size()) {
+                    return std::unexpected("explain accepts exactly one query");
+                }
+            } else if (query_pos + 1 < expanded_strings.size()) {
                 return std::unexpected(
-                    std::format("invalid hexadecimal instruction word '{}'", hex_arg));
+                    "explain accepts one query; use instruction, profile, or "
+                    "extension to specify its type");
             }
-            result.action = CliAction::ExplainInstruction;
-            result.options.explain_inst_val = val;
             return result;
         }
         if (subcmd == "config") {
-            if (subcmd_pos + 1 >= expanded_strings.size()) {
-                return std::unexpected(
-                    "config subcommand requires an action: validate <FILE|PRESET> or export-soc "
-                    "<PRESET> [FILE]");
-            }
-            const std::string& action = expanded_strings[subcmd_pos + 1];
-            if (action == "validate") {
-                if (subcmd_pos + 2 >= expanded_strings.size()) {
-                    return std::unexpected(
-                        "config validate requires a configuration file or preset");
-                }
-                result.action = CliAction::ValidateCpuModel;
-                result.options.dump_cpu_model_preset = expanded_strings[subcmd_pos + 2];
-                return result;
-            }
-            if (action == "export-soc") {
-                if (subcmd_pos + 2 >= expanded_strings.size()) {
-                    return std::unexpected(
-                        "config export-soc requires a SoC preset or configuration file");
-                }
-                result.action = CliAction::ExportSoCManifest;
-                result.options.soc_manifest_preset = expanded_strings[subcmd_pos + 2];
-                if (subcmd_pos + 3 < expanded_strings.size()) {
-                    result.options.soc_manifest_output = expanded_strings[subcmd_pos + 3];
-                }
-                return result;
-            }
-            return std::unexpected(
-                std::format("unknown config action '{}'; available: validate, export-soc", action));
-        }
-        if (subcmd == "scaffold") {
-            if (subcmd_pos + 1 >= expanded_strings.size()) {
-                return std::unexpected(
-                    "scaffold subcommand requires a target: cpu, device, or cfu");
-            }
-            const std::string& target = expanded_strings[subcmd_pos + 1];
-            if (target == "cpu") {
-                result.action = CliAction::DumpCpuModel;
-                if (subcmd_pos + 2 < expanded_strings.size()) {
-                    result.options.dump_cpu_model_preset = expanded_strings[subcmd_pos + 2];
-                }
-                if (subcmd_pos + 3 < expanded_strings.size()) {
-                    result.options.dump_cpu_model_output = expanded_strings[subcmd_pos + 3];
-                }
-                return result;
-            }
-            if (target == "device") {
-                if (subcmd_pos + 2 >= expanded_strings.size()) {
-                    return std::unexpected("scaffold device requires a device name");
-                }
-                result.action = CliAction::ScaffoldDevicePlugin;
-                result.options.scaffold_device_plugin_name = expanded_strings[subcmd_pos + 2];
-                if (subcmd_pos + 3 < expanded_strings.size()) {
-                    result.options.scaffold_device_plugin_output = expanded_strings[subcmd_pos + 3];
-                }
-                return result;
-            }
-            if (target == "cfu") {
-                if (subcmd_pos + 2 >= expanded_strings.size()) {
-                    return std::unexpected("scaffold cfu requires a CFU plugin name");
-                }
-                result.action = CliAction::ScaffoldCfuPlugin;
-                result.options.scaffold_cfu_plugin_name = expanded_strings[subcmd_pos + 2];
-                if (subcmd_pos + 3 < expanded_strings.size()) {
-                    result.options.scaffold_cfu_plugin_output = expanded_strings[subcmd_pos + 3];
-                }
-                return result;
-            }
-            return std::unexpected(
-                std::format("unknown scaffold target '{}'; available: cpu, device, cfu", target));
-        }
-        if (subcmd == "disk") {
             if (subcmd_pos + 1 >= expanded_strings.size() ||
-                expanded_strings[subcmd_pos + 1] != "create") {
-                return std::unexpected("disk subcommand requires 'create <OUT.IMG>'");
-            }
-            if (subcmd_pos + 2 >= expanded_strings.size()) {
-                return std::unexpected("disk create requires an output image path");
-            }
-            result.action = CliAction::CreateUefiDisk;
-            result.options.fn_uefi_disk_out = expanded_strings[subcmd_pos + 2];
-            for (size_t i = subcmd_pos + 3; i < expanded_strings.size(); ++i) {
-                const auto& opt = expanded_strings[i];
-                if (opt == "--kernel" || opt == "-k") {
-                    if (i + 1 < expanded_strings.size())
-                        result.options.fn_uefi_disk_kernel = expanded_strings[++i];
-                } else if (opt == "--rootfs" || opt == "-r") {
-                    if (i + 1 < expanded_strings.size())
-                        result.options.fn_uefi_disk_rootfs = expanded_strings[++i];
-                } else if (opt == "--size" || opt == "-s" || opt == "--disk-size-mb") {
-                    if (i + 1 < expanded_strings.size())
-                        result.options.uefi_disk_size_mb = std::stoul(expanded_strings[++i]);
-                }
-            }
+                expanded_strings[subcmd_pos + 1] != "export-soc")
+                return std::unexpected("available simulator config command: export-soc");
+            if (subcmd_pos + 2 >= expanded_strings.size())
+                return std::unexpected("config export-soc requires a preset or config file");
+            result.action = CliAction::ExportSoCManifest;
+            result.options.soc_manifest_preset = expanded_strings[subcmd_pos + 2];
+            if (subcmd_pos + 3 < expanded_strings.size())
+                result.options.soc_manifest_output = expanded_strings[subcmd_pos + 3];
             return result;
         }
+        if (subcmd == "scaffold")
+            return std::unexpected("scaffolding moved to simrv-tools scaffold");
+        if (subcmd == "disk")
+            return std::unexpected("disk image creation moved to simrv-tools disk create");
         if (subcmd == "mission") {
-            if (subcmd_pos + 1 >= expanded_strings.size()) {
-                return std::unexpected(
-                    "mission subcommand requires an action (check, create) or a .mission file "
-                    "path");
-            }
+            if (subcmd_pos + 1 >= expanded_strings.size())
+                return std::unexpected("mission subcommand requires a .mission file path");
             const std::string& action = expanded_strings[subcmd_pos + 1];
-            if (action == "check") {
-                if (subcmd_pos + 2 >= expanded_strings.size()) {
-                    return std::unexpected("mission check requires a .mission file path");
-                }
-                result.action = CliAction::CheckMission;
-                result.options.fn_mission_check = expanded_strings[subcmd_pos + 2];
-                return result;
-            }
-            if (action == "create") {
-                if (subcmd_pos + 2 >= expanded_strings.size()) {
-                    return std::unexpected("mission create requires an output .mission file path");
-                }
-                result.action = CliAction::CreateMission;
-                result.options.fn_mission_create = expanded_strings[subcmd_pos + 2];
-                return result;
-            }
+            if (action == "check" || action == "create")
+                return std::unexpected("mission file tools moved to simrv-tools mission");
             result.options.mission = action;
             result.options.tuimode = true;
             expanded_strings.erase(expanded_strings.begin() + subcmd_pos + 1);
             expanded_strings.erase(expanded_strings.begin() + subcmd_pos);
         } else if (subcmd == "bench") {
-            result.action = CliAction::RunBenchmark;
-            expanded_strings.erase(expanded_strings.begin() + subcmd_pos);
+            return std::unexpected("benchmarking moved to simrv-benchmark");
         } else if (subcmd == "run") {
             result.action = CliAction::Run;
             result.options.explicit_cli_mode = true;
@@ -1843,12 +1359,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
         if (raw_positionals) {
-            if (result.action == CliAction::RunBenchmark &&
-                result.options.fn_benchmark_elf.empty()) {
-                result.options.fn_benchmark_elf = std::string(arg);
-                result.options.fn_memimg = result.options.fn_benchmark_elf;
-                continue;
-            }
             if (result.options.fn_memimg.empty()) {
                 result.options.fn_memimg = std::string(arg);
                 continue;
@@ -1917,12 +1427,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
         // Positional target program image (Spike compatibility)
         if (!arg.starts_with('-')) {
-            if (result.action == CliAction::RunBenchmark &&
-                result.options.fn_benchmark_elf.empty()) {
-                result.options.fn_benchmark_elf = std::string(arg);
-                result.options.fn_memimg = result.options.fn_benchmark_elf;
-                continue;
-            }
             if (result.options.fn_memimg.empty()) {
                 result.options.fn_memimg = std::string(arg);
                 continue;
@@ -1961,39 +1465,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                                    result.options.fn_memimg.ends_with(".ext4");
         if (is_disk_image) {
             result.options.appmode = false;
-        }
-    }
-    if (!result.options.appmode && result.options.fn_dvtree.empty()) {
-        const bool is_rvcomp = result.options.config_target.contains("rvcomp") ||
-                               result.options.fn_memimg.contains("rvcomp") ||
-                               result.options.fn_memimg.contains("sys_full") ||
-                               result.options.fn_memimg.contains("sys_minimal");
-        if (is_rvcomp) {
-            namespace fs = std::filesystem;
-            std::error_code ec;
-            if (result.options.config_target.empty()) {
-                for (const auto& candidate : {"configs/models/rvcomp.cfg"}) {
-                    if (fs::is_regular_file(candidate, ec) && !ec) {
-                        result.options.config_target = candidate;
-                        result.options.fn_config = candidate;
-                        break;
-                    }
-                }
-            }
-            for (const auto& candidate :
-                 {"linux-images/rv98/rv98.dtb", "linux-images/rv98.dtb", "rv98.dtb"}) {
-                if (fs::is_regular_file(candidate, ec) && !ec) {
-                    result.options.fn_dvtree = candidate;
-                    break;
-                }
-            }
-            if (result.options.fn_dskimg.empty() && (result.options.fn_memimg.ends_with(".img") ||
-                                                     result.options.fn_memimg.ends_with(".raw") ||
-                                                     result.options.fn_memimg.ends_with(".ext4") ||
-                                                     result.options.fn_memimg.ends_with(".bin"))) {
-                result.options.fn_dskimg = result.options.fn_memimg;
-                result.options.use_disk = true;
-            }
         }
     }
     if (!result.options.appmode &&
@@ -2046,18 +1517,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.trace_pc_start && result.options.trace_pc_end &&
         *result.options.trace_pc_start > *result.options.trace_pc_end) {
         return std::unexpected("--trace-pc-range start must not exceed end");
-    }
-
-    if (result.action == CliAction::RunBenchmark) {
-        result.options.tuimode = false;
-        result.options.explicit_cli_mode = true;
-        if (result.options.fn_benchmark_elf.empty() && !result.options.fn_memimg.empty()) {
-            result.options.fn_benchmark_elf = result.options.fn_memimg;
-        }
-        if (result.options.fn_benchmark_elf.empty()) {
-            return std::unexpected("--benchmark requires an ELF binary to execute");
-        }
-        result.options.fn_memimg = result.options.fn_benchmark_elf;
     }
 
     if (result.options.uefi_enabled) {
@@ -2168,14 +1627,15 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.execution.profile = profile;
-    cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
-    if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
-        cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
-    }
+    const auto eff_isa = effective_isa_spec(*this);
+    cfg.isa.isa_preset = eff_isa.misa_bits;
+    cfg.isa.enabled_extensions.merge(eff_isa.extension_set);
+    const auto default_gcv_bits =
+        simrv::isa::parse_isa_spec("gcv").value_or(simrv::isa::IsaSpec{}).misa_bits;
     cfg.isa.misa_override =
         misa_override ||
         (cpu_model_preset.has_value() &&
-         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCV);
+         pipeline::make_cpu_model_preset(*cpu_model_preset).isa.misa_bits != default_gcv_bits);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 
@@ -2209,7 +1669,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
         if (simrv::core::load_platform_config(fn_config, model, cfg.soc)) {
             if (!cfg.soc.cpu_model.empty()) {
                 cfg.isa.misa_xlen = model.supported_xlen;
-                cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
+                cfg.isa.isa_preset = model.isa.misa_bits;
+                cfg.isa.enabled_extensions.merge(model.isa.extension_set);
                 cfg.isa.misa_override = true;
             }
             if (model.mmio_console_redirect) {
@@ -2225,10 +1686,18 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     if (bram_prewarm.has_value()) {
         cfg.bram_prewarm = *bram_prewarm;
     }
+    if (bus_protocol.has_value()) {
+        cfg.soc.bus_protocol = *bus_protocol;
+    }
     if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
     if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
         cfg.memory.dram_size = *cfg.soc.dram_size;
     }
+    if (!cpu_clock_hz.has_value() && cfg.soc.cpu_clock_hz != 0)
+        cfg.execution.cpu_clock_hz = cfg.soc.cpu_clock_hz;
+    if (!timebase_hz.has_value() && cfg.soc.timebase_hz != 0)
+        cfg.execution.timebase_hz = cfg.soc.timebase_hz;
+    if (cfg.files.bootargs.empty()) cfg.files.bootargs = cfg.soc.bootargs;
     if (cfg.execution.start_pc == simrv::boot::kStartPc && cfg.soc.reset_pc.has_value()) {
         cfg.execution.start_pc = *cfg.soc.reset_pc;
     }
@@ -2374,193 +1843,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
 auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
-           result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
-           result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
-           result.action != CliAction::ShowThirdPartyNotices &&
-           result.action != CliAction::CheckMission && result.action != CliAction::CreateMission &&
-           result.action != CliAction::CreateUefiDisk && result.action != CliAction::DumpCpuModel &&
-           result.action != CliAction::ExportSoCManifest &&
-           result.action != CliAction::ValidateCpuModel &&
-           result.action != CliAction::ScaffoldDevicePlugin &&
-           result.action != CliAction::ScaffoldCfuPlugin &&
-           result.action != CliAction::RunBenchmark &&
-           result.action != CliAction::GenerateCompletion;
+           result.action == CliAction::Run;
 }
 
-auto generate_shell_completion(std::string_view shell) -> std::string {
-    if (shell == "zsh") {
-        return R"(#compdef simrv
-
-_simrv() {
-    local -a subcommands
-    subcommands=(
-        'run:Execute a RISC-V program or OS image'
-        'bench:Run automated execution benchmarking'
-        'mission:Student classroom missions'
-        'disk:Create virtual disk images'
-        'scaffold:Generate boilerplate for CPU models, devices, or CFU plugins'
-        'config:Validate or export platform configurations'
-        'explain:Decode and explain a RISC-V instruction word'
-        'doctor:Diagnostics and terminal capabilities'
-        'completion:Generate shell autocompletion script'
-    )
-
-    _arguments -C \
-        '(-h --help)'{-h,--help}'[Show help message]' \
-        '(-v --version)'{-v,--version}'[Show version]' \
-        '--license[Show license information]' \
-        '--notices[Show third-party notices]' \
-        '--doctor[Run environment diagnostics]' \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'simrv subcommands' subcommands
-            ;;
-        args)
-            case $line[1] in
-                run)
-                    _arguments \
-                        '(-m --image)'{-m,--image}'[Load memory image]:file:_files' \
-                        '--pc[Initial PC]:address:' \
-                        '(-b --baremetal)'{-b,--baremetal}'[Bare-metal mode]' \
-                        '--os[Operating system mode]' \
-                        '(-d --disk)'{-d,--disk}'[VirtIO disk image]:file:_files' \
-                        '(-f --dtb)'{-f,--dtb}'[Device tree blob]:file:_files' \
-                        '(-u --tui)'{-u,--tui}'[Interactive TUI]' \
-                        '(-c --cli)'{-c,--cli}'[Headless CLI]' \
-                        '*:file:_files'
-                    ;;
-                bench)
-                    _arguments \
-                        '--runs[Number of runs]:number:' \
-                        '--warmups[Number of warmups]:number:' \
-                        '--json[Output JSON file]:file:_files' \
-                        '*:file:_files'
-                    ;;
-                mission)
-                    _arguments '1:(check create)' '*:file:_files'
-                    ;;
-                disk)
-                    _arguments '1:(create)' '--kernel[Kernel image]:file:_files' '--rootfs[Rootfs image]:file:_files' '--size[Size in MB]:number:' '*:file:_files'
-                    ;;
-                scaffold)
-                    _arguments '1:(cpu device cfu)' '*:file:_files'
-                    ;;
-                config)
-                    _arguments '1:(validate export-soc)' '*:file:_files'
-                    ;;
-                explain)
-                    _arguments '1:instruction_word:'
-                    ;;
-                doctor)
-                    ;;
-                completion)
-                    _arguments '1:(bash zsh fish)'
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-_simrv "$@"
-)";
-    }
-    if (shell == "fish") {
-        return R"(# fish completion for simrv
-complete -c simrv -f
-
-# Subcommands
-complete -c simrv -n "__fish_use_subcommand" -a "run" -d "Execute a RISC-V program or OS"
-complete -c simrv -n "__fish_use_subcommand" -a "bench" -d "Run automated execution benchmarking"
-complete -c simrv -n "__fish_use_subcommand" -a "mission" -d "Student classroom missions"
-complete -c simrv -n "__fish_use_subcommand" -a "disk" -d "Create virtual disk images"
-complete -c simrv -n "__fish_use_subcommand" -a "scaffold" -d "Scaffold CPU models, device plugins, or CFU plugins"
-complete -c simrv -n "__fish_use_subcommand" -a "config" -d "Validate or export configuration"
-complete -c simrv -n "__fish_use_subcommand" -a "explain" -d "Decode and explain a RISC-V instruction"
-complete -c simrv -n "__fish_use_subcommand" -a "doctor" -d "Diagnostics and terminal capabilities"
-complete -c simrv -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion script"
-
-# Subcommand arguments
-complete -c simrv -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
-complete -c simrv -n "__fish_seen_subcommand_from mission" -a "check create"
-complete -c simrv -n "__fish_seen_subcommand_from disk" -a "create"
-complete -c simrv -n "__fish_seen_subcommand_from scaffold" -a "cpu device cfu"
-complete -c simrv -n "__fish_seen_subcommand_from config" -a "validate export-soc"
-
-# Options
-complete -c simrv -s h -l help -d "Show help"
-complete -c simrv -s v -l version -d "Show version"
-complete -c simrv -l doctor -d "Run diagnostics"
-complete -c simrv -s m -l image -r -d "Load binary image"
-complete -c simrv -s c -l cli -d "Headless CLI mode"
-complete -c simrv -s u -l tui -d "Interactive TUI mode"
-complete -c simrv -l runs -r -d "Benchmark runs"
-complete -c simrv -l warmups -r -d "Benchmark warmups"
-complete -c simrv -l json -r -d "Benchmark JSON output"
-)";
-    }
-    // Default: bash
-    return R"(# bash completion for simrv
-_simrv() {
-    local cur prev words cword
-    _init_completion || return
-
-    local subcommands="run bench mission disk scaffold config explain doctor completion"
-    local common_opts="--help -h --version -v --license --notices --doctor --isa-info"
-
-    if [[ $cword -eq 1 ]]; then
-        if [[ "$cur" == -* ]]; then
-            COMPREPLY=($(compgen -W "$common_opts" -- "$cur"))
-        else
-            COMPREPLY=($(compgen -W "$subcommands" -- "$cur"))
-        fi
-        return 0
-    fi
-
-    local subcommand="${words[1]}"
-    case "$subcommand" in
-        run)
-            local run_opts="-m --image --pc --start-pc -b --baremetal --os --no-sbi --uefi --uefi-vars --auto-fdt --bootargs -d --disk --virtiofs -f --dtb --isa --profile --mode --pipeline --bpred --cpu-preset -u --tui -c --cli -t --trace --arch-trace --checkpoint-every"
-            COMPREPLY=($(compgen -W "$run_opts" -- "$cur"))
-            ;;
-        bench)
-            local bench_opts="--runs --warmups --json -m --image --pc -f --dtb"
-            COMPREPLY=($(compgen -W "$bench_opts" -- "$cur"))
-            ;;
-        mission)
-            local mission_cmds="check create"
-            COMPREPLY=($(compgen -W "$mission_cmds" -- "$cur"))
-            ;;
-        disk)
-            local disk_cmds="create"
-            local disk_opts="--kernel --rootfs --size"
-            if [[ $cword -eq 2 ]]; then
-                COMPREPLY=($(compgen -W "$disk_cmds" -- "$cur"))
-            else
-                COMPREPLY=($(compgen -W "$disk_opts" -- "$cur"))
-            fi
-            ;;
-        scaffold)
-            local scaffold_cmds="cpu device cfu"
-            COMPREPLY=($(compgen -W "$scaffold_cmds" -- "$cur"))
-            ;;
-        config)
-            local config_cmds="validate export-soc"
-            COMPREPLY=($(compgen -W "$config_cmds" -- "$cur"))
-            ;;
-        completion)
-            local shells="bash zsh fish"
-            COMPREPLY=($(compgen -W "$shells" -- "$cur"))
-            ;;
-        *)
-            ;;
-    esac
-}
-complete -F _simrv simrv
-)";
-}
 
 namespace {
 
@@ -2615,14 +1900,13 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
               {.option = "--profile <PROFILE>",
                .description =
-                   "Select formal architecture profile (rva23, rva23s64, rva22, legacy)."},
+                   "Select a ratified architecture profile by canonical name (for example, "
+                   "rva23s64 or rvi20u32)."},
               {.option = "--vlen <BITS>",
                .description = "Set vector register length (128–1024 bits; default: 256 bits)."},
               {.option = "--config <PRESET | FILE>",
-               .description = "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path.",
+               .description = "Select platform preset (virt-pcie, virt-mmio) or file path.",
                .accepts_equals_value = true},
-              {.option = "--dump-soc-manifest <PRESET> [FILE]",
-               .description = "Export the normalized SoC registry as JSON."},
               {.option = "--net <BACKEND>",
                .description = "Select user-mode NAT networking or disable the VirtIO network."}}},
         {.title = "Execution and pipeline",
@@ -2649,6 +1933,10 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Select fast, detailed, or cycle-accurate execution."},
               {.option = "--pipeline <TYPE>",
                .description = "Select the CA pipeline: 3stage or 5stage (default: 5stage)."},
+              {.option = "--bus <PROTOCOL>",
+               .description =
+                   "Select system bus protocol: tilelink-c, tilelink-uh, tilelink-ul, axi4, or "
+                   "axi4-lite."},
               {.option = "--no-forwarding", .description = "Disable operand forwarding."},
               {.option = "--early-out-div",
                .description = "Enable realistic data-dependent early-out division latency."},
@@ -2667,19 +1955,11 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--cpu-preset <PRESET>",
                .description = "Select tiny, balanced, performance, or a model file."},
               {.option = "--dump-cpu-model <MODEL> [FILE]",
-               .description = "Write a CPU model configuration."},
-              {.option = "--scaffold-cpu-model [FILE]",
-               .description = "Generate a starter CPU model configuration."},
-              {.option = "--validate-config, --validate-cpu-config <FILE>",
-               .description = "Validate a CPU model or platform configuration file."},
+               .description = "Export a CPU model preset or file as normalized configuration."},
               {.option = "--cfu-plugin <LIB.SO>",
                .description = "Load a dynamic custom function unit plugin."},
-              {.option = "--scaffold-cfu-plugin <NAME> [DIR|FILE]",
-               .description = "Generate a starter Custom Function Unit (CFU) plugin template."},
               {.option = "--plugin, --device-plugin <NAME|SO>[=ARGS]",
                .description = "Load external MMIO device plugin (e.g. mmc=disk.img)."},
-              {.option = "--scaffold-device-plugin <NAME> [DIR|FILE]",
-               .description = "Generate a starter external device plugin template."},
               {.option = "--bram-prewarm / --no-bram-prewarm",
                .description = "Control ELF cache prewarming for BRAM parity."}}},
         {.title = "Logging and tracing",
@@ -2769,9 +2049,6 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--signature <FILE>",
                .description = "Dump architectural test signature on exit.",
                .hidden_aliases = {"+signature="}},
-              {.option = "--explain-inst <HEX>",
-               .description = "Disassemble and explain a 32-bit instruction.",
-               .hidden_aliases = {"--explain"}},
               {.option = "--gdb", .description = "Start the GDB remote stub in CLI mode."},
               {.option = "--gdb-port <PORT>",
                .description = "Set the GDB server port (default: 1234)."},
@@ -2787,22 +2064,6 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--license", .description = "Display the license and copyright notice."},
               {.option = "--notices, --third-party",
                .description = "Display third-party licenses and attributions."},
-              {.option = "--check-mission <FILE>",
-               .description = "Validate a classroom mission file and print step preview."},
-              {.option = "--create-mission <FILE>",
-               .description = "Create a starter classroom guidance mission template."},
-              {.option = "--create-disk <OUT.IMG>",
-               .description = "Create a UEFI GPT FAT32 disk image containing BOOTRISCV64.EFI."},
-              {.option = "--disk-size-mb <MB>",
-               .description = "EFI System Partition size in MiB for --create-disk (default: 64)."},
-              {.option = "-B, --benchmark <FILE>",
-               .description = "Benchmark guest ELF execution throughput and latency."},
-              {.option = "--runs <N>",
-               .description = "Number of measured benchmark iterations (default: 5)."},
-              {.option = "--warmups <N>",
-               .description = "Number of warmup iterations before benchmark timing (default: 2)."},
-              {.option = "--json <FILE>",
-               .description = "Output benchmark statistics as JSON to specified file."},
               {.option = "-h, --help", .description = "Show this help."}}},
         {.title = "",
          .entries = {
@@ -2949,14 +2210,11 @@ auto cli_short_flag_takes_argument(char c) -> bool {
     };
     const CommandHelp commands[] = {
         {"run [IMAGE]", "Execute a RISC-V ELF or OS image (default)"},
-        {"bench <ELF>", "Run automated execution benchmarking"},
-        {"mission <check|create|FILE>", "Classroom student mission tools"},
-        {"disk create <OUT.IMG>", "Create virtual disk images"},
-        {"scaffold <cpu|device|cfu>", "Generate boilerplate for models and plugins"},
-        {"config <validate|export-soc>", "Validate or export system/SoC configurations"},
-        {"explain <HEX>", "Decode and explain a RISC-V instruction word"},
+        {"mission <FILE>", "Load classroom guidance for the interactive TUI"},
+        {"config export-soc <PRESET> [FILE]", "Export the normalized SoC registry as JSON"},
+        {"explain <QUERY>", "Explain an instruction, ISA extension, or architecture profile"},
         {"doctor", "Inspect environment, terminal, and capabilities"},
-        {"completion <bash|zsh|fish>", "Generate shell autocompletion script"},
+        {"help", "Show this help"},
     };
     for (const auto& cmd : commands) {
         std::print(stdout, "  {}{:<32}{}  {}\n", style(kBrightGreen), cmd.name, style(kReset),
@@ -3007,8 +2265,11 @@ auto cli_short_flag_takes_argument(char c) -> bool {
                style(kBold), style(kReset));
     std::print(stdout, "{}Examples{}\n", style(kBoldFgBrightBlue), style(kReset));
     std::print(stdout, "  {} run img/hello.bin\n", executable);
-    std::print(stdout, "  {} bench img/hello.bin --runs 10\n", executable);
+    std::print(stdout, "  {} config export-soc virt-pcie soc.json\n", executable);
     std::print(stdout, "  {} explain 0x00000013\n", executable);
+    std::print(stdout, "  {} explain ADD\n", executable);
+    std::print(stdout, "  {} explain profile RVA23S64\n", executable);
+    std::print(stdout, "  {} explain extension Zba\n", executable);
     std::print(stdout, "  {} --os --image Image --disk rootfs.img\n", executable);
 
     std::exit(status);

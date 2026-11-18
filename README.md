@@ -1,69 +1,70 @@
 # SimRV: Dual-Width Explainable RISC-V System Simulator
 
 <p align="center">
-  <strong>An explainable, dual-width (RV32 / RV64) RISC-V research simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, and full-system SMP Linux emulation.</strong>
+  <strong>An explainable, dual-width (RV32 / RV64) RISC-V simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, runtime plugin APIs, and full-system SMP Linux emulation.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="SimRV CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml/badge.svg?branch=dev" alt="Build and Test"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
   <a href="docs/architecture/compliance.md"><img src="https://img.shields.io/badge/profile-RVA23%20Target-blue.svg" alt="Profile RVA23 Target"/></a>
-  <a href="tests/act/"><img src="https://img.shields.io/badge/ACT%20Suite-Passing-success.svg" alt="ACT Suite"/></a>
-  <img src="https://img.shields.io/badge/SMP-2%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
+  <img src="https://img.shields.io/badge/SMP-1%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
 </p>
 
-SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes targeting the **RVA23 profile** (`rva23s64` default), with RV32 and narrower compatibility presets available for workloads and verification. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research and education simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes targeting the **RVA23 profile** (`rva23s64` default), with RV32 and narrower compatibility presets available for workloads and verification. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
 
-SimRV is not RISC-V certified. RVA23 is an implementation and verification target, not a formal certification claim; see the [compliance scope](docs/architecture/compliance.md) for verified coverage, ACT testing, and known gaps.
+SimRV is not RISC-V certified. RVA23 is an implementation and verification target, not a formal certification claim; see the [compliance scope](https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/) for verified coverage, ACT testing, and known gaps.
 
 ---
 
 ## Documentation
 
-Explore the in-progress **[SimRV development documentation](https://archlab-sciencetokyo.github.io/SimRV/dev/)**. The stable release documentation is available at [the stable site](https://archlab-sciencetokyo.github.io/SimRV/stable/).
+Browse the **[SimRV stable documentation](https://archlab-sciencetokyo.github.io/SimRV/stable/)** (or the [development docs](https://archlab-sciencetokyo.github.io/SimRV/dev/) for unreleased changes).
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/">User Guide</a></h3>
-      <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and student architecture guide.</p>
+      <h3><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/">User Guide</a></h3>
+      <p>Installation, CLI flags, interactive TUI workbench, bare-metal, Linux SMP, and classroom missions.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/">Installation (TGZ, RPM, DEB, Source)</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">Quickstart &amp; CLI Reference</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/tui/">Interactive TUI Workbench</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/classroom/">Student Reference Guide</a></li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/overview/">Architecture & Models</a></h3>
-      <p>Core execution units, 3/5-stage pipelines, TileLink-C cache coherence, CPU models, and RTL parity.</p>
+      <h3><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architecture &amp; Compliance</a></h3>
+      <p>Core execution units, 3/5-stage pipelines, TileLink-C cache coherence, and ISA compliance scope.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/tilelink/">TileLink-C Coherence</a> (<a href="docs/architecture/tilelink.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/hardware/models/">CPU Models & Calibration</a> (<a href="docs/hardware/models.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/hardware/rtl_parity/">RTL Parity Verification</a> (<a href="docs/hardware/rtl_parity.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">System &amp; Pipeline Overview</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/tilelink/">TileLink-C Coherence</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/">ISA Compliance &amp; Boundaries</a></li>
       </ul>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/linux/">Bare-Metal & Linux</a></h3>
-      <p>Bare-metal firmware, memory maps, MMIO peripherals (16550A UART, CLINT, PLIC, VirtIO block), and multi-hart SMP Linux.</p>
+      <h3><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Bare-Metal &amp; Full-System Linux</a></h3>
+      <p>Bare-metal firmware, memory maps, MMIO peripherals (16550A UART, CLINT/ACLINT, PLIC/AIA, VirtIO), and SMP Linux.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/linux/">Booting SMP Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/baremetal/">Bare-Metal &amp; Embedded</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Full-System Linux &amp; SMP</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/ga-workflow/">Release Validation</a></li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/development/contributing/">Development & Verification</a></h3>
-      <p>Developer standards, dual-architecture CTest validation gates, Spike lockstep co-simulation, and release qualification.</p>
+      <h3><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extensions/">Extensions, Models &amp; SDK</a></h3>
+      <p>Custom Function Unit (CFU) plugins, MMIO device plugins, CPU/SoC presets, RTL parity, and C++ SDK.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/development/contributing/">Contributing Standards</a> (<a href="docs/development/contributing.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/development/migration/">2.x to 3.0 Migration</a> (<a href="docs/development/migration.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extensions/">Custom Extensions &amp; CFU Plugins</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extending-platforms/">Extending CPU Presets &amp; MMIO Platforms</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/models/">Microarchitectural Models &amp; Tuning</a></li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/development/migration/">Migrating from 2.x to 3.0</a></li>
       </ul>
     </td>
   </tr>
@@ -71,300 +72,149 @@ Explore the in-progress **[SimRV development documentation](https://archlab-scie
 
 ---
 
-## Quick Start
+## Installation
 
-For release archives and RPM or DEB packages, follow the
-**[installation guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/)**.
-The source build below is intended for development and architecture work.
+Pre-built Linux release packages (`x86_64` RPM, DEB, and portable `x86_64`/`aarch64` musl archives) are published on [GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). Follow the **[installation guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/)** for package installation, upgrades, and source builds.
 
-### Interactive and headless runs
+### Supported Host Platforms
 
-Launch `simrv` normally (or pass `--tui`) to explore an image with the interactive TUI. Use
-`--cli` for scripted and headless runs; command-line options are the supported run interface.
+- **Linux (`x86_64` and `aarch64`)**: Full support including portable static musl archives, RPM/DEB packages, VirtIO-FS, and `libslirp` user-mode networking.
+- **macOS (`arm64` and `x86_64`)**: Source builds supported (with `libslirp` networking; VirtIO-FS is Linux-only).
+- **Windows**: Supported via **WSL2** (native Windows is not supported due to POSIX terminal and process APIs).
 
-```bash
-# Interactive image loading and inspection.
-./build/rv64-release/simrv -b -m img/hello.bin --tui
+### Building from Source
 
-# Headless execution with an explicit instruction limit.
-./build/rv64-release/simrv -b -m img/hello.bin --cli --steps 200000
-```
-
-### Host platform
-
-Linux release archives target x86-64 and AArch64, including 64-bit Raspberry Pi OS. Native macOS
-source builds are smoke-tested on macOS 26 for Apple silicon and Intel, but macOS packages are not
-published yet. VirtIO-FS directory sharing is Linux-only. User-mode networking uses libslirp on
-Linux and macOS. SimRV relies on POSIX terminal I/O, file-descriptor, polling, and process APIs that
-Windows does not provide natively, so a native Windows port would require substantial rework. WSL2
-is the practical compatibility option: it runs a real Linux kernel and userland and is readily
-available on Windows.
-
-### Prerequisites
-
-- **Clang 22+** or **GCC 16+** (required for the C++23 baseline).
-- **CMake 3.31+** & **Ninja**
-
-### Build
+Requires **Clang 22+** or **GCC 16+** (C++23), **CMake 3.31+**, and **Ninja**:
 
 ```bash
-# RV64-capable build (default; runs RV64 and RV32 guests)
 cmake --preset rv64-release
 cmake --build --preset rv64-release
-
-# RV64 Debug build
-cmake --preset rv64-debug
-cmake --build --preset rv64-debug
-
-# RV32 strict-width release verification build
-cmake --preset rv32-release
-cmake --build --preset rv32-release
-
-# Optional host-specialized RV64 build for local profiling
-cmake --preset rv64-native-release
-cmake --build --preset rv64-native-release
 ```
 
-The preset set includes RV64 Debug for local diagnosis, the two release architectures, one optional
-host-specialized RV64 build, and isolated RV64 sanitizer builds. Choose the installed C++23 compiler
-through `CC` and `CXX` when configuring; the native preset uses Clang and enables host-specific
-code generation.
+The `rv64-release` build runs both RV64 and RV32 guest workloads. A strict-width `rv32-release` preset is also available for native 32-bit verification.
 
-Sanitizer configurations are available when investigating memory, undefined-behavior, or threading
-issues. They build under `/tmp/simrv-build/`, keeping `build/` limited to release configurations:
+---
 
-```bash
-cmake --preset rv64-asan && cmake --build --preset rv64-asan
-cmake --preset rv64-ubsan && cmake --build --preset rv64-ubsan
-cmake --preset rv64-tsan && cmake --build --preset rv64-tsan
-```
+## Quick Start
 
-The presets place ccache state under the writable project build tree (`build/.ccache`), so
-read-only home-directory cache mounts do not break CMake compiler or LTO probes. To disable
-compiler caching explicitly, prefix configure and build commands with `CCACHE_DISABLE=1`.
-
-### Run
-
-Run a baremetal binary in interactive TUI mode (Default):
+Launch `simrv` normally (or pass `--tui`) to explore an image with the interactive TUI, or pass `--cli` for scripted and headless runs:
 
 ```bash
-./build/rv64-release/simrv -b -m img/hello.bin
-```
+# Check host environment and qualified ISA summary
+simrv --doctor
+simrv --isa-info
 
-Run headless in CLI-only mode:
+# Interactive TUI workbench (default)
+simrv -b -m hello.elf
 
-```bash
-./build/rv64-release/simrv -b -m img/hello.bin --cli
-```
+# Headless execution with an instruction limit
+simrv --cli -b -m hello.elf --steps 200000
 
-Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
+# Cycle-accurate 5-stage or 3-stage pipeline execution
+simrv --cli -b -m hello.elf --mode cycle-accurate --pipeline 5stage
+simrv --cli -b -m hello.elf --mode cycle-accurate --pipeline 3stage
 
-```bash
-# Fast functional execution
-./build/rv64-release/simrv -b -m img/hello.bin --mode fast --cli
+# Boot a full-system Linux image with disk and device tree
+simrv --os --cli -m opensbi-linux-payload.elf -D rootfs.img -f devicetree.dtb
 
-# Cycle-accurate five-stage pipeline execution
-./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cli
-
-# Choose the three-stage educational pipeline.
-./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
-```
-
-Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
-
-```bash
-./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
-```
-
-Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/hardware/models.md)):
-
-```bash
-# Load a predefined CPU model (searches configs/models/ or custom path)
-./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cpu-preset rvcomp --cli
-
-# Generate a starter model configuration
-./build/rv64-release/simrv --scaffold-cpu-model my_core.cfg
-```
-
-Run Linux OS image with disk & devicetree:
-
-```bash
-./build/rv64-release/simrv --os -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf -D linux-images/rv64/alpine-gui/rootfs.img -f linux-images/rv64/alpine-gui/devicetree.dtb --cli
-```
-
-Override ISA preset or Vector register length (VLEN):
-
-```bash
-# Select the explicit RV64 vector and Bitmanip ISA preset with a 512-bit VLEN
-./build/rv64-release/simrv -m img/vector.bin --isa rv64gcv_zba_zbb_zbc_zbs --vlen 512
+# Override ISA preset and Vector register length (VLEN)
+simrv -m vector.elf --isa rv64gcv_zba_zbb_zbc_zbs --vlen 512
 ```
 
 ---
 
-## Interactive TUI
+## Extensions, Plugins & SDK
 
-The TUI supports interactive stepping, breakpoints, and live hardware-state inspection.
+SimRV can be extended at runtime without modifying or recompiling the simulator:
 
-### Classroom integration
+| Extension Mechanism | Interface | Use Case |
+| --- | --- | --- |
+| **CFU Plugins** (`--cfu-plugin`) | `SimRvCfuPlugin` C ABI (`simrv_cfu_init`) | Tightly-coupled `custom-0` accelerators with cycle-accurate latency |
+| **Device Plugins** (`--plugin`) | `SimRvExternalDevice` C ABI (`simrv_device_plugin_init`) | Loosely-coupled MMIO peripherals on the TileLink interconnect |
+| **CPU & SoC Models** (`--config`) | INI model & platform files | Custom pipeline widths, cache hierarchies, branch predictors, and memory maps |
+| **C++ Runtime SDK** (`SimRV::runtime`) | Installed CMake package + headers | Embedding SimRV in external C++ harnesses and co-simulation tools |
 
-SimRV accepts ordinary RISC-V ELF files. Instructors can add an optional `.mission` file to provide
-editable student prompts and named program checkpoints; `--mission` starts the interactive TUI with
-the lesson modal.
+Scaffold starter projects directly from the CLI:
 
 ```bash
-./build/rv64-release/simrv --tui --baremetal -m exercise.elf \
-  --inspection-output inspection.json
+# Starter CPU model configuration
+simrv-tools scaffold cpu balanced my_core.cfg
+
+# Starter Custom Function Unit (CFU) plugin C project
+simrv-tools scaffold cfu my_cfu ./my_cfu_plugin/
+
+# Starter external MMIO device plugin C project
+simrv-tools scaffold device my_device ./my_device_plugin/
 ```
 
-To use the supplied lesson, build its example ELF and pass the lesson path with `--mission`.
-Missions do not collect identity or grading data, and students remain free to use the normal TUI
-controls.
+To seed a device plugin from an MMIO node in a board DTB, run
+`simrv-tools scaffold device --from-dtb board.dtb [output-directory]` and select a node.
 
-Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the relevant glossary
-topic (`?`), and trace (`v`) without changing the workload. In a mission, `F12` reopens the active
-step. Press `Enter` to hide the modal and `Space` to advance the instruction; only named symbols mark
-checkpoints as reached. Pressing `x`
-while paused writes the configured, schema-versioned inspection report; existing files require a
-second explicit export action. See the [educational reference](docs/user/classroom.md),
-[bare-metal guide](docs/user/baremetal.md), and [source-first ISA examples](examples/isa/).
+See [Custom Extensions & CFU Plugins](https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extensions/) and [Extending CPU Presets & MMIO Platforms](https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extending-platforms/) for the full C ABI and configuration reference.
 
-### Key Shortcuts
+---
+
+## Interactive TUI & Classroom Mode
+
+The TUI supports interactive stepping, breakpoints, live register/pipeline/cache/TLB inspection, instruction explanations (`e`), and an integrated guest terminal. Instructors can attach optional `.mission` files (`simrv mission <path.mission>`) for guided labs with named checkpoints and schema-versioned inspection exports (`x`).
 
 | Hotkey | Action |
 | --- | --- |
 | `[s]` / `[Space]` | Single instruction step |
 | `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
-| `[Click Label]` / `[Click Badge]` | Click active running badge to pause |
 | `[o]` / `[Alt-O]` | Open Binary / Disk image loader modal |
-| `[,]` / `[Alt-S]` | Simulator Settings modal (Execution mode, SMP, scheduler, diagnostics) |
-| `[Alt-M]` | Configure MISA CSR modal (Extensions A/B/C/D/F/M/V/S/U & VLEN) |
+| `[,]` / `[Alt-S]` | Simulator Settings modal (mode, SMP, scheduler, diagnostics) |
+| `[Alt-M]` | Configure `misa` CSR modal (extensions & VLEN) |
 | `[y]` | Cycle-Accurate Microarchitecture & Cache Config modal |
 | `[i]` | Memory inspector modal |
 | `[m]` | Manage breakpoints and watchpoints |
-| `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
-| `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC / CSR) |
-| `[F12]` | Reopen the current mission step and check its checkpoint |
-| `[Enter]` | Hide the current mission modal |
-| `[Space]` | Advance to the next instruction; stops at an unreached checkpoint |
-| `[e]` | Toggle instruction explanation |
-| `[?]` | Open glossary at the active inspector topic |
-| `[v]` | Toggle execution trace capture |
-| `[x]` | Export configured inspection report while paused |
-| `[Tab]` | Cycle right pane view (Guest Terminal / Log Buffer) |
-| `[F1]` / `[h]` | Display online help shortcuts |
-| `[Esc]` | Close active modal |
+| `[l]` / `[r]` | Cycle subsystem inspector tab / register bank tab |
+| `[e]` / `[?]` | Toggle instruction explanation / open contextual glossary |
+| `[v]` / `[x]` | Toggle trace capture / export inspection report while paused |
+| `[Tab]` | Switch right pane (Guest Terminal / Log Buffer) |
+| `[F1]` / `[h]` / `[Esc]` | Help shortcuts / close active modal |
 
 ---
 
 ## Supported RISC-V Extensions
 
-RVA23 is the primary architectural target; RV32 and narrower ISA presets support compatibility and verification workloads.
-
-See [RISC-V compliance scope](docs/architecture/compliance.md) for the precise architectural boundary,
-the [TileLink-C profile](docs/architecture/tilelink.md) for protocol/coherence scope, and the
-[3.0 migration guide](docs/development/migration.md) for intentional host-interface breakage.
-SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
-profile names are implementation targets and do not by themselves claim RISC-V certification.
+`rva23s64` is the primary architectural target; RV32 and narrower ISA presets are available for compatibility and verification workloads.
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |
 | **I** | ✅ Supported | Base integer instruction set (RV32I / RV64I) |
 | **M** | ✅ Supported | Integer multiplication, division, and remainder |
-| **A** | ✅ Supported | Atomic memory operations (LR/SC, AMO word/doubleword) |
-| **C** | ✅ Supported | Compressed instruction decode and execution |
-| **F / D** | ⚠️ Qualification ongoing | Single/double precision and FP CSRs; RMM arithmetic remains a documented gap |
+| **A** | ✅ Supported | Atomic memory operations (`LR`/`SC`, `AMO` word/doubleword) |
+| **C** | ✅ Supported | Compressed 16-bit instruction decode and execution |
+| **F / D** | ⚠️ Qualification ongoing | Single/double precision and FP CSRs; RMM rounding remains a documented gap |
 | **V** | ⚠️ Partial | Substantial RVV 1.0 subset with configurable VLEN (32–1024 bits); see compliance scope |
-| **B** | ✅ Supported | Bit manipulation extension (Zba, Zbb, Zbc, Zbs) |
-| **Privileged** | ✅ Supported | Machine, Supervisor, User modes (M/S/U), CSR access, traps |
-| **SV32 / SV39 / SV48** | ✅ Supported | Hardware MMU page table walker & TLB translation |
+| **B** | ✅ Supported | Bit manipulation (`Zba`, `Zbb`, `Zbc`, `Zbs`) |
+| **Privileged** | ✅ Supported | Machine, Supervisor, User modes (`M`/`S`/`U`), CSRs, traps, PMP |
+| **Sv32 / Sv39 / Sv48** | ✅ Supported | Hardware MMU page table walker & TLB translation |
 
 ---
 
-## Testing & Validation
-
-Always run gate test coverage on both 64-bit and 32-bit build presets:
-
-```bash
-# RV64 Full Gate Check (Default)
-ctest --test-dir build/rv64-release --output-on-failure -L gate
-
-# RV32 Full Gate Check
-ctest --test-dir build/rv32-release --output-on-failure -L gate
-```
-
-### ISA Test Suite
-
-For running the `riscv-tests` suite, set `RISCV_TESTS_DIR`:
-
-```bash
-RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv64-release --output-on-failure -L rv64gc
-RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L rv32gc
-```
-
----
-
-## Co-Simulation & Debugging
+## Debugging & Co-Simulation
 
 ### GDB Remote Debugging
 
-SimRV includes an event-driven GDB RSP server. `--gdb` selects CLI mode, starts the target paused,
-and listens on port 1234 by default. Use `--gdb-port <PORT>` to choose another port. GDB and the
-interactive TUI are separate debugging frontends, so explicit `--tui --gdb` is rejected; GDB is
-also incompatible with Spike lockstep.
-
 ```bash
-# Start SimRV with GDB server on port 1234
-./build/rv64-release/simrv -m path/to/hello.bin --gdb
+# Start SimRV with GDB RSP server on port 1234 (or --gdb-port <PORT>)
+simrv -m hello.elf --gdb
 
-# Connect from GDB in another terminal
+# Connect from GDB
 riscv64-unknown-elf-gdb hello.elf -ex "target remote :1234"
 ```
-
-The server uses all-stop multi-hart semantics. GDB breakpoints are logical (guest memory is not
-patched), disconnects leave the target paused and restart the listener, and `detach` removes
-GDB-owned breakpoints/watchpoints before resuming. In the TUI, breakpoints, watchpoints, stepping,
-and inspection are always available while paused—there is no separate debug-mode toggle.
 
 ### Spike Lockstep Co-Simulation
 
 Verify execution against Spike instruction-by-instruction:
 
 ```bash
-./build/rv64-release/simrv -m path/to/hello.bin --lockstep
+simrv -m hello.elf --lockstep
 ```
 
-Lockstep is a verification workflow for reproducible experiments, not an
-interactive TUI feature. Use a caller-supplied Spike built for the same XLEN
-and ISA preset as the image under test; `--spike-bin` selects a non-default
-binary and `--spike-elf` selects its comparison image. Keep the command line,
-Spike revision, image hash, and SimRV revision with paper evidence. Lockstep
-and GDB are intentionally mutually exclusive.
-
----
-
-## Release Assets & Pre-built Binaries
-
-Pre-compiled `simrv` packages are available under GitHub Releases for Linux (`x86_64`).
-See the [installation guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/)
-for portable archive, RPM, DEB, upgrade, and removal instructions.
-
-> [!NOTE]
-> Pre-built releases provide the RV64-capable simulator archive plus optional `simrv-tools` and
-> `simrv-benchmark` native packages. Guest Linux images are not bundled. Clone the repository for
-> development scripts and source-level workflows.
-
----
-
-## Project Structure
-
-- `src/`: Core implementation C++ units
-- `include/simrv/`: Simulator headers & public API
-- `scripts/`: Regression, ISA testing, and Linux image build helpers
-- `docs/`: Focused architecture, user, contributor, compliance, and release guides
-- `CHANGELOG.md`: Version release log
-- `docs/hardware/models.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
-- `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
-- `release/`: Release metadata, evidence schemas, and publishing inputs
+Use `--spike-bin` and `--spike-elf` to override the Spike binary or comparison ELF. Lockstep and GDB are mutually exclusive.
 
 ---
 
@@ -374,5 +224,4 @@ SimRV is licensed under the [MIT License](LICENSE).
 
 ## Citation
 
-If you use SimRV in academic work, please cite the metadata in
-[`CITATION.cff`](CITATION.cff).
+If you use SimRV in academic work, please cite the metadata in [`CITATION.cff`](CITATION.cff).

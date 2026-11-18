@@ -4,6 +4,7 @@
  */
 
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -191,8 +192,10 @@ auto run_single_test(const std::filesystem::path& simrv_bin, const std::filesyst
 
     const bool has_pass =
         (output.find("ISA TEST PASS") != std::string::npos ||
+         output.find("Program Halted (SUCCESS / PASS)") != std::string::npos ||
          output.find("Termination reason       :         guest poweroff") != std::string::npos);
     const bool has_fail = (output.find("ISA TEST FAIL") != std::string::npos ||
+                           output.find("Program Halted (FAIL / EXIT code=") != std::string::npos ||
                            output.find("RVCP-SUMMARY: TEST FAILED") != std::string::npos ||
                            output.find("[FATAL]") != std::string::npos);
 
@@ -351,7 +354,7 @@ int main(int argc, char** argv) {
                                  res.timed_out ? "TIMEOUT" : "FAIL", res.returncode);
                     if (res.detailed_rerun) {
                         std::println("      Detailed execution: {} (exit {})",
-                                     res.detailed_passed ? "PASS"
+                                     res.detailed_passed      ? "PASS"
                                      : res.detailed_timed_out ? "TIMEOUT"
                                                               : "FAIL",
                                      res.detailed_returncode);
@@ -388,10 +391,9 @@ int main(int argc, char** argv) {
                 report << std::format("      \"status\": \"{}\",\n",
                                       r.passed ? "PASS" : (r.timed_out ? "TIMEOUT" : "FAIL"));
                 if (r.detailed_rerun) {
-                    report << std::format("      \"detailed_status\": \"{}\",\n",
-                                          r.detailed_passed
-                                              ? "PASS"
-                                              : (r.detailed_timed_out ? "TIMEOUT" : "FAIL"));
+                    report << std::format(
+                        "      \"detailed_status\": \"{}\",\n",
+                        r.detailed_passed ? "PASS" : (r.detailed_timed_out ? "TIMEOUT" : "FAIL"));
                 } else {
                     report << "      \"detailed_status\": null,\n";
                 }

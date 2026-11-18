@@ -354,6 +354,29 @@ void populate_scalar_descriptions(OpDescTable& arr) {
                       "Atomic Maximum Doubleword (Unsigned). Atomically loads a 64-bit "
                       "doubleword from address rs1 into rd and stores the unsigned maximum "
                       "with rs2 back to address rs1."};
+    arr[AMOSWAP_B] = {"AMOSWAP.B", "Atomic Swap Byte (Zabha)."};
+    arr[AMOADD_B] = {"AMOADD.B", "Atomic Add Byte (Zabha)."};
+    arr[AMOXOR_B] = {"AMOXOR.B", "Atomic XOR Byte (Zabha)."};
+    arr[AMOAND_B] = {"AMOAND.B", "Atomic AND Byte (Zabha)."};
+    arr[AMOOR_B] = {"AMOOR.B", "Atomic OR Byte (Zabha)."};
+    arr[AMOMIN_B] = {"AMOMIN.B", "Atomic Minimum Byte (Signed, Zabha)."};
+    arr[AMOMAX_B] = {"AMOMAX.B", "Atomic Maximum Byte (Signed, Zabha)."};
+    arr[AMOMINU_B] = {"AMOMINU.B", "Atomic Minimum Byte (Unsigned, Zabha)."};
+    arr[AMOMAXU_B] = {"AMOMAXU.B", "Atomic Maximum Byte (Unsigned, Zabha)."};
+    arr[AMOSWAP_H] = {"AMOSWAP.H", "Atomic Swap Halfword (Zabha)."};
+    arr[AMOADD_H] = {"AMOADD.H", "Atomic Add Halfword (Zabha)."};
+    arr[AMOXOR_H] = {"AMOXOR.H", "Atomic XOR Halfword (Zabha)."};
+    arr[AMOAND_H] = {"AMOAND.H", "Atomic AND Halfword (Zabha)."};
+    arr[AMOOR_H] = {"AMOOR.H", "Atomic OR Halfword (Zabha)."};
+    arr[AMOMIN_H] = {"AMOMIN.H", "Atomic Minimum Halfword (Signed, Zabha)."};
+    arr[AMOMAX_H] = {"AMOMAX.H", "Atomic Maximum Halfword (Signed, Zabha)."};
+    arr[AMOMINU_H] = {"AMOMINU.H", "Atomic Minimum Halfword (Unsigned, Zabha)."};
+    arr[AMOMAXU_H] = {"AMOMAXU.H", "Atomic Maximum Halfword (Unsigned, Zabha)."};
+    arr[AMOCAS_B] = {"AMOCAS.B", "Atomic Compare-and-Swap Byte (Zacas+Zabha)."};
+    arr[AMOCAS_H] = {"AMOCAS.H", "Atomic Compare-and-Swap Halfword (Zacas+Zabha)."};
+    arr[AMOCAS_W] = {"AMOCAS.W", "Atomic Compare-and-Swap Word (Zacas)."};
+    arr[AMOCAS_D] = {"AMOCAS.D", "Atomic Compare-and-Swap Doubleword (Zacas)."};
+    arr[AMOCAS_Q] = {"AMOCAS.Q", "Atomic Compare-and-Swap Quadword (Zacas, RV64)."};
     arr[FLW] = {"FLW",
                 "Floating-Point Load Word. Loads a single-precision floating-point value "
                 "from memory address (rs1 + sign-extended 12-bit offset) into floating-point "
@@ -756,6 +779,56 @@ void populate_scalar_descriptions(OpDescTable& arr) {
     arr[FCVT_D_H] = {"FCVT.D.H", "Convert Half to Double. Converts f[rs1] to double precision."};
     arr[FCVT_H_D] = {"FCVT.H.D", "Convert Double to Half. Rounds f[rs1] to half precision."};
 
+    // Zfh (half-precision floating-point)
+    arr[FMADD_H] = {"FMADD.H", "Fused Multiply-Add Half. f[rd] = f[rs1]*f[rs2] + f[rs3]."};
+    arr[FMSUB_H] = {"FMSUB.H", "Fused Multiply-Subtract Half. f[rd] = f[rs1]*f[rs2] - f[rs3]."};
+    arr[FNMSUB_H] = {"FNMSUB.H",
+                     "Fused Neg-Multiply-Subtract Half. f[rd] = -(f[rs1]*f[rs2]) + f[rs3]."};
+    arr[FNMADD_H] = {"FNMADD.H", "Fused Neg-Multiply-Add Half. f[rd] = -(f[rs1]*f[rs2]) - f[rs3]."};
+    arr[FADD_H] = {"FADD.H", "Floating-Point Add Half. f[rd] = f[rs1] + f[rs2]."};
+    arr[FSUB_H] = {"FSUB.H", "Floating-Point Subtract Half. f[rd] = f[rs1] - f[rs2]."};
+    arr[FMUL_H] = {"FMUL.H", "Floating-Point Multiply Half. f[rd] = f[rs1] * f[rs2]."};
+    arr[FDIV_H] = {"FDIV.H", "Floating-Point Divide Half. f[rd] = f[rs1] / f[rs2]."};
+    arr[FSQRT_H] = {"FSQRT.H", "Floating-Point Square Root Half. f[rd] = sqrt(f[rs1])."};
+    arr[FSGNJ_H] = {"FSGNJ.H", "Sign Inject Half. Copies f[rs1] magnitude with sign of f[rs2]."};
+    arr[FSGNJN_H] = {
+        "FSGNJN.H",
+        "Sign Inject-Negate Half. Copies f[rs1] magnitude with negated sign of f[rs2]."};
+    arr[FSGNJX_H] = {"FSGNJX.H",
+                     "Sign Inject-XOR Half. Copies f[rs1] magnitude with XOR of signs."};
+    arr[FMIN_H] = {"FMIN.H", "Floating-Point Minimum Half. f[rd] = min(f[rs1], f[rs2])."};
+    arr[FMAX_H] = {"FMAX.H", "Floating-Point Maximum Half. f[rd] = max(f[rs1], f[rs2])."};
+    arr[FCVT_W_H] = {"FCVT.W.H", "Convert Half to Word. Converts f[rs1] to signed 32-bit integer."};
+    arr[FCVT_WU_H] = {"FCVT.WU.H",
+                      "Convert Half to Unsigned Word. Converts f[rs1] to unsigned 32-bit integer."};
+    arr[FCVT_H_W] = {"FCVT.H.W",
+                     "Convert Word to Half. Converts signed 32-bit integer to half precision."};
+    arr[FCVT_H_WU] = {
+        "FCVT.H.WU",
+        "Convert Unsigned Word to Half. Converts unsigned 32-bit integer to half precision."};
+    arr[FCVT_L_H] = {"FCVT.L.H",
+                     "Convert Half to Long (RV64). Converts f[rs1] to signed 64-bit integer."};
+    arr[FCVT_LU_H] = {
+        "FCVT.LU.H",
+        "Convert Half to Unsigned Long (RV64). Converts f[rs1] to unsigned 64-bit integer."};
+    arr[FCVT_H_L] = {
+        "FCVT.H.L",
+        "Convert Long to Half (RV64). Converts signed 64-bit integer to half precision."};
+    arr[FCVT_H_LU] = {"FCVT.H.LU",
+                      "Convert Unsigned Long to Half (RV64). Converts unsigned 64-bit integer to "
+                      "half precision."};
+    arr[FEQ_H] = {"FEQ.H", "Floating-Point Equal Half. x[rd] = (f[rs1] == f[rs2])."};
+    arr[FLT_H] = {"FLT.H", "Floating-Point Less Than Half. x[rd] = (f[rs1] < f[rs2])."};
+    arr[FLE_H] = {"FLE.H", "Floating-Point Less or Equal Half. x[rd] = (f[rs1] <= f[rs2])."};
+    arr[FCLASS_H] = {"FCLASS.H", "Classify Half. Writes 10-bit FP class mask of f[rs1] to x[rd]."};
+
+    // Zfbfmin (scalar BF16 conversions)
+    arr[FCVT_S_BF16] = {
+        "FCVT.S.BF16",
+        "Convert BF16 to Single. Converts f[rs1] from BFloat16 to single precision."};
+    arr[FCVT_BF16_S] = {"FCVT.BF16.S",
+                        "Convert Single to BF16. Rounds f[rs1] from single precision to BFloat16."};
+
     // Zfa (additional floating-point instructions)
     arr[FLI_S] = {"FLI.S",
                   "Load Immediate Single. Loads the single-precision constant selected by rs1."};
@@ -1054,8 +1127,12 @@ auto get_spec_formula(OperationId op_id) -> std::string_view {
         case XNOR:
             return "x[rd] = ~(x[rs1] ^ x[rs2])";
         default:
-            if (op_id >= LR_W && op_id <= AMOMAXU_D) {
+            if ((op_id >= LR_W && op_id <= AMOMAXU_D) ||
+                (op_id >= AMOSWAP_B && op_id <= AMOMAXU_H)) {
                 return "x[rd] = atomic_rmw(M[x[rs1]], x[rs2])";
+            }
+            if (op_id >= AMOCAS_B && op_id <= AMOCAS_Q) {
+                return "old = M[x[rs1]]; if (old == x[rd]) M[x[rs1]] = x[rs2]; x[rd] = old";
             }
             if (op_id >= FLW && op_id <= FCVT_D_LU) {
                 return "f[rd] / x[rd] = fp_op(rs1, rs2, rm)";
@@ -1110,8 +1187,10 @@ auto get_spec_section(std::string_view ext, OperationId op_id) -> SpecReference 
         sec = "Vol. I: Ch. 20 (F Single-Precision Floating-Point)";
     } else if (ext == "RV32D" || ext == "D") {
         sec = "Vol. I: Ch. 21 (D Double-Precision Floating-Point)";
-    } else if (ext == "Zfhmin") {
-        sec = "Vol. I: Ch. 23 (Zfhmin Half-Precision Floating-Point)";
+    } else if (ext == "Zfhmin" || ext == "Zfh") {
+        sec = "Vol. I: Ch. 23 (Zfh/Zfhmin Half-Precision Floating-Point)";
+    } else if (ext == "Zfbfmin") {
+        sec = "Vol. I: Ch. 24 (Zfbfmin Scalar BF16 Conversions)";
     } else if (ext == "Zfa") {
         sec = "Vol. I: Ch. 25 (Zfa Additional Floating-Point Instructions)";
     } else if (ext == "Zimop") {
@@ -1188,6 +1267,12 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
     if (op_id >= FLH && op_id <= FCVT_H_D) {
         return "Zfhmin";
     }
+    if (op_id >= FMADD_H && op_id <= FCLASS_H) {
+        return "Zfh";
+    }
+    if (op_id == FCVT_S_BF16 || op_id == FCVT_BF16_S) {
+        return "Zfbfmin";
+    }
     if (op_id >= FLI_S && op_id <= FCVTMOD_W_D) {
         return "Zfa";
     }
@@ -1220,6 +1305,12 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
     }
     if (op_id >= LR_D && op_id <= AMOMAXU_D) {
         return "RV64A";
+    }
+    if (op_id >= AMOSWAP_B && op_id <= AMOMAXU_H) {
+        return "Zabha";
+    }
+    if (op_id >= AMOCAS_B && op_id <= AMOCAS_Q) {
+        return "Zacas";
     }
     if (op_id >= FLW && op_id <= FCVT_S_LU) {
         return "RV32F";

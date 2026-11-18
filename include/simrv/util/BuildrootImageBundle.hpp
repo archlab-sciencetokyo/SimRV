@@ -6,6 +6,7 @@
 
 #include <charconv>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -53,8 +54,8 @@ struct BuildrootImageBundle {
             fs::path p(val);
             if (auto found = check_dir(p)) return found;
             for (const auto& sub :
-                 {"alpine-gui", "buildroot-output-rv64", "buildroot-fpga", "rv64/alpine-gui",
-                  "rv32/alpine-gui", "rv64/buildroot-fpga", "rv32/buildroot-fpga"}) {
+                 {"alpine-gui", "buildroot-output-rv64", "buildroot", "rv64/alpine-gui",
+                  "rv32/alpine-gui", "rv64/buildroot", "rv32/buildroot"}) {
                 if (auto found = check_dir(p / sub)) return found;
             }
         }
@@ -62,11 +63,21 @@ struct BuildrootImageBundle {
 
     // Check standard repository paths
     for (const auto& local_cand :
-         {"linux-images/rv64/alpine-gui", "linux-images/rv32/alpine-gui",
-          "linux-images/rv64/buildroot-fpga", "linux-images/rv32/buildroot-fpga",
-          "linux-build/buildroot-output-rv64", "linux-build/buildroot-output-rv32", "linux-build",
-          "linux-images"}) {
+         {"images/rv64/alpine-gui", "images/rv32/alpine-gui", "images/rv64/buildroot",
+          "images/rv32/buildroot", "linux-build/buildroot-output-rv64",
+          "linux-build/buildroot-output-rv32", "linux-build", "images"}) {
         if (auto found = check_dir(local_cand)) return found;
+    }
+
+    const char* xdgDataHome = std::getenv("XDG_DATA_HOME");
+    const char* home = std::getenv("HOME");
+    const fs::path userData =
+        xdgDataHome != nullptr && *xdgDataHome != '\0'
+            ? fs::path{xdgDataHome}
+            : fs::path{home != nullptr && *home != '\0' ? home : "."} / ".local/share";
+    for (const auto& user_cand :
+         {"rv64/alpine-gui", "rv32/alpine-gui", "rv64/buildroot", "rv32/buildroot"}) {
+        if (auto found = check_dir(userData / "SimRV/images" / user_cand)) return found;
     }
 
     return std::nullopt;

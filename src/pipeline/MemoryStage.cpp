@@ -19,7 +19,7 @@ using namespace simrv::isa;
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
-    if (isa::is_vector_op(active_context().op_id)) {
+    if (isa::is_vector_op(active_context().op_id) || isa::is_code_size_op(active_context().op_id)) {
         return;
     }
     auto& ctx = active_context();
@@ -63,6 +63,35 @@ void CPU::run_memory_stage(Machine& machine) {
         return;
     }
 
+    if (ctx.op_id == OperationId::SSPUSH && state_.zicfiss_enabled_in_current_mode()) {
+        ctx.mem_wdata = ctx.rrs2;
+        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,
+                                              ctx.funct3);
+        if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
+            const uint64_t step = (state_.regs.xlen == 64) ? 8ULL : 4ULL;
+            state_.ssp -= step;
+        }
+        return;
+    }
+
+    if (ctx.op_id == OperationId::SSPOPCHK && state_.zicfiss_enabled_in_current_mode()) {
+        if (!ctx.memory_load_complete) {
+            ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                 ctx.mem_addr, ctx.funct3);
+            if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
+            ctx.memory_load_complete = true;
+        }
+        const bool match = ctx.mem_rdata == ctx.rrs1;
+        if (!match) {
+            ctx.pending_exception = ExceptionCode::SoftwareCheck;
+            ctx.pending_tval = 3;
+            return;
+        }
+        const uint64_t step = (state_.regs.xlen == 64) ? 8ULL : 4ULL;
+        state_.ssp += step;
+        return;
+    }
+
     if (opcode != Opcode::Amo) {
         return;
     }
@@ -87,10 +116,23 @@ void CPU::memory_load_phase(Machine& machine) {
 
     if (opcode == Opcode::Load || isa::is_hlv_op(ctx.op_id) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
-        const auto access_funct3 =
-            pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
-        ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, ctx.mem_addr,
-                                                             access_funct3);
+        if (opcode == Opcode::Amo && ctx.op_id == OperationId::AMOCAS_Q) {
+            ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                 ctx.mem_addr, Funct3::Ld);
+            ctx.mem_rdata_hi = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                    ctx.mem_addr + 8, Funct3::Ld);
+        } else if (opcode == Opcode::Amo && ctx.op_id == OperationId::AMOCAS_D &&
+                   state_.regs.xlen == 32) {
+            ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                 ctx.mem_addr, Funct3::Lw);
+            ctx.mem_rdata_hi = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                    ctx.mem_addr + 4, Funct3::Lw);
+        } else {
+            const auto access_funct3 =
+                pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
+            ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this,
+                                                                 ctx.mem_addr, access_funct3);
+        }
     }
 
     if (opcode == Opcode::LoadFp) {
@@ -111,9 +153,40 @@ void CPU::memory_prepare_store_data(Machine& /*machine*/) {
     auto& ctx = active_context();
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = ctx.funct5;
-    ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
-                        ? ctx.rrs2
-                        : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
+    if (opcode == Opcode::Amo && funct5 == Funct5Amo::Cas) {
+        if (ctx.op_id == OperationId::AMOCAS_Q) {
+            ctx.cas_matched = (ctx.mem_rdata == ctx.rrd) && (ctx.mem_rdata_hi == ctx.rrd_hi);
+        } else if (ctx.op_id == OperationId::AMOCAS_D && state_.regs.xlen == 32) {
+            ctx.cas_matched =
+                (static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrd)) &&
+                (static_cast<uint32_t>(ctx.mem_rdata_hi) == static_cast<uint32_t>(ctx.rrd_hi));
+        } else {
+            switch (std::to_underlying(ctx.funct3)) {
+                case 0:
+                    ctx.cas_matched =
+                        static_cast<uint8_t>(ctx.mem_rdata) == static_cast<uint8_t>(ctx.rrd);
+                    break;
+                case 1:
+                    ctx.cas_matched =
+                        static_cast<uint16_t>(ctx.mem_rdata) == static_cast<uint16_t>(ctx.rrd);
+                    break;
+                case 2:
+                    ctx.cas_matched =
+                        static_cast<uint32_t>(ctx.mem_rdata) == static_cast<uint32_t>(ctx.rrd);
+                    break;
+                default:
+                    ctx.cas_matched = (ctx.mem_rdata == ctx.rrd);
+                    break;
+            }
+        }
+        ctx.mem_wdata = ctx.rrs2;
+        ctx.mem_wdata_hi = ctx.rrs2_hi;
+    } else {
+        ctx.mem_wdata =
+            (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
+                ? ctx.rrs2
+                : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
+    }
 
     if (opcode == Opcode::StoreFp) {
         ctx.mem_wdata = static_cast<simrv::xlen::Register>(
@@ -131,9 +204,26 @@ void CPU::memory_store_phase(Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = ctx.funct5;
 
-    if ((opcode == Opcode::Store) || isa::is_hsv_op(ctx.op_id) ||
-        (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
-        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
+    if (opcode == Opcode::Amo && funct5 == Funct5Amo::Cas) {
+        if (ctx.cas_matched) {
+            if (ctx.op_id == OperationId::AMOCAS_Q) {
+                simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr,
+                                                      ctx.mem_wdata, Funct3::Sd);
+                simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr + 8,
+                                                      ctx.mem_wdata_hi, Funct3::Sd);
+            } else if (ctx.op_id == OperationId::AMOCAS_D && state_.regs.xlen == 32) {
+                simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr,
+                                                      ctx.mem_wdata, Funct3::Sw);
+                simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr + 4,
+                                                      ctx.mem_wdata_hi, Funct3::Sw);
+            } else {
+                simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr,
+                                                      ctx.mem_wdata, ctx.funct3);
+            }
+        }
+    } else if ((opcode == Opcode::Store) || isa::is_hsv_op(ctx.op_id) ||
+               (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
+               (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
         const auto access_funct3 =
             pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,

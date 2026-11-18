@@ -57,6 +57,27 @@ void test_spec_provenance_and_formulas() {
     expect(add_spec.reference.extension == "RV32I", "ADD extension is RV32I");
     expect(add_spec.reference.formula == "x[rd] = x[rs1] + x[rs2]", "ADD operational formula");
 
+    const auto add_entry = find_explain_entry("add", ExplainEntryKind::Instruction);
+    expect(add_entry.has_value() && add_entry->name == "ADD",
+           "name lookup resolves instruction mnemonics case-insensitively");
+    expect(add_entry->spec_url.starts_with("https://docs.riscv.org/"),
+           "instruction explain entry has an official spec URL");
+    const auto profile_entry = find_explain_entry("RVA23S64", ExplainEntryKind::Profile);
+    expect(profile_entry.has_value() && profile_entry->description.contains("rv64"),
+           "name lookup explains registered architecture profiles");
+    const auto zba_entry = find_explain_entry("ZBA", ExplainEntryKind::Extension);
+    expect(zba_entry.has_value() && zba_entry->description.contains("rva23u64"),
+           "extension explain entry reports profile requirements");
+    const auto supervisor_entry = find_explain_entry("S", ExplainEntryKind::Extension);
+    expect(supervisor_entry.has_value() &&
+               supervisor_entry->description.contains("not an ISA extension letter"),
+           "extension lookup explains S as a MISA privilege bit");
+    expect(search_explain_entries("rva23s64").size() == 1,
+           "ISA catalog search includes matching profile names");
+    const auto supervisor_matches = search_explain_entries("s");
+    expect(!supervisor_matches.empty() && supervisor_matches.front().name == "S",
+           "exact ISA names appear ahead of partial search matches");
+
     const auto csrrs_spec = get_operation_spec(CSRRS);
     expect(csrrs_spec.reference.document == kUnprivSpecDoc, "CSRRS cites Unprivileged Manual");
     expect(csrrs_spec.reference.section.contains("Ch. 5"), "CSRRS cites Chapter 5 (Zicsr)");

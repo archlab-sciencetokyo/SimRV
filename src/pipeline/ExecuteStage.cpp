@@ -14,6 +14,8 @@
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Amo.hpp"
 #include "simrv/isa/Priv.hpp"
+#include "simrv/memory/MemoryAccess.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
@@ -34,6 +36,24 @@ void CPU::execute_core(Machine& machine) {
         return;
     }
 
+    if (simrv::compiler::unlikely(state_.elp && state_.zicfilp_enabled_in_current_mode())) {
+        const bool is_lpad = (ctx.opcode == Opcode::Auipc && ctx.rd == simrv::xlen::RegId::Zero);
+        if (!is_lpad) {
+            ctx.pending_exception = ExceptionCode::SoftwareCheck;
+            ctx.pending_tval = 2;
+            return;
+        }
+        const uint32_t imm20 = (ctx.ir >> 12U) & 0xFFFFFU;
+        const uint32_t label = static_cast<uint32_t>(
+            (static_cast<uint64_t>(state_.regs.read(simrv::xlen::RegId::T2)) >> 12U) & 0xFFFFFU);
+        if (imm20 != 0U && imm20 != label) {
+            ctx.pending_exception = ExceptionCode::SoftwareCheck;
+            ctx.pending_tval = 2;
+            return;
+        }
+        state_.elp = false;
+    }
+
     if (isa::is_vector_op(ctx.op_id)) {
         ctx.tkn = false;
         execute::ExecuteUnit::execute_vector(*this, machine, ctx.op_id, ctx.ir);
@@ -41,6 +61,144 @@ void CPU::execute_core(Machine& machine) {
         // after dispatch because vector instructions can update registers,
         // vl/vtype/vstart/vxsat, or partial state before a restartable fault.
         state_.mark_extension_dirty(MstatusBit::Vs);
+        return;
+    }
+
+    if (isa::is_code_size_op(ctx.op_id)) {
+        ctx.opcode = static_cast<Opcode>(0);
+        ctx.tkn = false;
+        ctx.fp_wb_enable = false;
+        ctx.int_wb_from_fp = false;
+
+        const uint16_t ir16 = static_cast<uint16_t>(ctx.ir_org & 0xFFFFU);
+        const auto sreg_from_3bit = [](uint32_t idx) noexcept -> simrv::xlen::RegId {
+            return static_cast<simrv::xlen::RegId>((idx < 2U) ? (8U + idx) : (16U + idx));
+        };
+        const auto build_rlist = [&](uint32_t rlist,
+                                     std::array<simrv::xlen::RegId, 13>& out) -> uint32_t {
+            static constexpr std::array<simrv::xlen::RegId, 13> kZcmpOrder = {
+                simrv::xlen::RegId::Ra, simrv::xlen::RegId::S0, simrv::xlen::RegId::S1,
+                simrv::xlen::RegId::S2, simrv::xlen::RegId::S3, simrv::xlen::RegId::S4,
+                simrv::xlen::RegId::S5, simrv::xlen::RegId::S6, simrv::xlen::RegId::S7,
+                simrv::xlen::RegId::S8, simrv::xlen::RegId::S9, simrv::xlen::RegId::S10,
+                simrv::xlen::RegId::S11};
+            if (rlist < 4U) return 0U;
+            const uint32_t count = (rlist == 15U) ? 13U : (rlist - 3U);
+            for (uint32_t i = 0; i < count; ++i) {
+                out[i] = kZcmpOrder[i];
+            }
+            return count;
+        };
+
+        const uint32_t elem_bytes = state_.regs.xlen / 8U;
+        const Funct3 mem_f3 = (elem_bytes == 8U) ? Funct3::Ld : Funct3::Lw;
+
+        switch (ctx.op_id) {
+            case OperationId::CM_MVA01S: {
+                const uint32_t r1s = (ir16 >> 7U) & 7U;
+                const uint32_t r2s = (ir16 >> 2U) & 7U;
+                const auto v1 = state_.regs.read(sreg_from_3bit(r1s));
+                const auto v2 = state_.regs.read(sreg_from_3bit(r2s));
+                state_.regs.write(simrv::xlen::RegId::A0, v1);
+                state_.regs.write(simrv::xlen::RegId::A1, v2);
+                break;
+            }
+            case OperationId::CM_MVSA01: {
+                const uint32_t r1s = (ir16 >> 7U) & 7U;
+                const uint32_t r2s = (ir16 >> 2U) & 7U;
+                if (r1s == r2s) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ir16;
+                    return;
+                }
+                const auto a0 = state_.regs.read(simrv::xlen::RegId::A0);
+                const auto a1 = state_.regs.read(simrv::xlen::RegId::A1);
+                state_.regs.write(sreg_from_3bit(r1s), a0);
+                state_.regs.write(sreg_from_3bit(r2s), a1);
+                break;
+            }
+            case OperationId::CM_PUSH: {
+                const uint32_t rlist = (ir16 >> 4U) & 0xFU;
+                const uint32_t spimm = (ir16 >> 2U) & 3U;
+                if (rlist < 4U || (misa_has_extension(state_.misa, IsaExtension::E) &&
+                                   state_.regs.xlen == 32 && rlist > 6U)) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ir16;
+                    return;
+                }
+                std::array<simrv::xlen::RegId, 13> regs_list{};
+                const uint32_t count = build_rlist(rlist, regs_list);
+                const uint32_t base_adj = ((count * elem_bytes) + 15U) & ~15U;
+                const uint32_t stack_adj = base_adj + (spimm * 16U);
+                const auto sp = state_.regs.read(simrv::xlen::RegId::Sp);
+                simrv::xlen::Word addr = sp - elem_bytes;
+                for (uint32_t idx = count; idx > 0U; --idx) {
+                    const auto val = state_.regs.read(regs_list[idx - 1U]);
+                    simrv::memory::MemoryAccess::storeInt(machine.memory_, *this,
+                                                          simrv::xlen::VirtAddr{addr}, val, mem_f3);
+                    if (ctx.pending_exception.has_value()) return;
+                    addr -= elem_bytes;
+                }
+                state_.regs.write(simrv::xlen::RegId::Sp, sp - stack_adj);
+                break;
+            }
+            case OperationId::CM_POP:
+            case OperationId::CM_POPRET:
+            case OperationId::CM_POPRETZ: {
+                const uint32_t rlist = (ir16 >> 4U) & 0xFU;
+                const uint32_t spimm = (ir16 >> 2U) & 3U;
+                if (rlist < 4U || (misa_has_extension(state_.misa, IsaExtension::E) &&
+                                   state_.regs.xlen == 32 && rlist > 6U)) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ir16;
+                    return;
+                }
+                std::array<simrv::xlen::RegId, 13> regs_list{};
+                const uint32_t count = build_rlist(rlist, regs_list);
+                const uint32_t base_adj = ((count * elem_bytes) + 15U) & ~15U;
+                const uint32_t stack_adj = base_adj + (spimm * 16U);
+                const auto sp = state_.regs.read(simrv::xlen::RegId::Sp);
+                std::array<simrv::xlen::Word, 13> loaded{};
+                simrv::xlen::Word addr = sp + stack_adj - elem_bytes;
+                for (uint32_t idx = count; idx > 0U; --idx) {
+                    loaded[idx - 1U] = simrv::memory::MemoryAccess::loadInt(
+                        machine.memory_, *this, simrv::xlen::VirtAddr{addr}, mem_f3);
+                    if (ctx.pending_exception.has_value()) return;
+                    addr -= elem_bytes;
+                }
+                for (uint32_t i = 0; i < count; ++i) {
+                    state_.regs.write(regs_list[i], loaded[i]);
+                }
+                state_.regs.write(simrv::xlen::RegId::Sp, sp + stack_adj);
+                if (ctx.op_id == OperationId::CM_POPRETZ) {
+                    state_.regs.write(simrv::xlen::RegId::A0, 0);
+                }
+                if (ctx.op_id == OperationId::CM_POPRET || ctx.op_id == OperationId::CM_POPRETZ) {
+                    const auto ra = state_.regs.read(simrv::xlen::RegId::Ra);
+                    ctx.tkn = 1;
+                    ctx.jmp_pc = simrv::xlen::VirtAddr{ra & ~static_cast<simrv::xlen::Register>(1)};
+                }
+                break;
+            }
+            case OperationId::CM_JT:
+            case OperationId::CM_JALT: {
+                const uint32_t index = (ir16 >> 2U) & 0xFFU;
+                const simrv::xlen::Word table_base =
+                    static_cast<simrv::xlen::Word>(state_.jvt) & ~simrv::xlen::Word{0x3FULL};
+                const simrv::xlen::Word entry_addr = table_base + (index * elem_bytes);
+                const simrv::xlen::Word target = simrv::memory::MemoryAccess::loadInt(
+                    machine.memory_, *this, simrv::xlen::VirtAddr{entry_addr}, mem_f3);
+                if (ctx.pending_exception.has_value()) return;
+                if (ctx.op_id == OperationId::CM_JALT) {
+                    state_.regs.write(simrv::xlen::RegId::Ra, (ctx.cpc + 2).raw());
+                }
+                ctx.tkn = 1;
+                ctx.jmp_pc = simrv::xlen::VirtAddr{target & ~static_cast<simrv::xlen::Register>(1)};
+                break;
+            }
+            default:
+                break;
+        }
         return;
     }
 
@@ -69,6 +227,10 @@ void CPU::execute_core(Machine& machine) {
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
+            }
+            if (state_.zicfilp_enabled_in_current_mode() && ctx.rs1 != simrv::xlen::RegId::Ra &&
+                ctx.rs1 != simrv::xlen::RegId::T0 && ctx.rs1 != simrv::xlen::RegId::T2) {
+                state_.elp = true;
             }
             break;
         case Opcode::Op:
@@ -120,6 +282,10 @@ void CPU::execute_core(Machine& machine) {
                 ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
             }
+            if (state_.zicfilp_enabled_in_current_mode() && ctx.rs1 != simrv::xlen::RegId::Ra &&
+                ctx.rs1 != simrv::xlen::RegId::T0 && ctx.rs1 != simrv::xlen::RegId::T2) {
+                state_.elp = true;
+            }
             break;
         case Opcode::Amo:
             ctx.tkn = false;
@@ -138,6 +304,29 @@ void CPU::execute_core(Machine& machine) {
             } else if (ctx.op_id == MOP) {
                 ctx.tkn = false;
                 ctx.wb_data = 0;
+            } else if (ctx.op_id == SSPUSH) {
+                ctx.tkn = false;
+                if (!state_.zicfiss_enabled_in_current_mode()) {
+                    ctx.wb_data = 0;
+                } else {
+                    const uint64_t step = (state_.regs.xlen == 64) ? 8ULL : 4ULL;
+                    ctx.mem_addr =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(state_.ssp - step)};
+                    ctx.funct3 = (state_.regs.xlen == 64) ? isa::Funct3::Sd : isa::Funct3::Sw;
+                    ctx.mem_wdata = ctx.rrs2;
+                }
+            } else if (ctx.op_id == SSPOPCHK) {
+                ctx.tkn = false;
+                if (!state_.zicfiss_enabled_in_current_mode()) {
+                    ctx.wb_data = 0;
+                } else {
+                    ctx.mem_addr =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(state_.ssp)};
+                    ctx.funct3 = (state_.regs.xlen == 64) ? isa::Funct3::Ld : isa::Funct3::Lw;
+                }
+            } else if (ctx.op_id == SSRDP) {
+                ctx.tkn = false;
+                ctx.wb_data = state_.zicfiss_enabled_in_current_mode() ? state_.ssp : 0;
             } else {
                 execute_system(machine);
             }
@@ -293,6 +482,7 @@ void CPU::execute_system(Machine& machine) {
             case Funct12Priv::Uret:
             case Funct12Priv::Sret:
             case Funct12Priv::Mret:
+            case Funct12Priv::Mnret:
                 ctx.tkn = true;
                 ctx.jmp_pc = simrv::xlen::VirtAddr{ctx.rcsr};
                 break;
@@ -333,6 +523,65 @@ void CPU::execute_system(Machine& machine) {
 
 void CPU::execute_fp(Machine& /*machine*/) {
     auto& ctx = active_context();
+    const bool zfinx_active = state_.enabled_extensions.has(MultiLetterExtension::Zfinx) &&
+                              !misa_has_extension(state_.misa, IsaExtension::F) &&
+                              !misa_has_extension(state_.misa, IsaExtension::D);
+
+    const auto load_zfinx_src = [&](std::array<simrv::xlen::FloatingRegister, 32>& fregs,
+                                    uint32_t idx, FpFmt fmt) -> bool {
+        if (state_.regs.xlen == 32 && fmt == FpFmt::Double && (idx & 1U) != 0U) {
+            return false;
+        }
+        const auto reg = static_cast<simrv::xlen::RegId>(idx);
+        if (fmt == FpFmt::Double) {
+            if (state_.regs.xlen == 64) {
+                fregs[idx] = (idx == 0U) ? 0ULL : static_cast<uint64_t>(state_.regs.read(reg));
+            } else {
+                const uint32_t lo = (idx == 0U) ? 0U : static_cast<uint32_t>(state_.regs.read(reg));
+                const uint32_t hi = (idx == 0U) ? 0U
+                                                : static_cast<uint32_t>(state_.regs.read(
+                                                      static_cast<simrv::xlen::RegId>(idx + 1U)));
+                fregs[idx] = (static_cast<uint64_t>(hi) << 32U) | lo;
+            }
+        } else if (fmt == FpFmt::Half) {
+            const uint64_t raw =
+                (idx == 0U) ? 0ULL : (static_cast<uint64_t>(state_.regs.read(reg)) & 0xFFFFULL);
+            fregs[idx] = 0xFFFFFFFFFFFF0000ULL | raw;
+        } else {
+            const uint64_t raw =
+                (idx == 0U) ? 0ULL : (static_cast<uint64_t>(state_.regs.read(reg)) & 0xFFFFFFFFULL);
+            fregs[idx] = simrv::xlen::kF32BoxerBits | raw;
+        }
+        return true;
+    };
+
+    const auto store_zfinx_dst = [&](simrv::xlen::FloatingRegister val, FpFmt fmt) -> bool {
+        const uint32_t rd_idx = std::to_underlying(ctx.rd);
+        if (state_.regs.xlen == 32 && fmt == FpFmt::Double && (rd_idx & 1U) != 0U) {
+            return false;
+        }
+        ctx.fp_wb_enable = false;
+        ctx.int_wb_from_fp = true;
+        if (fmt == FpFmt::Double) {
+            if (state_.regs.xlen == 64) {
+                ctx.wb_data = static_cast<simrv::xlen::Register>(val);
+            } else {
+                ctx.wb_data = static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(val & 0xFFFFFFFFULL)));
+                ctx.mem_rdata_hi = static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(static_cast<int32_t>((val >> 32U) & 0xFFFFFFFFULL)));
+                ctx.int_wb_pair = (ctx.rd != simrv::xlen::RegId::Zero);
+            }
+        } else if (fmt == FpFmt::Half) {
+            ctx.wb_data = static_cast<simrv::xlen::Register>(
+                static_cast<int64_t>(static_cast<int16_t>(val & 0xFFFFULL)));
+        } else {
+            ctx.wb_data = static_cast<simrv::xlen::Register>(
+                static_cast<int64_t>(static_cast<int32_t>(val & 0xFFFFFFFFULL)));
+        }
+        return true;
+    };
+
     switch (ctx.opcode) {
         case Opcode::MAdd:
         case Opcode::MSub:
@@ -348,6 +597,27 @@ void CPU::execute_fp(Machine& /*machine*/) {
             const auto fmt = static_cast<FpFmt>(ctx.funct7 & 0x3);
             const auto rs3 = static_cast<simrv::xlen::FpRegId>((ctx.ir >> 27) & 0x1F);
             const simrv::xlen::CsrValue old_fcsr = state_.fcsr;
+            if (zfinx_active) {
+                std::array<simrv::xlen::FloatingRegister, 32> zfinx_fregs{};
+                if (!load_zfinx_src(zfinx_fregs, std::to_underlying(ctx.rs1), fmt) ||
+                    !load_zfinx_src(zfinx_fregs, std::to_underlying(ctx.rs2), fmt) ||
+                    !load_zfinx_src(zfinx_fregs, std::to_underlying(rs3), fmt) ||
+                    (state_.regs.xlen == 32 && fmt == FpFmt::Double &&
+                     (std::to_underlying(ctx.rd) & 1U) != 0U)) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ctx.ir;
+                    break;
+                }
+                const auto fp = execute::ExecuteUnit::fusedFp(
+                    ctx.opcode, fmt, simrv::xlen::to_fp_reg_id(ctx.rs1),
+                    simrv::xlen::to_fp_reg_id(ctx.rs2), rs3,
+                    static_cast<isa::RoundingMode>(ctx.funct3), zfinx_fregs.data(), state_.fcsr);
+                if (fp.fp_wb_enable && !store_zfinx_dst(fp.fp_wb_data, fmt)) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ctx.ir;
+                }
+                break;
+            }
             const auto fp = execute::ExecuteUnit::fusedFp(
                 ctx.opcode, fmt, simrv::xlen::to_fp_reg_id(ctx.rs1),
                 simrv::xlen::to_fp_reg_id(ctx.rs2), rs3, static_cast<isa::RoundingMode>(ctx.funct3),
@@ -376,6 +646,43 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 break;
             }
             const simrv::xlen::CsrValue old_fcsr = state_.fcsr;
+            if (zfinx_active) {
+                const auto fmt = static_cast<FpFmt>(ctx.funct7 & 0x3);
+                const uint32_t rs1_idx = std::to_underlying(ctx.rs1);
+                const uint32_t rs2_idx = std::to_underlying(ctx.rs2);
+                // Determine source/dest widths for conversion ops
+                FpFmt src1_fmt = fmt;
+                FpFmt src2_fmt = fmt;
+                FpFmt dst_fmt = fmt;
+                const bool rs1_is_int =
+                    (ctx.funct7 == 0x68 || ctx.funct7 == 0x69 || ctx.funct7 == 0x6A);
+                if (ctx.funct7 == 0x20 || ctx.funct7 == 0x21 || ctx.funct7 == 0x22) {
+                    // FCVT.<dst>.<src>
+                    src1_fmt = (rs2_idx == 1U) ? FpFmt::Double
+                                               : (rs2_idx == 2U ? FpFmt::Half : FpFmt::Single);
+                }
+                const bool has_rs2 = (ctx.funct7 <= 0x15 || ctx.funct7 == 0x50 ||
+                                      ctx.funct7 == 0x51 || ctx.funct7 == 0x52);
+                std::array<simrv::xlen::FloatingRegister, 32> zfinx_fregs{};
+                if ((!rs1_is_int && !load_zfinx_src(zfinx_fregs, rs1_idx, src1_fmt)) ||
+                    (has_rs2 && !load_zfinx_src(zfinx_fregs, rs2_idx, src2_fmt))) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ctx.ir;
+                    break;
+                }
+                const auto fp = execute::ExecuteUnit::opFp(
+                    ctx.funct7, ctx.funct3, simrv::xlen::to_fp_reg_id(ctx.rs1),
+                    simrv::xlen::to_fp_reg_id(ctx.rs2), ctx.rrs1, zfinx_fregs.data(), state_.fcsr);
+                if (fp.int_wb_enable) {
+                    ctx.wb_data = fp.int_wb_data;
+                    ctx.int_wb_from_fp = true;
+                    ctx.fp_wb_enable = false;
+                } else if (fp.fp_wb_enable && !store_zfinx_dst(fp.fp_wb_data, dst_fmt)) {
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                    ctx.pending_tval = ctx.ir;
+                }
+                break;
+            }
             const auto fp = execute::ExecuteUnit::opFp(ctx.funct7, ctx.funct3,
                                                        simrv::xlen::to_fp_reg_id(ctx.rs1),
                                                        simrv::xlen::to_fp_reg_id(ctx.rs2), ctx.rrs1,

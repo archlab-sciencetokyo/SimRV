@@ -13,7 +13,7 @@ namespace simrv::cache {
  * @class L2Cache
  * @brief Intermediate unified Level-2 Cache (default 64 KiB, 64-byte lines, 8 ways).
  */
-class L2Cache : public BaseCache<1024, 64, 8> {
+class L2Cache : public BaseCache<4096, 64, 8> {
    public:
     L2Cache() = default;
 
@@ -25,7 +25,7 @@ class L2Cache : public BaseCache<1024, 64, 8> {
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
         if (cache_line != nullptr) {
-            std::memcpy(out_data.data(), cache_line->data.data(), kLineBytes);
+            std::memcpy(out_data.data(), cache_line->data.data(), line_bytes());
             cache_line->last_used = ++access_tick_;
             ++hits_;
             last_access_was_hit_ = true;

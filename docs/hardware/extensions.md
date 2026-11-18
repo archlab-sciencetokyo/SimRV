@@ -24,7 +24,7 @@ extensions = "zkn,zkr,zkt"
 enabled = true
 opcode = "custom-0"
 default_latency = 1
-rtl_module = "rvproc_cfu"
+rtl_module = "my_cfu"
 interface = "rs1-rs2-rd"
 ```
 
@@ -91,7 +91,7 @@ clang -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
 Run SimRV with the compiled accelerator plugin:
 
 ```bash
-simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=cfu-provingground target_program.elf
+simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=balanced target_program.elf
 ```
 
 ### Dual Extension Architecture: CFU vs. External Device Plugins
@@ -105,149 +105,3 @@ SimRV follows a unified plugin philosophy across both execution pipeline and SoC
 
 Both plugin interfaces use stable, versioned C ABIs loaded at runtime without modifying or rebuilding the core simulator. For complete documentation on authoring and auto-discovering memory-mapped external device plugins, see [Extending Platforms: Dynamic External Device Plugins](extending-platforms.md#dynamic-external-device-plugins-c-abi).
 
----
-
-## 1. Register the Extension and Opcodes
-
-All core ISA definitions and shared constants live in
-[`include/simrv/isa/IsaTypes.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/isa/IsaTypes.hpp) and [`include/simrv/isa/IsaConfig.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/isa/IsaConfig.hpp).
-
-1. **Extension Bit:** Add your extension to the `IsaExtension` enum
-   (e.g., `V = 21` for Vector).
-
-2. **ISA Presets:** Ensure the extension bit is included in the appropriate
-   `isa_preset_bits()` entries if it belongs to a standard preset.
-
-3. **Opcodes and Funct fields:**
-   - Add new major opcodes to the `Opcode` enum.
-   - Add sub-operation discriminants to `Funct3`, `Funct7`, or create a dedicated
-     enum (e.g., `Funct6Vector`) for dense sub-encoding spaces.
-
-4. **Operation ID (Profiling and Instruction Mix):**
-   - Add every new instruction to the `OperationId` enum.
-   - Define range sentinels at the bottom of the enum
-     (e.g., `kOpRangeRv32vBegin` / `kOpRangeRv32vEnd`) so that `Tracer` and
-     instruction-mix stats can bucket your extension correctly.
-
-5. **Requirements Check:** Update `required_extension_for_instruction()` so the
-   core raises `IllegalInstruction` when the extension is disabled in `misa`.
-
----
-
-## 2. Decode the Instruction
-
-Instruction decoding logic lives in:
-
-- [`include/simrv/pipeline/Decoder.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/pipeline/Decoder.hpp) — field extraction helpers
-- [`src/pipeline/Decoder.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/pipeline/Decoder.cpp) — master decode switch
-
-Steps:
-
-1. **Decoder Helpers:** If the extension introduces new instruction formats
-   (e.g., Vector `vtype`, `vm` mask fields), add extraction methods to the
-   `Decoder` class.
-
-2. **Operation Identification:** Update the `simrv::pipeline::decoder()` function.
-   This is the master lookup using `switch/case` over `Opcode` and `Funct3`/`Funct7`
-   to map raw instruction bits to your new `OperationId` values.
-
-3. **Compressed (RVC) variants:** If your extension includes 16-bit forms, handle
-   them in the decompression path before the main decode switch.
-
----
-
-## 3. Implement Execution Logic
-
-Execution routing happens in the Execute stage:
-
-- [`src/execute/ExecuteUnit.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnit.cpp) — routing hub facade
-- [`src/execute/ExecuteUnitInt.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitInt.cpp) — integer, M, and A ops
-- [`src/execute/ExecuteUnitFp.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFp.cpp) — FP ops (F, D)
-- [`src/execute/ExecuteUnitZb.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZb.cpp) — bit manipulation ops (Zb)
-- [`src/execute/ExecuteUnitVector.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitVector.cpp) — vector ops (V)
-
-Steps:
-
-1. **Routing:** Inside the execute dispatch, add a case for your `OperationId` range
-   or individual operations, delegating to a new execute unit if warranted.
-
-2. **Execution Context:**
-   - Fetch operands from `PipelineContext` (populated during the ID stage).
-   - For non-standard state (e.g., vector registers), route to a new dedicated unit
-     (e.g., `VectorUnit::execute()`).
-
-3. **Writeback:** Store results back into `PipelineContext` writeback fields so
-   `CPU::writeback_registers()` can commit them to architectural state during WB stage.
-
----
-
-## 4. Add Architectural State (Registers / CSRs)
-
-If the extension requires new architectural state (e.g., 32 vector registers of
-variable length):
-
-1. **Types:** Define new register identifiers and associated types in
-   [`include/simrv/xlen/Types.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/xlen/Types.hpp).
-
-2. **State Storage:** Add state arrays or structs to `ArchState` inside
-   [`include/simrv/core/Cpu.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/core/Cpu.hpp) (embedded in `CPU`
-   via `state_`).
-
-3. **Control and Status Registers (CSRs):**
-   - Add new CSR addresses to the `Csr` enum in [`include/simrv/core/Csr.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/core/Csr.hpp).
-   - Implement read/write behavior, access control, and illegal-instruction guards in
-     [`src/core/CsrFile.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/core/CsrFile.cpp).
-
----
-
-## 5. Instruction Explainer Integration
-
-SimRV's formal architectural explainer (`simrv::explain`) evaluates instructions statically and
-against live `ArchState` in the TUI EXPLAIN pane and via `--explain` CLI. Ensure new instructions
-appear with full specification provenance. Check whether an instruction is mandatory or optional
-for SimRV's target in the [RVA23 compliance scope](../architecture/compliance.md), and cite the
-ratified manual section for its actual defining extension; support in SimRV does not make an
-optional extension mandatory in RVA23.
-
-1. **Mnemonic, Normative Description, and Formula:** Add entries to `get_description()`,
-   `get_spec_formula()`, and `get_spec_section()` in
-   [`src/explain/ScalarSpecCatalog.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/explain/ScalarSpecCatalog.cpp),
-   citing *The RISC-V Instruction Set Manual* (Document Version `20260120`).
-
-2. **Extension Classification:** Update `get_isa_extension_name()` so `get_operation_spec()`
-   associates the instruction with its ratified extension and specification chapter.
-
-3. **Format & Operand Traits:** Ensure `get_instruction_format()` and `OperationInfo` operand
-   register banks (`rd_bank`, `rs1_bank`, `rs2_bank`, `rs3_bank`) are populated so
-   `explain_static()`, `explain_in_state()`, and `explain_at_pc()` resolve live operand values and
-   post-state effects automatically.
-
----
-
-## 6. TUI and Tracer Integration
-
-To maintain full observability:
-
-1. **Tracer:** Ensure `OPERATION_NAME` strings are populated for all new `OperationId`
-   values so instruction-mix output and trace files work correctly.
-
-2. **TUI Register & Subsystem Panes:** The TUI is split into modular components under `src/tui/panels/`:
-   - If you add new architectural state (e.g., vector registers), update
-     [`src/tui/panels/InspectorPaneRegs.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/tui/panels/InspectorPaneRegs.cpp) or create a dedicated panel view. Add a new view type in
-     [`include/simrv/tui/panels/InspectorPane.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/tui/panels/InspectorPane.hpp) and wire it into the pane cycler.
-   - Use the centralized theme helpers from `TuiTheme.hpp` — never hardcode raw ANSI escape sequences.
-
----
-
-## 7. Testing and Validation
-
-1. **ISA Tests:** Set `RISCV_TESTS_DIR=/path/to/riscv-tests` at CMake configuration time. ISA tests and lockstep checks will automatically register matching targets.
-
-2. **Vector Tests:** For vector extensions, set `SIMRV_VECTOR_TESTS_DIR=/path/to/riscv-vector-tests` or `--vector-tests-dir`.
-
-3. **Gate Suite:** Run the CTest gate suite to validate regression coverage across both architectures:
-
-   ```bash
-   ctest --test-dir build/rv64-release --output-on-failure -L gate
-   ctest --test-dir build/rv32-release --output-on-failure -L gate
-   ```

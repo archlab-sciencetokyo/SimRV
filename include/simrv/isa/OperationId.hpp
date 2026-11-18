@@ -74,6 +74,7 @@ enum OperationId : uint16_t {
     URET,
     SRET,
     MRET,
+    MNRET,
     WFI,
     SFENCE_VMA,
     HFENCE_VVMA,
@@ -691,6 +692,130 @@ enum OperationId : uint16_t {
     HSV_H,
     HSV_W,
     HSV_D,
+    /* Track 1B: Zacas / Zabha */
+    AMOSWAP_B,
+    AMOADD_B,
+    AMOXOR_B,
+    AMOAND_B,
+    AMOOR_B,
+    AMOMIN_B,
+    AMOMAX_B,
+    AMOMINU_B,
+    AMOMAXU_B,
+    AMOSWAP_H,
+    AMOADD_H,
+    AMOXOR_H,
+    AMOAND_H,
+    AMOOR_H,
+    AMOMIN_H,
+    AMOMAX_H,
+    AMOMINU_H,
+    AMOMAXU_H,
+    AMOCAS_B,
+    AMOCAS_H,
+    AMOCAS_W,
+    AMOCAS_D,
+    AMOCAS_Q,
+    /* Track 1C: Zfh / Zvfh / Zfbfmin / Zvfbfmin / Zvfbfwma */
+    FMADD_H,
+    FMSUB_H,
+    FNMSUB_H,
+    FNMADD_H,
+    FADD_H,
+    FSUB_H,
+    FMUL_H,
+    FDIV_H,
+    FSQRT_H,
+    FSGNJ_H,
+    FSGNJN_H,
+    FSGNJX_H,
+    FMIN_H,
+    FMAX_H,
+    FCVT_W_H,
+    FCVT_WU_H,
+    FCVT_L_H,
+    FCVT_LU_H,
+    FCVT_H_W,
+    FCVT_H_WU,
+    FCVT_H_L,
+    FCVT_H_LU,
+    FEQ_H,
+    FLT_H,
+    FLE_H,
+    FCLASS_H,
+    FCVT_S_BF16,
+    FCVT_BF16_S,
+    VFWCVTBF16_F_F_V,
+    VFNCVTBF16_F_F_W,
+    VFWMACCBF16_VV,
+    VFWMACCBF16_VF,
+    /* Track 2A: Vector Cryptography (Zvkn / Zvks / Zvkg / Zvknh*) */
+    VAESEF_VV,
+    VAESEF_VS,
+    VAESDF_VV,
+    VAESDF_VS,
+    VAESEM_VV,
+    VAESEM_VS,
+    VAESDM_VV,
+    VAESDM_VS,
+    VAESZ_VS,
+    VAESKF1_VI,
+    VAESKF2_VI,
+    VGHSH_VV,
+    VGMUL_VV,
+    VSHA2MS_VV,
+    VSHA2CH_VV,
+    VSHA2CL_VV,
+    VSM3ME_VV,
+    VSM3C_VI,
+    VSM4K_VI,
+    VSM4R_VV,
+    VSM4R_VS,
+    /* Track 2B: Scalar Cryptography (Zknd / Zkne / Zknh / Zksed / Zksh) */
+    AES32DSI,
+    AES32DSMI,
+    AES32ESI,
+    AES32ESMI,
+    AES64DS,
+    AES64DSM,
+    AES64ES,
+    AES64ESM,
+    AES64IM,
+    AES64KS1I,
+    AES64KS2,
+    SHA256SIG0,
+    SHA256SIG1,
+    SHA256SUM0,
+    SHA256SUM1,
+    SHA512SIG0,
+    SHA512SIG1,
+    SHA512SUM0,
+    SHA512SUM1,
+    SHA512SIG0L,
+    SHA512SIG0H,
+    SHA512SIG1L,
+    SHA512SIG1H,
+    SHA512SUM0R,
+    SHA512SUM1R,
+    SM4ED,
+    SM4KS,
+    SM3P0,
+    SM3P1,
+    /* Track 2C: Code-Size (Zcmp / Zcmt) */
+    CM_PUSH,
+    CM_POP,
+    CM_POPRET,
+    CM_POPRETZ,
+    CM_MVA01S,
+    CM_MVSA01,
+    CM_JT,
+    CM_JALT,
+    /* Zicfiss (Shadow Stack) */
+    SSPUSH,
+    SSPOPCHK,
+    SSRDP,
+    SSAMOSWAP_W,
+    SSAMOSWAP_D,
     /* Others */
     ILLEGAL,
     OperationIdCount
@@ -791,8 +916,31 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 
 [[nodiscard]] constexpr auto is_b_op(OperationId op_id) noexcept -> bool { return is_zb_op(op_id); }
 
+constexpr OperationId kOpRangeVectorCryptoBegin = VAESEF_VV;
+constexpr OperationId kOpRangeVectorCryptoEnd = VSM4R_VS;
+
+constexpr OperationId kOpRangeScalarCryptoBegin = AES32DSI;
+constexpr OperationId kOpRangeScalarCryptoEnd = SM3P1;
+
+constexpr OperationId kOpRangeCodeSizeBegin = CM_PUSH;
+constexpr OperationId kOpRangeCodeSizeEnd = CM_JALT;
+
 [[nodiscard]] constexpr auto is_vector_op(OperationId op_id) noexcept -> bool {
-    return op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd;
+    return (op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd) ||
+           (op_id >= VFWCVTBF16_F_F_V && op_id <= VFWMACCBF16_VF) ||
+           (op_id >= kOpRangeVectorCryptoBegin && op_id <= kOpRangeVectorCryptoEnd);
+}
+
+[[nodiscard]] constexpr auto is_vector_crypto_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeVectorCryptoBegin && op_id <= kOpRangeVectorCryptoEnd;
+}
+
+[[nodiscard]] constexpr auto is_zk_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeScalarCryptoBegin && op_id <= kOpRangeScalarCryptoEnd;
+}
+
+[[nodiscard]] constexpr auto is_code_size_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeCodeSizeBegin && op_id <= kOpRangeCodeSizeEnd;
 }
 
 [[nodiscard]] constexpr auto is_cfu_op(OperationId op_id) noexcept -> bool { return op_id == CFU; }

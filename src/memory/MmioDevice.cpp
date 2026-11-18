@@ -93,6 +93,21 @@ auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool
         }
     } else if (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData) {
         resp.opcode = TlOpcodeD::AccessAck;
+        const auto natural_mask = TlChannelA::compute_mask(req.size, req.address);
+        if (req.opcode == TlOpcodeA::PutPartialData && req.mask != natural_mask) {
+            if (req.size > kTlBeatSize || (req.mask & ~natural_mask) != 0) {
+                resp.denied = true;
+                return false;
+            }
+            const unsigned lane = static_cast<unsigned>(req.address.raw() & (kTlBeatBytes - 1));
+            const unsigned bytes = 1U << req.size;
+            for (unsigned i = 0; i < bytes; ++i) {
+                if ((req.mask & (1U << (lane + i))) != 0) {
+                    write8(offset + i, static_cast<uint8_t>(req.data >> (i * 8U)));
+                }
+            }
+            return true;
+        }
         switch (req.size) {
             case 0:
                 write8(offset, static_cast<uint8_t>(req.data & 0xffU));

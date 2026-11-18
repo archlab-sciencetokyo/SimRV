@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <fstream>
 #include <memory>
@@ -86,6 +88,8 @@ struct Axi4W {
     simrv::xlen::Word data{0};
     uint32_t strb{0xFFFFFFFFU};
     bool last{true};
+    std::array<simrv::xlen::Byte, 16> data_bytes{};
+    bool data_bytes_valid{false};
 };
 
 struct Axi4B {
@@ -110,6 +114,33 @@ struct Axi4R {
     simrv::xlen::Word data{0};
     AxiResp resp{AxiResp::Okay};
     bool last{true};
+    std::array<simrv::xlen::Byte, 16> data_bytes{};
+    bool data_bytes_valid{false};
+};
+
+/// Signals sampled at a single AXI clock edge.
+/// The system bus currently supports exclusive RAM transactions in single-hart,
+/// non-SMP configurations.
+struct Axi4CycleInput {
+    bool ar_valid{false};
+    Axi4Ar ar{};
+    bool aw_valid{false};
+    Axi4Aw aw{};
+    bool w_valid{false};
+    Axi4W w{};
+    bool r_ready{false};
+    bool b_ready{false};
+};
+
+/// Signals presented before the edge; a transfer occurs when valid and ready are both true.
+struct Axi4CycleOutput {
+    bool ar_ready{false};
+    bool aw_ready{false};
+    bool w_ready{false};
+    bool r_valid{false};
+    Axi4R r{};
+    bool b_valid{false};
+    Axi4B b{};
 };
 
 // -----------------------------------------------------------------------------
@@ -143,6 +174,14 @@ class Axi4Tracer {
 
 class Axi4Bridge {
    public:
+    struct ChannelStats {
+        uint64_t ar = 0;
+        uint64_t r = 0;
+        uint64_t aw = 0;
+        uint64_t w = 0;
+        uint64_t b = 0;
+    };
+
     explicit Axi4Bridge(core::Machine* machine = nullptr, pipeline::AxiConfig config = {});
 
     void set_config(const pipeline::AxiConfig& config) noexcept {
@@ -150,6 +189,13 @@ class Axi4Bridge {
         tracer_.enable(config_.trace_axi);
     }
     [[nodiscard]] auto config() const noexcept -> const pipeline::AxiConfig& { return config_; }
+    [[nodiscard]] auto channel_stats() const noexcept -> ChannelStats {
+        return {.ar = ar_count_.load(std::memory_order_relaxed),
+                .r = r_count_.load(std::memory_order_relaxed),
+                .aw = aw_count_.load(std::memory_order_relaxed),
+                .w = w_count_.load(std::memory_order_relaxed),
+                .b = b_count_.load(std::memory_order_relaxed)};
+    }
 
     [[nodiscard]] auto tracer() noexcept -> Axi4Tracer& { return tracer_; }
     [[nodiscard]] auto tracer() const noexcept -> const Axi4Tracer& { return tracer_; }
@@ -178,6 +224,11 @@ class Axi4Bridge {
     std::vector<Axi4Aw> pending_aw_;
     std::vector<Axi4W> pending_w_;
     std::vector<Axi4B> pending_b_;
+    std::atomic<uint64_t> ar_count_{0};
+    std::atomic<uint64_t> r_count_{0};
+    std::atomic<uint64_t> aw_count_{0};
+    std::atomic<uint64_t> w_count_{0};
+    std::atomic<uint64_t> b_count_{0};
 };
 
 }  // namespace simrv::memory

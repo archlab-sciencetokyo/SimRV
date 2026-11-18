@@ -40,6 +40,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op) -> bool
 
 template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
 SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op, FastOp kind) -> bool {
+    if (simrv::compiler::unlikely(state_.elp)) {
+        return false;
+    }
     simrv::xlen::Register wb_data = 0;
     const simrv::xlen::Register rrs1 = state_.regs.read(op.rs1);
 

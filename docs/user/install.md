@@ -43,7 +43,7 @@ cmake --build build/macos --target SimRV --parallel 2
 build/macos/SimRV --help
 ```
 
-The [SimRV CI workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
+The [Build and Test workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml)
 uploads separate `arm64` and `x86_64` artifacts after successful non-PR builds and smoke tests.
 Graphical guest display uses Kitty graphics when detected, then SIXEL when available; support
 depends on the terminal emulator, not just the host OS. The TUI falls back to text when neither is
@@ -84,7 +84,7 @@ archive at the same prefix. Use a native package when managed upgrades and remov
 
 ## Fedora and RPM systems
 
-The RPM bundle contains a standard repository index and four packages. For a normal simulator
+The RPM bundle contains a standard repository index and five packages. For a normal simulator
 installation, install only the runtime package:
 
 ```bash
@@ -94,7 +94,9 @@ simrv --version
 ```
 
 Install `simrv-devel-*.rpm` to develop C++ applications against SimRV, `simrv-tools-*.rpm` for
-model, parity, and benchmark utilities, or `simrv-tests-*.rpm` for the compliance test runners. Upgrade by
+the configuration wizard, generic parity/benchmark utilities, and Linux/Buildroot image builder,
+`simrv-tests-*.rpm` for the compliance test runners, or
+Upgrade by
 installing the corresponding packages from a newer bundle. Remove them with
 `sudo dnf remove simrv simrv-devel simrv-tools simrv-tests`.
 
@@ -115,9 +117,9 @@ sudo apt install ./simrv-deb/simrv_*_amd64.deb
 simrv --version
 ```
 
-The optional `simrv-devel` package provides the C++ SDK and depends on the matching `simrv`
-version. The tools and test packages also depend on `simrv`. Install the needed `.deb` files
-with the same command. Upgrade from a newer bundle or remove packages with
+The optional `simrv-devel` package provides the C++ SDK; the tools, tests, and plugins packages
+also depend on the matching `simrv` version. Install the needed `.deb` files with the same command.
+Upgrade from a newer bundle or remove packages with
 `sudo apt remove simrv simrv-devel simrv-tools simrv-tests`.
 
 To install the runtime and SDK together from the downloaded bundle:
@@ -174,7 +176,7 @@ distribution is outside this matrix or when package-manager integration is unava
 | --- | --- | --- |
 | `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 or AArch64 Linux host; RV64 guests and RV32 guest compatibility |
 | `simrv-devel` | Public C++ headers, static runtime library, and `SimRV::runtime` CMake package | Optional native SDK; C++23 compiler and host-compatible C++ standard library |
-| `simrv-tools` | CPU model wizard, tuning, RTL parity, and benchmarking suite | Standalone utilities; RTL parity also needs the selected external RTL/toolchain environment |
+| `simrv-tools` | CPU configuration wizard, generic parity/tuning, benchmarking, and optional Linux/Buildroot image builder with its templates and profiles | Standalone utilities; image building requires Linux host build dependencies, and RTL parity also needs the selected external RTL/toolchain environment |
 | `simrv-tests` | Architectural compliance test drivers (ACT4 and Vector test runners) | Standalone test execution drivers; requires separately prepared test suites |
 
 Packages do not include a RISC-V cross compiler, generated guest ELF files, Linux images, or
@@ -231,17 +233,17 @@ revision, target XLEN, compiler, generator, host platform, and optional `SOURCE_
 for reproducible builds. Its schema is installed at
 `/usr/local/simrv/share/SimRV/schemas/simrv-build-metadata.schema.json`.
 
-SimRV provides dynamic shell autocompletion for Bash, Zsh, and Fish via `simrv completion`:
+The tools package provides shell autocompletion for Bash, Zsh, and Fish via `simrv-tools completion`:
 
 ```bash
 # Bash (add to ~/.bashrc for persistence):
-eval "$(simrv completion bash)"
+eval "$(simrv-tools completion bash)"
 
 # Zsh (add to ~/.zshrc before compinit):
-eval "$(simrv completion zsh)"
+eval "$(simrv-tools completion zsh)"
 
 # Fish (run once to install for future sessions):
-simrv completion fish > ~/.config/fish/completions/simrv.fish
+simrv-tools completion fish > ~/.config/fish/completions/simrv.fish
 ```
 
 Build `rv32-release` only when a native RV32 strict-width implementation is required for

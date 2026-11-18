@@ -683,6 +683,13 @@ void test_sysconfig_modal_modes() {
     SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
+    simrv::core::Machine baremetal_settings_machine;
+    SettingsDraft baremetal_settings_draft;
+    SettingsModal::open(baremetal_settings_draft, baremetal_settings_machine);
+    SettingsModal::adjust_setting(baremetal_settings_draft, 14, 1);
+    expect(baremetal_settings_draft.dlog_mode,
+           "Device MMIO logging remains available in bare-metal mode");
+
     simrv::core::Machine settings_machine;
     SettingsDraft submitted_draft;
     SettingsModal::open(submitted_draft, settings_machine);
@@ -1075,10 +1082,15 @@ void test_classroom_cli_defaults() {
 
 void test_load_modal_path_completion() {
     namespace fs = std::filesystem;
-    const auto root = fs::temp_directory_path() /
-                      ("simrv-path-completion-" +
-                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root / "subdir");
+    const auto requested_root =
+        fs::temp_directory_path() /
+        ("simrv-path-completion-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(requested_root / "subdir");
+    // macOS exposes temporary directories through symlinked paths such as
+    // /var -> /private/var. Keep comparisons on the same canonical path that
+    // filesystem::relative uses below.
+    const auto root = fs::canonical(requested_root);
     std::ofstream(root / "program.elf").put('x');
     std::ofstream(root / "subdir" / "nested.elf").put('x');
 
@@ -1951,16 +1963,16 @@ void test_category_groups_and_glossary() {
             rows, [&rows](const std::string& row) { rows.push_back(row); }, topic, 0, 30, 78);
         expect(!rows.empty(), "glossary renders rows for topic " + std::to_string(topic));
         bool found_nav = false;
+        std::string footer_text;
         for (const auto& r : rows) {
             expect(simrv::tui::get_display_width(r) <= 78,
                    "glossary row stays within the requested modal width");
-            if (r.find("Previous") != std::string::npos && r.find("Next") != std::string::npos &&
-                r.find("Close") != std::string::npos) {
-                found_nav = true;
-                break;
-            }
+            footer_text += r;
         }
+        found_nav = footer_text.contains("Previous") && footer_text.contains("Next") &&
+                    footer_text.contains("Close");
         expect(found_nav, "glossary includes consistent action-key navigation");
+        expect(footer_text.contains("Press /") || topic != 0, "glossary exposes its search key");
     }
 
     std::vector<std::string> pipeline_rows;
@@ -2029,6 +2041,56 @@ void test_category_groups_and_glossary() {
         expect(simrv::tui::get_display_width(row) <= 40,
                "narrow glossary rows do not exceed the modal width");
     }
+
+    std::vector<std::string> privilege_glossary_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        privilege_glossary_rows,
+        [&privilege_glossary_rows](const std::string& row) {
+            privilege_glossary_rows.push_back(row);
+        },
+        5, 0, 50, 100);
+    std::string privilege_glossary_text;
+    for (const auto& row : privilege_glossary_rows) privilege_glossary_text += row + '\n';
+    expect(privilege_glossary_text.contains("reference/isa/priv/machine.html") &&
+               privilege_glossary_text.contains("reference/profiles-overview/index.html") &&
+               privilege_glossary_text.contains("Press O"),
+           "privilege glossary exposes official RISC-V links and browser action");
+
+    simrv::tui::modals::GlossaryModal glossary_search;
+    glossary_search.handle_key('/', simrv::tui::TuiKey::None);
+    for (const char ch : std::string_view("pipeline stages")) {
+        glossary_search.handle_key(static_cast<uint8_t>(ch), simrv::tui::TuiKey::None);
+    }
+    std::vector<std::string> search_rows;
+    glossary_search.render_content(search_rows, 100, 40);
+    std::string search_text;
+    for (const auto& row : search_rows) search_text += row + '\n';
+    expect(search_text.contains("[glossary]") && search_text.contains("Pipeline"),
+           "glossary search finds topic content");
+
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    std::vector<std::string> detail_rows;
+    glossary_search.render_content(detail_rows, 100, 40);
+    std::string detail_text;
+    for (const auto& row : detail_rows) detail_text += row + '\n';
+    expect(detail_text.contains("Pipeline Stages"),
+           "selecting a glossary search result opens its topic");
+
+    glossary_search.handle_key('/', simrv::tui::TuiKey::None);
+    for (const char ch : std::string_view("RVA23S64")) {
+        glossary_search.handle_key(static_cast<uint8_t>(ch), simrv::tui::TuiKey::None);
+    }
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    glossary_search.handle_key(13, simrv::tui::TuiKey::Enter);
+    detail_rows.clear();
+    glossary_search.render_content(detail_rows, 100, 40);
+    detail_text.clear();
+    for (const auto& row : detail_rows) detail_text += row + '\n';
+    expect(detail_text.contains("ISA Explanation") && detail_text.contains("RVA23S64") &&
+               detail_text.contains("Mandatory ISA") &&
+               detail_text.contains("docs.riscv.org/reference/rva23"),
+           "glossary search opens the shared profile explanation and spec URL");
 
     int topic_idx = 0;
     int scroll_offset = 0;
@@ -2276,7 +2338,7 @@ void test_log_buffer_wrapping() {
     buffer.push("Short log line");
     buffer.push(
         "\033[36mLoaded 105604 symbols from ELF image: "
-        "linux-images/rv64/alpine-gui/opensbi-linux-payload.elf\033[0m");
+        "images/rv64/alpine-gui/opensbi-linux-payload.elf\033[0m");
 
     auto lines_w30 = buffer.get_wrapped_lines(30, 20);
     expect(lines_w30.size() >= 3, "Log wrapped across multiple lines when width=30");
@@ -2943,29 +3005,29 @@ void test_bus_inspector_and_tilelink_channels() {
     pane.set_visible_rows(45);
 
     const int width = 88;
-    // The bus view has two tab rows followed by its logical rows. DMA contention now
-    // occupies logical rows 18-19, before the transaction history.
-    const std::string r16 = strip_ansi(pane.render_row(18, width));
-    expect(r16.find("TileLink-C Channels") != std::string::npos,
-           "row 18 contains TileLink-C channel section header");
+    // The bus view has two tab rows followed by its logical rows.
+    const std::string r5 = strip_ansi(pane.render_row(7, width));
+    expect(r5.find("TileLink fabric") != std::string::npos,
+           "row 7 contains TileLink fabric section header");
 
-    const std::string r17 = strip_ansi(pane.render_row(19, width));
-    expect(r17.find("A(Req)") != std::string::npos && r17.find("B(Probe)") != std::string::npos,
-           "row 19 contains channel status indicators");
+    const std::string r6 = strip_ansi(pane.render_row(8, width));
+    expect(r6.find("A req:") != std::string::npos && r6.find("B probe:") != std::string::npos,
+           "row 8 contains channel status indicators");
 
-    const std::string r18 = strip_ansi(pane.render_row(22, width));
-    expect(r18.find("Recent Bus Transactions") != std::string::npos,
-           "row 20 contains Recent Bus Transactions header");
+    const std::string r7 = strip_ansi(pane.render_row(9, width));
+    expect(r7.find("Recent TileLink transactions") != std::string::npos,
+           "row 9 contains Recent TileLink transactions header");
 
-    const std::string r19 = strip_ansi(pane.render_row(23, width));
-    expect(r19.find("[E]") != std::string::npos && r19.find("GrantAck") != std::string::npos,
-           "row 21 contains latest recorded transaction (E GrantAck)");
+    const std::string r8 = strip_ansi(pane.render_row(10, width));
+    expect(r8.find("[E]") != std::string::npos && r8.find("GrantAck") != std::string::npos,
+           "row 10 contains latest recorded transaction (E GrantAck)");
 
     // Test narrow column width formatting
     const int narrow_width = 45;
-    const std::string narrow_r17 = strip_ansi(pane.render_row(19, narrow_width));
-    expect(narrow_r17.find("A:") != std::string::npos && narrow_r17.find("B:") != std::string::npos,
-           "narrow row 19 formats compact channel status");
+    const std::string narrow_r6 = strip_ansi(pane.render_row(8, narrow_width));
+    expect(narrow_r6.find("A req:") != std::string::npos &&
+               narrow_r6.find("B probe:") != std::string::npos,
+           "narrow row 8 formats compact channel status");
 }
 
 void test_inspector_vector_csr_rows() {
@@ -3261,7 +3323,7 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 15, "tool picker provides 15 selectable workbench tools");
+    expect(tools.size() == 16, "tool picker provides 16 selectable workbench tools");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('o') ==
                simrv::tui::TuiRegPage::LOG,
            "accelerator 'o' maps to LOG");
@@ -3415,8 +3477,11 @@ void test_multi_column_workbench_tools_and_swapping() {
     const auto trace_index = static_cast<int>(std::distance(available_tools.begin(), trace));
     const auto trace_row = simrv::tui::modals::ToolPickerModal::row_for_tool_index(
         static_cast<size_t>(trace_index), modal.tool_filter());
-    // Tool picker is vertically centered at y=3 in this 120x30 test terminal.
-    auto click_res = modal.handle_click(60, 4 + trace_row, 120, 30);
+    // Tool picker is vertically centered in this 120x30 test terminal.
+    const auto picker_rows =
+        simrv::tui::modals::ToolPickerModal::content_row_count(modal.tool_filter());
+    const int picker_top = std::max(1, (30 - std::min(28, picker_rows)) / 2);
+    auto click_res = modal.handle_click(60, picker_top + 1 + trace_row, 120, 30);
     expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
            "clicking tool row submits selection");
     expect(modal.get_tool_picker_cursor() == trace_index, "cursor updated to TRACE");
@@ -4623,7 +4688,10 @@ void test_formalized_registry_and_presets() {
     }
 
     // 4. ToolPickerModal mode-aligned filtering (unavailable tools hidden)
-    ToolFilter ia_filter{.cycle_accurate = false, .has_fp = false, .has_vector = false};
+    ToolFilter ia_filter{.cycle_accurate = false,
+                         .has_fp = false,
+                         .has_vector = false,
+                         .display_graphics_supported = false};
     const auto ia_tools = ToolPickerModal::all_tools(ia_filter);
     expect(ia_tools.size() == 10, "IA mode without FP/Vector provides exactly 10 tools");
     expect(!ToolPickerModal::find_by_accelerator('c', ia_filter).has_value(),
@@ -4638,8 +4706,8 @@ void test_formalized_registry_and_presets() {
            "VEC unavailable without Vector");
     expect(ToolPickerModal::find_by_accelerator('o', ia_filter) == TuiRegPage::LOG,
            "LOG available in IA");
-    expect(ToolPickerModal::content_row_count(ia_filter) == 18,
-           "IA content row count adapts to 18 rows");
+    expect(ToolPickerModal::content_row_count(ia_filter) == 19,
+           "IA content row count adapts to 19 rows");
 
     for (size_t i = 0; i < ia_tools.size(); ++i) {
         const int row = ToolPickerModal::row_for_tool_index(i, ia_filter);

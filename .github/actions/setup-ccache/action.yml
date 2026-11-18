@@ -1,0 +1,37 @@
+name: Setup ccache
+description: Configure ccache environment and restore/save the ccache directory via actions/cache.
+
+inputs:
+  key-prefix:
+    description: Cache key prefix identifying OS, architecture, and compiler
+    required: true
+  cache-dir:
+    description: Path to the ccache directory
+    required: false
+    default: ${{ github.workspace }}/build/.ccache
+  max-size:
+    description: Maximum ccache size
+    required: false
+    default: 2G
+
+runs:
+  using: composite
+  steps:
+    - name: Export ccache environment
+      shell: bash
+      run: |
+        mkdir -p "${{ inputs.cache-dir }}"
+        {
+          echo "CCACHE_DIR=${{ inputs.cache-dir }}"
+          echo "CCACHE_TEMPDIR=${{ inputs.cache-dir }}-tmp"
+          echo "CCACHE_MAXSIZE=${{ inputs.max-size }}"
+          echo "CCACHE_COMPRESS=true"
+        } >> "$GITHUB_ENV"
+
+    - name: Restore ccache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.cache-dir }}
+        key: ccache-${{ inputs.key-prefix }}-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ inputs.key-prefix }}-

@@ -4,6 +4,7 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/execute/ExecuteUnitZb.hpp"
+#include "simrv/execute/ExecuteUnitZk.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Math.hpp"
@@ -121,6 +122,9 @@ auto ExecuteUnitInt::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register i
             break;
 
         default:
+            if (isa::is_zk_op(op_id)) {
+                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, 32);
+            }
             return ExecuteUnitZb::aluIntZb(in1, in2, op_id, 32);
     }
     return static_cast<simrv::xlen::Register>(static_cast<int64_t>(res32));
@@ -211,6 +215,9 @@ auto ExecuteUnitInt::aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2
         }
 
         default:
+            if (isa::is_zk_op(op_id)) {
+                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, xlen);
+            }
             if (isa::is_zb_op(op_id)) {
                 return ExecuteUnitZb::aluIntZb(in1, in2, op_id, xlen);
             }
@@ -328,8 +335,21 @@ auto ExecuteUnitInt::branchTaken(simrv::xlen::Register in1, simrv::xlen::Registe
 
 auto ExecuteUnitInt::aluAmo(simrv::xlen::Register in1, simrv::xlen::Register in2, Funct5Amo funct5,
                             Funct3 funct3) -> simrv::xlen::Register {
+    const auto f3 = std::to_underlying(funct3);
+    if (f3 == 0) {  // AMO*B (8-bit, Zabha)
+        const auto res8 =
+            perform_amo_op<int8_t>(static_cast<int8_t>(in1), static_cast<int8_t>(in2), funct5);
+        return static_cast<simrv::xlen::Register>(
+            static_cast<simrv::xlen::SignedWord>(res8));  // sign-extend to XLEN
+    }
+    if (f3 == 1) {  // AMO*H (16-bit, Zabha)
+        const auto res16 =
+            perform_amo_op<int16_t>(static_cast<int16_t>(in1), static_cast<int16_t>(in2), funct5);
+        return static_cast<simrv::xlen::Register>(
+            static_cast<simrv::xlen::SignedWord>(res16));  // sign-extend to XLEN
+    }
     if constexpr (simrv::xlen::kIsXLen64) {
-        if (funct3 == static_cast<Funct3>(2)) {  // AMO*W (32-bit)
+        if (f3 == 2) {  // AMO*W (32-bit)
             const auto res32 = perform_amo_op<int32_t>(static_cast<int32_t>(in1),
                                                        static_cast<int32_t>(in2), funct5);
             return static_cast<simrv::xlen::Register>(

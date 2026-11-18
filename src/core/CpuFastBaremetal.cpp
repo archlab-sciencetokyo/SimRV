@@ -49,10 +49,13 @@ auto CPU::resolve_branch_target_baremetal(CachedOp* chained,
     return nullptr;
 }
 
-template <bool kCopyContext, bool kInstMix, int kHpmClassMode>
+template <FastKernelSpec Spec>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
                                                         const simrv::memory::RamView& ram,
                                                         bool poll_pause) -> uint32_t {
+    constexpr bool kCopyContext = Spec.copy_pipeline_context;
+    constexpr bool kInstMix = Spec.collect_instruction_mix;
+    constexpr int kHpmClassMode = static_cast<int>(Spec.hpm_mode);
     auto* const uart = (state_.mhartid == 0) ? machine.uart_device() : nullptr;
     uint32_t cached_ops = 0;
     uint32_t flushed_uart_ops = 0;
@@ -1820,9 +1823,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 // applied at the enclosing batch boundary. If one is already pending, or if an
                 // LR reservation is active, or if SMP/non-fast-RAM requires individual
                 // synchronization, execute a single instruction.
-                if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u ||
-                                              state_.lr_reservation_active || !fast_m_ram ||
-                                              multi_hart)) {
+                if (simrv::compiler::unlikely(
+                        (state_.mip & state_.mie) != 0u || state_.lr_reservation_active ||
+                        !fast_m_ram || multi_hart ||
+                        machine.memory_.reservation_table().may_have_external_reservations())) {
                     if (cached_ops != 0 &&
                         simrv::compiler::unlikely(is_batch_accounted_counter_csr(*cached))) {
                         break;
@@ -1981,24 +1985,36 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
         }
     } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
     const auto ram = machine.ram_view();
+    static constexpr std::array<FastKernelSpec, 5> kFastBaremetalCatalog = {{
+        {false, false, true, HpmClassMode::Disabled},
+        {false, false, true, HpmClassMode::ListenersOnly},
+        {true, true, true, HpmClassMode::Dynamic},
+        {true, false, true, HpmClassMode::Dynamic},
+        {false, true, true, HpmClassMode::Dynamic},
+    }};
+    using KernelFn = uint32_t (CPU::*)(Machine&, uint32_t, const simrv::memory::RamView&, bool);
+    static constexpr auto kDispatchTable = []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::array<KernelFn, sizeof...(Is)>{
+            &CPU::run_fast_baremetal_kernel<kFastBaremetalCatalog[Is]>...};
+    }(std::make_index_sequence<kFastBaremetalCatalog.size()>{});
+
+    const HpmClassMode hpm_mode =
+        (!policy.copy_pipeline_context && !policy.collect_instruction_mix)
+            ? (perf_counters.has_instruction_class_listeners() ? HpmClassMode::ListenersOnly
+                                                               : HpmClassMode::Disabled)
+            : HpmClassMode::Dynamic;
+    const FastKernelSpec target{
+        .copy_pipeline_context = policy.copy_pipeline_context,
+        .collect_instruction_mix = policy.collect_instruction_mix,
+        .poll_pause = true,
+        .hpm_mode = hpm_mode,
+    };
     uint32_t cached_ops = 0;
-    if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
-        if (perf_counters.has_instruction_class_listeners()) {
-            cached_ops = run_fast_baremetal_kernel<false, false, 1>(machine, batch_size, ram,
-                                                                    policy.poll_pause);
-        } else {
-            cached_ops = run_fast_baremetal_kernel<false, false, 0>(machine, batch_size, ram,
-                                                                    policy.poll_pause);
+    for (size_t i = 0; i < kFastBaremetalCatalog.size(); ++i) {
+        if (kFastBaremetalCatalog[i] == target) {
+            cached_ops = (this->*kDispatchTable[i])(machine, batch_size, ram, policy.poll_pause);
+            break;
         }
-    } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
-        cached_ops =
-            run_fast_baremetal_kernel<true, true, 2>(machine, batch_size, ram, policy.poll_pause);
-    } else if (policy.copy_pipeline_context) {
-        cached_ops =
-            run_fast_baremetal_kernel<true, false, 2>(machine, batch_size, ram, policy.poll_pause);
-    } else {
-        cached_ops =
-            run_fast_baremetal_kernel<false, true, 2>(machine, batch_size, ram, policy.poll_pause);
     }
 
     if (cached_ops > 0) {

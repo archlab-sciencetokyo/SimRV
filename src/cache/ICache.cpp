@@ -9,7 +9,7 @@ namespace simrv::cache {
 auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)
     -> bool {
     const simrv::xlen::PhysAddr line_base =
-        req.address & ~(static_cast<simrv::xlen::Address>(kLineBytes - 1u));
+        req.address & ~(static_cast<simrv::xlen::Address>(line_mask()));
     const uint32_t set_idx = get_set_index(line_base);
     const auto tag = get_tag(line_base);
 

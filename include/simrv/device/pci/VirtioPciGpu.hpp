@@ -6,6 +6,7 @@
 
 #include "simrv/device/pci/VirtioPciDevice.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/device/virtio/VirtioGpuQueue.hpp"
 
 namespace simrv::device {
 
@@ -18,6 +19,7 @@ class VirtioPciGpu : public VirtioPciDevice {
     VirtioPciGpu();
 
    protected:
+    virtio::VirtioGpuState gpu_state_{};
     void on_queue_notify(virtio::VirtioQueueIndex queue_index) override;
     auto read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData override;
 };

@@ -36,6 +36,7 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/BenchmarkEvent.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -1152,7 +1153,8 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
         for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
             machine.advance_ca_primary_cycle();
             if (simrv::compiler::unlikely(
-                    machine.execution_state() != ExecutionState::Running || machine.tohost != 0 ||
+                    machine.execution_state() != ExecutionState::Running ||
+                    (machine.tohost != 0 && !machine.tohost_low_word_pending()) ||
                     (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
                      machine.retired_instruction_count() >= fincnt))) {
                 break;
@@ -1168,7 +1170,7 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
             break;
         }
         machine.advance_ca_global_cycle();
-        if (simrv::compiler::unlikely(machine.tohost != 0 ||
+        if (simrv::compiler::unlikely((machine.tohost != 0 && !machine.tohost_low_word_pending()) ||
                                       (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
                                        machine.retired_instruction_count() >= fincnt))) {
             break;
@@ -1481,7 +1483,8 @@ void Machine::prewarm_bram_caches() {
     for (size_t h = 0; h < num_harts(); ++h) {
         auto& cpu = hart(h);
         const auto prewarm = [&]<typename Cache>(Cache& cache, simrv::xlen::PhysAddr address,
-                                                 size_t size, bool align_segment) {
+                                                 size_t size, bool align_segment,
+                                                 simrv::memory::MesiState initial_state) {
             constexpr simrv::xlen::Address kLineBytes = Cache::kLineBytes;
             const simrv::xlen::Address start =
                 align_segment ? address.raw() & ~(kLineBytes - 1u) : address.raw();
@@ -1495,10 +1498,9 @@ void Machine::prewarm_bram_caches() {
             for (size_t line = 0; line < lines; ++line) {
                 const simrv::xlen::PhysAddr physical{addr};
                 if (ram.contains(physical, kLineBytes)) {
-                    cache.insert(physical, ram.unchecked_ptr(physical),
-                                 simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(physical,
-                                                                                  cpu.hart_id());
+                    cache.insert(physical, ram.unchecked_ptr(physical), initial_state);
+                    memory().system_bus().coherence_hub().register_preloaded_line(
+                        physical, cpu.hart_id(), initial_state);
                 }
                 if (addr > std::numeric_limits<simrv::xlen::Address>::max() - kLineBytes) break;
                 addr += kLineBytes;
@@ -1508,15 +1510,21 @@ void Machine::prewarm_bram_caches() {
         if (!loaded_segments_.empty()) {
             for (const auto& seg : loaded_segments_) {
                 if (seg.is_executable) {
-                    prewarm(cpu.icache, seg.paddr, seg.size, true);
+                    prewarm(cpu.icache, seg.paddr, seg.size, true,
+                            simrv::memory::MesiState::Shared);
                 } else {
-                    prewarm(cpu.dcache, seg.paddr, seg.size, true);
+                    const auto state = num_harts() == 1 ? simrv::memory::MesiState::Exclusive
+                                                        : simrv::memory::MesiState::Shared;
+                    prewarm(cpu.dcache, seg.paddr, seg.size, true, state);
                 }
             }
         } else {
             // Fallback: pre-warm IMEM range into ICache and DMEM range into DCache
-            prewarm(cpu.icache, simrv::xlen::PhysAddr{ram.base()}, 0, false);
-            prewarm(cpu.dcache, simrv::xlen::PhysAddr{ram.base()}, 0, false);
+            prewarm(cpu.icache, simrv::xlen::PhysAddr{ram.base()}, 0, false,
+                    simrv::memory::MesiState::Shared);
+            const auto state = num_harts() == 1 ? simrv::memory::MesiState::Exclusive
+                                                : simrv::memory::MesiState::Shared;
+            prewarm(cpu.dcache, simrv::xlen::PhysAddr{ram.base()}, 0, false, state);
         }
     }
 }
@@ -1979,8 +1987,7 @@ void Machine::run() {
 
         if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
 
-        if (!appmode_enabled() && runtime_->spike_lockstep &&
-            runtime_->spike_lockstep->is_running()) {
+        if (runtime_->spike_lockstep && runtime_->spike_lockstep->is_running()) {
             runtime_->spike_lockstep->compare_and_report(primary_hart().state(),
                                                          primary_hart().pipeline_context.cpc,
                                                          primary_hart().e_icount);
@@ -2173,18 +2180,10 @@ void Machine::finalize_cycle_tohost() {
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit
                     const int code = static_cast<int>(arg0);
-                    if (appmode_enabled()) {
-                        if (code == 0) {
-                            simrv::log::info("ISA TEST PASS");
-                        } else {
-                            simrv::log::error("ISA TEST FAIL code={}", code);
-                        }
+                    if (code == 0) {
+                        simrv::log::info("Program Halted (SUCCESS / PASS)");
                     } else {
-                        if (code == 0) {
-                            simrv::log::info("Program Halted (SUCCESS / PASS)");
-                        } else {
-                            simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
-                        }
+                        simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
                     }
                     exit_code = code;
                     stop(code == 0 ? StopReason::TohostPass : StopReason::TohostFail);
@@ -2199,22 +2198,14 @@ void Machine::finalize_cycle_tohost() {
 
     // Universal tohost halting check (e.g. exit code via tohost)
     if (tohost == 1) {
-        if (appmode_enabled()) {
-            simrv::log::info("ISA TEST PASS");
-        } else {
-            simrv::log::info("Program Halted (SUCCESS / PASS)");
-        }
+        simrv::log::info("Program Halted (SUCCESS / PASS)");
         exit_code = 0;
         stop(StopReason::TohostPass);
         tohost = 0;
         return;
     } else if ((tohost & 1) != 0u) {
         const int code = static_cast<int>(tohost >> 1);
-        if (appmode_enabled()) {
-            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost.load());
-        } else {
-            simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
-        }
+        simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         exit_code = code == 0 ? 1 : code;
         stop(StopReason::TohostFail);
         tohost = 0;
@@ -2222,12 +2213,15 @@ void Machine::finalize_cycle_tohost() {
     }
 }
 
-void Machine::publish_tohost_write(uint64_t value, TohostWriteKind kind) noexcept {
+void Machine::publish_tohost_write(uint64_t value, TohostWriteKind kind,
+                                   uint32_t low_word_fallback_cycles) noexcept {
     tohost.store(value, std::memory_order_relaxed);
     switch (kind) {
         case TohostWriteKind::LowWord:
             tohost_low_word_pending_.store(true, std::memory_order_release);
-            tohost_low_word_fallback_cycles_.store(4, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(
+                static_cast<uint8_t>(std::min<uint32_t>(low_word_fallback_cycles, 255)),
+                std::memory_order_release);
             break;
         case TohostWriteKind::HighWord:
         case TohostWriteKind::Full:

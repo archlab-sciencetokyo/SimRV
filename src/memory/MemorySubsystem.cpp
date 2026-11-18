@@ -8,12 +8,35 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/TemplatedBus.hpp"
 
 namespace simrv::memory {
+
+MemorySubsystem::MemorySubsystem(simrv::core::Machine& machine)
+    : machine_(machine),
+      mmu_(nullptr),
+      system_bus_(make_system_bus(machine, kDefaultTileLinkCSpec)) {}
+
+void MemorySubsystem::configure_bus(const BusProtocolSpec& spec) {
+    const bool smp = system_bus_ ? system_bus_->is_smp_enabled() : false;
+    auto replacement = make_system_bus(machine_, spec);
+    reservation_table_.clear_external_reservations();
+    system_bus_ = std::move(replacement);
+    if (system_bus_) {
+        system_bus_->set_smp_enabled(smp);
+    }
+}
+
+void MemorySubsystem::configure_bus(BusProtocol protocol) {
+    if (const auto* entry = find_bus_catalog_entry(protocol)) {
+        configure_bus(entry->spec);
+    }
+}
 
 void MemorySubsystem::initialize_mmu() {
     if (!mmu_) {
         mmu_ = std::make_unique<simrv::Mmu>(machine_.ram_view());
+        mmu_->walker().set_reservation_table(&reservation_table_);
     }
 }
 
@@ -27,13 +50,13 @@ auto MemorySubsystem::dma_read(simrv::xlen::PhysAddr physical_address, void* dst
     if (!geometry.contains(physical_address, len)) {
         return false;
     }
-    if (!machine_.runtime_profile.is_instruction_mode()) {
+    if (!machine_.runtime_profile.is_instruction_mode() && system_bus_->has_coherence()) {
         const simrv::xlen::Address first_line =
             paddr & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
         const simrv::xlen::Address last_line =
             (paddr + len - 1u) & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
         for (simrv::xlen::Address line = first_line;; line += CoherenceHub::kLineBytes) {
-            system_bus_.coherence_hub().invalidate_line_external(simrv::xlen::PhysAddr{line});
+            system_bus_->coherence_hub().invalidate_line_external(simrv::xlen::PhysAddr{line});
             if (line == last_line) break;
         }
     }
@@ -51,13 +74,13 @@ auto MemorySubsystem::dma_write(simrv::xlen::PhysAddr physical_address, const vo
     if (!geometry.contains(physical_address, len)) {
         return false;
     }
-    if (!machine_.runtime_profile.is_instruction_mode()) {
+    if (!machine_.runtime_profile.is_instruction_mode() && system_bus_->has_coherence()) {
         const simrv::xlen::Address first_line =
             paddr & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
         const simrv::xlen::Address last_line =
             (paddr + len - 1u) & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
         for (simrv::xlen::Address line = first_line;; line += CoherenceHub::kLineBytes) {
-            system_bus_.coherence_hub().invalidate_line_external(simrv::xlen::PhysAddr{line});
+            system_bus_->coherence_hub().invalidate_line_external(simrv::xlen::PhysAddr{line});
             if (line == last_line) break;
         }
     }

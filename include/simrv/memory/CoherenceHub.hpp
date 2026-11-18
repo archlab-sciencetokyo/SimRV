@@ -64,6 +64,9 @@ class CoherenceHub {
                         const std::array<simrv::xlen::Byte, kLineBytes>* release_data = nullptr)
         -> bool;
 
+    auto complete_cycle_probe(const TlChannelB& probe, const TlChannelC& response,
+                              const std::array<simrv::xlen::Byte, kLineBytes>* data) -> bool;
+
     void process_grant_ack(const TlChannelE& ack);
 
     /// Notify the directory when a Trunk holder performs its first write (E -> M).
@@ -76,7 +79,8 @@ class CoherenceHub {
     void invalidate_line_external(simrv::xlen::PhysAddr line_base);
 
     /// Register a clean line populated directly during machine startup prewarming.
-    void register_preloaded_line(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart);
+    void register_preloaded_line(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart,
+                                 MesiState initial_state = MesiState::Shared);
 
     [[nodiscard]] auto stats() const -> const CoherenceStats& { return stats_; }
     void reset_stats() { stats_ = {}; }
@@ -88,6 +92,8 @@ class CoherenceHub {
     [[nodiscard]] auto shared_l2_for_hart(simrv::xlen::HartId hart) noexcept
         -> simrv::cache::L2Cache*;
     [[nodiscard]] auto shared_l3_enabled() const noexcept -> bool { return l3_enabled_; }
+    auto service_uncached_shared_cache(simrv::xlen::HartId hart, simrv::xlen::PhysAddr address,
+                                       uint32_t& out_hit_latency) -> bool;
 
     [[nodiscard]] auto get_directory_state(simrv::xlen::PhysAddr line_base) const -> DirectoryEntry;
     [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;

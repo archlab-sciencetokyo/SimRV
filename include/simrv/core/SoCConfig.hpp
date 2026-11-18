@@ -19,6 +19,7 @@
 #include "simrv/SafetyProfiles.hpp"
 #include "simrv/core/InterruptTopology.hpp"
 #include "simrv/core/PlatformMap.h"
+#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -384,11 +385,16 @@ struct SoCConfig {
     std::optional<simrv::xlen::Address> dram_size;
     std::optional<simrv::xlen::VirtAddr> reset_pc;
     std::optional<simrv::xlen::PhysAddr> tohost;
+    uint64_t cpu_clock_hz = 0;
+    uint64_t timebase_hz = 0;
+    std::string bootargs;
     SmpTopologyConfig smp{};
     std::vector<SoCDeviceConfig> devices;
     std::vector<std::string> plugins{};
     bool mmio_console_redirect = false;
     bool bram_prewarm = false;
+    simrv::memory::BusProtocol bus_protocol = simrv::memory::BusProtocol::TileLinkC;
+    std::string bus_name{};
 
     [[nodiscard]] static auto virt_pcie() -> SoCConfig {
         return {.name = "virt-pcie",
@@ -400,7 +406,11 @@ struct SoCConfig {
                 .dram_size = std::nullopt,
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
-                .devices = {soc_device_default(SoCDeviceKind::PFlash)}};
+                .cpu_clock_hz = 0,
+                .timebase_hz = 0,
+                .bootargs = {},
+                .devices = {soc_device_default(SoCDeviceKind::PFlash)},
+                .bus_name = {}};
     }
 
     [[nodiscard]] static auto virt_mmio() -> SoCConfig {
@@ -413,6 +423,9 @@ struct SoCConfig {
                 .dram_size = std::nullopt,
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
+                .cpu_clock_hz = 0,
+                .timebase_hz = 0,
+                .bootargs = {},
                 .devices = {soc_device_default(SoCDeviceKind::VirtioMmioBlock),
                             soc_device_default(SoCDeviceKind::VirtioMmioConsole),
                             soc_device_default(SoCDeviceKind::VirtioMmioRng),
@@ -421,27 +434,13 @@ struct SoCConfig {
                             soc_device_default(SoCDeviceKind::VirtioMmioSound),
                             soc_device_default(SoCDeviceKind::VirtioMmioNet),
                             soc_device_default(SoCDeviceKind::VirtioMmioFs),
-                            soc_device_default(SoCDeviceKind::DmaController)}};
-    }
-
-    [[nodiscard]] static auto rvcomp() -> SoCConfig {
-        return {.name = "rvcomp",
-                .cpu_model = "rvcomp",
-                .enable_pcie = false,
-                .enable_mmio = false,
-                .disable_unlisted_devices = true,
-                .dram_base = std::nullopt,
-                .dram_size = std::nullopt,
-                .reset_pc = std::nullopt,
-                .tohost = std::nullopt,
-                .devices = {soc_device_default(SoCDeviceKind::ResetControl),
-                            soc_device_default(SoCDeviceKind::RingBufferEthernet)}};
+                            soc_device_default(SoCDeviceKind::DmaController)},
+                .bus_name = {}};
     }
 
     [[nodiscard]] static auto preset(std::string_view preset_name) -> std::optional<SoCConfig> {
         if (preset_name == "virt-pcie" || preset_name == "pcie") return virt_pcie();
         if (preset_name == "virt-mmio" || preset_name == "mmio") return virt_mmio();
-        if (preset_name == "rvcomp") return rvcomp();
         return std::nullopt;
     }
 

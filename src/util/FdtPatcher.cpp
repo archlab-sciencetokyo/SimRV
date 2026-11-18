@@ -160,7 +160,169 @@ auto misa_extension_for_letter(char letter) -> std::optional<unsigned> {
             return std::nullopt;
     }
 }
+
+auto string_prop(const Node& node, std::string_view name) -> std::string {
+    const auto* value = prop(node, name);
+    if (value == nullptr || value->data.empty()) return {};
+    const auto end = std::ranges::find(value->data, uint8_t{0});
+    return std::string(reinterpret_cast<const char*>(value->data.data()),
+                       static_cast<size_t>(end - value->data.begin()));
+}
+
+auto read_reg(const Prop* reg, uint32_t address_cells, uint32_t size_cells)
+    -> std::optional<std::pair<uint64_t, uint64_t>> {
+    if (reg == nullptr || (address_cells != 1 && address_cells != 2) ||
+        (size_cells != 1 && size_cells != 2))
+        return std::nullopt;
+    const size_t tuple_cells = address_cells + size_cells;
+    if (reg->data.size() < tuple_cells * 4) return std::nullopt;
+    uint64_t base = be32(reg->data, 0);
+    if (address_cells == 2) base = (base << 32U) | be32(reg->data, 4);
+    size_t offset = address_cells * 4;
+    uint64_t size = be32(reg->data, offset);
+    if (size_cells == 2) size = (size << 32U) | be32(reg->data, offset + 4);
+    return std::pair{base, size};
+}
+
+auto parse_blob(std::span<const uint8_t> blob) -> std::expected<Node, std::string> {
+    if (blob.size() < 40 || be32(blob, 0) != kMagic)
+        return std::unexpected("invalid device tree header");
+    const uint32_t total = be32(blob, 4), structure_offset = be32(blob, 8),
+                   strings_offset = be32(blob, 12), version = be32(blob, 20),
+                   structure_size = be32(blob, 36), strings_size = be32(blob, 32);
+    if (total > blob.size() || total < 40 || structure_offset >= total || strings_offset >= total ||
+        version < 17 || structure_size > total - structure_offset ||
+        strings_size > total - strings_offset)
+        return std::unexpected("unsupported or truncated device tree");
+    try {
+        Parser parser{blob.subspan(structure_offset, structure_size),
+                      blob.subspan(strings_offset, strings_size)};
+        return parser.node();
+    } catch (const std::exception& error) {
+        return std::unexpected(std::string("invalid device tree: ") + error.what());
+    }
+}
 }  // namespace
+
+auto read_fdt_platform(std::span<const uint8_t> blob)
+    -> std::expected<FdtPlatformDescription, std::string> {
+    auto parsed = parse_blob(blob);
+    if (!parsed) return std::unexpected(parsed.error());
+    const Node& root = *parsed;
+    FdtPlatformDescription result{};
+    const uint32_t root_address_cells = cells(root, "#address-cells", 2);
+    const uint32_t root_size_cells = cells(root, "#size-cells", 1);
+
+    const Node* cpus = child(const_cast<Node&>(root), "cpus");
+    if (cpus != nullptr) {
+        result.timebase_hz = cells(*cpus, "timebase-frequency", 0);
+        result.hart_count = 0;
+        for (const auto& cpu : cpus->children) {
+            if (!cpu.name.starts_with("cpu@") || string_prop(cpu, "status") == "disabled") continue;
+            ++result.hart_count;
+            if (result.cpu_clock_hz == 0) result.cpu_clock_hz = cells(cpu, "clock-frequency", 0);
+            if (result.cpu_isa.empty()) {
+                result.cpu_isa = string_prop(cpu, "riscv,isa-base");
+                if (result.cpu_isa.empty()) result.cpu_isa = string_prop(cpu, "riscv,isa");
+                if (const auto* extensions = prop(cpu, "riscv,isa-extensions");
+                    extensions != nullptr) {
+                    const auto extension_count =
+                        static_cast<size_t>(std::ranges::count(extensions->data, uint8_t{0}));
+                    result.cpu_isa += std::format(" (+{} extensions)", extension_count);
+                }
+            }
+        }
+        if (result.hart_count == 0) result.hart_count = 1;
+    } else {
+        result.warnings.emplace_back("No /cpus node was found; using one hart.");
+    }
+
+    for (const auto& node : root.children) {
+        if (is_memory(const_cast<Node&>(node))) {
+            if (auto range = read_reg(prop(node, "reg"), root_address_cells, root_size_cells)) {
+                if (range->first > std::numeric_limits<simrv::xlen::Address>::max()) {
+                    result.warnings.emplace_back(
+                        "The RAM base is outside this build's physical address width.");
+                    continue;
+                }
+                result.dram_base = simrv::xlen::PhysAddr{range->first};
+                result.dram_size = range->second;
+                break;
+            }
+        }
+        if (node.name == "chosen") result.bootargs = string_prop(node, "bootargs");
+    }
+    if (result.dram_size == 0)
+        result.warnings.emplace_back("No readable root-level memory range was found.");
+
+    const Node* soc = child(const_cast<Node&>(root), "soc");
+    if (soc != nullptr) {
+        const uint32_t address_cells = cells(*soc, "#address-cells", root_address_cells);
+        const uint32_t size_cells = cells(*soc, "#size-cells", root_size_cells);
+        const auto* bus_ranges = prop(*soc, "ranges");
+        const bool translated_bus = bus_ranges != nullptr && !bus_ranges->data.empty();
+        if (translated_bus)
+            result.warnings.emplace_back(
+                "The /soc bus has translated ranges; device addresses need manual review.");
+        for (const auto& node : soc->children) {
+            if (string_prop(node, "status") == "disabled") continue;
+            if (!node.children.empty()) {
+                result.warnings.emplace_back("Nested bus/device node '" + node.name +
+                                             "' and its children were not imported.");
+                continue;
+            }
+            const auto compatible = string_prop(node, "compatible");
+            if (compatible.empty()) {
+                if (prop(node, "reg") != nullptr)
+                    result.warnings.emplace_back("Skipped device node '" + node.name +
+                                                 "' because it has no compatible string.");
+                continue;
+            }
+            if (translated_bus) continue;
+            const auto* reg = prop(node, "reg");
+            const auto range = read_reg(reg, address_cells, size_cells);
+            if (!range || range->second == 0) {
+                result.warnings.emplace_back("Skipped device node '" + node.name +
+                                             "' without a supported reg range.");
+                continue;
+            }
+            if (reg != nullptr && reg->data.size() > (address_cells + size_cells) * 4U)
+                result.warnings.emplace_back(
+                    "Device '" + node.name +
+                    "' has multiple reg ranges; only the first was imported.");
+            if (range->first > std::numeric_limits<simrv::xlen::Address>::max()) {
+                result.warnings.emplace_back("Skipped device '" + node.name +
+                                             "' outside this build's physical address width.");
+                continue;
+            }
+            FdtImportedDevice device{};
+            device.name = node.name.substr(0, node.name.find('@'));
+            device.compatible = compatible;
+            device.base = simrv::xlen::PhysAddr{range->first};
+            device.size = range->second;
+            if (const auto* interrupts = prop(node, "interrupts"); interrupts != nullptr) {
+                if (interrupts->data.size() == 4) {
+                    device.irq = be32(interrupts->data, 0);
+                } else if (!interrupts->data.empty()) {
+                    result.warnings.emplace_back("Device '" + node.name +
+                                                 "' has a multi-cell interrupt specifier; IRQ "
+                                                 "was left unset for review.");
+                }
+            } else if (prop(node, "interrupts-extended") != nullptr) {
+                result.warnings.emplace_back("Device '" + node.name +
+                                             "' uses interrupts-extended; IRQ was left unset.");
+            }
+            if (const auto* clock = prop(node, "clock-frequency"); clock != nullptr) {
+                if (clock->data.size() == 4) device.clock_hz = be32(clock->data, 0);
+                if (clock->data.size() == 8) device.clock_hz = be64(clock->data, 0);
+            }
+            result.devices.push_back(std::move(device));
+        }
+    } else {
+        result.warnings.emplace_back("No /soc node was found; no MMIO devices were imported.");
+    }
+    return result;
+}
 
 auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
     -> std::expected<void, std::string> {

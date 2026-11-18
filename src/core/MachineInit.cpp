@@ -34,6 +34,8 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FdtGenerator.hpp"
 #include "simrv/util/FdtPatcher.hpp"
@@ -350,7 +352,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
         const char class_byte = ident[4];
         in.seekg(0, std::ios::beg);
         auto load_segment = [&](const auto& phdr) {
-            if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0 ||
+            if (phdr.p_type != kLoadSegment || phdr.p_memsz == 0 ||
                 !std::in_range<std::streamoff>(phdr.p_offset)) {
                 return;
             }
@@ -367,10 +369,15 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 return;
             }
             const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-            in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-            if (in.read(reinterpret_cast<char*>(ram + dest_offset),
-                        static_cast<std::streamsize>(
-                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            bool segment_read = copy_bytes == 0;
+            if (copy_bytes != 0) {
+                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+                segment_read = static_cast<bool>(in.read(
+                    reinterpret_cast<char*>(ram + dest_offset),
+                    static_cast<std::streamsize>(
+                        copy_bytes)));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            }
+            if (segment_read) {
                 loaded_segment = true;
                 if (machine != nullptr) {
                     const bool is_exec = (phdr.p_flags & 0x1) != 0;
@@ -523,6 +530,9 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
+    if (config.soc.bus_protocol != simrv::memory::BusProtocol::TileLinkC) {
+        memory().configure_bus(config.soc.bus_protocol);
+    }
     if (const auto valid = config.validate(); !valid) {
         simrv::log::error("Invalid machine configuration: {}", valid.error());
         return std::unexpected(valid.error());
@@ -817,9 +827,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     auto effective_isa_preset_bits = [&]() -> simrv::xlen::CsrValue {
         if (config.cpu_model_config_override) {
             const auto& cfg = *config.cpu_model_config_override;
-            auto bits = isa::isa_preset_bits(cfg.isa_preset);
-            if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
-                cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+            auto bits = cfg.isa.misa_bits;
+            if (cfg.has_isa_extension("zba") && cfg.has_isa_extension("zbb") &&
+                cfg.has_isa_extension("zbs")) {
                 bits |= isa::misa_extension_bit(isa::IsaExtension::B);
             }
             return bits;
@@ -827,9 +837,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (!config.files.config_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
             if (simrv::core::load_cpu_config(config.files.config_path, cfg)) {
-                auto bits = isa::isa_preset_bits(cfg.isa_preset);
-                if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
-                    cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                auto bits = cfg.isa.misa_bits;
+                if (cfg.has_isa_extension("zba") && cfg.has_isa_extension("zbb") &&
+                    cfg.has_isa_extension("zbs")) {
                     bits |= isa::misa_extension_bit(isa::IsaExtension::B);
                 }
                 return bits;
@@ -841,7 +851,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             simrv::pipeline::CpuModelConfig cfg{};
             if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
                 if (simrv::core::load_cpu_config(*resolved, cfg)) {
-                    auto bits = isa::isa_preset_bits(cfg.isa_preset);
+                    auto bits = cfg.isa.misa_bits;
                     if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
                         cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
                         bits |= isa::misa_extension_bit(isa::IsaExtension::B);
@@ -850,23 +860,81 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 }
             }
             cfg = pipeline::make_cpu_model_preset(*config.cpu_model_preset);
-            auto bits = isa::isa_preset_bits(cfg.isa_preset);
-            if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
-                cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+            auto bits = cfg.isa.misa_bits;
+            if (cfg.has_isa_extension("zba") && cfg.has_isa_extension("zbb") &&
+                cfg.has_isa_extension("zbs")) {
                 bits |= isa::misa_extension_bit(isa::IsaExtension::B);
             }
             return bits;
         }
+        if (const auto profile_isa =
+                isa::parse_isa_spec(isa::profile_default_isa_string(config.execution.profile))) {
+            return profile_isa->misa_bits;
+        }
         return config.isa.isa_preset;
     };
 
+    auto effective_extensions = [&]() -> isa::ExtensionSet {
+        isa::ExtensionSet ext_set = config.isa.enabled_extensions;
+        const auto add_model_exts = [&](const simrv::pipeline::CpuModelConfig& cfg) {
+            ext_set.merge(cfg.isa.extension_set);
+            for (const auto& ext : cfg.isa_extensions) {
+                isa::add_extension_to_set(ext_set, ext);
+            }
+        };
+        if (config.cpu_model_config_override) {
+            add_model_exts(*config.cpu_model_config_override);
+        } else if (!config.files.config_path.empty()) {
+            simrv::pipeline::CpuModelConfig cfg{};
+            if (simrv::core::load_cpu_config(config.files.config_path, cfg)) {
+                add_model_exts(cfg);
+            }
+        } else if (config.cpu_model_preset.has_value()) {
+            const auto profile_name =
+                simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
+            simrv::pipeline::CpuModelConfig cfg{};
+            if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
+                if (simrv::core::load_cpu_config(*resolved, cfg)) {
+                    add_model_exts(cfg);
+                }
+            } else {
+                add_model_exts(pipeline::make_cpu_model_preset(*config.cpu_model_preset));
+            }
+        }
+        if (!config.isa.misa_override) {
+            if (const auto prof_spec = isa::parse_isa_spec(
+                    isa::profile_default_isa_string(config.execution.profile))) {
+                ext_set.merge(prof_spec->extension_set);
+            }
+        }
+        return ext_set;
+    };
+
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
-    const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
+    const auto* selected_profile = isa::profile_info(config.execution.profile);
+    const unsigned int target_xlen =
+        config.isa.misa_override
+            ? ((config.isa.misa_xlen != 0)
+                   ? config.isa.misa_xlen
+                   : ((model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits))
+            : ((selected_profile != nullptr)
+                   ? selected_profile->xlen
+                   : ((model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits));
     simrv::xlen::CsrValue initial_misa = isa::misa_with_mxl(
         config.isa.misa_override ? config.isa.isa_preset : effective_isa_preset_bits(),
         target_xlen);
     initial_misa &= ~isa::misa_extension_bit(isa::IsaExtension::X);
+    if (!config.isa.misa_override) {
+        if (const auto prof_spec =
+                isa::parse_isa_spec(isa::profile_default_isa_string(config.execution.profile))) {
+            initial_misa |= prof_spec->misa_bits;
+        }
+        if (config.execution.profile == isa::ArchitectureProfile::Rva23S64) {
+            initial_misa |= isa::misa_extension_bit(isa::IsaExtension::H);
+        }
+    }
     config.isa.isa_preset = initial_misa;
+    config.isa.enabled_extensions = effective_extensions();
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = (target_xlen == 32);
         if (config.isa.misa_override && config.isa.misa_xlen == 32) {
@@ -932,6 +1000,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         linux_boot ? static_cast<simrv::xlen::Register>(config.memory.dram_base + dtb_offset)
                    : 0);  // a1 = dtb
     primary_hart().state().misa = initial_misa;
+    primary_hart().state().supervisor_mode_supported =
+        isa::profile_info(config.execution.profile)->supervisor_profile;
+    primary_hart().state().user_mode_supported = true;
+    primary_hart().state().enabled_extensions = config.isa.enabled_extensions;
     primary_hart().state().refresh_misa_status();
     primary_hart().state().priv = kPrivMachine;
     primary_hart().state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
@@ -986,6 +1058,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             if (!cfu_plugin_path.empty()) sec_cpu->cfu_unit.load_plugin(cfu_plugin_path);
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
+            sec_cpu->state().supervisor_mode_supported =
+                isa::profile_info(config.execution.profile)->supervisor_profile;
+            sec_cpu->state().user_mode_supported = true;
+            sec_cpu->state().enabled_extensions = config.isa.enabled_extensions;
             sec_cpu->state().refresh_misa_status();
             sec_cpu->state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
             sec_cpu->state().initialize_lower_xlen_fields();

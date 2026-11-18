@@ -22,6 +22,9 @@ namespace simrv::util {
  */
 auto scaffold_device_plugin(std::string_view name, std::string_view output) -> bool;
 
+/** Select an MMIO node from a DTB and generate a plugin scaffold seeded from its metadata. */
+auto scaffold_device_plugin_from_dtb(std::string_view dtb_path, std::string_view output) -> bool;
+
 /**
  * @brief Generate a starter Custom Function Unit (CFU) plugin project or single file.
  *

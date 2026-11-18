@@ -1,6 +1,6 @@
 /**
  * @file TestRawCfuPlugin.c
- * @brief Standalone CFU-Proving-Ground / CFU-Playground shared library fixture.
+ * @brief Standalone legacy raw CFU ABI shared library fixture.
  *
  * Contains NO SimRV-specific headers or symbols. Exports only standard `cfu_op` and `cfu_reset`.
  */

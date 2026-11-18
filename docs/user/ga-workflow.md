@@ -33,25 +33,8 @@ framebuffer behavior is validated independently of terminal graphics rendering.
 ## Export a compatible SoC description
 
 ```bash
-simrv --dump-soc-manifest virt-pcie soc.json
+simrv config export-soc virt-pcie soc.json
 ```
 
 The manifest contains both `schema_version` and `manifest_version`. Consumers should reject an
 unknown schema or compatibility version instead of silently guessing device addresses.
-
-The repository smoke check combines these steps:
-
-```bash
-python3 scripts/ga_smoke.py --simrv build/rv64-release/simrv \
-  --guest examples/hello/build-rv64/hello.elf
-```
-
-Before handing off release binaries or guest images, verify their manifests and keep reproducible
-evidence with the exact Git tag, architecture, guest profile, manifest, and host toolchain:
-
-```bash
-python3 scripts/release_check.py \
-  --binary build/rv64-release/simrv \
-  --binary build/rv32-release/simrv
-python3 scripts/check-linux-artifacts.py linux-images/rv64/alpine-gui
-```

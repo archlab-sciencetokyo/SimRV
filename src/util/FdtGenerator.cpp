@@ -242,6 +242,42 @@ auto generate_platform_fdt(const core::MachineConfig& config,
                                                    core::kBaseGuestExtensions.end());
     guest_extensions.insert(guest_extensions.end(), core::kPatchableGuestExtensions.begin(),
                             core::kPatchableGuestExtensions.end());
+    std::erase_if(guest_extensions, [&](std::string_view extension) {
+        if (extension.size() != 1) return false;
+        simrv::isa::IsaExtension misa_extension{};
+        switch (extension.front()) {
+            case 'a':
+                misa_extension = simrv::isa::IsaExtension::A;
+                break;
+            case 'b':
+                misa_extension = simrv::isa::IsaExtension::B;
+                break;
+            case 'c':
+                misa_extension = simrv::isa::IsaExtension::C;
+                break;
+            case 'd':
+                misa_extension = simrv::isa::IsaExtension::D;
+                break;
+            case 'f':
+                misa_extension = simrv::isa::IsaExtension::F;
+                break;
+            case 'h':
+                misa_extension = simrv::isa::IsaExtension::H;
+                break;
+            case 'i':
+                misa_extension = simrv::isa::IsaExtension::I;
+                break;
+            case 'm':
+                misa_extension = simrv::isa::IsaExtension::M;
+                break;
+            case 'v':
+                misa_extension = simrv::isa::IsaExtension::V;
+                break;
+            default:
+                return false;
+        }
+        return !simrv::isa::misa_has_extension(config.isa.isa_preset, misa_extension);
+    });
     if (config.isa.misa_override) {
         // An explicit ISA preset may intentionally be narrower than the build's default
         // architecture profile. Do not advertise optional extensions that the preset omits.
@@ -334,6 +370,59 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         guest_extensions.emplace_back("shvstvecd");
         guest_extensions.emplace_back("shvsatpa");
         guest_extensions.emplace_back("shgatpa");
+    }
+
+    const auto append_if_enabled = [&](simrv::isa::MultiLetterExtension ext,
+                                       std::string_view dt_name) {
+        if (config.isa.enabled_extensions.has(ext) &&
+            std::ranges::find(guest_extensions, dt_name) == guest_extensions.end()) {
+            guest_extensions.emplace_back(dt_name);
+        }
+    };
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sdtrig, "sdtrig");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sv48, "sv48");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sv57, "sv57");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zkr, "zkr");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svadu, "svadu");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sspm, "sspm");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svvptc, "svvptc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zacas, "zacas");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zabha, "zabha");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfh, "zfh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfh, "zvfh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfbfmin, "zfbfmin");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfbfmin, "zvfbfmin");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfbfwma, "zvfbfwma");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbkb, "zbkb");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbkc, "zbkc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbkx, "zbkx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zknd, "zknd");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zkne, "zkne");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zknh, "zknh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zksed, "zksed");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zksh, "zksh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvkg, "zvkg");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvkned, "zvkned");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvknha, "zvknha");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvknhb, "zvknhb");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvksed, "zvksed");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvksh, "zvksh");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zcmp, "zcmp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zcmt, "zcmt");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfinx, "zfinx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zdinx, "zdinx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zhinx, "zhinx");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smdbltrp, "smdbltrp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Ssdbltrp, "ssdbltrp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smcsrind, "smcsrind");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sscsrind, "sscsrind");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smrnmi, "smrnmi");
+
+    if (!simrv::isa::profile_info(config.execution.profile)->supervisor_profile) {
+        std::erase_if(guest_extensions, [](std::string_view ext) {
+            return ext.starts_with("sv") || ext.starts_with("ss") || ext.starts_with("sh") ||
+                   ext == "h";
+        });
     }
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
@@ -559,7 +648,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         }
         fdt.end_node();
     } else if (config.platform_profile == core::PlatformProfile::Mmio) {
-        // VirtIO MMIO slots for embedded / FPGA target
+        // VirtIO MMIO slots for embedded systems
         static constexpr core::SoCDeviceKind kVirtioKinds[] = {
             core::SoCDeviceKind::VirtioMmioBlock, core::SoCDeviceKind::VirtioMmioConsole,
             core::SoCDeviceKind::VirtioMmioRng,   core::SoCDeviceKind::VirtioMmioGpu,

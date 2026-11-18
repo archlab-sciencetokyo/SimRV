@@ -15,6 +15,7 @@
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -70,16 +71,35 @@ auto format_speed(uint64_t kips) -> std::string {
 }  // namespace
 
 auto InspectorPane::performance_row_count() const -> int {
+    if (page_ == TuiRegPage::GPR) return machine_.runtime_profile.is_cycle_mode() ? 10 : 6;
     return machine_.runtime_profile.is_cycle_mode() ? 9 : 5;
 }
 
 auto InspectorPane::performance_start_row(bool single_column) const -> int {
     if (single_column) return 32;
+    if (page_ == TuiRegPage::DTREE) {
+        int rows = 3;
+        for (const auto& device : machine_.configuration().soc.devices) {
+            rows += 1 + static_cast<int>(device.regions.size());
+        }
+        return std::max(25, rows);
+    }
     return (page_ == TuiRegPage::PIPELINE || page_ == TuiRegPage::BUS) ? 25 : 21;
 }
 
 auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int stats_row,
                                                      int width) -> std::string {
+    if (page_ == TuiRegPage::GPR && stats_row == 5) {
+        const auto& bus = machine_.memory().system_bus();
+        const auto contention = bus.contention_stats();
+        return format_to_width(
+            std::format(" {}{}{}\033[0m · R:{} W:{} · pending:{} · DMA:{}", kThemeText,
+                        bus.protocol_display_name(), kThemeText,
+                        simrv::util::format_with_commas(bus.read_count()),
+                        simrv::util::format_with_commas(bus.write_count()), bus.pending_requests(),
+                        contention.dma_active ? "active" : "idle"),
+            width);
+    }
     const auto simulated_seconds =
         simrv::core::timing::timer_ticks_to_seconds(cpu.clint_mmio.mtime.load());
     if (stats_row == 0) return section_line("Performance", width);
@@ -126,6 +146,17 @@ auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu
 
 auto InspectorPane::render_sampled_machine_performance_stats(
     const simrv::core::TuiExecutionSnapshot& snapshot, int stats_row, int width) -> std::string {
+    if (page_ == TuiRegPage::GPR && stats_row == 5) {
+        const auto& bus = machine_.memory().system_bus();
+        const auto contention = bus.contention_stats();
+        return format_to_width(
+            std::format(" {}{}{}\033[0m · R:{} W:{} · pending:{} · DMA:{}", kThemeText,
+                        bus.protocol_display_name(), kThemeText,
+                        simrv::util::format_with_commas(bus.read_count()),
+                        simrv::util::format_with_commas(bus.write_count()), bus.pending_requests(),
+                        contention.dma_active ? "active" : "idle"),
+            width);
+    }
     const auto simulated_seconds =
         simrv::core::timing::timer_ticks_to_seconds(snapshot.timer_ticks);
     if (stats_row == 0) return section_line("Performance", width);
@@ -173,6 +204,17 @@ auto InspectorPane::render_sampled_machine_performance_stats(
 
 auto InspectorPane::render_cycle_accurate_stats(const simrv::core::TuiExecutionSnapshot& snapshot,
                                                 int stats_row, int width) -> std::string {
+    if (page_ == TuiRegPage::GPR && stats_row == 9) {
+        const auto& bus = machine_.memory().system_bus();
+        const auto contention = bus.contention_stats();
+        return format_to_width(
+            std::format(" {}{}{}\033[0m · R:{} W:{} · pending:{} · DMA:{}", kThemeText,
+                        bus.protocol_display_name(), kThemeText,
+                        simrv::util::format_with_commas(bus.read_count()),
+                        simrv::util::format_with_commas(bus.write_count()), bus.pending_requests(),
+                        contention.dma_active ? "active" : "idle"),
+            width);
+    }
     const int half = width / 2;
     const int label_pad = width < 45 ? 0 : 7;
     const uint64_t cycles = snapshot.cycle_count;
@@ -277,12 +319,11 @@ auto InspectorPane::render_debug_state(int debug_row, int width) -> std::string 
         if (!resolved) sym = "no matching ELF symbol";
         // render_pair reserves eleven cells for the label and separator in the right column.
         sym = compact_elf_symbol(std::move(sym), std::max(1, right_width - 11));
-        return render_pair(
-            "PC",
-            std::format("0x{:0{}x}", static_cast<uint64_t>(st.pc.raw()),
-                        simrv::xlen::kIsXLen64 ? 16 : 8),
-            kThemeMint, "ELF sym", sym, resolved ? kThemePeach : kThemeMuted, col_width,
-            right_width, label_pad);
+        return render_pair("PC",
+                           std::format("0x{:0{}x}", static_cast<uint64_t>(st.pc.raw()),
+                                       simrv::xlen::kIsXLen64 ? 16 : 8),
+                           kThemeMint, "ELF sym", sym, resolved ? kThemePeach : kThemeMuted,
+                           col_width, right_width, label_pad);
     }
     if (debug_row == 2) {
         return render_pair(

@@ -4,7 +4,11 @@
  */
 #include <fcntl.h>
 #include <poll.h>
+#if defined(__APPLE__)
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
@@ -61,7 +65,7 @@ auto main() -> int {
         } else if (const char* env_build = std::getenv("SIMRV_LINUX_BUILD_DIR")) {
             images_dir = env_build;
         } else {
-            images_dir = root / "linux-images/rv64/alpine-gui";
+            images_dir = root / "images/rv64/alpine-gui";
         }
 
         const auto mem_img = images_dir / "opensbi-linux-payload.elf";

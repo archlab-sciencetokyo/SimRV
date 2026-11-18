@@ -4,6 +4,7 @@
  */
 #include "simrv/device/pci/VirtioPciGpu.hpp"
 
+#include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/virtio/VirtioGpuQueue.hpp"
 
 namespace simrv::device {
@@ -35,7 +36,8 @@ void VirtioPciGpu::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
         trigger_irq();
     };
 
-    virtio::process_gpu_queue(q, dma_read_cb, dma_write_cb, notify_complete);
+    auto* machine = root_complex_ ? root_complex_->machine() : nullptr;
+    virtio::process_gpu_queue(q, gpu_state_, machine, dma_read_cb, dma_write_cb, notify_complete);
 }
 
 }  // namespace simrv::device

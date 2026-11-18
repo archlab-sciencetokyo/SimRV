@@ -21,10 +21,6 @@
 
 namespace simrv::rtl {
 
-// Forward declarations of built-in target factories
-auto create_rvcomp_target() -> std::unique_ptr<ParityTarget>;
-auto create_cfu_pg_target() -> std::unique_ptr<ParityTarget>;
-
 namespace {
 
 const char* const kStandardCrt0 = R"asm(/*
@@ -117,15 +113,13 @@ SECTIONS
 {
   . = 0x80000000;
   .text.init : { *(.text.init) }
-  . = ALIGN(0x1000);
   .text : { *(.text .text.*) }
-  . = ALIGN(0x1000);
   .rodata : { *(.rodata .rodata.*) }
+  ASSERT(. <= 0x80001000, "Parity benchmark text overlaps the tohost register")
+  .tohost 0x80001000 : { *(.tohost) }
   . = ALIGN(0x1000);
   .data : { *(.data .data.*) }
   .bss : { *(.bss .bss.*) *(COMMON) }
-  . = ALIGN(0x1000);
-  .tohost : { *(.tohost) }
   _end = .;
 }
 )ld";
@@ -260,8 +254,8 @@ auto get_embedded_benchmarks() -> const std::vector<Benchmark>& { return build_b
 
 auto find_riscv_toolchain() -> std::optional<Toolchain> {
     constexpr std::array<const char*, 4> kCandidates = {
-        "riscv32-linux-gnu-gcc", "riscv32-unknown-elf-gcc", "riscv64-linux-gnu-gcc",
-        "riscv64-unknown-elf-gcc"};
+        "riscv32-unknown-elf-gcc", "riscv64-unknown-elf-gcc", "riscv32-linux-gnu-gcc",
+        "riscv64-linux-gnu-gcc"};
 
     for (const auto* gcc_cand : kCandidates) {
         if (auto found_gcc = check_tool(gcc_cand)) {
@@ -350,10 +344,7 @@ auto compare_retirement_traces(std::span<const RetirementEvent> rtl,
     return comp;
 }
 
-ParityRegistry::ParityRegistry() {
-    targets_.push_back(create_rvcomp_target());
-    targets_.push_back(create_cfu_pg_target());
-}
+ParityRegistry::ParityRegistry() = default;
 
 ParityRegistry::~ParityRegistry() {
     targets_.clear();
@@ -394,6 +385,15 @@ auto ParityRegistry::load_plugin(const std::filesystem::path& plugin_path) -> bo
     const SimRvRtlTarget* target_desc = init_fn();
     if (!target_desc) {
         simrv::log::error("ParityRegistry: plugin init returned null target for {}",
+                          plugin_path.string());
+        ::dlclose(handle);
+        return false;
+    }
+
+    if (target_desc->abi_version != SIMRV_RTL_PLUGIN_ABI_VERSION ||
+        target_desc->struct_size < sizeof(SimRvRtlTarget) || !target_desc->name ||
+        !target_desc->run_benchmark) {
+        simrv::log::error("ParityRegistry: incompatible or incomplete parity plugin descriptor from {}",
                           plugin_path.string());
         ::dlclose(handle);
         return false;

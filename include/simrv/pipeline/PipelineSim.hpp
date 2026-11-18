@@ -93,7 +93,14 @@ struct PipelineCycleEvent {
     bool control_flush = false;
 };
 
-enum class PipelineType : uint8_t { FiveStage = 0, ThreeStage = 1 };
+enum class PipelineType : uint8_t {
+    TwoStage = 0,
+    ThreeStage = 1,
+    FiveStage = 2,
+    SixStageIssue = 3,
+    SixStageFetch = 4,
+    SixStageMem = 5,
+};
 
 struct CpuConfig {
     // Additional execution stalls after an operation issues into EX.
@@ -105,12 +112,16 @@ struct CpuConfig {
     simrv::xlen::LatencyCycles fence_flush_penalty = 4;
     simrv::xlen::LatencyCycles branch_mispredict_penalty = 2;
     simrv::xlen::LatencyCycles cycle_counter_start_delay = 0;
+    uint64_t startup_cycle_offset = 0;
+    uint64_t startup_instruction_offset = 0;
     simrv::xlen::LatencyCycles host_interface_latency = 0;
     simrv::xlen::LatencyCycles host_interface_phase_period = 0;
+    simrv::xlen::LatencyCycles tohost_pair_fallback_cycles = 4;
     bool enable_forwarding = true;
     bool enable_instruction_prefetch = false;
     bool record_snapshots = false;
     bool divider_early_out = false;
+    bool tohost_requires_high_word = false;
     PipelineType pipeline_type = PipelineType::FiveStage;
     BranchPredictorConfig branch_predictor{};
 };
@@ -125,9 +136,12 @@ struct PipelineCycleSnapshot {
         bool stalled = false;
     };
     StageInfo f;
+    StageInfo f2;
     StageInfo d;
+    StageInfo i;
     StageInfo e;
     StageInfo m;
+    StageInfo m2;
     StageInfo w;
 };
 
@@ -260,7 +274,7 @@ class PipelineSim {
     }
 
     bool ca_kernel_active_ = false;
-    std::array<PipelineReg, 5> ca_regs_{};
+    std::array<PipelineReg, 8> ca_regs_{};
     PipelineStats ca_stats_{};
     static constexpr size_t kCaHistoryCapacity = PipelineHistoryView::kCapacity;
     std::array<PipelineCycleSnapshot, kCaHistoryCapacity> ca_history_{};

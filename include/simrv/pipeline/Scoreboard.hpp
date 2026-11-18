@@ -15,9 +15,12 @@ namespace simrv::pipeline {
 
 enum class PipelineStage : uint8_t {
     Fetch,
+    Fetch2,
     Decode,
+    Issue,
     Execute,
     Memory,
+    Memory2,
     Writeback,
     Commit,
 };
@@ -258,11 +261,17 @@ class Scoreboard {
             }
         };
         // Process oldest stage to youngest stage:
-        // Writeback -> Memory -> Execute -> (Decode if requested)
+        // Writeback -> (Memory2) -> Memory -> Execute -> (Issue) -> (Decode if requested)
         // Younger stage overwrites reservation for the same register
         reserve_slot(pipe.writeback, PipelineStage::Writeback);
+        if constexpr (requires { pipe.memory2; }) {
+            reserve_slot(pipe.memory2, PipelineStage::Memory2);
+        }
         reserve_slot(pipe.memory, PipelineStage::Memory);
         reserve_slot(pipe.execute, PipelineStage::Execute);
+        if constexpr (requires { pipe.issue; }) {
+            reserve_slot(pipe.issue, PipelineStage::Issue);
+        }
         if (include_decode) {
             reserve_slot(pipe.decode, PipelineStage::Decode);
         }

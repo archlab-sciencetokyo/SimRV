@@ -6,9 +6,10 @@
 
 #include <memory>
 
+#include "simrv/memory/Bus.hpp"
+#include "simrv/memory/BusProtocolSpec.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/ReservationTable.hpp"
-#include "simrv/memory/TileLinkBus.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -22,21 +23,22 @@ namespace simrv::memory {
  */
 class MemorySubsystem {
    public:
-    explicit MemorySubsystem(simrv::core::Machine& machine)
-        : machine_(machine), mmu_(nullptr), system_bus_(machine) {}
+    explicit MemorySubsystem(simrv::core::Machine& machine);
 
     ~MemorySubsystem() = default;
+
+    /// Reconfigure the system interconnect bus protocol
+    void configure_bus(const BusProtocolSpec& spec);
+    void configure_bus(BusProtocol protocol);
 
     /// Initialize MMU instance bound to machine CPU state
     void initialize_mmu();
 
     /// Get raw pointer to MMU (nullptr if uninitialized)
     [[nodiscard]] auto mmu() const -> simrv::Mmu* { return mmu_.get(); }
-    /// Access system TileLink interconnect bus
-    [[nodiscard]] auto system_bus() -> simrv::memory::TileLinkBus& { return system_bus_; }
-    [[nodiscard]] auto system_bus() const -> const simrv::memory::TileLinkBus& {
-        return system_bus_;
-    }
+    /// Access system interconnect bus
+    [[nodiscard]] auto system_bus() -> simrv::memory::Bus& { return *system_bus_; }
+    [[nodiscard]] auto system_bus() const -> const simrv::memory::Bus& { return *system_bus_; }
     /// Access LR/SC reservation tracking table
     [[nodiscard]] auto reservation_table() -> simrv::memory::ReservationTable& {
         return reservation_table_;
@@ -59,7 +61,7 @@ class MemorySubsystem {
    private:
     simrv::core::Machine& machine_;
     std::unique_ptr<simrv::Mmu> mmu_;
-    simrv::memory::TileLinkBus system_bus_;
+    std::unique_ptr<simrv::memory::Bus> system_bus_;
     simrv::memory::ReservationTable reservation_table_;
 };
 

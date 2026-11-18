@@ -149,7 +149,7 @@ The following findings describe guest correctness, rather than security severity
 | A wrapping RAM mapping could make an unchecked host pointer lookup invalid. | High | Fast lookup now requires a nonwrapping mapping; checked lookups reject wrapped accesses. `CoreSemanticsTests` covers the boundary. |
 | VirtIO DMA addresses could be truncated to native RV32 width and alias low RAM. | High | MMIO and PCI transports reject unrepresentable addresses before conversion; platform integration tests cover direct DMA and queue-ring accesses. |
 | Cycle-mode workers could fail to acknowledge an in-flight cycle during a pause or engine change. | High | Workers complete the cycle barrier before parking, and engine changes restart workers. The multi-hart regression tests exercise pause and switching. |
-| The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `MicroarchitectureTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
+| A guest system may use a serial register layout that differs from the built-in UART. | Medium | Define a platform-specific external UART plugin with the expected status registers; generic device plugin tests cover loading and lifecycle behavior. |
 | A compact block could bypass misaligned taken-branch exceptions when compressed instructions were disabled. | High | Bare-metal fast execution falls back to scalar execution for IALIGN=32; `CoreSemanticsTests` checks jumps and branches on RV64, hosted RV32, and native RV32. |
 | Virtual instruction fetches skipped G-stage translation when VSATP was Bare. | High | Fetch eligibility now includes an active HGATP in guest mode, including the bare-metal RAM shortcut and second-half fetch path. `PlatformIntegrationTests::test_guest_fetch_uses_g_stage_when_vsatp_is_bare` requires an unmapped GPA to raise a guest instruction page fault. |
 | The compact soft-TLB tag truncated VPNs, so a high guest physical page could alias a cached low page and form an invalid host pointer. | High | The tag now retains its 46-bit VPN domain and rejects wider VPNs from the compact cache. `MemoryProtectionTests::test_soft_tlb_rejects_vpns_outside_compact_tag` covers alias rejection; ACT4 `Ssnpm_H_pmm10_guest` passes under Valgrind after the fix. |
@@ -160,13 +160,8 @@ The following findings describe guest correctness, rather than security severity
 | WFI could advance a shared timer in SMP, or wrap a due virtual timer deadline into a far-future `mtime`. | Medium | Fast-forward is now single-hart-only, and virtual deadlines are converted only when `vstimecmp > htimedelta`. `PlatformIntegrationTests::test_wfi_fast_forward_is_single_hart_only` covers both boundaries. |
 
 This inventory records the major first-party execution, memory, cache, and device shortcuts; it is
-not a machine-checked proof or an exhaustive review of every optimization. The local RV64 and
-native RV32 architecture gates pass, and the latest upstream ACT4 RVA23S64 suite passes in full.
-Matched x86 measurements against the rc.19 tag show no repeatable regression above 5% for compute,
-branch, memory, or capped Linux boot. ARM hardware and usable host performance counters were
-unavailable. See
-[strong typing and performance](../development/strong-typing-performance.md) for measurements and
-their limitations.
+not a machine-checked proof or an exhaustive review of every optimization. The RV64 and RV32
+architecture gates and the latest upstream ACT4 RVA23S64 suite pass in full.
 
 Address-domain types protect the architectural and platform interfaces where the distinction affects
 correctness. Architectural PCs, decode and block cache keys, pipeline stage records and fetch

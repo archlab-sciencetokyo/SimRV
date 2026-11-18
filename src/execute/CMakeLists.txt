@@ -1,6 +1,7 @@
 simrv_add_component(simrv-execution
   ExecuteUnitInt.cpp
   ExecuteUnitZb.cpp
+  ExecuteUnitZk.cpp
   ExecuteUnitFp.cpp
   ExecuteUnit.cpp
   CfuUnit.cpp
@@ -10,6 +11,7 @@ simrv_add_component(simrv-execution
   vector/VectorInteger.cpp
   vector/VectorFixedPoint.cpp
   vector/VectorFloat.cpp
+  vector/VectorCrypto.cpp
   vector/VectorPermute.cpp
 )
 add_library(simrv::execution ALIAS simrv-execution)

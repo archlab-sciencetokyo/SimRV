@@ -4,8 +4,8 @@
 #include <cstdio>
 #include <utility>
 
+#include "simrv/execute/ExecuteUnitZk.hpp"
 #include "simrv/isa/Common.hpp"
-#include "simrv/isa/Compressed.hpp"
 #include "simrv/pipeline/DecodeTable.hpp"
 
 namespace simrv::pipeline {
@@ -14,665 +14,110 @@ using simrv::isa::OperationId;
 using enum simrv::isa::OperationId;
 
 const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> OPERATION_NAME = {
-    "LUI",
-    "AUIPC",
-    "JAL",
-    "JALR",
-    "BEQ",
-    "BNE",
-    "BLT",
-    "BGE",
-    "BLTU",
-    "BGEU",
-    "LB",
-    "LH",
-    "LW",
-    "LD",
-    "LBU",
-    "LHU",
-    "LWU",
-    "SB",
-    "SH",
-    "SW",
-    "SD",
-    "ADDI",
-    "SLTI",
-    "SLTIU",
-    "XORI",
-    "ORI",
-    "ANDI",
-    "SLLI",
-    "SRLI",
-    "SRAI",
-    "ADDIW",
-    "SLLIW",
-    "SRLIW",
-    "SRAIW",
-    "ADD",
-    "SUB",
-    "SLL",
-    "SLT",
-    "SLTU",
-    "XOR",
-    "SRL",
-    "SRA",
-    "OR",
-    "AND",
-    "ADDW",
-    "SUBW",
-    "SLLW",
-    "SRLW",
-    "SRAW",
-    "FENCE",
-    "FENCE_I",
-    "ECALL",
-    "EBREAK",
-    "CSRRW",
-    "CSRRS",
-    "CSRRC",
-    "CSRRWI",
-    "CSRRSI",
-    "CSRRCI",
-    "URET",
-    "SRET",
-    "MRET",
-    "WFI",
-    "SFENCE_VMA",
-    "HFENCE_VVMA",
-    "HFENCE_GVMA",
-    "MUL",
-    "MULH",
-    "MULHSU",
-    "MULHU",
-    "DIV",
-    "DIVU",
-    "REM",
-    "REMU",
-    "MULW",
-    "DIVW",
-    "DIVUW",
-    "REMW",
-    "REMUW",
-    "LR_W",
-    "SC_W",
-    "AMOSWAP_W",
-    "AMOADD_W",
-    "AMOXOR_W",
-    "AMOAND_W",
-    "AMOOR_W",
-    "AMOMIN_W",
-    "AMOMAX_W",
-    "AMOMINU_W",
-    "AMOMAXU_W",
-    "LR_D",
-    "SC_D",
-    "AMOSWAP_D",
-    "AMOADD_D",
-    "AMOXOR_D",
-    "AMOAND_D",
-    "AMOOR_D",
-    "AMOMIN_D",
-    "AMOMAX_D",
-    "AMOMINU_D",
-    "AMOMAXU_D",
-    "FLW",
-    "FSW",
-    "FMADD_S",
-    "FMSUB_S",
-    "FNMADD_S",
-    "FNMSUB_S",
-    "FADD_S",
-    "FSUB_S",
-    "FMUL_S",
-    "FDIV_S",
-    "FSQRT_S",
-    "FSGNJ_S",
-    "FSGNJN_S",
-    "FSGNJX_S",
-    "FMIN_S",
-    "FMAX_S",
-    "FCVT_W_S",
-    "FCVT_WU_S",
-    "FMV_X_W",
-    "FEQ_S",
-    "FLT_S",
-    "FLE_S",
-    "FCLASS_S",
-    "FCVT_S_W",
-    "FCVT_S_WU",
-    "FMV_W_X",
-    "FCVT_L_S",
-    "FCVT_LU_S",
-    "FCVT_S_L",
-    "FCVT_S_LU",
-    "FLD",
-    "FSD",
-    "FMADD_D",
-    "FMSUB_D",
-    "FNMSUB_D",
-    "FNMADD_D",
-    "FADD_D",
-    "FSUB_D",
-    "FMUL_D",
-    "FDIV_D",
-    "FSQRT_D",
-    "FSGNJ_D",
-    "FSGNJN_D",
-    "FSGNJX_D",
-    "FMIN_D",
-    "FMAX_D",
-    "FCVT_S_D",
-    "FCVT_D_S",
-    "FEQ_D",
-    "FLT_D",
-    "FLE_D",
-    "FCLASS_D",
-    "FCVT_W_D",
-    "FCVT_WU_D",
-    "FCVT_D_W",
-    "FCVT_D_WU",
-    "FMV_X_D",
-    "FMV_D_X",
-    "FCVT_L_D",
-    "FCVT_LU_D",
-    "FCVT_D_L",
-    "FCVT_D_LU",
-    "SH1ADD",
-    "SH2ADD",
-    "SH3ADD",
-    "SH1ADD.UW",
-    "SH2ADD.UW",
-    "SH3ADD.UW",
-    "ADD.UW",
-    "SLLI.UW",
-    "ANDN",
-    "ORN",
-    "XNOR",
-    "CLZ",
-    "CTZ",
-    "CPOP",
-    "MIN",
-    "MAX",
-    "MINU",
-    "MAXU",
-    "SEXT.B",
-    "SEXT.H",
-    "ZEXT.H",
-    "ROL",
-    "ROR",
-    "RORI",
-    "CLZW",
-    "CTZW",
-    "CPOPW",
-    "ROLW",
-    "RORW",
-    "RORIW",
-    "CLMUL",
-    "CLMULH",
-    "CLMULR",
-    "BSET",
-    "BSETI",
-    "BCLR",
-    "BCLRI",
-    "BINV",
-    "BINVI",
-    "BEXT",
-    "BEXTI",
-    "ORC.B",
-    "REV8",
-    "PACK",
-    "PACKW",
-    "VSETVLI",
-    "VSETIVLI",
-    "VSETVL",
-    "VLE8_V",
-    "VLE16_V",
-    "VLE32_V",
-    "VLE64_V",
-    "VLE8FF_V",
-    "VLE16FF_V",
-    "VLE32FF_V",
-    "VLE64FF_V",
-    "VLM_V",
-    "VSE8_V",
-    "VSE16_V",
-    "VSE32_V",
-    "VSE64_V",
-    "VSM_V",
-    "VADD_VV",
-    "VADD_VX",
-    "VADD_VI",
-    "VSUB_VV",
-    "VSUB_VX",
-    "VMUL_VV",
-    "VMUL_VX",
-    "VMULH_VV",
-    "VMULH_VX",
-    "VMULHU_VV",
-    "VMULHU_VX",
-    "VMULHSU_VV",
-    "VMULHSU_VX",
-    "VDIV_VV",
-    "VDIV_VX",
-    "VDIVU_VV",
-    "VDIVU_VX",
-    "VREM_VV",
-    "VREM_VX",
-    "VREMU_VV",
-    "VREMU_VX",
-    "VAND_VV",
-    "VAND_VX",
-    "VAND_VI",
-    "VOR_VV",
-    "VOR_VX",
-    "VOR_VI",
-    "VXOR_VV",
-    "VXOR_VX",
-    "VXOR_VI",
-    "VSLL_VV",
-    "VSLL_VX",
-    "VSLL_VI",
-    "VSRL_VV",
-    "VSRL_VX",
-    "VSRL_VI",
-    "VSRA_VV",
-    "VSRA_VX",
-    "VSRA_VI",
-    "VMV_V_V",
-    "VMV_V_X",
-    "VMV_V_I",
-    "VMV_X_S",
-    "VMV_S_X",
-    "VMSEQ_VV",
-    "VMSEQ_VX",
-    "VMSEQ_VI",
-    "VMSNE_VV",
-    "VMSNE_VX",
-    "VMSNE_VI",
-    "VMSLT_VV",
-    "VMSLT_VX",
-    "VMSLTU_VV",
-    "VMSLTU_VX",
-    "VMSLE_VV",
-    "VMSLE_VX",
-    "VMSLE_VI",
-    "VMSLEU_VV",
-    "VMSLEU_VX",
-    "VMSLEU_VI",
-    "VMSGT_VX",
-    "VMSGT_VI",
-    "VMSGTU_VX",
-    "VMSGTU_VI",
-    "VMERGE_VVM",
-    "VMERGE_VXM",
-    "VMERGE_VIM",
-    "VMACC_VV",
-    "VMACC_VX",
-    "VMADD_VV",
-    "VMADD_VX",
-    "VNMSAC_VV",
-    "VNMSAC_VX",
-    "VNMSUB_VV",
-    "VNMSUB_VX",
-    "VWMACCU_VV",
-    "VWMACCU_VX",
-    "VWMACC_VV",
-    "VWMACC_VX",
-    "VWMACCUS_VX",
-    "VWMACCSU_VV",
-    "VWMACCSU_VX",
-    "VMIN_VV",
-    "VMIN_VX",
-    "VMINU_VV",
-    "VMINU_VX",
-    "VMAX_VV",
-    "VMAX_VX",
-    "VMAXU_VV",
-    "VMAXU_VX",
-    "VLSE8_V",
-    "VLSE16_V",
-    "VLSE32_V",
-    "VLSE64_V",
-    "VSSE8_V",
-    "VSSE16_V",
-    "VSSE32_V",
-    "VSSE64_V",
-    "VLUXEI8_V",
-    "VLUXEI16_V",
-    "VLUXEI32_V",
-    "VLUXEI64_V",
-    "VLOXEI8_V",
-    "VLOXEI16_V",
-    "VLOXEI32_V",
-    "VLOXEI64_V",
-    "VSUXEI8_V",
-    "VSUXEI16_V",
-    "VSUXEI32_V",
-    "VSUXEI64_V",
-    "VSOXEI8_V",
-    "VSOXEI16_V",
-    "VSOXEI32_V",
-    "VSOXEI64_V",
-    "VID_V",
-    "VFMADD_VV",
-    "VFMADD_VF",
-    "VFNMADD_VV",
-    "VFNMADD_VF",
-    "VFMSUB_VV",
-    "VFMSUB_VF",
-    "VFNMSUB_VV",
-    "VFNMSUB_VF",
-    "VFMACC_VV",
-    "VFMACC_VF",
-    "VFNMACC_VV",
-    "VFNMACC_VF",
-    "VFMSAC_VV",
-    "VFMSAC_VF",
-    "VFNMSAC_VV",
-    "VFNMSAC_VF",
-    "VREDSUM_VS",
-    "VREDAND_VS",
-    "VREDOR_VS",
-    "VREDXOR_VS",
-    "VREDMINU_VS",
-    "VREDMIN_VS",
-    "VREDMAXU_VS",
-    "VREDMAX_VS",
-    "VFREDUSUM_VS",
-    "VFREDOSUM_VS",
-    "VFREDMIN_VS",
-    "VFREDMAX_VS",
-    "VFWREDUSUM_VS",
-    "VFWREDOSUM_VS",
-    "VFWADD_VV",
-    "VFWADD_VF",
-    "VFWSUB_VV",
-    "VFWSUB_VF",
-    "VFWADD_WV",
-    "VFWADD_WF",
-    "VFWSUB_WV",
-    "VFWSUB_WF",
-    "VFWMUL_VV",
-    "VFWMUL_VF",
-    "VFWMACC_VV",
-    "VFWMACC_VF",
-    "VFWNMACC_VV",
-    "VFWNMACC_VF",
-    "VFWMSAC_VV",
-    "VFWMSAC_VF",
-    "VFWNMSAC_VV",
-    "VFWNMSAC_VF",
-    "VWMUL_VV",
-    "VWMUL_VX",
-    "VNCLIP_WV",
-    "VNCLIP_WX",
-    "VNCLIP_WI",
-    "VNCLIPU_WV",
-    "VNCLIPU_WX",
-    "VNCLIPU_WI",
-    "VNSRL_WV",
-    "VNSRL_WX",
-    "VNSRL_WI",
-    "VNSRA_WV",
-    "VNSRA_WX",
-    "VNSRA_WI",
-    "VSLIDE1UP_VX",
-    "VSLIDE1DOWN_VX",
-    "VFSLIDE1UP_VF",
-    "VFSLIDE1DOWN_VF",
-    "VFADD_VV",
-    "VFADD_VF",
-    "VFSUB_VV",
-    "VFSUB_VF",
-    "VFRSUB_VF",
-    "VFMUL_VV",
-    "VFMUL_VF",
-    "VFDIV_VV",
-    "VFDIV_VF",
-    "VFRDIV_VF",
-    "VFSQRT_V",
-    "VFRSQRT7_V",
-    "VFREC7_V",
-    "VFCLASS_V",
-    "VFCVT_XU_F_V",
-    "VFCVT_X_F_V",
-    "VFCVT_F_XU_V",
-    "VFCVT_F_X_V",
-    "VFCVT_RTZ_XU_F_V",
-    "VFCVT_RTZ_X_F_V",
-    "VFWCVT_XU_F_V",
-    "VFWCVT_X_F_V",
-    "VFWCVT_F_XU_V",
-    "VFWCVT_F_X_V",
-    "VFWCVT_F_F_V",
-    "VFWCVT_RTZ_XU_F_V",
-    "VFWCVT_RTZ_X_F_V",
-    "VFNCVT_XU_F_W",
-    "VFNCVT_X_F_W",
-    "VFNCVT_F_XU_W",
-    "VFNCVT_F_X_W",
-    "VFNCVT_F_F_W",
-    "VFNCVT_ROD_F_F_W",
-    "VFNCVT_RTZ_XU_F_W",
-    "VFNCVT_RTZ_X_F_W",
-    "VFSGNJ_VV",
-    "VFSGNJ_VF",
-    "VFSGNJN_VV",
-    "VFSGNJN_VF",
-    "VFSGNJX_VV",
-    "VFSGNJX_VF",
-    "VFMIN_VV",
-    "VFMIN_VF",
-    "VFMAX_VV",
-    "VFMAX_VF",
-    "VMFEQ_VV",
-    "VMFEQ_VF",
-    "VMFNE_VV",
-    "VMFNE_VF",
-    "VMFLT_VV",
-    "VMFLT_VF",
-    "VMFLE_VV",
-    "VMFLE_VF",
-    "VMFGT_VF",
-    "VMFGE_VF",
-    "VRSUB_VX",
-    "VRSUB_VI",
-    "VSADD_VV",
-    "VSADD_VX",
-    "VSADD_VI",
-    "VSADDU_VV",
-    "VSADDU_VX",
-    "VSADDU_VI",
-    "VAADDU_VV",
-    "VAADDU_VX",
-    "VAADD_VV",
-    "VAADD_VX",
-    "VASUBU_VV",
-    "VASUBU_VX",
-    "VASUB_VV",
-    "VASUB_VX",
-    "VSBC_VVM",
-    "VSBC_VXM",
-    "VSEXT_VF2",
-    "VSEXT_VF4",
-    "VSEXT_VF8",
-    "VZEXT_VF2",
-    "VZEXT_VF4",
-    "VZEXT_VF8",
-    "VSLIDEDOWN_VX",
-    "VSLIDEDOWN_VI",
-    "VSLIDEUP_VX",
-    "VSLIDEUP_VI",
-    "VRGATHER_VV",
-    "VRGATHER_VX",
-    "VRGATHER_VI",
-    "VRGATHEREI16_VV",
-    "VSMUL_VV",
-    "VSMUL_VX",
-    "VSSRA_VV",
-    "VSSRA_VX",
-    "VSSRA_VI",
-    "VSSRL_VV",
-    "VSSRL_VX",
-    "VSSRL_VI",
-    "VSSUB_VV",
-    "VSSUB_VX",
-    "VSSUBU_VV",
-    "VSSUBU_VX",
-    "VWADD_VV",
-    "VWADD_VX",
-    "VWADD_WV",
-    "VWADD_WX",
-    "VWADDU_VV",
-    "VWADDU_VX",
-    "VWADDU_WV",
-    "VWADDU_WX",
-    "VWSUB_VV",
-    "VWSUB_VX",
-    "VWSUB_WV",
-    "VWSUB_WX",
-    "VWSUBU_VV",
-    "VWSUBU_VX",
-    "VWSUBU_WV",
-    "VWSUBU_WX",
-    "VWMULU_VV",
-    "VWMULU_VX",
-    "VWMULSU_VV",
-    "VWMULSU_VX",
-    "VWREDSUM_VS",
-    "VWREDSUMU_VS",
-    "VMV1R_V",
-    "VMV2R_V",
-    "VMV4R_V",
-    "VMV8R_V",
-    "VL1RE8_V",
-    "VL1RE16_V",
-    "VL1RE32_V",
-    "VL1RE64_V",
-    "VL2RE8_V",
-    "VL2RE16_V",
-    "VL2RE32_V",
-    "VL2RE64_V",
-    "VL4RE8_V",
-    "VL4RE16_V",
-    "VL4RE32_V",
-    "VL4RE64_V",
-    "VL8RE8_V",
-    "VL8RE16_V",
-    "VL8RE32_V",
-    "VL8RE64_V",
-    "VS1R_V",
-    "VS2R_V",
-    "VS4R_V",
-    "VS8R_V",
-    "VADC_VVM",
-    "VADC_VXM",
-    "VADC_VIM",
-    "VMADC_VV",
-    "VMADC_VX",
-    "VMADC_VI",
-    "VMADC_VVM",
-    "VMADC_VXM",
-    "VMADC_VIM",
-    "VMSBC_VV",
-    "VMSBC_VX",
-    "VMSBC_VVM",
-    "VMSBC_VXM",
-    "VMSBF_M",
-    "VMSIF_M",
-    "VMSOF_M",
-    "VFIRST_M",
-    "VCPOP_M",
-    "VIOTA_M",
-    "VCOMPRESS_VM",
-    "VANDN_VV",
-    "VANDN_VX",
-    "VROL_VV",
-    "VROL_VX",
-    "VROR_VV",
-    "VROR_VX",
-    "VROR_VI",
-    "VCLZ_V",
-    "VCTZ_V",
-    "VCPOP_V",
-    "VBREV_V",
-    "VBREV8_V",
-    "VREV8_V",
-    "VCLMUL_VV",
-    "VCLMUL_VX",
-    "VCLMULH_VV",
-    "VCLMULH_VX",
-    "VMAND_MM",
-    "VMNAND_MM",
-    "VMANDN_MM",
-    "VMOR_MM",
-    "VMNOR_MM",
-    "VMORN_MM",
-    "VMXOR_MM",
-    "VMXNOR_MM",
-    "VFMV_F_S",
-    "VFMV_S_F",
-    "VFMERGE_VFM",
-    "VFMV_V_F",
-    "VWSLL_VV",
-    "VWSLL_VX",
-    "VWSLL_VI",
-    "VCHECK",
-    "CFU",
-    "CZERO_EQZ",
-    "CZERO_NEZ",
-    "CBO_ZERO",
-    "CBO_CLEAN",
-    "CBO_FLUSH",
-    "CBO_INVAL",
-    "PREFETCH_I",
-    "PREFETCH_R",
-    "PREFETCH_W",
-    "SINVAL_VMA",
-    "SFENCE_W_INVAL",
-    "SFENCE_INVAL_IR",
-    "HINVAL_VVMA",
-    "HINVAL_GVMA",
-    "FLH",
-    "FSH",
-    "FMV_X_H",
-    "FMV_H_X",
-    "FCVT_S_H",
-    "FCVT_H_S",
-    "FCVT_D_H",
-    "FCVT_H_D",
-    "FLI_S",
-    "FLI_D",
-    "FMINM_S",
-    "FMAXM_S",
-    "FMINM_D",
-    "FMAXM_D",
-    "FLEQ_S",
-    "FLTQ_S",
-    "FLEQ_D",
-    "FLTQ_D",
-    "FROUND_S",
-    "FROUNDNX_S",
-    "FROUND_D",
-    "FROUNDNX_D",
-    "FCVTMOD_W_D",
-    "MOP",
-    "WRS_NTO",
-    "WRS_STO",
-    "HLV_B",
-    "HLV_BU",
-    "HLV_H",
-    "HLV_HU",
-    "HLV_W",
-    "HLV_WU",
-    "HLV_D",
-    "HLVX_HU",
-    "HLVX_WU",
-    "HSV_B",
-    "HSV_H",
-    "HSV_W",
-    "HSV_D",
-    "ILLEGAL"};
+    "LUI", "AUIPC", "JAL", "JALR", "BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU", "LB", "LH", "LW",
+    "LD", "LBU", "LHU", "LWU", "SB", "SH", "SW", "SD", "ADDI", "SLTI", "SLTIU", "XORI", "ORI",
+    "ANDI", "SLLI", "SRLI", "SRAI", "ADDIW", "SLLIW", "SRLIW", "SRAIW", "ADD", "SUB", "SLL", "SLT",
+    "SLTU", "XOR", "SRL", "SRA", "OR", "AND", "ADDW", "SUBW", "SLLW", "SRLW", "SRAW", "FENCE",
+    "FENCE_I", "ECALL", "EBREAK", "CSRRW", "CSRRS", "CSRRC", "CSRRWI", "CSRRSI", "CSRRCI", "URET",
+    "SRET", "MRET", "MNRET", "WFI", "SFENCE_VMA", "HFENCE_VVMA", "HFENCE_GVMA", "MUL", "MULH",
+    "MULHSU", "MULHU", "DIV", "DIVU", "REM", "REMU", "MULW", "DIVW", "DIVUW", "REMW", "REMUW",
+    "LR_W", "SC_W", "AMOSWAP_W", "AMOADD_W", "AMOXOR_W", "AMOAND_W", "AMOOR_W", "AMOMIN_W",
+    "AMOMAX_W", "AMOMINU_W", "AMOMAXU_W", "LR_D", "SC_D", "AMOSWAP_D", "AMOADD_D", "AMOXOR_D",
+    "AMOAND_D", "AMOOR_D", "AMOMIN_D", "AMOMAX_D", "AMOMINU_D", "AMOMAXU_D", "FLW", "FSW",
+    "FMADD_S", "FMSUB_S", "FNMADD_S", "FNMSUB_S", "FADD_S", "FSUB_S", "FMUL_S", "FDIV_S", "FSQRT_S",
+    "FSGNJ_S", "FSGNJN_S", "FSGNJX_S", "FMIN_S", "FMAX_S", "FCVT_W_S", "FCVT_WU_S", "FMV_X_W",
+    "FEQ_S", "FLT_S", "FLE_S", "FCLASS_S", "FCVT_S_W", "FCVT_S_WU", "FMV_W_X", "FCVT_L_S",
+    "FCVT_LU_S", "FCVT_S_L", "FCVT_S_LU", "FLD", "FSD", "FMADD_D", "FMSUB_D", "FNMSUB_D",
+    "FNMADD_D", "FADD_D", "FSUB_D", "FMUL_D", "FDIV_D", "FSQRT_D", "FSGNJ_D", "FSGNJN_D",
+    "FSGNJX_D", "FMIN_D", "FMAX_D", "FCVT_S_D", "FCVT_D_S", "FEQ_D", "FLT_D", "FLE_D", "FCLASS_D",
+    "FCVT_W_D", "FCVT_WU_D", "FCVT_D_W", "FCVT_D_WU", "FMV_X_D", "FMV_D_X", "FCVT_L_D", "FCVT_LU_D",
+    "FCVT_D_L", "FCVT_D_LU", "SH1ADD", "SH2ADD", "SH3ADD", "SH1ADD.UW", "SH2ADD.UW", "SH3ADD.UW",
+    "ADD.UW", "SLLI.UW", "ANDN", "ORN", "XNOR", "CLZ", "CTZ", "CPOP", "MIN", "MAX", "MINU", "MAXU",
+    "SEXT.B", "SEXT.H", "ZEXT.H", "ROL", "ROR", "RORI", "CLZW", "CTZW", "CPOPW", "ROLW", "RORW",
+    "RORIW", "CLMUL", "CLMULH", "CLMULR", "BSET", "BSETI", "BCLR", "BCLRI", "BINV", "BINVI", "BEXT",
+    "BEXTI", "ORC.B", "REV8", "PACK", "PACKW", "VSETVLI", "VSETIVLI", "VSETVL", "VLE8_V", "VLE16_V",
+    "VLE32_V", "VLE64_V", "VLE8FF_V", "VLE16FF_V", "VLE32FF_V", "VLE64FF_V", "VLM_V", "VSE8_V",
+    "VSE16_V", "VSE32_V", "VSE64_V", "VSM_V", "VADD_VV", "VADD_VX", "VADD_VI", "VSUB_VV", "VSUB_VX",
+    "VMUL_VV", "VMUL_VX", "VMULH_VV", "VMULH_VX", "VMULHU_VV", "VMULHU_VX", "VMULHSU_VV",
+    "VMULHSU_VX", "VDIV_VV", "VDIV_VX", "VDIVU_VV", "VDIVU_VX", "VREM_VV", "VREM_VX", "VREMU_VV",
+    "VREMU_VX", "VAND_VV", "VAND_VX", "VAND_VI", "VOR_VV", "VOR_VX", "VOR_VI", "VXOR_VV", "VXOR_VX",
+    "VXOR_VI", "VSLL_VV", "VSLL_VX", "VSLL_VI", "VSRL_VV", "VSRL_VX", "VSRL_VI", "VSRA_VV",
+    "VSRA_VX", "VSRA_VI", "VMV_V_V", "VMV_V_X", "VMV_V_I", "VMV_X_S", "VMV_S_X", "VMSEQ_VV",
+    "VMSEQ_VX", "VMSEQ_VI", "VMSNE_VV", "VMSNE_VX", "VMSNE_VI", "VMSLT_VV", "VMSLT_VX", "VMSLTU_VV",
+    "VMSLTU_VX", "VMSLE_VV", "VMSLE_VX", "VMSLE_VI", "VMSLEU_VV", "VMSLEU_VX", "VMSLEU_VI",
+    "VMSGT_VX", "VMSGT_VI", "VMSGTU_VX", "VMSGTU_VI", "VMERGE_VVM", "VMERGE_VXM", "VMERGE_VIM",
+    "VMACC_VV", "VMACC_VX", "VMADD_VV", "VMADD_VX", "VNMSAC_VV", "VNMSAC_VX", "VNMSUB_VV",
+    "VNMSUB_VX", "VWMACCU_VV", "VWMACCU_VX", "VWMACC_VV", "VWMACC_VX", "VWMACCUS_VX", "VWMACCSU_VV",
+    "VWMACCSU_VX", "VMIN_VV", "VMIN_VX", "VMINU_VV", "VMINU_VX", "VMAX_VV", "VMAX_VX", "VMAXU_VV",
+    "VMAXU_VX", "VLSE8_V", "VLSE16_V", "VLSE32_V", "VLSE64_V", "VSSE8_V", "VSSE16_V", "VSSE32_V",
+    "VSSE64_V", "VLUXEI8_V", "VLUXEI16_V", "VLUXEI32_V", "VLUXEI64_V", "VLOXEI8_V", "VLOXEI16_V",
+    "VLOXEI32_V", "VLOXEI64_V", "VSUXEI8_V", "VSUXEI16_V", "VSUXEI32_V", "VSUXEI64_V", "VSOXEI8_V",
+    "VSOXEI16_V", "VSOXEI32_V", "VSOXEI64_V", "VID_V", "VFMADD_VV", "VFMADD_VF", "VFNMADD_VV",
+    "VFNMADD_VF", "VFMSUB_VV", "VFMSUB_VF", "VFNMSUB_VV", "VFNMSUB_VF", "VFMACC_VV", "VFMACC_VF",
+    "VFNMACC_VV", "VFNMACC_VF", "VFMSAC_VV", "VFMSAC_VF", "VFNMSAC_VV", "VFNMSAC_VF", "VREDSUM_VS",
+    "VREDAND_VS", "VREDOR_VS", "VREDXOR_VS", "VREDMINU_VS", "VREDMIN_VS", "VREDMAXU_VS",
+    "VREDMAX_VS", "VFREDUSUM_VS", "VFREDOSUM_VS", "VFREDMIN_VS", "VFREDMAX_VS", "VFWREDUSUM_VS",
+    "VFWREDOSUM_VS", "VFWADD_VV", "VFWADD_VF", "VFWSUB_VV", "VFWSUB_VF", "VFWADD_WV", "VFWADD_WF",
+    "VFWSUB_WV", "VFWSUB_WF", "VFWMUL_VV", "VFWMUL_VF", "VFWMACC_VV", "VFWMACC_VF", "VFWNMACC_VV",
+    "VFWNMACC_VF", "VFWMSAC_VV", "VFWMSAC_VF", "VFWNMSAC_VV", "VFWNMSAC_VF", "VWMUL_VV", "VWMUL_VX",
+    "VNCLIP_WV", "VNCLIP_WX", "VNCLIP_WI", "VNCLIPU_WV", "VNCLIPU_WX", "VNCLIPU_WI", "VNSRL_WV",
+    "VNSRL_WX", "VNSRL_WI", "VNSRA_WV", "VNSRA_WX", "VNSRA_WI", "VSLIDE1UP_VX", "VSLIDE1DOWN_VX",
+    "VFSLIDE1UP_VF", "VFSLIDE1DOWN_VF", "VFADD_VV", "VFADD_VF", "VFSUB_VV", "VFSUB_VF", "VFRSUB_VF",
+    "VFMUL_VV", "VFMUL_VF", "VFDIV_VV", "VFDIV_VF", "VFRDIV_VF", "VFSQRT_V", "VFRSQRT7_V",
+    "VFREC7_V", "VFCLASS_V", "VFCVT_XU_F_V", "VFCVT_X_F_V", "VFCVT_F_XU_V", "VFCVT_F_X_V",
+    "VFCVT_RTZ_XU_F_V", "VFCVT_RTZ_X_F_V", "VFWCVT_XU_F_V", "VFWCVT_X_F_V", "VFWCVT_F_XU_V",
+    "VFWCVT_F_X_V", "VFWCVT_F_F_V", "VFWCVT_RTZ_XU_F_V", "VFWCVT_RTZ_X_F_V", "VFNCVT_XU_F_W",
+    "VFNCVT_X_F_W", "VFNCVT_F_XU_W", "VFNCVT_F_X_W", "VFNCVT_F_F_W", "VFNCVT_ROD_F_F_W",
+    "VFNCVT_RTZ_XU_F_W", "VFNCVT_RTZ_X_F_W", "VFSGNJ_VV", "VFSGNJ_VF", "VFSGNJN_VV", "VFSGNJN_VF",
+    "VFSGNJX_VV", "VFSGNJX_VF", "VFMIN_VV", "VFMIN_VF", "VFMAX_VV", "VFMAX_VF", "VMFEQ_VV",
+    "VMFEQ_VF", "VMFNE_VV", "VMFNE_VF", "VMFLT_VV", "VMFLT_VF", "VMFLE_VV", "VMFLE_VF", "VMFGT_VF",
+    "VMFGE_VF", "VRSUB_VX", "VRSUB_VI", "VSADD_VV", "VSADD_VX", "VSADD_VI", "VSADDU_VV",
+    "VSADDU_VX", "VSADDU_VI", "VAADDU_VV", "VAADDU_VX", "VAADD_VV", "VAADD_VX", "VASUBU_VV",
+    "VASUBU_VX", "VASUB_VV", "VASUB_VX", "VSBC_VVM", "VSBC_VXM", "VSEXT_VF2", "VSEXT_VF4",
+    "VSEXT_VF8", "VZEXT_VF2", "VZEXT_VF4", "VZEXT_VF8", "VSLIDEDOWN_VX", "VSLIDEDOWN_VI",
+    "VSLIDEUP_VX", "VSLIDEUP_VI", "VRGATHER_VV", "VRGATHER_VX", "VRGATHER_VI", "VRGATHEREI16_VV",
+    "VSMUL_VV", "VSMUL_VX", "VSSRA_VV", "VSSRA_VX", "VSSRA_VI", "VSSRL_VV", "VSSRL_VX", "VSSRL_VI",
+    "VSSUB_VV", "VSSUB_VX", "VSSUBU_VV", "VSSUBU_VX", "VWADD_VV", "VWADD_VX", "VWADD_WV",
+    "VWADD_WX", "VWADDU_VV", "VWADDU_VX", "VWADDU_WV", "VWADDU_WX", "VWSUB_VV", "VWSUB_VX",
+    "VWSUB_WV", "VWSUB_WX", "VWSUBU_VV", "VWSUBU_VX", "VWSUBU_WV", "VWSUBU_WX", "VWMULU_VV",
+    "VWMULU_VX", "VWMULSU_VV", "VWMULSU_VX", "VWREDSUM_VS", "VWREDSUMU_VS", "VMV1R_V", "VMV2R_V",
+    "VMV4R_V", "VMV8R_V", "VL1RE8_V", "VL1RE16_V", "VL1RE32_V", "VL1RE64_V", "VL2RE8_V",
+    "VL2RE16_V", "VL2RE32_V", "VL2RE64_V", "VL4RE8_V", "VL4RE16_V", "VL4RE32_V", "VL4RE64_V",
+    "VL8RE8_V", "VL8RE16_V", "VL8RE32_V", "VL8RE64_V", "VS1R_V", "VS2R_V", "VS4R_V", "VS8R_V",
+    "VADC_VVM", "VADC_VXM", "VADC_VIM", "VMADC_VV", "VMADC_VX", "VMADC_VI", "VMADC_VVM",
+    "VMADC_VXM", "VMADC_VIM", "VMSBC_VV", "VMSBC_VX", "VMSBC_VVM", "VMSBC_VXM", "VMSBF_M",
+    "VMSIF_M", "VMSOF_M", "VFIRST_M", "VCPOP_M", "VIOTA_M", "VCOMPRESS_VM", "VANDN_VV", "VANDN_VX",
+    "VROL_VV", "VROL_VX", "VROR_VV", "VROR_VX", "VROR_VI", "VCLZ_V", "VCTZ_V", "VCPOP_V", "VBREV_V",
+    "VBREV8_V", "VREV8_V", "VCLMUL_VV", "VCLMUL_VX", "VCLMULH_VV", "VCLMULH_VX", "VMAND_MM",
+    "VMNAND_MM", "VMANDN_MM", "VMOR_MM", "VMNOR_MM", "VMORN_MM", "VMXOR_MM", "VMXNOR_MM",
+    "VFMV_F_S", "VFMV_S_F", "VFMERGE_VFM", "VFMV_V_F", "VWSLL_VV", "VWSLL_VX", "VWSLL_VI", "VCHECK",
+    "CFU", "CZERO_EQZ", "CZERO_NEZ", "CBO_ZERO", "CBO_CLEAN", "CBO_FLUSH", "CBO_INVAL",
+    "PREFETCH_I", "PREFETCH_R", "PREFETCH_W", "SINVAL_VMA", "SFENCE_W_INVAL", "SFENCE_INVAL_IR",
+    "HINVAL_VVMA", "HINVAL_GVMA", "FLH", "FSH", "FMV_X_H", "FMV_H_X", "FCVT_S_H", "FCVT_H_S",
+    "FCVT_D_H", "FCVT_H_D", "FLI_S", "FLI_D", "FMINM_S", "FMAXM_S", "FMINM_D", "FMAXM_D", "FLEQ_S",
+    "FLTQ_S", "FLEQ_D", "FLTQ_D", "FROUND_S", "FROUNDNX_S", "FROUND_D", "FROUNDNX_D", "FCVTMOD_W_D",
+    "MOP", "WRS_NTO", "WRS_STO", "HLV_B", "HLV_BU", "HLV_H", "HLV_HU", "HLV_W", "HLV_WU", "HLV_D",
+    "HLVX_HU", "HLVX_WU", "HSV_B", "HSV_H", "HSV_W", "HSV_D", "AMOSWAP_B", "AMOADD_B", "AMOXOR_B",
+    "AMOAND_B", "AMOOR_B", "AMOMIN_B", "AMOMAX_B", "AMOMINU_B", "AMOMAXU_B", "AMOSWAP_H",
+    "AMOADD_H", "AMOXOR_H", "AMOAND_H", "AMOOR_H", "AMOMIN_H", "AMOMAX_H", "AMOMINU_H", "AMOMAXU_H",
+    "AMOCAS_B", "AMOCAS_H", "AMOCAS_W", "AMOCAS_D", "AMOCAS_Q", "FMADD_H", "FMSUB_H", "FNMSUB_H",
+    "FNMADD_H", "FADD_H", "FSUB_H", "FMUL_H", "FDIV_H", "FSQRT_H", "FSGNJ_H", "FSGNJN_H",
+    "FSGNJX_H", "FMIN_H", "FMAX_H", "FCVT_W_H", "FCVT_WU_H", "FCVT_L_H", "FCVT_LU_H", "FCVT_H_W",
+    "FCVT_H_WU", "FCVT_H_L", "FCVT_H_LU", "FEQ_H", "FLT_H", "FLE_H", "FCLASS_H", "FCVT_S_BF16",
+    "FCVT_BF16_S", "VFWCVTBF16_F_F_V", "VFNCVTBF16_F_F_W", "VFWMACCBF16_VV", "VFWMACCBF16_VF",
+    /* Track 2A: Vector Cryptography */
+    "VAESEF_VV", "VAESEF_VS", "VAESDF_VV", "VAESDF_VS", "VAESEM_VV", "VAESEM_VS", "VAESDM_VV",
+    "VAESDM_VS", "VAESZ_VS", "VAESKF1_VI", "VAESKF2_VI", "VGHSH_VV", "VGMUL_VV", "VSHA2MS_VV",
+    "VSHA2CH_VV", "VSHA2CL_VV", "VSM3ME_VV", "VSM3C_VI", "VSM4K_VI", "VSM4R_VV", "VSM4R_VS",
+    /* Track 2B: Scalar Cryptography */
+    "AES32DSI", "AES32DSMI", "AES32ESI", "AES32ESMI", "AES64DS", "AES64DSM", "AES64ES", "AES64ESM",
+    "AES64IM", "AES64KS1I", "AES64KS2", "SHA256SIG0", "SHA256SIG1", "SHA256SUM0", "SHA256SUM1",
+    "SHA512SIG0", "SHA512SIG1", "SHA512SUM0", "SHA512SUM1", "SHA512SIG0L", "SHA512SIG0H",
+    "SHA512SIG1L", "SHA512SIG1H", "SHA512SUM0R", "SHA512SUM1R", "SM4ED", "SM4KS", "SM3P0", "SM3P1",
+    /* Track 2C: Code-Size */
+    "CM_PUSH", "CM_POP", "CM_POPRET", "CM_POPRETZ", "CM_MVA01S", "CM_MVSA01", "CM_JT", "CM_JALT",
+    /* Zicfiss */
+    "SSPUSH", "SSPOPCHK", "SSRDP", "SSAMOSWAP_W", "SSAMOSWAP_D", "ILLEGAL"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
     const auto index = static_cast<std::size_t>(operation);
@@ -722,6 +167,22 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
     const uint32_t imm12 = ir >> 20;
     const uint32_t imm6 = imm12 >> 6;
     if (funct3 == 1) {
+        if (imm12 == 0x100) return OperationId::SHA256SUM0;
+        if (imm12 == 0x101) return OperationId::SHA256SUM1;
+        if (imm12 == 0x102) return OperationId::SHA256SIG0;
+        if (imm12 == 0x103) return OperationId::SHA256SIG1;
+        if (imm12 == 0x104) return OperationId::SHA512SUM0;
+        if (imm12 == 0x105) return OperationId::SHA512SUM1;
+        if (imm12 == 0x106) return OperationId::SHA512SIG0;
+        if (imm12 == 0x107) return OperationId::SHA512SIG1;
+        if (imm12 == 0x108) return OperationId::SM3P0;
+        if (imm12 == 0x109) return OperationId::SM3P1;
+        if (imm12 == 0x300) return OperationId::AES64IM;
+        if ((imm12 >> 4) == 0x31) {
+            const uint32_t rnum = imm12 & 0xFU;
+            if (rnum <= 10) return OperationId::AES64KS1I;
+            return OperationId::ILLEGAL;
+        }
         if (imm12 == 0x600) return OperationId::CLZ;
         if (imm12 == 0x601) return OperationId::CTZ;
         if (imm12 == 0x602) return OperationId::CPOP;
@@ -750,6 +211,53 @@ consteval auto generate_op_standard_table() {
     // funct3 = 0
     table.assign(0, 0x00, OperationId::ADD);
     table.assign(0, 0x20, OperationId::SUB);
+
+    // Track 2B: RV64 AES
+    table.assign(0, 0x19, OperationId::AES64ES);
+    table.assign(0, 0x1B, OperationId::AES64ESM);
+    table.assign(0, 0x1D, OperationId::AES64DS);
+    table.assign(0, 0x1F, OperationId::AES64DSM);
+    table.assign(0, 0x3F, OperationId::AES64KS2);
+
+    // Track 2B: RV32 SHA-512
+    table.assign(0, 0x28, OperationId::SHA512SUM0R);
+    table.assign(0, 0x29, OperationId::SHA512SUM1R);
+    table.assign(0, 0x2A, OperationId::SHA512SIG0L);
+    table.assign(0, 0x2B, OperationId::SHA512SIG1L);
+    table.assign(0, 0x2E, OperationId::SHA512SIG0H);
+    table.assign(0, 0x2F, OperationId::SHA512SIG1H);
+
+    // Track 2B: RV32 AES Byte-Select (bs = 0..3)
+    table.assign(0, 0x11, OperationId::AES32ESI);
+    table.assign(0, 0x31, OperationId::AES32ESI);
+    table.assign(0, 0x51, OperationId::AES32ESI);
+    table.assign(0, 0x71, OperationId::AES32ESI);
+
+    table.assign(0, 0x13, OperationId::AES32ESMI);
+    table.assign(0, 0x33, OperationId::AES32ESMI);
+    table.assign(0, 0x53, OperationId::AES32ESMI);
+    table.assign(0, 0x73, OperationId::AES32ESMI);
+
+    table.assign(0, 0x15, OperationId::AES32DSI);
+    table.assign(0, 0x35, OperationId::AES32DSI);
+    table.assign(0, 0x55, OperationId::AES32DSI);
+    table.assign(0, 0x75, OperationId::AES32DSI);
+
+    table.assign(0, 0x17, OperationId::AES32DSMI);
+    table.assign(0, 0x37, OperationId::AES32DSMI);
+    table.assign(0, 0x57, OperationId::AES32DSMI);
+    table.assign(0, 0x77, OperationId::AES32DSMI);
+
+    // Track 2B: ShangMi SM4 Byte-Select (bs = 0..3)
+    table.assign(0, 0x18, OperationId::SM4ED);
+    table.assign(0, 0x38, OperationId::SM4ED);
+    table.assign(0, 0x58, OperationId::SM4ED);
+    table.assign(0, 0x78, OperationId::SM4ED);
+
+    table.assign(0, 0x1A, OperationId::SM4KS);
+    table.assign(0, 0x3A, OperationId::SM4KS);
+    table.assign(0, 0x5A, OperationId::SM4KS);
+    table.assign(0, 0x7A, OperationId::SM4KS);
 
     // funct3 = 1
     table.assign(1, 0x00, OperationId::SLL);
@@ -886,6 +394,8 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
             return (rd_is_zero && rs1_is_zero) ? OperationId::SRET : OperationId::ILLEGAL;
         case 0x302:
             return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::ILLEGAL;
+        case 0x702:
+            return (rd_is_zero && rs1_is_zero) ? OperationId::MNRET : OperationId::ILLEGAL;
         case 0x105:
             return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::ILLEGAL;
         case 0x00D:
@@ -1038,32 +548,63 @@ constexpr auto decode_ext_m_op32 = decode_table<kMTable32>;
 }
 
 consteval auto generate_amo_table() {
-    DecodeTable<OperationId, 2, 32, OperationId::ILLEGAL> table;
+    DecodeTable<OperationId, 5, 32, OperationId::ILLEGAL> table;
+    // funct3 == 0 (8-bit AMO*B - Zabha / Zacas)
+    table.assign(0, 0x00, OperationId::AMOADD_B);
+    table.assign(0, 0x01, OperationId::AMOSWAP_B);
+    table.assign(0, 0x04, OperationId::AMOXOR_B);
+    table.assign(0, 0x05, OperationId::AMOCAS_B);
+    table.assign(0, 0x08, OperationId::AMOOR_B);
+    table.assign(0, 0x0C, OperationId::AMOAND_B);
+    table.assign(0, 0x10, OperationId::AMOMIN_B);
+    table.assign(0, 0x14, OperationId::AMOMAX_B);
+    table.assign(0, 0x18, OperationId::AMOMINU_B);
+    table.assign(0, 0x1C, OperationId::AMOMAXU_B);
+
+    // funct3 == 1 (16-bit AMO*H - Zabha / Zacas)
+    table.assign(1, 0x00, OperationId::AMOADD_H);
+    table.assign(1, 0x01, OperationId::AMOSWAP_H);
+    table.assign(1, 0x04, OperationId::AMOXOR_H);
+    table.assign(1, 0x05, OperationId::AMOCAS_H);
+    table.assign(1, 0x08, OperationId::AMOOR_H);
+    table.assign(1, 0x0C, OperationId::AMOAND_H);
+    table.assign(1, 0x10, OperationId::AMOMIN_H);
+    table.assign(1, 0x14, OperationId::AMOMAX_H);
+    table.assign(1, 0x18, OperationId::AMOMINU_H);
+    table.assign(1, 0x1C, OperationId::AMOMAXU_H);
+
     // funct3 == 2 (32-bit AMO*W)
-    table.assign(0, 0x00, OperationId::AMOADD_W);
-    table.assign(0, 0x01, OperationId::AMOSWAP_W);
-    table.assign(0, 0x02, OperationId::LR_W);
-    table.assign(0, 0x03, OperationId::SC_W);
-    table.assign(0, 0x04, OperationId::AMOXOR_W);
-    table.assign(0, 0x08, OperationId::AMOOR_W);
-    table.assign(0, 0x0C, OperationId::AMOAND_W);
-    table.assign(0, 0x10, OperationId::AMOMIN_W);
-    table.assign(0, 0x14, OperationId::AMOMAX_W);
-    table.assign(0, 0x18, OperationId::AMOMINU_W);
-    table.assign(0, 0x1C, OperationId::AMOMAXU_W);
+    table.assign(2, 0x00, OperationId::AMOADD_W);
+    table.assign(2, 0x01, OperationId::AMOSWAP_W);
+    table.assign(2, 0x02, OperationId::LR_W);
+    table.assign(2, 0x03, OperationId::SC_W);
+    table.assign(2, 0x04, OperationId::AMOXOR_W);
+    table.assign(2, 0x05, OperationId::AMOCAS_W);
+    table.assign(2, 0x09, OperationId::SSAMOSWAP_W);
+    table.assign(2, 0x08, OperationId::AMOOR_W);
+    table.assign(2, 0x0C, OperationId::AMOAND_W);
+    table.assign(2, 0x10, OperationId::AMOMIN_W);
+    table.assign(2, 0x14, OperationId::AMOMAX_W);
+    table.assign(2, 0x18, OperationId::AMOMINU_W);
+    table.assign(2, 0x1C, OperationId::AMOMAXU_W);
 
     // funct3 == 3 (64-bit AMO*D)
-    table.assign(1, 0x00, OperationId::AMOADD_D);
-    table.assign(1, 0x01, OperationId::AMOSWAP_D);
-    table.assign(1, 0x02, OperationId::LR_D);
-    table.assign(1, 0x03, OperationId::SC_D);
-    table.assign(1, 0x04, OperationId::AMOXOR_D);
-    table.assign(1, 0x08, OperationId::AMOOR_D);
-    table.assign(1, 0x0C, OperationId::AMOAND_D);
-    table.assign(1, 0x10, OperationId::AMOMIN_D);
-    table.assign(1, 0x14, OperationId::AMOMAX_D);
-    table.assign(1, 0x18, OperationId::AMOMINU_D);
-    table.assign(1, 0x1C, OperationId::AMOMAXU_D);
+    table.assign(3, 0x00, OperationId::AMOADD_D);
+    table.assign(3, 0x01, OperationId::AMOSWAP_D);
+    table.assign(3, 0x02, OperationId::LR_D);
+    table.assign(3, 0x03, OperationId::SC_D);
+    table.assign(3, 0x04, OperationId::AMOXOR_D);
+    table.assign(3, 0x05, OperationId::AMOCAS_D);
+    table.assign(3, 0x09, OperationId::SSAMOSWAP_D);
+    table.assign(3, 0x08, OperationId::AMOOR_D);
+    table.assign(3, 0x0C, OperationId::AMOAND_D);
+    table.assign(3, 0x10, OperationId::AMOMIN_D);
+    table.assign(3, 0x14, OperationId::AMOMAX_D);
+    table.assign(3, 0x18, OperationId::AMOMINU_D);
+    table.assign(3, 0x1C, OperationId::AMOMAXU_D);
+
+    // funct3 == 4 (128-bit AMOCAS.Q - Zacas RV64)
+    table.assign(4, 0x05, OperationId::AMOCAS_Q);
 
     return table;
 }
@@ -1071,8 +612,10 @@ consteval auto generate_amo_table() {
 constexpr auto kAmoTable = generate_amo_table();
 
 [[nodiscard]] constexpr auto decode_ext_a(simrv::xlen::Funct7 funct7, isa::Funct3 funct3,
-                                          simrv::xlen::RegId rs2) noexcept -> OperationId {
-    if (!isa::amo_width_supported(funct3)) {
+                                          simrv::xlen::RegId rd, simrv::xlen::RegId rs2) noexcept
+    -> OperationId {
+    const auto f3 = std::to_underlying(funct3);
+    if (f3 > 4) {
         return OperationId::ILLEGAL;
     }
     const auto funct5 = static_cast<isa::Funct5Amo>(funct7 >> 2);
@@ -1080,23 +623,49 @@ constexpr auto kAmoTable = generate_amo_table();
     if (funct5 == isa::Funct5Amo::Lr && rs2 != simrv::xlen::RegId::Zero) {
         return OperationId::ILLEGAL;
     }
+    const bool pair_unaligned =
+        ((std::to_underlying(rd) & 1U) != 0U) || ((std::to_underlying(rs2) & 1U) != 0U);
+    if (funct5 == isa::Funct5Amo::Cas) {
+        if (f3 == 4) {
+            if constexpr (!simrv::xlen::kIsXLen64) {
+                return OperationId::ILLEGAL;
+            }
+            if (pair_unaligned) {
+                return OperationId::ILLEGAL;
+            }
+        } else if (f3 == 3) {
+            if constexpr (!simrv::xlen::kIsXLen64) {
+                if (pair_unaligned) {
+                    return OperationId::ILLEGAL;
+                }
+            }
+        }
+    } else {
+        if (f3 == 4 || (!simrv::xlen::kIsXLen64 && f3 == 3)) {
+            return OperationId::ILLEGAL;
+        }
+    }
     const auto funct5_idx = std::to_underlying(funct5);
     if (funct5_idx < 32) {
-        return kAmoTable.lookup(std::to_underlying(funct3) - 2, funct5_idx);
+        return kAmoTable.lookup(f3, funct5_idx);
     }
     return OperationId::ILLEGAL;
 }
 
 consteval auto generate_fma_table() {
-    DecodeTable<OperationId, 128, 2, OperationId::ILLEGAL> table;
+    DecodeTable<OperationId, 128, 3, OperationId::ILLEGAL> table;
     table.assign(std::to_underlying(Opcode::MAdd), 0, OperationId::FMADD_S);
     table.assign(std::to_underlying(Opcode::MAdd), 1, OperationId::FMADD_D);
+    table.assign(std::to_underlying(Opcode::MAdd), 2, OperationId::FMADD_H);
     table.assign(std::to_underlying(Opcode::MSub), 0, OperationId::FMSUB_S);
     table.assign(std::to_underlying(Opcode::MSub), 1, OperationId::FMSUB_D);
+    table.assign(std::to_underlying(Opcode::MSub), 2, OperationId::FMSUB_H);
     table.assign(std::to_underlying(Opcode::NMSub), 0, OperationId::FNMSUB_S);
     table.assign(std::to_underlying(Opcode::NMSub), 1, OperationId::FNMSUB_D);
+    table.assign(std::to_underlying(Opcode::NMSub), 2, OperationId::FNMSUB_H);
     table.assign(std::to_underlying(Opcode::NMAdd), 0, OperationId::FNMADD_S);
     table.assign(std::to_underlying(Opcode::NMAdd), 1, OperationId::FNMADD_D);
+    table.assign(std::to_underlying(Opcode::NMAdd), 2, OperationId::FNMADD_H);
     return table;
 }
 
@@ -1104,7 +673,7 @@ constexpr auto kFmaTable = generate_fma_table();
 
 [[nodiscard]] constexpr auto decode_fma(Opcode op, uint32_t funct7) noexcept -> OperationId {
     const uint32_t fmt = funct7 & 0x03;
-    if (fmt > 1) {
+    if (fmt > 2) {
         return OperationId::ILLEGAL;
     }
     return kFmaTable.lookup(std::to_underlying(op), fmt);
@@ -1241,6 +810,7 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
     const uint32_t f5 = funct7 >> 2;
     if (fmt == 0) {
         if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_S_H;
+        if (f5 == 0x08 && rs2 == 6) return OperationId::FCVT_S_BF16;
         return decode_op_fp_single(funct3, f5, rs2);
     }
     if (fmt == 1) {
@@ -1248,10 +818,57 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
         return decode_op_fp_double(funct3, f5, rs2);
     }
     if (fmt == 2) {
-        if (f5 == 0x08 && rs2 == 0) return OperationId::FCVT_H_S;
-        if (f5 == 0x08 && rs2 == 1) return OperationId::FCVT_H_D;
-        if (f5 == 0x1C && rs2 == 0 && funct3 == 0) return OperationId::FMV_X_H;
-        if (f5 == 0x1E && rs2 == 0 && funct3 == 0) return OperationId::FMV_H_X;
+        switch (f5) {
+            case 0x00:
+                return OperationId::FADD_H;
+            case 0x01:
+                return OperationId::FSUB_H;
+            case 0x02:
+                return OperationId::FMUL_H;
+            case 0x03:
+                return OperationId::FDIV_H;
+            case 0x04:
+                if (funct3 == 0) return OperationId::FSGNJ_H;
+                if (funct3 == 1) return OperationId::FSGNJN_H;
+                if (funct3 == 2) return OperationId::FSGNJX_H;
+                return OperationId::ILLEGAL;
+            case 0x05:
+                if (funct3 == 0) return OperationId::FMIN_H;
+                if (funct3 == 1) return OperationId::FMAX_H;
+                return OperationId::ILLEGAL;
+            case 0x08:
+                if (rs2 == 0) return OperationId::FCVT_H_S;
+                if (rs2 == 1) return OperationId::FCVT_H_D;
+                if (rs2 == 8) return OperationId::FCVT_BF16_S;
+                return OperationId::ILLEGAL;
+            case 0x0B:
+                return rs2 == 0 ? OperationId::FSQRT_H : OperationId::ILLEGAL;
+            case 0x14:
+                if (funct3 == 2) return OperationId::FEQ_H;
+                if (funct3 == 1) return OperationId::FLT_H;
+                if (funct3 == 0) return OperationId::FLE_H;
+                return OperationId::ILLEGAL;
+            case 0x18:
+                if (rs2 == 0) return OperationId::FCVT_W_H;
+                if (rs2 == 1) return OperationId::FCVT_WU_H;
+                if (rs2 == 2) return OperationId::FCVT_L_H;
+                if (rs2 == 3) return OperationId::FCVT_LU_H;
+                return OperationId::ILLEGAL;
+            case 0x1A:
+                if (rs2 == 0) return OperationId::FCVT_H_W;
+                if (rs2 == 1) return OperationId::FCVT_H_WU;
+                if (rs2 == 2) return OperationId::FCVT_H_L;
+                if (rs2 == 3) return OperationId::FCVT_H_LU;
+                return OperationId::ILLEGAL;
+            case 0x1C:
+                if (rs2 == 0 && funct3 == 0) return OperationId::FMV_X_H;
+                if (rs2 == 0 && funct3 == 1) return OperationId::FCLASS_H;
+                return OperationId::ILLEGAL;
+            case 0x1E:
+                return (rs2 == 0 && funct3 == 0) ? OperationId::FMV_H_X : OperationId::ILLEGAL;
+            default:
+                return OperationId::ILLEGAL;
+        }
     }
     return OperationId::ILLEGAL;
 }
@@ -1497,7 +1114,10 @@ consteval auto generate_vector_common_table() {
                             {1, OperationId::VFWMUL_VV},
                             {5, OperationId::VFWMUL_VF}});
     table.assign_row(0x3A, {{2, OperationId::VWMULSU_VV}, {6, OperationId::VWMULSU_VX}});
-    table.assign_row(0x3B, {{2, OperationId::VWMUL_VV}, {6, OperationId::VWMUL_VX}});
+    table.assign_row(0x3B, {{1, OperationId::VFWMACCBF16_VV},
+                            {5, OperationId::VFWMACCBF16_VF},
+                            {2, OperationId::VWMUL_VV},
+                            {6, OperationId::VWMUL_VX}});
     table.assign_row(0x3C, {{2, OperationId::VWMACCU_VV},
                             {6, OperationId::VWMACCU_VX},
                             {1, OperationId::VFWMACC_VV},
@@ -1578,6 +1198,7 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, simrv::xlen::Instruction
                 if (vs1 == 10) return OperationId::VFWCVT_F_XU_V;
                 if (vs1 == 11) return OperationId::VFWCVT_F_X_V;
                 if (vs1 == 12) return OperationId::VFWCVT_F_F_V;
+                if (vs1 == 13) return OperationId::VFWCVTBF16_F_F_V;
                 if (vs1 == 14) return OperationId::VFWCVT_RTZ_XU_F_V;
                 if (vs1 == 15) return OperationId::VFWCVT_RTZ_X_F_V;
                 if (vs1 == 16) return OperationId::VFNCVT_XU_F_W;
@@ -1588,6 +1209,7 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, simrv::xlen::Instruction
                 if (vs1 == 21) return OperationId::VFNCVT_ROD_F_F_W;
                 if (vs1 == 22) return OperationId::VFNCVT_RTZ_XU_F_W;
                 if (vs1 == 23) return OperationId::VFNCVT_RTZ_X_F_W;
+                if (vs1 == 29) return OperationId::VFNCVTBF16_F_F_W;
             } else if (funct3 == 2) {
                 uint32_t rs1_val = (ir >> 15) & 0x1F;
                 if (rs1_val == 7) return OperationId::VSEXT_VF2;
@@ -1648,6 +1270,69 @@ auto decode_vector_whole_register_move(simrv::xlen::Instruction ir) -> Operation
 }
 
 }  // namespace
+
+auto decode_ext_op_p(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
+    const bool vm = (ir & (1u << 25)) != 0;
+    if (funct3 != 2U || !vm) return OperationId::ILLEGAL;
+    const uint32_t f6 = funct7 >> 1U;
+    const uint32_t vs1 = (ir >> 15U) & 0x1FU;
+    switch (f6) {
+        case 0x20U:
+            return OperationId::VSM3ME_VV;
+        case 0x21U:
+            return OperationId::VSM4K_VI;
+        case 0x22U:
+            return OperationId::VAESKF1_VI;
+        case 0x28U:
+            switch (vs1) {
+                case 0x00U:
+                    return OperationId::VAESDM_VV;
+                case 0x01U:
+                    return OperationId::VAESDF_VV;
+                case 0x02U:
+                    return OperationId::VAESEM_VV;
+                case 0x03U:
+                    return OperationId::VAESEF_VV;
+                case 0x10U:
+                    return OperationId::VSM4R_VV;
+                case 0x11U:
+                    return OperationId::VGMUL_VV;
+                default:
+                    return OperationId::ILLEGAL;
+            }
+        case 0x29U:
+            switch (vs1) {
+                case 0x00U:
+                    return OperationId::VAESDM_VS;
+                case 0x01U:
+                    return OperationId::VAESDF_VS;
+                case 0x02U:
+                    return OperationId::VAESEM_VS;
+                case 0x03U:
+                    return OperationId::VAESEF_VS;
+                case 0x07U:
+                    return OperationId::VAESZ_VS;
+                case 0x10U:
+                    return OperationId::VSM4R_VS;
+                default:
+                    return OperationId::ILLEGAL;
+            }
+        case 0x2AU:
+            return OperationId::VAESKF2_VI;
+        case 0x2BU:
+            return OperationId::VSM3C_VI;
+        case 0x2CU:
+            return OperationId::VGHSH_VV;
+        case 0x2DU:
+            return OperationId::VSHA2MS_VV;
+        case 0x2EU:
+            return OperationId::VSHA2CH_VV;
+        case 0x2FU:
+            return OperationId::VSHA2CL_VV;
+        default:
+            return OperationId::ILLEGAL;
+    }
+}
 
 auto decode_ext_v(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
     if (funct3 == 7) {
@@ -1814,265 +1499,6 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
     }
 }
 
-auto make_r_type(uint32_t opcode, uint32_t funct3, uint32_t funct7, uint32_t rd, uint32_t rs1,
-                 uint32_t rs2) -> simrv::xlen::Instruction {
-    return opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) | (funct7 << 25);
-}
-
-auto make_i_type(uint32_t opcode, uint32_t funct3, uint32_t rd, uint32_t rs1, uint32_t imm)
-    -> simrv::xlen::Instruction {
-    return opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | ((imm & 0xFFF) << 20);
-}
-
-auto make_s_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2, uint32_t imm)
-    -> simrv::xlen::Instruction {
-    return opcode | ((imm & 0x1F) << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) |
-           (((imm >> 5) & 0x7F) << 25);
-}
-
-auto make_b_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2, uint32_t imm)
-    -> simrv::xlen::Instruction {
-    return opcode | (((imm >> 11) & 0x1) << 7) | (((imm >> 1) & 0xF) << 8) | (funct3 << 12) |
-           (rs1 << 15) | (rs2 << 20) | (((imm >> 5) & 0x3F) << 25) | (((imm >> 12) & 0x1) << 31);
-}
-
-auto make_u_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> simrv::xlen::Instruction {
-    return opcode | (rd << 7) | (imm & 0xFFFFF000);
-}
-
-auto make_j_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> simrv::xlen::Instruction {
-    return opcode | (rd << 7) | (((imm >> 12) & 0xFF) << 12) | (((imm >> 11) & 0x1) << 20) |
-           (((imm >> 1) & 0x3FF) << 21) | (((imm >> 20) & 0x1) << 31);
-}
-
-auto decompress_q0(simrv::xlen::Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p,
-                   uint32_t rs2_p) -> simrv::xlen::Instruction {
-    switch (static_cast<isa::Q0Op>(op)) {
-        case isa::Q0Op::ADDI4SPN: {
-            const uint32_t imm = ((ir >> 7) & 0xF) << 6 | ((ir >> 11) & 0x3) << 4 |
-                                 ((ir >> 5) & 0x1) << 3 | ((ir >> 6) & 0x1) << 2;
-            if (imm == 0) return 0;
-            return make_i_type(0x13, 0x0, rs2_p, 2, imm);
-        }
-        case isa::Q0Op::FLD: {
-            const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
-            return make_i_type(0x07, 0x3, rs2_p, rs1_p, imm);
-        }
-        case isa::Q0Op::LW: {
-            const uint32_t imm =
-                ((ir >> 5) & 0x1) << 6 | ((ir >> 10) & 0x7) << 3 | ((ir >> 6) & 0x1) << 2;
-            return make_i_type(0x03, 0x2, rs2_p, rs1_p, imm);
-        }
-        case isa::Q0Op::LD_FLW: {
-            if (is_rv64) {
-                const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
-                return make_i_type(0x03, 0x3, rs2_p, rs1_p, imm);
-            } else {
-                const uint32_t imm =
-                    ((ir >> 5) & 0x1) << 6 | ((ir >> 10) & 0x7) << 3 | ((ir >> 6) & 0x1) << 2;
-                return make_i_type(0x07, 0x2, rs2_p, rs1_p, imm);
-            }
-        }
-        case isa::Q0Op::FSD: {
-            const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
-            return make_s_type(0x27, 0x3, rs1_p, rs2_p, imm);
-        }
-        case isa::Q0Op::SW: {
-            const uint32_t imm =
-                ((ir >> 5) & 0x1) << 6 | ((ir >> 10) & 0x7) << 3 | ((ir >> 6) & 0x1) << 2;
-            return make_s_type(0x23, 0x2, rs1_p, rs2_p, imm);
-        }
-        case isa::Q0Op::SD_FSW: {
-            if (is_rv64) {
-                const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
-                return make_s_type(0x23, 0x3, rs1_p, rs2_p, imm);
-            } else {
-                const uint32_t imm =
-                    ((ir >> 5) & 0x1) << 6 | ((ir >> 10) & 0x7) << 3 | ((ir >> 6) & 0x1) << 2;
-                return make_s_type(0x27, 0x2, rs1_p, rs2_p, imm);
-            }
-        }
-        default:
-            return 0;
-    }
-}
-
-auto decompress_q1_op4(simrv::xlen::Instruction ir, uint32_t rs1_p, uint32_t rs2_p)
-    -> simrv::xlen::Instruction {
-    const uint32_t sub_op = (ir >> 10) & 0x3;
-    if (sub_op == 0 || sub_op == 1) {
-        const uint32_t shamt = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) << 5);
-        const uint32_t funct7 = (sub_op == 1) ? 0x20 : 0x00;
-        return make_r_type(0x13, 0x5, funct7, rs1_p, rs1_p, shamt);
-    }
-    if (sub_op == 2) {
-        const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
-        return make_i_type(0x13, 0x7, rs1_p, rs1_p, imm);
-    }
-    const uint32_t funct_sub = (ir >> 5) & 0x3;
-    const uint32_t bit12 = (ir >> 12) & 0x1;
-    if (bit12 == 0) {
-        switch (funct_sub) {
-            case 0:
-                return make_r_type(0x33, 0x0, 0x20, rs1_p, rs1_p, rs2_p);
-            case 1:
-                return make_r_type(0x33, 0x4, 0x00, rs1_p, rs1_p, rs2_p);
-            case 2:
-                return make_r_type(0x33, 0x6, 0x00, rs1_p, rs1_p, rs2_p);
-            case 3:
-                return make_r_type(0x33, 0x7, 0x00, rs1_p, rs1_p, rs2_p);
-            default:
-                break;
-        }
-    } else {
-        switch (funct_sub) {
-            case 0:
-                return make_r_type(0x3B, 0x0, 0x20, rs1_p, rs1_p, rs2_p);
-            case 1:
-                return make_r_type(0x3B, 0x0, 0x00, rs1_p, rs1_p, rs2_p);
-            default:
-                break;
-        }
-    }
-    return 0;
-}
-
-auto decompress_q1_op1(simrv::xlen::Instruction ir, bool is_rv64, uint32_t rs1_rd)
-    -> simrv::xlen::Instruction {
-    if (is_rv64) {
-        const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
-        return make_i_type(0x1B, 0x0, rs1_rd, rs1_rd, imm);
-    } else {
-        const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 |
-                             ((ir >> 6) & 0x1) << 7 | ((ir >> 7) & 0x1) << 6 |
-                             ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
-                             ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
-        return make_j_type(0x6F, 1, imm);
-    }
-}
-
-auto decompress_q1_op3(simrv::xlen::Instruction ir, uint32_t rs1_rd) -> simrv::xlen::Instruction {
-    if (rs1_rd == 2) {
-        const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x3) << 7 |
-                             ((ir >> 5) & 0x1) << 6 | ((ir >> 6) & 0x1) << 4 |
-                             (((ir >> 12) & 0x1) ? 0xFFFFFE00 : 0);
-        return make_i_type(0x13, 0x0, 2, 2, imm);
-    } else {
-        const uint32_t imm = (((ir >> 2) & 0x1F) << 12) | (((ir >> 12) & 0x1) ? 0xFFFE0000 : 0);
-        return make_u_type(0x37, rs1_rd, imm);
-    }
-}
-
-auto decompress_q1(simrv::xlen::Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd,
-                   uint32_t rs1_p, uint32_t rs2_p) -> simrv::xlen::Instruction {
-    switch (static_cast<isa::Q1Op>(op)) {
-        case isa::Q1Op::ADDI: {
-            const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
-            return make_i_type(0x13, 0x0, rs1_rd, rs1_rd, imm);
-        }
-        case isa::Q1Op::JAL_ADDIW:
-            return decompress_q1_op1(ir, is_rv64, rs1_rd);
-        case isa::Q1Op::LI: {
-            const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
-            return make_i_type(0x13, 0x0, rs1_rd, 0, imm);
-        }
-        case isa::Q1Op::LUI_ADDI16SP:
-            return decompress_q1_op3(ir, rs1_rd);
-        case isa::Q1Op::ARITH:
-            return decompress_q1_op4(ir, rs1_p, rs2_p);
-        case isa::Q1Op::J: {
-            const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 |
-                                 ((ir >> 6) & 0x1) << 7 | ((ir >> 7) & 0x1) << 6 |
-                                 ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
-                                 ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
-            return make_j_type(0x6F, 0, imm);
-        }
-        case isa::Q1Op::BEQZ:
-        case isa::Q1Op::BNEZ: {
-            const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x3) << 1 |
-                                 ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x3) << 3 |
-                                 (((ir >> 12) & 0x1) ? 0xFFFFFF00 : 0);
-            return make_b_type(0x63, (static_cast<isa::Q1Op>(op) == isa::Q1Op::BEQZ) ? 0x0 : 0x1,
-                               rs1_p, 0, imm);
-        }
-        default:
-            break;
-    }
-    return 0;
-}
-
-auto decompress_q2_op4(simrv::xlen::Instruction ir, uint32_t rs1_rd, uint32_t rs2)
-    -> simrv::xlen::Instruction {
-    const uint32_t bit12 = (ir >> 12) & 0x1;
-    if (bit12 == 0) {
-        if (rs2 == 0) {
-            return make_i_type(0x67, 0x0, 0, rs1_rd, 0);
-        } else {
-            return make_r_type(0x33, 0x0, 0x00, rs1_rd, 0, rs2);
-        }
-    } else {
-        if (rs1_rd == 0 && rs2 == 0) return 0x00100073;
-        if (rs2 == 0) {
-            return make_i_type(0x67, 0x0, 1, rs1_rd, 0);
-        } else {
-            return make_r_type(0x33, 0x0, 0x00, rs1_rd, rs1_rd, rs2);
-        }
-    }
-}
-
-auto decompress_q2(simrv::xlen::Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd,
-                   uint32_t rs2) -> simrv::xlen::Instruction {
-    switch (static_cast<isa::Q2Op>(op)) {
-        case isa::Q2Op::SLLI: {
-            const uint32_t shamt = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) << 5);
-            return make_r_type(0x13, 0x1, 0x00, rs1_rd, rs1_rd, shamt);
-        }
-        case isa::Q2Op::FLDSP: {
-            const uint32_t imm =
-                ((ir >> 2) & 0x7) << 6 | ((ir >> 5) & 0x3) << 3 | ((ir >> 12) & 0x1) << 5;
-            return make_i_type(0x07, 0x3, rs1_rd, 2, imm);
-        }
-        case isa::Q2Op::LWSP: {
-            const uint32_t imm =
-                ((ir >> 2) & 0x3) << 6 | ((ir >> 4) & 0x7) << 2 | ((ir >> 12) & 0x1) << 5;
-            return make_i_type(0x03, 0x2, rs1_rd, 2, imm);
-        }
-        case isa::Q2Op::LDSP_FLWSP: {
-            if (is_rv64) {
-                const uint32_t imm =
-                    ((ir >> 2) & 0x7) << 6 | ((ir >> 5) & 0x3) << 3 | ((ir >> 12) & 0x1) << 5;
-                return make_i_type(0x03, 0x3, rs1_rd, 2, imm);
-            } else {
-                const uint32_t imm =
-                    ((ir >> 2) & 0x3) << 6 | ((ir >> 4) & 0x7) << 2 | ((ir >> 12) & 0x1) << 5;
-                return make_i_type(0x07, 0x2, rs1_rd, 2, imm);
-            }
-        }
-        case isa::Q2Op::ALU_JR:
-            return decompress_q2_op4(ir, rs1_rd, rs2);
-        case isa::Q2Op::FSDSP: {
-            const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
-            return make_s_type(0x27, 0x3, 2, rs2, imm);
-        }
-        case isa::Q2Op::SWSP: {
-            const uint32_t imm = ((ir >> 7) & 0x3) << 6 | ((ir >> 9) & 0xF) << 2;
-            return make_s_type(0x23, 0x2, 2, rs2, imm);
-        }
-        case isa::Q2Op::SDSP_FSWSP: {
-            if (is_rv64) {
-                const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
-                return make_s_type(0x23, 0x3, 2, rs2, imm);
-            } else {
-                const uint32_t imm = ((ir >> 7) & 0x3) << 6 | ((ir >> 9) & 0xF) << 2;
-                return make_s_type(0x27, 0x2, 2, rs2, imm);
-            }
-        }
-        default:
-            break;
-    }
-    return 0;
-}
-
 }  // namespace
 
 auto decoder(simrv::xlen::Instruction ir) -> OperationId {
@@ -2097,12 +1523,30 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
         constexpr uint32_t kMopRrMask = 0xfe00707fU;
         for (size_t index = 0; index < kMopMatches.size(); ++index) {
             const uint32_t mask = index < 32 ? kMopRMask : kMopRrMask;
-            if ((ir & mask) == kMopMatches[index]) return OperationId::MOP;
+            if ((ir & mask) == kMopMatches[index]) {
+                if (kMopMatches[index] == 0xce004073U && dec.rd() == simrv::xlen::RegId::Zero &&
+                    dec.rs1() == simrv::xlen::RegId::Zero &&
+                    (dec.rs2() == simrv::xlen::RegId::Ra || dec.rs2() == simrv::xlen::RegId::T0)) {
+                    return OperationId::SSPUSH;
+                }
+                if (kMopMatches[index] == 0xcdc04073U) {
+                    if (dec.rd() == simrv::xlen::RegId::Zero &&
+                        (dec.rs1() == simrv::xlen::RegId::Ra ||
+                         dec.rs1() == simrv::xlen::RegId::T0)) {
+                        return OperationId::SSPOPCHK;
+                    }
+                    if (dec.rs1() == simrv::xlen::RegId::Zero &&
+                        dec.rd() != simrv::xlen::RegId::Zero) {
+                        return OperationId::SSRDP;
+                    }
+                }
+                return OperationId::MOP;
+            }
         }
     }
 
     if (op == Opcode::Amo) {
-        return decode_ext_a(funct7, dec.funct3(), dec.rs2());
+        return decode_ext_a(funct7, dec.funct3(), dec.rd(), dec.rs2());
     }
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp || op == Opcode::MAdd ||
         op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
@@ -2118,6 +1562,9 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
     if (op == Opcode::OpV) {
         return decode_ext_v(funct3, funct7, ir);
     }
+    if (op == Opcode::OpP) {
+        return decode_ext_op_p(funct3, funct7, ir);
+    }
     if (op == Opcode::Custom0) {
         return OperationId::CFU;
     }
@@ -2125,82 +1572,10 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
         return decode_ext_m(op, funct3);
     }
     auto res = decode_ext_i(op, funct3, funct7, ir);
+    if (isa::is_zk_op(res)) {
+        execute::ExecuteUnitZk::set_current_funct7(funct7);
+    }
     return res;
-}
-
-auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::xlen::Instruction {
-    simrv::pipeline::Decoder dec(ir);
-    if (!dec.is_compressed()) {
-        return ir;
-    }
-
-    // Zcmop's C.MOP.n encodings occupy reserved C.LUI space. They are architectural
-    // no-ops unless a later extension redefines them, so expand them to C.NOP rather
-    // than treating them as the ordinary C.LUI rd, 0 encoding (which writes rd).
-    static constexpr std::array<simrv::xlen::Instruction, 8> kCmopEncodings{
-        0x6081U, 0x6181U, 0x6281U, 0x6381U, 0x6481U, 0x6581U, 0x6681U, 0x6781U};
-    if (std::ranges::find(kCmopEncodings, ir & 0xFFFFU) != kCmopEncodings.end()) {
-        return 0x00000013U;  // addi x0, x0, 0
-    }
-
-    // Zcb's extra compressed integer operations expand to ordinary integer loads,
-    // stores, and bit-manipulation instructions. Decode these before the base C
-    // quadrant handling, where the same encodings are otherwise reserved.
-    const uint32_t rd_prime = 8U + ((ir >> 2U) & 0x7U);
-    const uint32_t rs1_prime = 8U + ((ir >> 7U) & 0x7U);
-    const uint32_t rs2_prime = rd_prime;
-    if ((ir & 0xfc03U) == 0x8000U) {  // C.LBU
-        const uint32_t imm = (((ir >> 5U) & 1U) << 1U) | ((ir >> 6U) & 1U);
-        return make_i_type(0x03U, 0x4U, rd_prime, rs1_prime, imm);
-    }
-    if ((ir & 0xfc43U) == 0x8400U || (ir & 0xfc43U) == 0x8440U) {  // C.LHU / C.LH
-        const bool signed_load = (ir & 0x40U) != 0;
-        const uint32_t imm = ((ir >> 5U) & 1U) << 1U;
-        return make_i_type(0x03U, signed_load ? 0x1U : 0x5U, rd_prime, rs1_prime, imm);
-    }
-    if ((ir & 0xfc03U) == 0x8800U) {  // C.SB
-        const uint32_t imm = (((ir >> 5U) & 1U) << 1U) | ((ir >> 6U) & 1U);
-        return make_s_type(0x23U, 0x0U, rs1_prime, rs2_prime, imm);
-    }
-    if ((ir & 0xfc43U) == 0x8c00U) {  // C.SH
-        const uint32_t imm = ((ir >> 5U) & 1U) << 1U;
-        return make_s_type(0x23U, 0x1U, rs1_prime, rs2_prime, imm);
-    }
-    if ((ir & 0xfc63U) == 0x9c41U) {  // C.MUL
-        return make_r_type(0x33U, 0x0U, 0x01U, rs1_prime, rs1_prime, rd_prime);
-    }
-    if ((ir & 0xfc7fU) == 0x9c75U) {  // C.NOT
-        return make_i_type(0x13U, 0x4U, rs1_prime, rs1_prime, 0xfffU);
-    }
-    if ((ir & 0xfc7fU) == 0x9c65U || (ir & 0xfc7fU) == 0x9c6dU) {  // C.SEXT.B / C.SEXT.H
-        const uint32_t imm = ((ir & 0x7fU) == 0x65U) ? 0x604U : 0x605U;
-        return make_i_type(0x13U, 0x1U, rs1_prime, rs1_prime, imm);
-    }
-    if ((ir & 0xfc7fU) == 0x9c61U) {  // C.ZEXT.B
-        return make_i_type(0x13U, 0x7U, rs1_prime, rs1_prime, 0xffU);
-    }
-    if ((ir & 0xfc7fU) == 0x9c69U) {  // C.ZEXT.H (PACK rd, rs1, x0)
-        return make_r_type(is_rv64 ? 0x3bU : 0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime, 0U);
-    }
-    if ((ir & 0xfc7fU) == 0x9c71U && is_rv64) {  // C.ZEXT.W (ADD.UW rd, rs1, x0)
-        return make_r_type(0x3bU, 0x0U, 0x04U, rs1_prime, rs1_prime, 0U);
-    }
-
-    const uint32_t op = dec.c_op();
-    switch (ir & 0x3) {
-        case 0x0:
-            return decompress_q0(ir, is_rv64, op, std::to_underlying(dec.c_rs1_rd_p()),
-                                 std::to_underlying(dec.c_rs2_p()));
-        case 0x1:
-            return decompress_q1(ir, is_rv64, op, std::to_underlying(dec.c_rs1_rd()),
-                                 std::to_underlying(dec.c_rs1_rd_p()),
-                                 std::to_underlying(dec.c_rs2_p()));
-        case 0x2:
-            return decompress_q2(ir, is_rv64, op, std::to_underlying(dec.c_rs1_rd()),
-                                 std::to_underlying(dec.c_rs2()));
-        default:
-            return 0;
-    }
 }
 
 }  // namespace simrv::pipeline

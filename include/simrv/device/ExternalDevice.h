@@ -77,8 +77,8 @@ typedef struct SimRvHostServices {
  */
 typedef struct SimRvExternalDevice {
     uint32_t api_version;   /**< Must be SIMRV_EXTERNAL_DEVICE_API_VERSION (2) or (1) */
-    const char* name;       /**< Human-readable device name (e.g. "rvcomp-mmc") */
-    const char* compatible; /**< DeviceTree compatible string (e.g. "isct,rvcomp-mmc") */
+    const char* name;       /**< Human-readable device name (e.g. "example-mmc") */
+    const char* compatible; /**< DeviceTree compatible string (e.g. "example,mmc") */
     uint64_t default_base;  /**< Default MMIO base physical address */
     uint64_t default_size;  /**< MMIO address space size in bytes */
 

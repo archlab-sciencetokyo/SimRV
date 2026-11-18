@@ -20,9 +20,13 @@
 
 namespace simrv::core {
 
-template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
+template <FastKernelSpec Spec>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batch_size,
                                                  const simrv::memory::RamView& ram) -> uint32_t {
+    constexpr bool kCopyContext = Spec.copy_pipeline_context;
+    constexpr bool kInstMix = Spec.collect_instruction_mix;
+    constexpr bool kPollPause = Spec.poll_pause;
+    constexpr int kHpmClassMode = static_cast<int>(Spec.hpm_mode);
     uint32_t cached_ops = 0;
     simrv::xlen::Counter last_flushed_icount = e_icount;
     uint32_t chunk_cycles = 0;
@@ -74,8 +78,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
                          !state_.has_locked_pmp);
                     const bool check_reservations =
-                        machine.memory_.reservation_table().may_have_reservations() &&
-                        machine.num_harts() > 1;
+                        machine.memory_.reservation_table().may_have_reservations();
                     auto* chained = cached;
                     CachedOp* fallback_op = nullptr;
                     simrv::xlen::VirtAddr next_pc = state_.pc;
@@ -833,38 +836,41 @@ void CPU::run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBat
     } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
 
     const auto ram = machine.ram_view();
-    if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
-        const auto run_kernel = [&]<int kHpmClassMode>() {
-            if (policy.poll_pause) {
-                run_fast_os_kernel<false, false, true, kHpmClassMode>(machine, batch_size, ram);
-            } else {
-                run_fast_os_kernel<false, false, false, kHpmClassMode>(machine, batch_size, ram);
-            }
-        };
-        if (perf_counters.has_instruction_class_listeners()) {
-            run_kernel.template operator()<1>();
-        } else {
-            run_kernel.template operator()<0>();
-        }
-    } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<true, true, true, 2>(machine, batch_size, ram);
-        } else {
-            run_fast_os_kernel<true, true, false, 2>(machine, batch_size, ram);
-        }
-    } else if (policy.copy_pipeline_context) {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<true, false, true, 2>(machine, batch_size, ram);
-        } else {
-            run_fast_os_kernel<true, false, false, 2>(machine, batch_size, ram);
-        }
-    } else {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<false, true, true, 2>(machine, batch_size, ram);
-        } else {
-            run_fast_os_kernel<false, true, false, 2>(machine, batch_size, ram);
+    static constexpr std::array<FastKernelSpec, 10> kFastOsCatalog = {{
+        {false, false, true, HpmClassMode::Disabled},
+        {false, false, false, HpmClassMode::Disabled},
+        {false, false, true, HpmClassMode::ListenersOnly},
+        {false, false, false, HpmClassMode::ListenersOnly},
+        {true, true, true, HpmClassMode::Dynamic},
+        {true, true, false, HpmClassMode::Dynamic},
+        {true, false, true, HpmClassMode::Dynamic},
+        {true, false, false, HpmClassMode::Dynamic},
+        {false, true, true, HpmClassMode::Dynamic},
+        {false, true, false, HpmClassMode::Dynamic},
+    }};
+    using KernelFn = uint32_t (CPU::*)(Machine&, uint32_t, const simrv::memory::RamView&);
+    static constexpr auto kDispatchTable = []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::array<KernelFn, sizeof...(Is)>{&CPU::run_fast_os_kernel<kFastOsCatalog[Is]>...};
+    }(std::make_index_sequence<kFastOsCatalog.size()>{});
+
+    const HpmClassMode hpm_mode =
+        (!policy.copy_pipeline_context && !policy.collect_instruction_mix)
+            ? (perf_counters.has_instruction_class_listeners() ? HpmClassMode::ListenersOnly
+                                                               : HpmClassMode::Disabled)
+            : HpmClassMode::Dynamic;
+    const FastKernelSpec target{
+        .copy_pipeline_context = policy.copy_pipeline_context,
+        .collect_instruction_mix = policy.collect_instruction_mix,
+        .poll_pause = policy.poll_pause,
+        .hpm_mode = hpm_mode,
+    };
+    for (size_t i = 0; i < kFastOsCatalog.size(); ++i) {
+        if (kFastOsCatalog[i] == target) {
+            (this->*kDispatchTable[i])(machine, batch_size, ram);
+            return;
         }
     }
+    (this->*kDispatchTable[0])(machine, batch_size, ram);
 }
 
 }  // namespace simrv::core

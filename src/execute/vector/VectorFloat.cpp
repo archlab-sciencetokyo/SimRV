@@ -4,6 +4,7 @@
 
 #include "VectorHelpers.hpp"
 #include "VectorSubunits.hpp"
+#include "simrv/execute/FloatTraits.hpp"
 #include "simrv/execute/RoundingRmm.hpp"
 #include "simrv/isa/FpConversions.hpp"
 
@@ -61,18 +62,7 @@ auto is_fp_to_integer_conversion(isa::OperationId op_id) -> bool {
 }
 
 auto frm_to_host_round(simrv::xlen::CsrValue fcsr) -> int {
-    switch (isa::frm_rounding_mode(fcsr)) {
-        case isa::RoundingMode::Rtz:
-            return FE_TOWARDZERO;
-        case isa::RoundingMode::Rdn:
-            return FE_DOWNWARD;
-        case isa::RoundingMode::Rup:
-            return FE_UPWARD;
-        default:
-            // FE_TONEAREST implements RNE. RMM still requires a software
-            // tie-breaking path and is recorded in the compliance document.
-            return FE_TONEAREST;
-    }
+    return simrv::execute::frm_to_host_round(fcsr);
 }
 
 auto is_rmm_mode(const core::CPU& cpu) -> bool {
@@ -1522,6 +1512,85 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
     }
 }
 
+void execute_vfwcvt_bf16(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
+                         uint32_t vl, simrv::xlen::CsrValue& flags) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    std::vector<uint16_t> sources(vl);
+    std::vector<bool> active(vl);
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        active[i] = vector::is_element_active(mask_reg, i, vm);
+        if (active[i]) sources[i] = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
+    }
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!active[i]) continue;
+        const uint16_t raw = sources[i];
+        if (isa::fp::bf16_is_nan(raw)) {
+            if (isa::fp::bf16_is_snan(raw)) flags |= isa::FflagsBit::Nv;
+            vector::set_group_element<uint32_t>(cpu.state().regs, rd, i,
+                                                VectorFpElement<float>::kCanonicalNan);
+            continue;
+        }
+        const float value = isa::fp::bf16_to_float(raw);
+        vector::set_group_element<uint32_t>(cpu.state().regs, rd, i, fp_result_raw<float>(value));
+    }
+}
+
+void execute_vfncvt_bf16(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
+                         uint32_t vl, simrv::xlen::CsrValue& flags) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    std::vector<uint32_t> sources(vl);
+    std::vector<bool> active(vl);
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        active[i] = vector::is_element_active(mask_reg, i, vm);
+        if (active[i]) sources[i] = vector::get_group_element<uint32_t>(cpu.state().regs, rs2, i);
+    }
+    const isa::RoundingMode rm = isa::frm_rounding_mode(cpu.state().fcsr);
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!active[i]) continue;
+        const float value = std::bit_cast<float>(sources[i]);
+        const auto converted = isa::fp::to_bfloat16(value, rm);
+        flags |= converted.flags;
+        vector::set_group_element<uint16_t>(cpu.state().regs, rd, i, converted.bits);
+    }
+}
+
+void execute_vfwmacc_bf16(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                          simrv::xlen::RegId rs2, bool scalar, bool vm, uint32_t vl,
+                          simrv::xlen::CsrValue& flags) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    std::vector<bool> active(vl);
+    for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
+    const uint16_t scalar_raw =
+        scalar ? static_cast<uint16_t>(read_vector_scalar_fp(cpu, rs1) & 0xffffU) : uint16_t{0};
+    std::vector<float> lhs_values(vl);
+    std::vector<float> rhs_values(vl);
+    std::vector<float> vd_values(vl);
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!active[i]) continue;
+        const uint16_t vs2_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
+        const uint16_t vs1_raw =
+            scalar ? scalar_raw : vector::get_group_element<uint16_t>(cpu.state().regs, rs1, i);
+        const uint32_t vd_raw = vector::get_group_element<uint32_t>(cpu.state().regs, rd, i);
+        if (isa::fp::bf16_is_snan(vs2_raw) || isa::fp::bf16_is_snan(vs1_raw) ||
+            VectorFpElement<float>::signaling_nan(vd_raw)) {
+            flags |= isa::FflagsBit::Nv;
+        }
+        lhs_values[i] = isa::fp::bf16_to_float(vs2_raw);
+        rhs_values[i] = isa::fp::bf16_to_float(vs1_raw);
+        vd_values[i] = VectorFpElement<float>::value(vd_raw);
+    }
+    const bool rmm = is_rmm_mode(cpu);
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!active[i]) continue;
+        const float result = canonicalize_nan(
+            fused_result(rhs_values[i], vd_values[i], lhs_values[i], FpFmaKind::MAcc, rmm));
+        vector::set_group_element<uint32_t>(cpu.state().regs, rd, i, fp_result_raw<float>(result));
+    }
+}
+
 }  // namespace
 
 void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
@@ -1679,6 +1748,19 @@ void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::R
                 execute_vfncvt<uint16_t, float>(cpu, op_id, rd, rs2, vm, vl, software_flags);
             else if (sew == 32)
                 execute_vfncvt<float, double>(cpu, op_id, rd, rs2, vm, vl, software_flags);
+            break;
+        case isa::OperationId::VFWCVTBF16_F_F_V:
+            if (sew == 16) execute_vfwcvt_bf16(cpu, rd, rs2, vm, vl, software_flags);
+            break;
+        case isa::OperationId::VFNCVTBF16_F_F_W:
+            if (sew == 16) execute_vfncvt_bf16(cpu, rd, rs2, vm, vl, software_flags);
+            break;
+        case isa::OperationId::VFWMACCBF16_VV:
+        case isa::OperationId::VFWMACCBF16_VF:
+            if (sew == 16) {
+                execute_vfwmacc_bf16(cpu, rd, rs1, rs2, op_id == isa::OperationId::VFWMACCBF16_VF,
+                                     vm, vl, software_flags);
+            }
             break;
         case isa::OperationId::VFSGNJ_VV:
         case isa::OperationId::VFSGNJ_VF:

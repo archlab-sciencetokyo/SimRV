@@ -16,6 +16,8 @@ struct ArchState;
 
 namespace simrv::memory {
 
+class ReservationTable;
+
 /// Address produced by VS-stage translation and consumed by G-stage translation.
 struct GuestPhysAddr {
     explicit constexpr GuestPhysAddr(simrv::xlen::Address value = 0) noexcept : value_(value) {}
@@ -202,9 +204,23 @@ struct PageWalkResult {
     }
 };
 
+struct SvModeSpec {
+    uint8_t satp_mode = 0;
+    uint8_t levels = 0;
+    uint8_t vpn_bits = 0;
+    uint8_t pte_bytes = 0;
+    uint8_t va_bits = 0;
+    bool has_pdc = false;
+};
+
+inline constexpr SvModeSpec kSv32Spec{1, 2, 10, 4, 32, false};
+inline constexpr SvModeSpec kSv39Spec{8, 3, 9, 8, 39, true};
+inline constexpr SvModeSpec kSv48Spec{9, 4, 9, 8, 48, false};
+inline constexpr SvModeSpec kSv57Spec{10, 5, 9, 8, 57, false};
+
 /**
  * @class PageTableWalker
- * @brief Handles architectural Sv32, Sv39, and Sv48 hardware page table walks.
+ * @brief Handles architectural Sv32, Sv39, Sv48, and Sv57 hardware page table walks.
  */
 class PageTableWalker {
    public:
@@ -216,6 +232,19 @@ class PageTableWalker {
 
     [[nodiscard]] constexpr auto ram_view() const noexcept -> RamView { return ram_; }
     constexpr void set_ram_view(RamView ram) noexcept { ram_ = ram; }
+    void set_reservation_table(ReservationTable* table) noexcept { reservations_ = table; }
+
+    template <SvModeSpec Spec>
+    [[nodiscard]] static constexpr auto is_canonical_sv(simrv::xlen::VirtAddr v_addr) noexcept
+        -> bool {
+        if constexpr (Spec.va_bits == 32 || Spec.va_bits >= 64) {
+            return true;
+        } else {
+            constexpr simrv::xlen::Word shift = 64 - Spec.va_bits;
+            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
+                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
+        }
+    }
 
     [[nodiscard]] static constexpr auto is_canonical(simrv::xlen::VirtAddr v_addr,
                                                      simrv::xlen::Word satp, unsigned xlen)
@@ -224,22 +253,16 @@ class PageTableWalker {
             return true;
         }
         const simrv::xlen::Word mode = simrv::xlen::satp_mode(satp, 64);
-        if (mode == 8) {  // Sv39
-            constexpr simrv::xlen::Word shift = 64 - 39;
-            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
-                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
+        switch (mode) {
+            case kSv39Spec.satp_mode:
+                return is_canonical_sv<kSv39Spec>(v_addr);
+            case kSv48Spec.satp_mode:
+                return is_canonical_sv<kSv48Spec>(v_addr);
+            case kSv57Spec.satp_mode:
+                return is_canonical_sv<kSv57Spec>(v_addr);
+            default:
+                return true;
         }
-        if (mode == 9) {  // Sv48
-            constexpr simrv::xlen::Word shift = 64 - 48;
-            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
-                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
-        }
-        if (mode == 10) {  // Sv57
-            constexpr simrv::xlen::Word shift = 64 - 57;
-            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
-                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
-        }
-        return true;
     }
 
     [[nodiscard]] static auto page_fault_for(PteAccess access) noexcept -> simrv::xlen::TrapCause;
@@ -298,6 +321,7 @@ class PageTableWalker {
     mutable std::array<PdcEntry, kPdcSize> pdc_{};
     mutable uint32_t pdc_epoch_{1};
     RamView ram_{};
+    ReservationTable* reservations_ = nullptr;
 
     [[nodiscard]] auto pte_access_valid(simrv::xlen::PhysAddr address, unsigned size) const noexcept
         -> bool;

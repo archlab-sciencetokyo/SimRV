@@ -31,6 +31,9 @@ struct PipelineContext : public DecodedInstruction {
     // OF stage operands
     simrv::xlen::Register rrs1 = 0;
     simrv::xlen::Register rrs2 = 0;
+    simrv::xlen::Register rrd = 0;
+    simrv::xlen::Register rrs2_hi = 0;
+    simrv::xlen::Register rrd_hi = 0;
     simrv::xlen::CsrValue rcsr = 0;
     simrv::xlen::CsrValue rcsr_write =
         0;  ///< RMW base, excluding hardware-only mip.SEIP contribution.
@@ -45,11 +48,15 @@ struct PipelineContext : public DecodedInstruction {
 
     // LD/EX2 stage memory data
     simrv::xlen::Register mem_rdata = 0;
+    simrv::xlen::Register mem_rdata_hi = 0;
     simrv::xlen::Register mem_wdata = 0;
+    simrv::xlen::Register mem_wdata_hi = 0;
     bool memory_load_complete = false;
     bool hypervisor_memory_access_fault = false;
     bool sc_reservation_checked = false;
     bool sc_reservation_succeeded = false;
+    bool cas_matched = false;
+    bool int_wb_pair = false;
 
     // FP datapath temporaries
     simrv::xlen::FloatingRegister fp_mem_rdata = 0;

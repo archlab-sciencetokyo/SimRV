@@ -28,10 +28,11 @@ SimRV
 # Build system outputs
 build*
 !configs/buildroot/
+!.github/workflows/build-and-test.yml
 !examples/**/build-*/
 !examples/**/build-*/*
 linux-build
-linux-images/
+/images/
 CMakeUserPresets.json
 compile_commands.json
 

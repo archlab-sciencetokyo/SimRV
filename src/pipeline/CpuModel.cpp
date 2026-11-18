@@ -18,9 +18,7 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
             std::format("CPU model '{}' requires XLEN=64 (this simulator build is RV32)",
                         name.empty() ? "custom" : name));
     }
-    if ((isa_preset == isa::IsaPreset::E || isa_preset == isa::IsaPreset::EM ||
-         isa_preset == isa::IsaPreset::EMAC) &&
-        supported_xlen != 32) {
+    if (isa.has(isa::IsaExtension::E) && supported_xlen != 32) {
         return std::unexpected(std::format("CPU model '{}' uses RV32E and must specify XLEN=32",
                                            name.empty() ? "custom" : name));
     }
@@ -34,10 +32,10 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
             return std::format(
                 "{} cache capacity, associativity, and line size must be powers of two", name);
         }
-        // CPU model configurations that do not implement Zic64b may retain 32-byte geometry.
-        // The RVA23 default uses the 64-byte coherent block required by Zic64b.
-        if (cache.line_bytes != 32 && cache.line_bytes != 64) {
-            return std::format("{} cache line size must be 32 or 64 bytes", name);
+        // CPU model configurations that do not implement Zic64b may retain 16- or 32-byte
+        // geometry. The RVA23 default uses the 64-byte coherent block required by Zic64b.
+        if (cache.line_bytes != 16 && cache.line_bytes != 32 && cache.line_bytes != 64) {
+            return std::format("{} cache line size must be 16, 32, or 64 bytes", name);
         }
         if (cache.associativity > 8 ||
             cache.capacity_bytes < cache.associativity * cache.line_bytes) {

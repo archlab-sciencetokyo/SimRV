@@ -30,6 +30,7 @@
 #include "simrv/device/Aclint.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/rtl/ParityTarget.hpp"
@@ -46,6 +47,8 @@ concept SymbolLookupAddress = requires(const simrv::debug::SymbolTable& table, T
     table.lookup(address);
 };
 static_assert(SymbolLookupAddress<simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::RetirementEvent::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::rtl::TimingDivergence::pc), simrv::xlen::VirtAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::PhysAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::Address>);
 template <typename T>
@@ -64,8 +67,6 @@ static_assert(LockstepPc<simrv::xlen::VirtAddr>);
 static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
 static_assert(!LockstepPc<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::rtl::RetirementEvent::pc), simrv::xlen::VirtAddr>);
-static_assert(std::same_as<decltype(simrv::rtl::TimingDivergence::pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::core::PipelineStallRecord::pc), simrv::xlen::VirtAddr>);
 template <typename T>
 concept TrapTracePc =
@@ -670,6 +671,7 @@ void test_sbi_trace_virtual_pc() {
     std::filesystem::remove(path);
 }
 
+#if !defined(__APPLE__)
 void test_arch_trace_function_filter(std::string_view executable_path) {
     simrv::core::MachineConfig config;
     config.debug.trace_function = "main";
@@ -708,6 +710,7 @@ void test_arch_trace_function_filter(std::string_view executable_path) {
         std::filesystem::remove(sibling_path(path, name));
     std::filesystem::remove(path);
 }
+#endif
 
 void test_retired_memory_events_and_address_classification() {
     simrv::core::MachineConfig config;
@@ -1116,6 +1119,7 @@ void test_dma_schedule_and_completion_events() {
     std::filesystem::remove(path);
 }
 
+#if !defined(__APPLE__)
 void test_function_symbol_lookup(std::string_view executable_path) {
     simrv::debug::SymbolTable symbols;
     const auto path = std::filesystem::absolute(executable_path).string();
@@ -1135,6 +1139,7 @@ void test_function_symbol_lookup(std::string_view executable_path) {
             .has_value())
         std::abort();
 }
+#endif
 
 void test_lockstep_virtual_pc(std::string_view executable_path) {
     const auto path = std::filesystem::absolute(executable_path).string();
@@ -1165,7 +1170,11 @@ int main(int argc, char** argv) {
             stderr);
         return 0;
     }
+#if !defined(__APPLE__)
+    // The native macOS test executable is Mach-O, while the simulator's
+    // symbol table parser intentionally handles ELF images.
     test_function_symbol_lookup(argv[0]);
+#endif
     test_lockstep_virtual_pc(argv[0]);
     test_retirement_context_and_call_trace();
     test_optional_fp_register_write_trace();
@@ -1179,7 +1188,9 @@ int main(int argc, char** argv) {
     test_arch_trace_event_hart_and_cycle_filters();
     test_arch_trace_device_filter();
     test_sbi_trace_virtual_pc();
+#if !defined(__APPLE__)
     test_arch_trace_function_filter(argv[0]);
+#endif
     test_retired_memory_events_and_address_classification();
     test_precise_memory_fault_event();
     test_bus_trace_level_four();

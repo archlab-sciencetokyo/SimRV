@@ -1,5 +1,32 @@
 # Contributing
 
+## What to Propose
+
+Issues are the place for bug reports, questions, general feedback, and feature or design
+proposals. For substantial work, discuss the goal and approach in an issue before writing code.
+This is especially helpful for changes to CPU or device behavior, public interfaces, configuration
+formats, or project direction.
+
+Pull requests are welcome for plugins and plugin behavior, as well as focused fixes, documentation,
+tests, and other changes that fit SimRV's goals. You do not need prior approval for a small,
+straightforward correction. For larger changes, link the issue so the proposed implementation has
+shared context before review.
+
+Opening a pull request does not guarantee that the change will be merged. Maintainers review
+changes for project fit, correctness, compatibility, scope, and validation. If a proposal is not a
+fit for the core project, maintainers may suggest keeping it as an external plugin or separate
+project.
+
+## License and Attribution
+
+SimRV is distributed under the MIT License. Only contribute work you have the right to share under
+that license. If you include or adapt third-party code, identify its source and license, preserve
+required notices, and update `THIRD_PARTY_NOTICES.md` when needed. Mention new dependencies in the
+pull request.
+
+If a change affects research claims, published results, or citation details, update the relevant
+documentation and `CITATION.cff` when appropriate. Use the exact release tag when citing SimRV.
+
 ## Branching Model
 
 This repository uses a lightweight integration flow:

@@ -42,6 +42,7 @@
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/PipelineTopology.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -73,6 +74,11 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue mtval2{};   ///< Machine Second Trap Value (H extension)
     simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
     simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
+    bool supervisor_mode_supported{true};
+    bool user_mode_supported{true};
+    isa::ExtensionSet enabled_extensions{};  ///< Multi-letter ISA extensions bitset
+    uint64_t zkr_entropy_state =
+        0x9E3779B97F4A7C15ULL;  ///< Per-hart deterministic PRNG state for Zkr seed CSR
     simrv::xlen::Word fetch_align_mask =
         (isa::kMisaDefault & (simrv::xlen::CsrValue{1} << 2)) != 0
             ? 1u
@@ -98,6 +104,33 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue menvcfgh{};  ///< Machine Environment Configuration High (RV32, 0x31A)
     simrv::xlen::CsrValue mseccfg{};   ///< Machine Security Configuration (Smepmp, 0x747)
     simrv::xlen::CsrValue mseccfgh{};  ///< Machine Security Configuration High (RV32, 0x757)
+    simrv::xlen::CsrValue jvt{};       ///< Jump Vector Table (Zcmt, 0x017)
+
+    /* Indirect CSR Access (Smcsrind / Sscsrind) & RNMI (Smrnmi) */
+    struct IndirectRegEntry {
+        simrv::xlen::CsrValue select{};
+        std::array<simrv::xlen::CsrValue, 6> regs{};
+        bool valid{false};
+    };
+    simrv::xlen::CsrValue miselect{};
+    simrv::xlen::CsrValue siselect{};
+    simrv::xlen::CsrValue vsiselect{};
+    std::array<IndirectRegEntry, 16> mireg_bank{};
+    std::array<IndirectRegEntry, 16> sireg_bank{};
+    std::array<IndirectRegEntry, 16> vsireg_bank{};
+    simrv::xlen::CsrValue mnscratch{};
+    simrv::xlen::CsrValue mnepc{};
+    simrv::xlen::CsrValue mncause{};
+    simrv::xlen::CsrValue mnstatus{simrv::xlen::CsrValue{1} << 3U};  ///< NMIE=1 at reset
+
+    /* Smcntrpmf, Smaia/Ssaia, and Zicfilp/Zicfiss (CFI) */
+    uint64_t mcyclecfg{};
+    uint64_t minstretcfg{};
+    simrv::xlen::CsrValue mvien{};
+    simrv::xlen::CsrValue mvip{};
+    simrv::xlen::CsrValue hvien{};
+    simrv::xlen::CsrValue ssp{};
+    bool elp{false};
 
     /* Supervisor Mode CSRs */
     simrv::xlen::CsrValue
@@ -142,6 +175,34 @@ struct alignas(128) ArchState {
     simrv::xlen::TrapCause vscause{};
     simrv::xlen::CsrValue vstval{};
     simrv::xlen::CsrValue vsatp{};
+
+    [[nodiscard]] constexpr auto zicfilp_enabled_in_current_mode() const noexcept -> bool {
+        if (!enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) return false;
+        if (priv == simrv::xlen::PrivilegeLevel::Machine) {
+            return (static_cast<uint64_t>(mseccfg) & (uint64_t{1} << 10U)) != 0;
+        }
+        if (priv == simrv::xlen::PrivilegeLevel::Supervisor) {
+            return virt ? ((static_cast<uint64_t>(henvcfg) & (uint64_t{1} << 2U)) != 0)
+                        : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 2U)) != 0);
+        }
+        const bool has_s = supervisor_mode_supported;
+        return has_s ? ((static_cast<uint64_t>(senvcfg) & (uint64_t{1} << 2U)) != 0)
+                     : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 2U)) != 0);
+    }
+
+    [[nodiscard]] constexpr auto zicfiss_enabled_in_current_mode() const noexcept -> bool {
+        if (!enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) return false;
+        if (priv == simrv::xlen::PrivilegeLevel::Machine) {
+            return false;
+        }
+        if (priv == simrv::xlen::PrivilegeLevel::Supervisor) {
+            return virt ? ((static_cast<uint64_t>(henvcfg) & (uint64_t{1} << 3U)) != 0)
+                        : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 3U)) != 0);
+        }
+        const bool has_s = supervisor_mode_supported;
+        return has_s ? ((static_cast<uint64_t>(senvcfg) & (uint64_t{1} << 3U)) != 0)
+                     : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 3U)) != 0);
+    }
 
     /** Pending external interrupt for the guest interrupt file selected by hstatus.VGEIN. */
     [[nodiscard]] constexpr auto selected_guest_external_pending() const noexcept
@@ -337,8 +398,8 @@ struct alignas(128) ArchState {
      * case lower privilege modes must remain RV32 when a trap enters S/U mode.
      */
     constexpr void initialize_lower_xlen_fields() {
-        const bool has_s = isa::misa_has_extension(misa, isa::IsaExtension::S);
-        const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
+        const bool has_s = supervisor_mode_supported;
+        const bool has_u = user_mode_supported;
         const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
         const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
         const bool has_h = isa::misa_has_extension(misa, isa::IsaExtension::H);
@@ -647,6 +708,12 @@ class CPU {
     void sret();
 
     /**
+     * @brief Handles execution return from a resumable non-maskable interrupt (MNRET instruction).
+     * Restores privilege level, virtualization mode, and NMIE from `mnstatus`.
+     */
+    void mnret();
+
+    /**
      * @brief Recomputes the MIP (Machine Interrupt Pending) register based on currently active
      * external interrupts.
      */
@@ -739,7 +806,7 @@ class CPU {
     template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
     SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast(CachedOp& op) -> bool;
 
-    template <bool kCopyContext, bool kInstMix, int kHpmClassMode>
+    template <FastKernelSpec Spec>
     SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
                                                        const simrv::memory::RamView& ram,
                                                        bool poll_pause) -> uint32_t;
@@ -753,7 +820,7 @@ class CPU {
     void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
                                   const FastBatchPolicy& policy);
 
-    template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
+    template <FastKernelSpec Spec>
     SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size,
                                                 const simrv::memory::RamView& ram) -> uint32_t;
 
@@ -921,8 +988,25 @@ class CPU {
     }
     SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
 
+    [[nodiscard]] static constexpr auto counter_mode_inhibited(uint64_t cfg,
+                                                               simrv::xlen::PrivilegeLevel priv,
+                                                               bool virt) noexcept -> bool {
+        if (cfg == 0) return false;
+        if (priv == simrv::xlen::PrivilegeLevel::Machine) return (cfg & (uint64_t{1} << 62U)) != 0;
+        if (virt) {
+            return priv == simrv::xlen::PrivilegeLevel::Supervisor
+                       ? (cfg & (uint64_t{1} << 59U)) != 0
+                       : (cfg & (uint64_t{1} << 58U)) != 0;
+        }
+        return priv == simrv::xlen::PrivilegeLevel::Supervisor ? (cfg & (uint64_t{1} << 61U)) != 0
+                                                               : (cfg & (uint64_t{1} << 60U)) != 0;
+    }
+
     SIMRV_ALWAYS_INLINE void account_arch_cycles(uint64_t count = 1) noexcept {
-        if ((state_.mcountinhibit & 1U) == 0) clint_mmio.mcycle += count;
+        if ((state_.mcountinhibit & 1U) == 0 &&
+            !counter_mode_inhibited(state_.mcyclecfg, state_.priv, state_.virt)) {
+            clint_mmio.mcycle += count;
+        }
     }
 
     /// Advance PC by op.len() and update instruction counters for straight ALU ops without
@@ -975,7 +1059,10 @@ class CPU {
     SIMRV_ALWAYS_INLINE void account_retirement(uint64_t count = 1) noexcept {
         state_.consecutive_traps = 0;
         e_icount += count;
-        if ((state_.mcountinhibit & 4U) == 0) state_.minstret += count;
+        if ((state_.mcountinhibit & 4U) == 0 &&
+            !counter_mode_inhibited(state_.minstretcfg, state_.priv, state_.virt)) {
+            state_.minstret += count;
+        }
     }
 
     /// Zero-cost read-only access to architectural state for tracing/logging.
@@ -1106,7 +1193,7 @@ class CPU {
     SIMRV_ALWAYS_INLINE void record_hpm_event(HpmEvent event, uint64_t count = 1) noexcept {
         if (perf_counters.notify_event(event, count, static_cast<uint32_t>(state_.mcountinhibit),
                                        state_.priv, state_.virt)) {
-            if (isa::misa_has_extension(state_.misa, isa::IsaExtension::S)) {
+            if (state_.supervisor_mode_supported) {
                 state_.mip |= MipBit::Lcofip;
             }
         }
@@ -1225,6 +1312,19 @@ class CPU {
     PerformanceCounters perf_counters{};
     std::array<simrv::xlen::Counter, isa::OperationIdCount>
         e_instmix{};  // Instruction-mix statistics
+
+   private:
+    struct CaPolicySpec {
+        simrv::pipeline::PipelineTopologySpec topology{};
+        bool observable = false;
+        friend auto operator==(const CaPolicySpec&, const CaPolicySpec&) -> bool = default;
+    };
+
+    template <simrv::pipeline::PipelineTopologySpec Spec>
+    void run_ca_pipeline_cycle_impl(Machine& machine);
+
+    template <CaPolicySpec Policy>
+    void execute_ca_cycle_stages_impl(Machine& machine, simrv::xlen::Counter retired_before);
 };
 
 }  // namespace simrv::core

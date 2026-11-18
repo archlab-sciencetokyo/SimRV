@@ -70,8 +70,10 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
     PipelineCycleSnapshot snapshot{};
     snapshot.cycle = ca_stats_.cycle_count;
     auto stage_info = [](const PipelineReg& reg, bool stage_stalled) {
-        return PipelineCycleSnapshot::StageInfo{
-            .pc = simrv::xlen::VirtAddr{reg.pc}, .op_id = reg.op_id, .valid = reg.valid, .stalled = stage_stalled};
+        return PipelineCycleSnapshot::StageInfo{.pc = simrv::xlen::VirtAddr{reg.pc},
+                                                .op_id = reg.op_id,
+                                                .valid = reg.valid,
+                                                .stalled = stage_stalled};
     };
     snapshot.f = stage_info(fetch_reg, event.fetch.stalled);
     snapshot.d = stage_info(decode_reg, event.decode.stalled);
@@ -157,7 +159,12 @@ void PipelineSim::restore_state(const PipelineSimState& state) {
     ca_kernel_active_ = state.ca_kernel_active;
     if (ca_kernel_active_) {
         ca_stats_ = state.stats;
-        ca_regs_ = {state.f_reg, state.d_reg, state.e_reg, state.m_reg, state.w_reg};
+        ca_regs_.fill(PipelineReg{});
+        ca_regs_[std::to_underlying(PipelineStage::Fetch)] = state.f_reg;
+        ca_regs_[std::to_underlying(PipelineStage::Decode)] = state.d_reg;
+        ca_regs_[std::to_underlying(PipelineStage::Execute)] = state.e_reg;
+        ca_regs_[std::to_underlying(PipelineStage::Memory)] = state.m_reg;
+        ca_regs_[std::to_underlying(PipelineStage::Writeback)] = state.w_reg;
         ca_history_head_ = 0;
         ca_history_size_ = 0;
         for (const auto& snapshot : state.cycle_history) {

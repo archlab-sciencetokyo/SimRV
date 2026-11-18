@@ -7,6 +7,7 @@
 #include <boost/container/flat_map.hpp>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -95,6 +96,40 @@ class ReservationTable {
         return success;
     }
 
+    /// Track a bus master's exclusive transaction independently of hart LR/SC reservations.
+    void set_external_reservation(uint32_t id, simrv::xlen::PhysAddr address, size_t size) {
+        const std::scoped_lock lock(mutex_);
+        if (size == 0 ||
+            std::cmp_greater(size - 1,
+                             std::numeric_limits<simrv::xlen::Address>::max() - address.raw())) {
+            external_reservations_.erase(id);
+            may_have_external_reservations_.store(!external_reservations_.empty(),
+                                                  std::memory_order_release);
+            return;
+        }
+        external_reservations_[id] = ExternalReservation{address.raw(), size};
+        may_have_external_reservations_.store(true, std::memory_order_release);
+    }
+
+    /// Consume an exclusive monitor whether its address and size match or not.
+    auto check_and_clear_external_reservation(uint32_t id, simrv::xlen::PhysAddr address,
+                                              size_t size) -> bool {
+        const std::scoped_lock lock(mutex_);
+        const auto it = external_reservations_.find(id);
+        if (it == external_reservations_.end()) return false;
+        const bool matches = it->second.address == address.raw() && it->second.size == size;
+        external_reservations_.erase(it);
+        may_have_external_reservations_.store(!external_reservations_.empty(),
+                                              std::memory_order_release);
+        return matches;
+    }
+
+    void clear_external_reservations() {
+        const std::scoped_lock lock(mutex_);
+        external_reservations_.clear();
+        may_have_external_reservations_.store(false, std::memory_order_release);
+    }
+
     /**
      * @brief Invalidate all reservations that overlap the specified address granule.
      * @param addr Physical address written by a store, AMO, or DMA.
@@ -103,7 +138,7 @@ class ReservationTable {
      */
     void invalidate_matching(simrv::xlen::PhysAddr addr,
                              std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
-        if (!may_have_reservations_.load(std::memory_order_acquire)) return;
+        if (!may_have_reservations()) return;
         const std::scoped_lock lock(mutex_);
         const simrv::xlen::Address granule_addr = addr.raw() & kReservationGranuleMask;
         bool any_valid = false;
@@ -123,6 +158,7 @@ class ReservationTable {
         if (!any_valid) {
             may_have_reservations_.store(false, std::memory_order_release);
         }
+        invalidate_external_locked(granule_addr, granule_addr + kReservationGranule - 1);
     }
 
     /**
@@ -133,7 +169,7 @@ class ReservationTable {
      */
     void invalidate_range(simrv::xlen::PhysAddr address, size_t size,
                           std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
-        if (size == 0 || !may_have_reservations_.load(std::memory_order_acquire)) return;
+        if (size == 0 || !may_have_reservations()) return;
         const auto addr = address.raw();
         const simrv::xlen::Address first_granule = addr & kReservationGranuleMask;
         const simrv::xlen::Address last_byte =
@@ -156,6 +192,7 @@ class ReservationTable {
             }
         }
         if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
+        invalidate_external_locked(addr, last_byte);
     }
 
     template <std::integral I>
@@ -198,13 +235,20 @@ class ReservationTable {
     void clear_all() {
         const std::scoped_lock lock(mutex_);
         reservations_.clear();
+        external_reservations_.clear();
         may_have_reservations_.store(false, std::memory_order_release);
+        may_have_external_reservations_.store(false, std::memory_order_release);
     }
 
     /// False guarantees that an ordinary store has no LR/SC reservation to invalidate. True is
     /// conservative; updates may clear it when the last valid reservation is removed.
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto may_have_reservations() const noexcept -> bool {
-        return may_have_reservations_.load(std::memory_order_acquire);
+        return may_have_reservations_.load(std::memory_order_acquire) ||
+               may_have_external_reservations_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto may_have_external_reservations() const noexcept -> bool {
+        return may_have_external_reservations_.load(std::memory_order_acquire);
     }
 
    private:
@@ -213,9 +257,30 @@ class ReservationTable {
         bool valid{false};
     };
 
+    struct ExternalReservation {
+        simrv::xlen::Address address{};
+        size_t size{};
+    };
+
+    void invalidate_external_locked(simrv::xlen::Address first, simrv::xlen::Address last) {
+        for (auto it = external_reservations_.begin(); it != external_reservations_.end();) {
+            const auto end =
+                it->second.address + static_cast<simrv::xlen::Address>(it->second.size - 1);
+            if (it->second.address <= last && end >= first) {
+                it = external_reservations_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        may_have_external_reservations_.store(!external_reservations_.empty(),
+                                              std::memory_order_release);
+    }
+
     mutable std::mutex mutex_;
     boost::container::flat_map<simrv::xlen::HartId, ReservationEntry> reservations_;
+    boost::container::flat_map<uint32_t, ExternalReservation> external_reservations_;
     std::atomic<bool> may_have_reservations_{false};
+    std::atomic<bool> may_have_external_reservations_{false};
 };
 
 }  // namespace simrv::memory

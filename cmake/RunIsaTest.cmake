@@ -57,9 +57,11 @@ execute_process(
 )
 
 # 4. Check results
-if(sim_out MATCHES "ISA TEST PASS")
+string(FIND "${sim_out}" "Program Halted (SUCCESS / PASS)" pass_marker)
+string(FIND "${sim_out}" "Program Halted (FAIL / EXIT code=" fail_marker)
+if(NOT pass_marker EQUAL -1)
   message(STATUS "PASS: ${test_name} (HTIF tohost: ${tohost_addr})")
-elseif(sim_out MATCHES "ISA TEST FAIL")
+elseif(NOT fail_marker EQUAL -1)
   message(FATAL_ERROR "FAIL: ${test_name}\nSimulator stdout:\n${sim_out}\nSimulator stderr:\n${sim_err}")
 else()
   message(FATAL_ERROR "FAIL: ${test_name} (Execution error/timeout/no pass marker)\nResult: ${sim_res}\nSimulator stdout:\n${sim_out}\nSimulator stderr:\n${sim_err}")
