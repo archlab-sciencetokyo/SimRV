@@ -133,13 +133,13 @@ jobs:
         shell: bash
         run: |
           EXTRA_ARGS=()
+          EXTRA_ARGS+=("-DSIMRV_ENABLE_LTO=OFF")
           if [[ "${{ matrix.compiler }}" == "clang" ]]; then
             CC=clang
             CXX=clang++
           else
             CC=gcc
             CXX=g++
-            EXTRA_ARGS+=("-DSIMRV_ENABLE_LTO=OFF")
             EXTRA_ARGS+=("-DSIMRV_VECTOR_TESTS_DIR=${{ steps.riscv-tests.outputs.vector-tests-dir }}")
           fi
           cmake --preset ${{ matrix.arch }}-release \
@@ -221,7 +221,7 @@ jobs:
             preset: rv64-tsan
             build_dir: /tmp/simrv-build/rv64-tsan
             build_jobs: 0
-            cmake_extra: ''
+            cmake_extra: -DSIMRV_ENABLE_LTO=OFF
             ctest_label: thread
             needs_setarch: true
     steps:

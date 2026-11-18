@@ -69,7 +69,6 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DCMAKE_LINKER_TYPE=MOLD
-          -DSIMRV_ENABLE_LTO=OFF
           -DSIMRV_WARNINGS_AS_ERRORS=ON
 
       - name: Build
