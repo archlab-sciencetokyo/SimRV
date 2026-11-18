@@ -1,0 +1,29 @@
+{
+  "title": "SimRV: A Dual-Width Explainable RISC-V System Simulator",
+  "version": "3.0.0",
+  "upload_type": "software",
+  "description": "A high-performance, dual-width (RV64/RV32) explainable RISC-V system simulator for computer architecture education, full-system Linux/RTOS execution, and microarchitectural research.",
+  "license": "MIT",
+  "creators": [
+    {
+      "name": "Trunk, Lennart",
+      "affiliation": "Institute of Science Tokyo"
+    }
+  ],
+  "contributors": [
+    {
+      "name": "Kise, Kenji",
+      "affiliation": "Institute of Science Tokyo",
+      "type": "Supervisor"
+    }
+  ],
+  "keywords": [
+    "RISC-V",
+    "Simulator",
+    "Computer Architecture",
+    "RVA23",
+    "RVB23",
+    "TileLink",
+    "Education"
+  ]
+}
