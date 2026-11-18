@@ -31,6 +31,7 @@
 #include "simrv/isa/VectorTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/Decompressor.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 
@@ -226,9 +227,27 @@ auto format_canonical_assembly(const InstructionExplanation& expl, const std::st
     if (op_id == ILLEGAL) {
         return "unknown / illegal instruction";
     }
-    if (expl.opcode == Opcode::OpV) {
+    if (simrv::isa::is_vector_op(op_id)) {
         return format_vector_assembly(op_id, mnemonic, expl.rd.reg_id, expl.rs1.reg_id,
                                       expl.rs2.reg_id, expl.imm);
+    }
+    if (op_id >= CM_PUSH && op_id <= CM_JALT) {
+        if (op_id == CM_JT || op_id == CM_JALT) {
+            return std::format("{} {}", mnemonic, (expl.raw_bits >> 2U) & 0xFFU);
+        }
+        return std::string(mnemonic);
+    }
+    if (op_id == SSRDP) {
+        return std::format("{} {}", mnemonic, rd_abi);
+    }
+    if (op_id == SSPUSH) {
+        return std::format("{} {}", mnemonic, rs2_abi);
+    }
+    if (op_id == SSPOPCHK) {
+        return std::format("{} {}", mnemonic, rs1_abi);
+    }
+    if (op_id == SSAMOSWAP_W || op_id == SSAMOSWAP_D) {
+        return std::format("{} {}, {}, ({})", mnemonic, rd_abi, rs2_abi, rs1_abi);
     }
     if (fmt == InstFormat::R) {
         if (op_id == SFENCE_VMA || op_id == SINVAL_VMA || op_id == HFENCE_VVMA ||
@@ -285,8 +304,16 @@ auto format_canonical_assembly(const InstructionExplanation& expl, const std::st
             }
             return std::format("{} {}, {}, {}", mnemonic, rd_abi, csr_str, rs1_abi);
         }
+        if (op_id == AES64KS1I) {
+            return std::format("{} {}, {}, {}", mnemonic, rd_abi, rs1_abi,
+                               (expl.canonical_bits >> 20U) & 0xFU);
+        }
+        if (op_id == AES64IM || (op_id >= SHA256SIG0 && op_id <= SHA512SUM1) || op_id == SM3P0 ||
+            op_id == SM3P1) {
+            return std::format("{} {}, {}", mnemonic, rd_abi, rs1_abi);
+        }
         if (op_id == ECALL || op_id == EBREAK || op_id == URET || op_id == SRET || op_id == MRET ||
-            op_id == WFI || op_id == SFENCE_W_INVAL || op_id == SFENCE_INVAL_IR ||
+            op_id == MNRET || op_id == WFI || op_id == SFENCE_W_INVAL || op_id == SFENCE_INVAL_IR ||
             op_id == WRS_NTO || op_id == WRS_STO) {
             return std::string(mnemonic);
         }
@@ -474,17 +501,27 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigne
     expl.active_virtualization = (st != nullptr) ? st->virt : false;
     expl.state_grounded = (st != nullptr);
 
+    bool compressed_direct_op = false;
+    OperationId compressed_op_id = ILLEGAL;
     if (expl.is_compressed) {
-        expl.canonical_bits =
-            simrv::pipeline::decompressInstruction(raw_inst & 0xFFFFU, active_xlen == 64);
+        const auto ir16 = static_cast<uint16_t>(raw_inst & 0xFFFFU);
+        compressed_op_id = simrv::pipeline::decode_compressed_op(ir16);
+        if (compressed_op_id != ILLEGAL) {
+            compressed_direct_op = true;
+            expl.canonical_bits = ir16;
+        } else {
+            expl.canonical_bits = simrv::pipeline::decompressInstruction(ir16, active_xlen == 64);
+        }
     } else {
         expl.canonical_bits = raw_inst;
     }
 
     const simrv::pipeline::Decoder decoded(expl.canonical_bits);
     expl.opcode = decoded.opcode();
-    expl.op_id = simrv::pipeline::decoder(expl.canonical_bits);
-    expl.format = simrv::isa::get_instruction_format(expl.opcode);
+    expl.op_id =
+        compressed_direct_op ? compressed_op_id : simrv::pipeline::decoder(expl.canonical_bits);
+    expl.format = compressed_direct_op ? InstFormat::Unknown
+                                       : simrv::isa::get_instruction_format(expl.opcode);
     expl.funct3 = decoded.funct3();
     expl.funct7 = decoded.funct7();
 

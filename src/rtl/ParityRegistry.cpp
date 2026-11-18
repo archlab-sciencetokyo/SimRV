@@ -393,8 +393,9 @@ auto ParityRegistry::load_plugin(const std::filesystem::path& plugin_path) -> bo
     if (target_desc->abi_version != SIMRV_RTL_PLUGIN_ABI_VERSION ||
         target_desc->struct_size < sizeof(SimRvRtlTarget) || !target_desc->name ||
         !target_desc->run_benchmark) {
-        simrv::log::error("ParityRegistry: incompatible or incomplete parity plugin descriptor from {}",
-                          plugin_path.string());
+        simrv::log::error(
+            "ParityRegistry: incompatible or incomplete parity plugin descriptor from {}",
+            plugin_path.string());
         ::dlclose(handle);
         return false;
     }

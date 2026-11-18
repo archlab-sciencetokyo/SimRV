@@ -196,9 +196,10 @@ auto print_isa_info() -> void {
         "  public profiles  : RVI20U32/U64, RVA20U/S64, RVA22U/S64, RVA23U/S64, RVB23U/S64");
     std::println("  ISA strings      : canonical RISC-V ISA strings; X extensions are preserved");
     std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
-    std::println("  privilege         : M/S/U, Sv32 (RV32), Sv39/Sv48 (RV64)");
-    std::println("  debug frontends   : TUI, GDB RSP");
-    std::println("  qualified caveats : RMM arithmetic and complete RVV are not claimed");
+    std::println("  privilege        : M/S/U, H, Sv32 (RV32), Sv39 (RV64)");
+    std::println("  debug frontends  : TUI, GDB RSP");
+    std::println(
+        "  qualified caveats: complete RVV coverage and formal RVI certification are not claimed");
     std::println("  see               : docs/architecture/compliance.md");
 }
 
@@ -366,7 +367,8 @@ auto print_doctor() -> int {
                      simrv_graphics != nullptr ? simrv_graphics : "(unset)",
                      simrv_display != nullptr ? simrv_display : "(unset)");
     }
-    std::println("  mouse protocol   : SGR-pixel mode (1006/1016) requested by interactive TUI");
+    std::println("  mouse protocol   : SGR mode (1006) requested by interactive TUI (SGR-pixel "
+                 "1016 for image frames)");
     std::println(
         "  framebuffer TUI  : streaming via Sixel or Kitty when detected; text TUI always "
         "available");
@@ -461,9 +463,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
                    arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
-                   arg == "--notices" || arg == "--third-party" || arg == "--check-mission" ||
-                   arg == "--create-mission" || arg == "--create-disk" ||
-                   arg == "completion" || arg == "--completion") {
+                   arg == "--notices" || arg == "--third-party" || arg == "completion") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
             skip_banner = true;

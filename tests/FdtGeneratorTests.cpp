@@ -495,6 +495,52 @@ void test_rvb23_fdt_does_not_advertise_vector_without_misa_v() {
            "RVB23S64 generated FDT advertises only MISA-supported single-letter extensions");
 }
 
+void test_explicit_isa_fdt_advertises_enabled_optional_extensions() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+    simrv::core::MachineConfig config{};
+    const auto spec =
+        simrv::isa::parse_isa_spec("rv64gcv_zba_zbb_zbc_zbs_zicond_zfa_smrnmi");
+    expect(spec.has_value(), "explicit optional ISA string parses");
+    if (!spec) return;
+    config.isa.misa_override = true;
+    config.isa.misa_xlen = 64;
+    config.isa.isa_preset = spec->misa_bits;
+    config.isa.enabled_extensions = spec->extension_set;
+
+    const auto blob = simrv::util::generate_platform_fdt(config, nullptr);
+    for (std::string_view ext :
+         {"zicond", "zfa", "zba", "zbb", "zbc", "zbs", "smrnmi"}) {
+        expect(blob_contains_string(blob, ext),
+               std::string("explicit ISA FDT advertises enabled extension ") + std::string(ext));
+    }
+    expect(!blob_contains_string(blob, "zimop"),
+           "explicit ISA with M but without Zimop does not advertise zimop");
+}
+
+void test_hosted_rv32_fdt_reports_rv32i_sv32_and_strips_rv64_exts() {
+    if constexpr (!simrv::xlen::kIsXLen64) return;
+    simrv::core::MachineConfig config{};
+    const auto spec = simrv::isa::parse_isa_spec("rv32gc_zicsr_zifencei");
+    expect(spec.has_value(), "hosted RV32 ISA string parses");
+    if (!spec) return;
+    config.isa.misa_override = true;
+    config.isa.misa_xlen = 32;
+    config.isa.isa_preset = spec->misa_bits;
+    config.isa.enabled_extensions = spec->extension_set;
+
+    const auto blob = simrv::util::generate_platform_fdt(config, nullptr);
+    expect(blob_contains_string(blob, "rv32i"),
+           "hosted RV32 FDT advertises riscv,isa-base = rv32i");
+    expect(blob_contains_string(blob, "riscv,sv32"),
+           "hosted RV32 FDT advertises mmu-type = riscv,sv32");
+    expect(!blob_contains_string(blob, "ssu64xl"),
+           "hosted RV32 FDT omits RV64-only ssu64xl extension");
+    expect(!blob_contains_string(blob, "ssnpm"),
+           "hosted RV32 FDT omits RV64-only ssnpm extension");
+    expect(!blob_contains_string(blob, "supm"),
+           "hosted RV32 FDT omits RV64-only supm extension");
+}
+
 void test_patch_fdt_bootargs_override() {
     simrv::util::FdtGenerator fdt;
     fdt.begin_node("");
@@ -586,6 +632,8 @@ auto main() -> int {
     test_generated_fdt_uses_explicit_soc_devices();
     test_explicit_gc_fdt_does_not_advertise_rva23_extensions();
     test_rvb23_fdt_does_not_advertise_vector_without_misa_v();
+    test_explicit_isa_fdt_advertises_enabled_optional_extensions();
+    test_hosted_rv32_fdt_reports_rv32i_sv32_and_strips_rv64_exts();
 
     if (failures != 0) {
         std::cerr << failures << " assertion(s) failed.\n";

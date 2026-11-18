@@ -404,9 +404,11 @@ constexpr auto has_vector_destination(isa::OperationId op_id,
                                       const VectorMemoryLayout& memory_layout) -> bool {
     if (memory_layout.recognized) return !is_vector_store(op_id);
     const auto value = std::to_underlying(op_id);
-    return value >= std::to_underlying(isa::OperationId::VADD_VV) &&
-           value <= std::to_underlying(isa::OperationId::VWSLL_VI) &&
-           !has_scalar_destination(op_id);
+    const bool in_vec_range = (value >= std::to_underlying(isa::OperationId::VADD_VV) &&
+                               value <= std::to_underlying(isa::OperationId::VWSLL_VI)) ||
+                              (value >= std::to_underlying(isa::OperationId::VFWCVTBF16_F_F_V) &&
+                               value <= std::to_underlying(isa::OperationId::VSM4R_VS));
+    return in_vec_range && !has_scalar_destination(op_id);
 }
 
 constexpr auto register_ranges_overlap(uint32_t first_a, uint32_t count_a, uint32_t first_b,
@@ -570,6 +572,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFWADD_VV:
         case isa::OperationId::VFWSUB_VV:
         case isa::OperationId::VFWMUL_VV:
+        case isa::OperationId::VWSLL_VV:
             layout = Layout::WidenVv;
             break;
         case isa::OperationId::VWADD_VX:
@@ -582,6 +585,8 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFWADD_VF:
         case isa::OperationId::VFWSUB_VF:
         case isa::OperationId::VFWMUL_VF:
+        case isa::OperationId::VWSLL_VX:
+        case isa::OperationId::VWSLL_VI:
             layout = Layout::WidenVx;
             break;
         case isa::OperationId::VWADD_WV:
@@ -607,6 +612,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFWNMACC_VV:
         case isa::OperationId::VFWMSAC_VV:
         case isa::OperationId::VFWNMSAC_VV:
+        case isa::OperationId::VFWMACCBF16_VV:
             layout = Layout::WidenAccVv;
             break;
         case isa::OperationId::VWMACCU_VX:
@@ -617,6 +623,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFWNMACC_VF:
         case isa::OperationId::VFWMSAC_VF:
         case isa::OperationId::VFWNMSAC_VF:
+        case isa::OperationId::VFWMACCBF16_VF:
             layout = Layout::WidenAccVx;
             break;
         case isa::OperationId::VFWCVT_XU_F_V:
@@ -626,6 +633,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFWCVT_F_F_V:
         case isa::OperationId::VFWCVT_RTZ_XU_F_V:
         case isa::OperationId::VFWCVT_RTZ_X_F_V:
+        case isa::OperationId::VFWCVTBF16_F_F_V:
             layout = Layout::WidenConvert;
             break;
         case isa::OperationId::VNCLIP_WV:
@@ -652,10 +660,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
         case isa::OperationId::VFNCVT_ROD_F_F_W:
         case isa::OperationId::VFNCVT_RTZ_XU_F_W:
         case isa::OperationId::VFNCVT_RTZ_X_F_W:
-        case isa::OperationId::VFWCVTBF16_F_F_V:
         case isa::OperationId::VFNCVTBF16_F_F_W:
-        case isa::OperationId::VFWMACCBF16_VV:
-        case isa::OperationId::VFWMACCBF16_VF:
             layout = Layout::NarrowConvert;
             break;
         case isa::OperationId::VSEXT_VF2:

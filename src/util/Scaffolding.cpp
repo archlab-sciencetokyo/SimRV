@@ -9,10 +9,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <print>
 #include <sstream>
 #include <string>
-#include <iterator>
 #include <vector>
 
 #include "simrv/core/CpuConfigParser.hpp"
@@ -34,14 +34,18 @@ auto escape_c_string(std::string_view value) -> std::string {
     std::string escaped;
     for (const char ch : value) {
         if (ch == '\\' || ch == '"') escaped.push_back('\\');
-        if (ch == '\n') escaped += "\\n";
-        else if (ch == '\r') escaped += "\\r";
-        else if (ch == '\t') escaped += "\\t";
-        else escaped.push_back(ch);
+        if (ch == '\n')
+            escaped += "\\n";
+        else if (ch == '\r')
+            escaped += "\\r";
+        else if (ch == '\t')
+            escaped += "\\t";
+        else
+            escaped.push_back(ch);
     }
     return escaped;
 }
-}
+}  // namespace
 
 static auto scaffold_device_plugin_seeded(std::string_view name, std::string_view output,
                                           const DeviceSeed& seed) -> bool {
@@ -52,8 +56,9 @@ static auto scaffold_device_plugin_seeded(std::string_view name, std::string_vie
 
     std::string name_str(name);
     for (auto& ch : name_str) {
-        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-              (ch >= '0' && ch <= '9') || ch == '_')) ch = '_';
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+              ch == '_'))
+            ch = '_';
     }
     if (name_str.empty() || (name_str.front() >= '0' && name_str.front() <= '9'))
         name_str.insert(name_str.begin(), '_');
@@ -61,8 +66,7 @@ static auto scaffold_device_plugin_seeded(std::string_view name, std::string_vie
     const std::string size_hex = std::format("0x{:x}", seed.size);
     const std::string c_compatible = escape_c_string(seed.compatible);
 
-    auto generate_c_source = [&name_str, &base_hex, &size_hex,
-                              &c_compatible]() -> std::string {
+    auto generate_c_source = [&name_str, &base_hex, &size_hex, &c_compatible]() -> std::string {
         std::ostringstream ss;
         ss << "/**\n"
            << " * @file " << name_str << "_plugin.c\n"
@@ -282,8 +286,8 @@ auto scaffold_device_plugin_from_dtb(std::string_view dtb_path, std::string_view
     std::println("MMIO devices found in {}:", dtb_path);
     for (size_t i = 0; i < platform->devices.size(); ++i) {
         const auto& device = platform->devices[i];
-        std::println("  {}. {} ({}) base=0x{:x} size=0x{:x} irq={}", i + 1,
-                     device.name, device.compatible, device.base.raw(), device.size, device.irq);
+        std::println("  {}. {} ({}) base=0x{:x} size=0x{:x} irq={}", i + 1, device.name,
+                     device.compatible, device.base.raw(), device.size, device.irq);
     }
     size_t choice = 0;
     if (platform->devices.size() == 1) {
@@ -298,8 +302,9 @@ auto scaffold_device_plugin_from_dtb(std::string_view dtb_path, std::string_view
     }
     const auto& selected = platform->devices[choice - 1];
     DeviceSeed seed{selected.compatible, selected.base.raw(), selected.size, selected.irq};
-    std::println("\nNote: DTBs describe device identity and address ranges, not register layouts.\n"
-                 "The generated read/write handlers are editable starter examples.");
+    std::println(
+        "\nNote: DTBs describe device identity and address ranges, not register layouts.\n"
+        "The generated read/write handlers are editable starter examples.");
     return scaffold_device_plugin_seeded(selected.name, output, seed);
 }
 

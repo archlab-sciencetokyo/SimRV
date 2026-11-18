@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-rc.20",
-  "release_tag": "v3.0.0-rc.20",
+  "version": "3.0.0",
+  "release_tag": "v3.0.0",
   "host_support": {
     "os": "Linux",
     "architectures": ["x86_64", "aarch64"],
@@ -30,6 +30,7 @@
   },
   "guest_profiles": [
     "RVA23",
+    "RVB23",
     "RV32GCBV",
     "RV64GCBV"
   ],
@@ -46,8 +47,8 @@
       "redistribute": false
     },
     "act_tests": {
-      "url": "https://github.com/riscv-non-isa/riscv-arch-test.git",
-      "revision": "v3.0.0",
+      "url": "https://github.com/riscv/riscv-arch-test.git",
+      "revision": "1c3e9f2a89e103eeed0a3e6ba1bc699f100fd481",
       "license": "BSD-3-Clause",
       "redistribute": false
     },
@@ -194,9 +195,9 @@
     ]
   },
   "artifacts": [
-    "SimRV-linux-x86_64-v3.0.0-rc.20.tar.gz",
-    "SimRV-linux-aarch64-v3.0.0-rc.20.tar.gz",
-    "SimRV-rpm-packages-v3.0.0-rc.20.tar.gz",
-    "SimRV-deb-packages-v3.0.0-rc.20.tar.gz"
+    "SimRV-linux-x86_64-v3.0.0.tar.gz",
+    "SimRV-linux-aarch64-v3.0.0.tar.gz",
+    "SimRV-rpm-packages-v3.0.0.tar.gz",
+    "SimRV-deb-packages-v3.0.0.tar.gz"
   ]
 }

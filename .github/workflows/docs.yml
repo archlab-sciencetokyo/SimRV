@@ -92,12 +92,15 @@ jobs:
       - name: Build stable and development sites with Zensical
         run: |
           mkdir -p site
-          # The stable branch still stores its Zensical-compatible config as mkdocs.yml.
+          docs_main_cfg="docs-main/zensical.yml"
+          if [[ ! -f "$docs_main_cfg" ]]; then
+            docs_main_cfg="docs-main/mkdocs.yml"
+          fi
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/stable/" \
             SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/docs-main/site" \
             SIMRV_DOCS_EDIT_URI="edit/main/docs/" \
             SIMRV_DOCS_CHANNEL="stable" \
-            zensical build --strict --config-file docs-main/mkdocs.yml
+            zensical build --strict --config-file "$docs_main_cfg"
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/dev/" \
             SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/docs-dev/site" \
             SIMRV_DOCS_EDIT_URI="edit/dev/docs/" \

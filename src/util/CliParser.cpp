@@ -1247,8 +1247,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                     opt_id == "--checkpoint-every" || opt_id == "--trace-range" ||
                     opt_id == "--trace-pc-range" || opt_id == "--tohost-addr" ||
                     opt_id == "--signature" || opt_id == "--log-level" ||
-                    opt_id == "--log-format" || opt_id == "--uefi" ||
-                    opt_id == "--uefi-vars") {
+                    opt_id == "--log-format" || opt_id == "--uefi" || opt_id == "--uefi-vars") {
                     ++i;
                 }
             }
@@ -1667,11 +1666,16 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     if (!fn_config.empty()) {
         simrv::pipeline::CpuModelConfig model{};
         if (simrv::core::load_platform_config(fn_config, model, cfg.soc)) {
-            if (!cfg.soc.cpu_model.empty()) {
-                cfg.isa.misa_xlen = model.supported_xlen;
-                cfg.isa.isa_preset = model.isa.misa_bits;
+            if (!cfg.isa.misa_override && (!cfg.soc.cpu_model.empty() ||
+                                           model.supported_xlen != 0 || model.name != "balanced")) {
+                if (model.supported_xlen != 0) {
+                    cfg.isa.misa_xlen = model.supported_xlen;
+                }
+                if (model.isa.misa_bits != 0) {
+                    cfg.isa.isa_preset = model.isa.misa_bits;
+                    cfg.isa.misa_override = true;
+                }
                 cfg.isa.enabled_extensions.merge(model.isa.extension_set);
-                cfg.isa.misa_override = true;
             }
             if (model.mmio_console_redirect) {
                 cfg.mmio_console_redirect = true;
@@ -1846,7 +1850,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
            result.action == CliAction::Run;
 }
 
-
 namespace {
 
 #pragma GCC diagnostic push
@@ -1919,7 +1922,7 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description =
                    "Raise a CLINT timer interrupt after N cycles (cycles; default: disabled)."},
               {.option = "--cpu-clock, --clock-hz <FREQ>",
-               .description = "Set CPU clock frequency (e.g. 100MHz, 1GHz; default: 100 MHz).",
+               .description = "Set CPU clock frequency (e.g. 100MHz, 1GHz; default: 160 MHz).",
                .hidden_aliases = {"--clock"}},
               {.option = "--timebase-hz <FREQ>",
                .description = "Set RTC timebase frequency (e.g. 10MHz, 32768Hz; default: 10 MHz).",
@@ -1932,7 +1935,9 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--mode <MODE>",
                .description = "Select fast, detailed, or cycle-accurate execution."},
               {.option = "--pipeline <TYPE>",
-               .description = "Select the CA pipeline: 3stage or 5stage (default: 5stage)."},
+               .description =
+                   "Select the CA pipeline: 2stage, 3stage, 5stage (default), 6stage-issue, "
+                   "6stage-fetch, or 6stage-mem."},
               {.option = "--bus <PROTOCOL>",
                .description =
                    "Select system bus protocol: tilelink-c, tilelink-uh, tilelink-ul, axi4, or "

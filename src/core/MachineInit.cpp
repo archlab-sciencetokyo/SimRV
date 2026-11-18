@@ -852,8 +852,8 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
                 if (simrv::core::load_cpu_config(*resolved, cfg)) {
                     auto bits = cfg.isa.misa_bits;
-                    if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
-                        cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                    if (cfg.has_isa_extension("zba") && cfg.has_isa_extension("zbb") &&
+                        cfg.has_isa_extension("zbs")) {
                         bits |= isa::misa_extension_bit(isa::IsaExtension::B);
                     }
                     return bits;
@@ -873,6 +873,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
         return config.isa.isa_preset;
     };
+
+    const bool has_model_override = config.cpu_model_config_override ||
+                                    config.cpu_model_preset.has_value() ||
+                                    !config.files.config_path.empty();
 
     auto effective_extensions = [&]() -> isa::ExtensionSet {
         isa::ExtensionSet ext_set = config.isa.enabled_extensions;
@@ -901,7 +905,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 add_model_exts(pipeline::make_cpu_model_preset(*config.cpu_model_preset));
             }
         }
-        if (!config.isa.misa_override) {
+        if (!config.isa.misa_override && !has_model_override) {
             if (const auto prof_spec = isa::parse_isa_spec(
                     isa::profile_default_isa_string(config.execution.profile))) {
                 ext_set.merge(prof_spec->extension_set);
@@ -917,23 +921,15 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             ? ((config.isa.misa_xlen != 0)
                    ? config.isa.misa_xlen
                    : ((model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits))
-            : ((selected_profile != nullptr)
-                   ? selected_profile->xlen
-                   : ((model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits));
+            : ((has_model_override && model_xlen != 0)
+                   ? model_xlen
+                   : ((selected_profile != nullptr)
+                          ? selected_profile->xlen
+                          : ((model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits)));
     simrv::xlen::CsrValue initial_misa = isa::misa_with_mxl(
         config.isa.misa_override ? config.isa.isa_preset : effective_isa_preset_bits(),
         target_xlen);
     initial_misa &= ~isa::misa_extension_bit(isa::IsaExtension::X);
-    if (!config.isa.misa_override) {
-        if (const auto prof_spec =
-                isa::parse_isa_spec(isa::profile_default_isa_string(config.execution.profile))) {
-            initial_misa |= prof_spec->misa_bits;
-        }
-        if (config.execution.profile == isa::ArchitectureProfile::Rva23S64) {
-            initial_misa |= isa::misa_extension_bit(isa::IsaExtension::H);
-        }
-    }
-    config.isa.isa_preset = initial_misa;
     config.isa.enabled_extensions = effective_extensions();
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = (target_xlen == 32);
@@ -987,12 +983,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
         const bool guest_xlen64 = ((static_cast<uint64_t>(initial_misa) >> 62U) & 0x3U) == 0x2U;
         if (!config.isa.misa_override && guest_xlen64 &&
-            config.execution.profile == isa::ArchitectureProfile::Rva23S64 &&
-            !config.cpu_model_config_override && !config.cpu_model_preset.has_value() &&
-            config.files.config_path.empty()) {
+            config.execution.profile == isa::ArchitectureProfile::Rva23S64 && !has_model_override) {
             initial_misa |= isa::misa_extension_bit(isa::IsaExtension::H);
         }
     }
+    config.isa.isa_preset = initial_misa;
     primary_hart().state().pc = resolved_start_pc_;
     primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(10), 0);  // a0 = hartid
     primary_hart().state().regs.write(

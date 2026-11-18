@@ -18,7 +18,7 @@ using simrv::isa::Opcode;
 using simrv::isa::perform_amo_op;
 
 auto ExecuteUnitInt::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                              isa::OperationId op_id) -> simrv::xlen::Register {
+                              isa::OperationId op_id, uint32_t funct7) -> simrv::xlen::Register {
     using enum isa::OperationId;
     const auto u1 = static_cast<uint32_t>(in1);
     const auto u2 = static_cast<uint32_t>(in2);
@@ -123,7 +123,7 @@ auto ExecuteUnitInt::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register i
 
         default:
             if (isa::is_zk_op(op_id)) {
-                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, 32);
+                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, 32, funct7);
             }
             return ExecuteUnitZb::aluIntZb(in1, in2, op_id, 32);
     }
@@ -131,14 +131,15 @@ auto ExecuteUnitInt::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register i
 }
 
 auto ExecuteUnitInt::aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                            isa::OperationId op_id, unsigned xlen) -> simrv::xlen::Register {
+                            isa::OperationId op_id, unsigned xlen, uint32_t funct7)
+    -> simrv::xlen::Register {
     using enum isa::OperationId;
 
     if constexpr (!simrv::xlen::kIsXLen64) {
         xlen = 32;
     }
     if (simrv::compiler::unlikely(xlen == 32)) {
-        return aluInt32(in1, in2, op_id);
+        return aluInt32(in1, in2, op_id, funct7);
     }
 
     switch (op_id) {
@@ -216,7 +217,7 @@ auto ExecuteUnitInt::aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2
 
         default:
             if (isa::is_zk_op(op_id)) {
-                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, xlen);
+                return ExecuteUnitZk::aluIntZk(in1, in2, op_id, xlen, funct7);
             }
             if (isa::is_zb_op(op_id)) {
                 return ExecuteUnitZb::aluIntZb(in1, in2, op_id, xlen);

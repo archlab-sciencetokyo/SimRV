@@ -793,13 +793,17 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     // Control, memory, and uncommon instructions retain their precise cached/fallback paths.
     const simrv::xlen::Register rrs1 = state_.regs.read(op.rs1);
     const auto cached_opcode = op.opcode();
-    const bool uses_fp_state =
+    const bool zfinx_active = state_.enabled_extensions.has(isa::MultiLetterExtension::Zfinx) &&
+                              !isa::misa_has_extension(state_.misa, isa::IsaExtension::F) &&
+                              !isa::misa_has_extension(state_.misa, isa::IsaExtension::D);
+    const bool uses_fp_reg_state =
         !simrv::isa::is_vector_op(op.op_id) &&
         (cached_opcode == isa::Opcode::LoadFp || cached_opcode == isa::Opcode::StoreFp ||
-         cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
-         cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
-         cached_opcode == isa::Opcode::NMAdd);
-    if (simrv::compiler::unlikely(uses_fp_state &&
+         (!zfinx_active &&
+          (cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
+           cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
+           cached_opcode == isa::Opcode::NMAdd)));
+    if (simrv::compiler::unlikely(uses_fp_reg_state &&
                                   !state_.extension_state_enabled(MstatusBit::Fs))) {
         raise_exception(ExceptionCode::IllegalInstruction, op.ir);
         return;
@@ -1055,6 +1059,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::FNMSUB_S:
         case isa::FNMADD_D:
         case isa::FNMADD_S: {
+            if (simrv::compiler::unlikely(zfinx_active)) {
+                break;
+            }
             const isa::RoundingMode rm = isa::resolve_rounding_mode(op.funct3, state_.fcsr);
             if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
                 raise_exception(ExceptionCode::IllegalInstruction, op.ir);
@@ -1084,6 +1091,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::FMUL_S:
         case isa::FDIV_D:
         case isa::FDIV_S: {
+            if (simrv::compiler::unlikely(zfinx_active)) {
+                break;
+            }
             const isa::RoundingMode rm = isa::resolve_rounding_mode(op.funct3, state_.fcsr);
             if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
                 raise_exception(ExceptionCode::IllegalInstruction, op.ir);
@@ -1126,14 +1136,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 advance_cached_pc(op);
                 return;
             }
-            if constexpr (!kCopyContext) {
-                op.copy_to(pipeline_context);
-                pipeline_context.tlb_miss = false;
-                pipeline_context.pending_tval = 0;
-            }
-            execute_cached_fallback(machine);
-            return;
+            break;
     }
+    if constexpr (!kCopyContext) {
+        op.copy_to(pipeline_context);
+        pipeline_context.tlb_miss = false;
+        pipeline_context.pending_tval = 0;
+    }
+    execute_cached_fallback(machine);
 }
 
 template void CPU::execute_cached_op_fast<false, false>(Machine&, CachedOp&,

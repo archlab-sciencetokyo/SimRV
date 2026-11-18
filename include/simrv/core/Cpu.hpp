@@ -414,13 +414,18 @@ struct alignas(128) ArchState {
             if (has_h) {
                 constexpr uint64_t kVsxlMask = uint64_t{0x3U} << 32U;
                 hstatus = static_cast<simrv::xlen::CsrValue>(
-                    (static_cast<uint64_t>(hstatus) & ~kVsxlMask) | (uint64_t{2U} << 32U));
+                    (static_cast<uint64_t>(hstatus) & ~kVsxlMask) | (lower_xlen << 32U));
                 vsstatus = static_cast<simrv::xlen::CsrValue>(
-                    (static_cast<uint64_t>(vsstatus) & ~kVsxlMask) | (uint64_t{2U} << 32U));
+                    (static_cast<uint64_t>(vsstatus) & ~kVsxlMask) | (lower_xlen << 32U));
             }
+            menvcfgh = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(menvcfg) >> 32U);
         }
         mstatus = mstatus_legalize_mpp(mstatus, has_s, has_u);
-        mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h);
+        mstatus &=
+            mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h,
+                                  enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp),
+                                  enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp),
+                                  enabled_extensions.has(isa::MultiLetterExtension::Zicfilp));
         update_xlen();
     }
 };

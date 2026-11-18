@@ -80,7 +80,7 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 | Key | Action | Description |
 | :--- | :--- | :--- |
 | **`Ctrl-P`** / **`F5`** / **`C`** | Run / Pause | Toggle between continuous execution and paused inspection. |
-| **`S`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
+| **`S`** / **`F6`** / **`Space`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
 | **`Ctrl-R`** | Reboot | Reset architectural state, reload images, and restart simulation. |
 | **`Ctrl-Q`** / **`F10`** / **`Q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
 | **`F`** | Set Frequency | Set the requested simulation frequency. |

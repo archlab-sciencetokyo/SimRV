@@ -49,7 +49,15 @@
       "properties": {
         "pc": { "$ref": "#/$defs/hex" },
         "raw": { "$ref": "#/$defs/hex" },
-        "operation": { "type": "string" }
+        "operation": { "type": "string" },
+        "mnemonic": { "type": "string" },
+        "assembly": { "type": "string" },
+        "extension": { "type": "string" },
+        "spec_section": { "type": "string" },
+        "formula": { "type": "string" },
+        "predicted_next_pc": { "$ref": "#/$defs/hex" },
+        "predicted_writeback": { "type": "string" },
+        "predicted_trap": { "type": ["string", "null"] }
       }
     },
     "architectural_state": {
@@ -94,6 +102,34 @@
         "dcache_misses": { "$ref": "#/$defs/count" },
         "data_hazard_stalls": { "$ref": "#/$defs/count" },
         "control_hazard_bubbles": { "$ref": "#/$defs/count" }
+      }
+    },
+    "mission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "completed", "step", "step_count", "checkpoint_count", "reached_checkpoints"],
+      "properties": {
+        "id": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "step": { "type": "integer", "minimum": 0 },
+        "step_count": { "type": "integer", "minimum": 0 },
+        "checkpoint_count": { "type": "integer", "minimum": 0 },
+        "reached_checkpoints": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "checkpoint_details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "message"],
+            "properties": {
+              "symbol": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "recent_trace": {

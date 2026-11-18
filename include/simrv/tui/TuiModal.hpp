@@ -21,9 +21,9 @@
 #include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/tui/modals/ToolPickerModal.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
-#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 class Machine;

@@ -433,7 +433,10 @@ void execute_vfadd_vf(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Floati
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
 
         if constexpr (std::is_same_v<T, uint16_t>) {
-            auto val1_raw = static_cast<uint16_t>(rs1_val & 0xFFFFULL);
+            auto val1_raw = (rs1_val & ~simrv::xlen::FloatingRegister{0xFFFF}) ==
+                                    ~simrv::xlen::FloatingRegister{0xFFFF}
+                                ? static_cast<uint16_t>(rs1_val)
+                                : UINT16_C(0x7E00);
             auto val2_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
             float val1 = vector::fp16_to_fp32(val1_raw);
             float val2 = vector::fp16_to_fp32(val2_raw);
@@ -516,7 +519,11 @@ void execute_vf_binary_vf(core::CPU& cpu, simrv::xlen::RegId rd,
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     if constexpr (std::is_same_v<T, uint16_t>) {
-        const float rhs = vector::fp16_to_fp32(static_cast<uint16_t>(rs1_val));
+        const uint16_t rhs_raw = (rs1_val & ~simrv::xlen::FloatingRegister{0xFFFF}) ==
+                                         ~simrv::xlen::FloatingRegister{0xFFFF}
+                                     ? static_cast<uint16_t>(rs1_val)
+                                     : UINT16_C(0x7E00);
+        const float rhs = vector::fp16_to_fp32(rhs_raw);
         for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
             if (!vector::is_element_active(mask_reg, i, vm)) continue;
             const float lhs =
@@ -607,7 +614,12 @@ struct VectorFpElement<uint16_t> {
     static constexpr Raw kSign = UINT16_C(0x8000);
     static constexpr Raw kCanonicalNan = UINT16_C(0x7E00);
     static auto value(Raw raw) -> Value { return vector::fp16_to_fp32(raw); }
-    static auto scalar(simrv::xlen::FloatingRegister raw) -> Raw { return static_cast<Raw>(raw); }
+    static auto scalar(simrv::xlen::FloatingRegister raw) -> Raw {
+        return (raw & ~simrv::xlen::FloatingRegister{0xFFFF}) ==
+                       ~simrv::xlen::FloatingRegister{0xFFFF}
+                   ? static_cast<Raw>(raw)
+                   : kCanonicalNan;
+    }
     static auto signaling_nan(Raw raw) -> bool {
         return (raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) && (raw & UINT16_C(0x03FF)) != 0 &&
                (raw & UINT16_C(0x0200)) == 0;

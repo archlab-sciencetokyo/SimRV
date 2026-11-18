@@ -291,6 +291,49 @@ void test_optional_fp_register_write_trace() {
     std::filesystem::remove(path);
 }
 
+void test_vector_register_write_json_quoting() {
+    const auto path = trace_path("vec-register-write");
+    simrv::core::MachineConfig config;
+    config.debug.trace_register_writes = true;
+    Machine machine(config);
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    cpu.machine_ = &machine;
+    cpu.state().pc = simrv::xlen::VirtAddr{kPc};
+    cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::V);
+    cpu.state().mstatus |= simrv::core::MstatusBit::Vs;
+    cpu.state().refresh_misa_status();
+    cpu.state().vl = 4;
+    cpu.state().vtype = 0x10U;
+    machine.trace().init_architecture_trace(path.string());
+
+    simrv::pipeline::PipelineContext retiring{};
+    retiring.trace_sequence = 1;
+    retiring.cpc = simrv::xlen::VirtAddr{kPc};
+    retiring.ir = (0x00U << 26U) | (1U << 25U) | (2U << 20U) | (3U << 15U) | (3U << 12U) |
+                  (1U << 7U) | 0x57U;
+    retiring.rd = static_cast<simrv::xlen::RegId>(1);
+    retiring.op_id = simrv::isa::VADD_VI;
+    retiring.traits.writes_vec = true;
+    machine.trace().capture_register_write_before(cpu, retiring);
+    cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(retiring.rd)).u32[0] = 0x12345678U;
+    machine.trace().log_architecture_retirement(cpu, retiring);
+    machine.trace().flush_all();
+
+    const auto records = read_trace(sibling_path(path, "registers.jsonl"));
+    if (records.size() != 1 ||
+        records.front().find("\"register_file\":\"vector\"") == std::string::npos ||
+        records.front().find("\"before_bits\":\"0x") == std::string::npos ||
+        records.front().find("\"after_bits\":\"0x") == std::string::npos) {
+        std::abort();
+    }
+    for (const auto* stream : {"registers.jsonl", "calls.jsonl", "devices.jsonl",
+                               "interrupts.jsonl", "bus.jsonl", "metadata.json"})
+        std::filesystem::remove(sibling_path(path, stream));
+    std::filesystem::remove(path);
+}
+
 void test_retirement_index_offsets() {
     constexpr size_t kRetirements = 257;
     Machine machine;
@@ -1178,6 +1221,7 @@ int main(int argc, char** argv) {
     test_lockstep_virtual_pc(argv[0]);
     test_retirement_context_and_call_trace();
     test_optional_fp_register_write_trace();
+    test_vector_register_write_json_quoting();
     test_retirement_index_offsets();
     test_gzip_retirement_preserves_schema_one_records();
     test_branches_are_not_calls();

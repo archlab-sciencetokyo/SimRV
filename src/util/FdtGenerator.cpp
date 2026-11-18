@@ -325,9 +325,11 @@ auto generate_platform_fdt(const core::MachineConfig& config,
             return !simrv::isa::misa_has_extension(config.isa.isa_preset, misa_extension);
         });
     }
-    if constexpr (simrv::xlen::kIsXLen64) {
-        // Present in the shared optional capability catalog.
-    } else {
+    const bool is_guest_rv32 =
+        !simrv::xlen::kIsXLen64 || config.isa.misa_xlen == 32 ||
+        (simrv::xlen::kIsXLen64 &&
+         (((static_cast<uint64_t>(config.isa.isa_preset) >> 62U) & 0x3U) == 1U));
+    if (is_guest_rv32) {
         std::erase_if(guest_extensions, [](std::string_view ext) {
             return ext == "ssu64xl" || ext == "ssnpm" || ext == "supm";
         });
@@ -339,7 +341,6 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     if (has_vector && has_bitmanip) guest_extensions.emplace_back("zvkb");
     if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::M)) {
         guest_extensions.emplace_back("zmmul");
-        guest_extensions.emplace_back("zimop");
     }
     if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::A)) {
         guest_extensions.emplace_back("zaamo");
@@ -417,6 +418,36 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     append_if_enabled(simrv::isa::MultiLetterExtension::Smcsrind, "smcsrind");
     append_if_enabled(simrv::isa::MultiLetterExtension::Sscsrind, "sscsrind");
     append_if_enabled(simrv::isa::MultiLetterExtension::Smrnmi, "smrnmi");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zicond, "zicond");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfa, "zfa");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zfhmin, "zfhmin");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvfhmin, "zvfhmin");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvbb, "zvbb");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvbc, "zvbc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zvkt, "zvkt");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zkt, "zkt");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zicbom, "zicbom");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zicboz, "zicboz");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zicbop, "zicbop");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zawrs, "zawrs");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svinval, "svinval");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svpbmt, "svpbmt");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Svnapot, "svnapot");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sstc, "sstc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Sscofpmf, "sscofpmf");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Ssstateen, "ssstateen");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zba, "zba");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbb, "zbb");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbc, "zbc");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zbs, "zbs");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zcf, "zcf");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smcntrpmf, "smcntrpmf");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Smaia, "smaia");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Ssaia, "ssaia");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zicfilp, "zicfilp");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zicfiss, "zicfiss");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zimop, "zimop");
+    append_if_enabled(simrv::isa::MultiLetterExtension::Zcmop, "zcmop");
 
     if (!simrv::isa::profile_info(config.execution.profile)->supervisor_profile) {
         std::erase_if(guest_extensions, [](std::string_view ext) {
@@ -432,12 +463,12 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.property_u32("reg", hart);
         fdt.property_string("status", "okay");
         fdt.property_u32("clock-frequency", clock_hz);
-        fdt.property_string("riscv,isa-base", simrv::xlen::kIsXLen64 ? "rv64i" : "rv32i");
+        fdt.property_string("riscv,isa-base", is_guest_rv32 ? "rv32i" : "rv64i");
         fdt.property_stringlist("riscv,isa-extensions", guest_extensions);
         fdt.property_u32("riscv,cbom-block-size", core::kGuestCacheBlockBytes);
         fdt.property_u32("riscv,cbop-block-size", core::kGuestCacheBlockBytes);
         fdt.property_u32("riscv,cboz-block-size", core::kGuestCacheBlockBytes);
-        fdt.property_string("mmu-type", simrv::xlen::kIsXLen64 ? "riscv,sv39" : "riscv,sv32");
+        fdt.property_string("mmu-type", is_guest_rv32 ? "riscv,sv32" : "riscv,sv39");
 
         // CPU Interrupt Controller
         fdt.begin_node("interrupt-controller");

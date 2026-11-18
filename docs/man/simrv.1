@@ -108,7 +108,8 @@ Stop after \fIn\fR instructions have retired across all harts.
 Enable a CLINT timer interrupt after \fIn\fR cycles.
 .TP
 .B \-\-pipeline=\fItype\fR
-Select the cycle-accurate pipeline target: \fB3stage\fR or \fB5stage\fR.
+Select the cycle-accurate pipeline target: \fB2stage\fR, \fB3stage\fR, \fB5stage\fR (default),
+\fB6stage-issue\fR, \fB6stage-fetch\fR, or \fB6stage-mem\fR.
 .TP
 .B \-\-no-forwarding
 Disable operand forwarding in the cycle-accurate pipeline.
@@ -308,7 +309,7 @@ Installed build provenance manifest.
 The Tools package can generate completion scripts for Bash, Zsh, and Fish with
 \fBsimrv-tools completion\fR.
 .SH SEE ALSO
-.BR simrv\-cpu\-wizard (1),
+.BR simrv\-config\-wizard (1),
 .BR simrv\-tools (1),
 .BR simrv\-parity (1),
 .BR simrv\-benchmark (1)

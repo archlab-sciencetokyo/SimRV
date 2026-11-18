@@ -23,8 +23,7 @@ class FramebufferDevice {
 
     [[nodiscard]] virtual auto framebuffer_geometry() const noexcept
         -> simrv::core::FramebufferConfig = 0;
-    [[nodiscard]] virtual auto framebuffer_data() const noexcept
-        -> std::span<const uint8_t> = 0;
+    [[nodiscard]] virtual auto framebuffer_data() const noexcept -> std::span<const uint8_t> = 0;
     [[nodiscard]] virtual auto is_display_active() const noexcept -> bool {
         return !framebuffer_data().empty();
     }

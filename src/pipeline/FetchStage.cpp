@@ -883,6 +883,15 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         if (!rv32e_register_operands_valid(traits.writes_int, decoded.rd(), traits.reads_rs1_int,
                                            decoded.rs1(), traits.reads_rs2_int, decoded.rs2())) {
             is_valid = false;
+        } else if (effective_extensions.has(isa::MultiLetterExtension::Zfinx) &&
+                   !misa_has_extension(state_.misa, isa::IsaExtension::F) &&
+                   !misa_has_extension(state_.misa, isa::IsaExtension::D)) {
+            const auto rs3_reg = static_cast<simrv::xlen::RegId>((w_ir_tmp >> 27U) & 0x1FU);
+            if (!rv32e_register_operands_valid(traits.writes_fp, decoded.rd(), traits.reads_rs1_fp,
+                                               decoded.rs1(), traits.reads_rs2_fp, decoded.rs2()) ||
+                (traits.reads_rs3_fp && !rv32e_register_is_valid(rs3_reg))) {
+                is_valid = false;
+            }
         }
     }
     if (simrv::compiler::unlikely(op_id == isa::ILLEGAL)) {

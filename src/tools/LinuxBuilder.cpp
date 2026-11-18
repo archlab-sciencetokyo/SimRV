@@ -123,7 +123,9 @@ BuildPaths buildPaths(const Config& config) {
         fs::absolute(envOr("SIMRV_GUEST_IMAGES_DIR",
                            envOr("SIMRV_LINUX_IMAGES_DIR",
                                  envOr("SIMRV_LINUX_IMAGES_ROOT", defaultImagesRoot.string()))));
-    paths.images = paths.imagesRoot / config.arch / (config.rootfs + "-" + config.profile);
+    paths.images =
+        paths.imagesRoot / config.arch /
+        (config.rootfs == config.profile ? config.rootfs : config.rootfs + "-" + config.profile);
     paths.linuxSource = paths.build / ("linux-" + config.linuxVersion);
     paths.opensbiSource = paths.build / ("opensbi-" + config.opensbi);
     paths.busyboxSource = paths.build / ("busybox-" + config.busybox);
@@ -1549,26 +1551,32 @@ void buildUefi(const Config& config, const BuildPaths& paths) {
             throw std::runtime_error(std::string{name} + " exceeds the 32 MiB pflash device");
         fs::copy_file(firmware, paths.images / name, fs::copy_options::overwrite_existing);
     }
-    auto simulator = envOr("SIMRV_BIN", "");
-    if (simulator.empty()) {
-        const auto installedSimulator = linuxBuilderExecutable.parent_path() / "simrv";
-        if (access(installedSimulator.c_str(), X_OK) == 0) simulator = installedSimulator.string();
+    auto toolsBin = envOr("SIMRV_TOOLS_BIN", "");
+    if (toolsBin.empty()) {
+        const auto installedTools = linuxBuilderExecutable.parent_path() / "simrv-tools";
+        if (access(installedTools.c_str(), X_OK) == 0) toolsBin = installedTools.string();
     }
-    if (simulator.empty()) {
-        for (const auto& candidate :
-             {paths.source / "build/rv64-release/simrv", paths.source / "build/rv64-dev/simrv",
-              paths.source / "build/rv32-release/simrv", paths.source / "build/rv32-dev/simrv"}) {
+    if (toolsBin.empty()) {
+        for (const auto& candidate : {paths.source / "build/rv64-release/simrv-tools",
+                                      paths.source / "build/rv64-dev/simrv-tools",
+                                      paths.source / "build/rv32-release/simrv-tools",
+                                      paths.source / "build/rv32-dev/simrv-tools"}) {
             if (access(candidate.c_str(), X_OK) == 0) {
-                simulator = candidate.string();
+                toolsBin = candidate.string();
                 break;
             }
         }
     }
-    if (simulator.empty() || access(simulator.c_str(), X_OK) != 0)
+    if (toolsBin.empty()) {
+        if (const auto found = findProgram("simrv-tools")) {
+            toolsBin = found->string();
+        }
+    }
+    if (toolsBin.empty() || access(toolsBin.c_str(), X_OK) != 0)
         throw std::runtime_error(
-            "SimRV executable is required to create the UEFI disk; set SIMRV_BIN");
-    runChecked({simulator, "--create-disk", (paths.images / "uefi-disk.img").string(), "-m",
-                (paths.images / "uefi-kernel.efi").string(), "-D",
+            "simrv-tools executable is required to create the UEFI disk; set SIMRV_TOOLS_BIN");
+    runChecked({toolsBin, "disk", "create", (paths.images / "uefi-disk.img").string(), "--kernel",
+                (paths.images / "uefi-kernel.efi").string(), "--rootfs",
                 (paths.images / "rootfs.img").string()});
 }
 
@@ -2053,6 +2061,7 @@ int main(int argc, char** argv) {
     config.reuseBuildroot = envOr("SIMRV_LINUX_REUSE_BUILDROOT", "0") == "1";
     bool tui = false;
     bool help = false;
+    bool profileSet = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg{argv[i]};
         if (arg == "--tui") {
@@ -2072,9 +2081,10 @@ int main(int argc, char** argv) {
                 config.libc = value;
             else if (arg == "--rootfs")
                 config.rootfs = value;
-            else if (arg == "--profile")
+            else if (arg == "--profile") {
                 config.profile = value;
-            else if (arg == "--linux-version")
+                profileSet = true;
+            } else if (arg == "--linux-version")
                 config.linuxVersion = value;
             else if (arg == "--opensbi-version")
                 config.opensbi = value;
@@ -2121,6 +2131,9 @@ int main(int argc, char** argv) {
     if (help) {
         printHelp(argv[0]);
         return 0;
+    }
+    if (!profileSet && config.rootfs == "buildroot") {
+        config.profile = "buildroot";
     }
     if (tui) {
         if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {

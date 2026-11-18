@@ -112,6 +112,15 @@ auto sign_extend_return_pc(const ArchState& state, simrv::xlen::VirtAddr pc) noe
         case csr_addr(Csr::Satp):
         case csr_addr(Csr::Senvcfg):
         case csr_addr(Csr::Stimecmp):
+        case csr_addr(Csr::Siselect):
+        case csr_addr(Csr::Sireg):
+        case csr_addr(Csr::Sireg2):
+        case csr_addr(Csr::Sireg3):
+        case csr_addr(Csr::Sireg4):
+        case csr_addr(Csr::Sireg5):
+        case csr_addr(Csr::Sireg6):
+        case csr_addr(Csr::Scontext):
+        case csr_addr(Csr::Stopi):
         case csr_addr(Csr::Sstateen0):
         case csr_addr(Csr::Sstateen1):
         case csr_addr(Csr::Sstateen2):
@@ -438,6 +447,10 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
                 state.update_xlen();
                 state.pc = simrv::xlen::VirtAddr{state.mtvec & ~simrv::xlen::CsrValue{3U}};
                 state.lr_reservation_active = false;
+                cpu.pipeline_context.pending_exception = std::nullopt;
+                cpu.pipeline_context.pending_tval = 0;
+                cpu.pipeline_context.pending_htval = 0;
+                cpu.pipeline_context.pending_htinst = 0;
                 return TrapDisposition::Delivered;
             }
             effective_cause = std::to_underlying(isa::ExceptionCode::DoubleTrap);
@@ -872,10 +885,10 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
             address == csr_addr(Csr::Hideleg) || address == csr_addr(Csr::Hie) ||
             address == csr_addr(Csr::Hcounteren) || address == csr_addr(Csr::Htimedelta) ||
             address == csr_addr(Csr::Hgeie) || (address == csr_addr(Csr::Hgeip) && !is_write) ||
-            address == csr_addr(Csr::Henvcfg) || address == csr_addr(Csr::Htval) ||
-            address == csr_addr(Csr::Hip) || address == csr_addr(Csr::Hvip) ||
-            address == csr_addr(Csr::Htinst) || address == csr_addr(Csr::Hgatp) ||
-            (address >= 0x60CU && address <= 0x60FU);
+            address == csr_addr(Csr::Henvcfg) || address == csr_addr(Csr::Hvien) ||
+            address == csr_addr(Csr::Htval) || address == csr_addr(Csr::Hip) ||
+            address == csr_addr(Csr::Hvip) || address == csr_addr(Csr::Htinst) ||
+            address == csr_addr(Csr::Hgatp) || (address >= 0x60CU && address <= 0x60FU);
         const bool virtualization_fault =
             state.virt &&
             ((state.priv == kPrivUser && state.supervisor_mode_supported &&
@@ -916,8 +929,11 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
 
     if (address == csr_addr(Csr::Fflags) || address == csr_addr(Csr::Frm) ||
         address == csr_addr(Csr::Fcsr)) {
-        if (!isa::misa_has_extension(state.misa, isa::IsaExtension::F) ||
-            !state.extension_state_enabled(MstatusBit::Fs)) {
+        const bool zfinx_active = state.enabled_extensions.has(isa::MultiLetterExtension::Zfinx) &&
+                                  !isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&
+                                  !isa::misa_has_extension(state.misa, isa::IsaExtension::D);
+        if (!zfinx_active && (!isa::misa_has_extension(state.misa, isa::IsaExtension::F) ||
+                              !state.extension_state_enabled(MstatusBit::Fs))) {
             return ExceptionCode::IllegalInstruction;
         }
     }
@@ -955,15 +971,14 @@ auto TrapController::check_csr_access(const ArchState& state, simrv::xlen::CsrNu
             return ExceptionCode::IllegalInstruction;
         }
     }
-    if (address == csr_addr(Csr::Hvien)) {
-        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Smaia) &&
-            !state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia)) {
+    if (address == csr_addr(Csr::Hvien) || address == csr_addr(Csr::Vstopi)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia) ||
+            !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
             return ExceptionCode::IllegalInstruction;
         }
     }
-    if (address == csr_addr(Csr::Stopi) || address == csr_addr(Csr::Vstopi)) {
-        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia) &&
-            !state.enabled_extensions.has(isa::MultiLetterExtension::Smaia)) {
+    if (address == csr_addr(Csr::Stopi)) {
+        if (!state.enabled_extensions.has(isa::MultiLetterExtension::Ssaia)) {
             return ExceptionCode::IllegalInstruction;
         }
     }
@@ -1122,9 +1137,10 @@ auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
         address == csr_num(Csr::Hcounteren).value() ||
         address == csr_num(Csr::Htimedelta).value() || address == csr_num(Csr::Hgeie).value() ||
         address == csr_num(Csr::Hgeip).value() || address == csr_num(Csr::Henvcfg).value() ||
-        address == csr_num(Csr::Htval).value() || address == csr_num(Csr::Hip).value() ||
-        address == csr_num(Csr::Hvip).value() || address == csr_num(Csr::Htinst).value() ||
-        address == csr_num(Csr::Hgatp).value() || (address >= 0x60CU && address <= 0x60FU);
+        address == csr_num(Csr::Hvien).value() || address == csr_num(Csr::Htval).value() ||
+        address == csr_num(Csr::Hip).value() || address == csr_num(Csr::Hvip).value() ||
+        address == csr_num(Csr::Htinst).value() || address == csr_num(Csr::Hgatp).value() ||
+        (address >= 0x60CU && address <= 0x60FU);
     const bool vs_csr = address >= 0x200U && address <= 0x2FFU;
     if (h_csr || vs_csr) {
         if (!isa::misa_has_extension(misa, isa::IsaExtension::H)) return false;

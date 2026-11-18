@@ -127,7 +127,7 @@ The source suite revision is the `riscv-arch-test` suite (configured via `RISCV_
 Local RVA23S64 evidence includes profile-specific regressions, 2391 Chips Alliance base-V tests at
 VLEN=128 and VLEN=256, Sha's seven constituent ACT categories, and the current upstream ACT4 suite
 (3202/3202 at VLEN=128). Both local architecture CTest gates pass. Remote release CI gates must
-also pass before the rc.19 release is considered complete. This test evidence is not formal
+also pass before the release is considered complete. This test evidence is not formal
 RISC-V International certification.
 
 This evidence is not formal RISC-V International certification. The table and exact mandatory
