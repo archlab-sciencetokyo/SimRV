@@ -251,9 +251,9 @@ jobs:
         run: |
           build_jobs=${{ matrix.build_jobs }}
           if (( build_jobs > 0 )); then
-            cmake --build --preset ${{ matrix.preset }} --parallel "$build_jobs"
+            cmake --build --preset ${{ matrix.preset }} --target simrv-sanitizer-binaries --parallel "$build_jobs"
           else
-            cmake --build --preset ${{ matrix.preset }}
+            cmake --build --preset ${{ matrix.preset }} --target simrv-sanitizer-binaries
           fi
 
       - name: Run ${{ matrix.sanitizer }} suite

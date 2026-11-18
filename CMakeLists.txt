@@ -391,3 +391,11 @@ include("${PROJECT_SOURCE_DIR}/cmake/SimRVTests.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/SimRVDeveloperTargets.cmake")
 
 include("${PROJECT_SOURCE_DIR}/cmake/SimRVPackaging.cmake")
+
+if(BUILD_TESTING)
+  get_property(SIMRV_REGRESSION_TEST_TARGETS
+               GLOBAL PROPERTY SIMRV_REGRESSION_TEST_TARGETS)
+  add_custom_target(
+    simrv-sanitizer-binaries
+    DEPENDS simrv-package-binaries ${SIMRV_REGRESSION_TEST_TARGETS})
+endif()
