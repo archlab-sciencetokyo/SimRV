@@ -136,6 +136,7 @@ if(BUILD_TESTING)
 
   simrv_add_runtime_test(simrv-microarchitecture-tests tests/MicroarchitectureTests.cpp microarchitecture
                          "gate;regress;pipeline")
+  set_tests_properties(microarchitecture PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_link_libraries(simrv-microarchitecture-tests PRIVATE simrv-tooling)
   simrv_add_runtime_test(simrv-device-plugin-tests tests/DevicePluginTests.cpp device-plugins
                          "gate;regress;device;plugin")
@@ -150,6 +151,7 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-cpu-model-loader-tests tests/CpuModelLoaderTests.cpp cpu-model-loader
     "gate;regress;pipeline;model")
+  set_tests_properties(cpu-model-loader PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_definitions(simrv-cpu-model-loader-tests PRIVATE
                              TEST_CFU_CONFIG_PATH="${PROJECT_SOURCE_DIR}/tests/fixtures/cfu-test.cfg")
 
