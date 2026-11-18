@@ -5,6 +5,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [v3.0.0] — 2026-11-18
+
+- Promote SimRV 3.0.0 General Availability (GA): dual-width (RV32 / RV64) C++23 RISC-V simulator with interactive TUI workbench, classroom missions, GDB RSP, Spike lockstep, dynamic `.cfg` CPU/SoC/bus/pipeline models, external CFU/MMIO device/parity plugins, and native C++ tooling/packaging.
+- Complete ISA and core correctness audit fixes ahead of GA:
+  - Fix `Zfinx`/`Zdinx`/`Zhinx` `DecodeCache` fast-path fallback, `fcsr`/`fflags`/`frm` presence and `mstatus.FS` preservation, `Zfa` `FLI.*`/`FROUND*` decoding, and `RV32E` < 16 operand enforcement.
+  - Forward scalar crypto `funct7` (`bs`) across cycle-accurate pipeline stages, prevent `Zcmp`/`Zcmt` CA register clobbering, enforce `RV32E` `CM.MVA01S`/`CM.MVSA01` limits, and sign-extend 32-bit `Zcmp`/`Zcmt` targets.
+  - Harden `Ssdbltrp`/`Smdbltrp`/`Zicfilp` `mstatus` masks, `Smrnmi` pending-trap state clearing, hosted-RV32 `menvcfg*`/`mcyclecfg*`/`minstretcfg*` high/low updates, `Ssaia`/`Hvien` CSR trapping, `Zvfbfmin`/`Zvfbfwma`/`Zvbb` widening vector writeback and `Zvfh` NaN-boxing, `MachineInit`/CLI config overrides, CMO 32-bit address truncation & dynamic cache-line sizes, L3->L2 slice extraction, and runtime FDT extension/XLEN/MMU advertising.
+  - Fix `InstructionExplainer` `Zcmp`/`Zcmt` compressed decoding and Wave 1–3 spec catalog coverage, vector `register_write` JSON trace quoting, JSON schemas (`soc-manifest`, `inspection-report`, `release-manifest`), CI workflows, documentation/manpages, and native `simrv-release-check` / `simrv-evidence` / `simrv-linux-builder` tooling.
+
 ## [v3.0.0-rc.20] — 2026-11-15
 
 - Replace hardcoded ISA and pipeline presets with dynamic `IsaSpec` parsing, model discovery (`configs/models/*.cfg` with `extends` inheritance), and `kPipelineCatalog` / `PipelineTopology` NTTP specialization.

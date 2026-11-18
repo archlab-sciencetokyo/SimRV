@@ -1,9 +1,15 @@
-# SimRV 3.0.0 release-candidate handoff
+# SimRV 3.0.0 GA release
 
-Branch: `release/3.0.0-rc.20`
+Branch: `release/3.0.0`
 Target: `dev`
 
-## Candidate scope for v3.0.0-rc.20
+## Completed scope for v3.0.0
+
+- [x] Fix core, ISA, CSR, pipeline, memory, FDT, explainer, trace, schema, and tooling audit findings ahead of GA.
+- [x] Align CI workflows, man pages, user/architecture documentation, and `.agents` workflows with 3.0.0 CLI and 4-package layout.
+- [x] Synchronize version `3.0.0` across `CMakeLists.txt`, `release/release-manifest.json`, `CITATION.cff`, and `CHANGELOG.md`.
+- [x] Add regression tests covering audit fixes across `CoreSemanticsTests`, `RiscvProfileTests`, `TraceTests`, `FdtGeneratorTests`, and `ReleaseTests`.
+- [ ] Run remote CI qualification matrix across PR to `dev` before creating git tags or GitHub release assets.
 
 - [x] Replace fixed ISA/pipeline presets with dynamic `IsaSpec`, `discover_cpu_models()`, and `PipelineTopology` NTTP kernels.
 - [x] Implement protocol-neutral `Bus` and `TemplatedBus<BusProtocolSpec>` for TileLink-C/UH/UL and AXI4/AXI4-Lite.
