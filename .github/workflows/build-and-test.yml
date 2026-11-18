@@ -211,7 +211,7 @@ jobs:
           - sanitizer: asan-ubsan
             preset: rv64-asan
             build_dir: /tmp/simrv-build/rv64-asan
-            build_jobs: 3
+            build_jobs: 0
             cmake_extra: >-
               -DSIMRV_ENABLE_UBSAN=ON -DSIMRV_WARNINGS_AS_ERRORS=ON
               -DSIMRV_ENABLE_LTO=OFF
