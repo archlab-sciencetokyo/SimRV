@@ -80,6 +80,24 @@ auto compute_stats(std::vector<double> values) -> BenchmarkStats {
     return stats;
 }
 
+struct CacheMetrics {
+    uint64_t accesses;
+    double miss_rate_pct;
+};
+
+auto calculate_cache_metrics(const BenchmarkCacheStats& stats) -> CacheMetrics {
+    const uint64_t accesses = stats.hits + stats.misses;
+
+    const double miss_rate_pct =
+        accesses == 0 ? 0.0
+                      : 100.0 * static_cast<double>(stats.misses) / static_cast<double>(accesses);
+
+    return {
+        .accesses = accesses,
+        .miss_rate_pct = miss_rate_pct,
+    };
+}
+
 auto execution_mode_str(RequestedExecutionMode mode) -> std::string {
     switch (mode) {
         case RequestedExecutionMode::Fast:
@@ -256,13 +274,10 @@ void print_table(const BenchmarkReport& report) {
         "{}",
         cyan("--------------------------------------------------------------------------------"));
     const auto print_cache_stats = [](std::string_view name, const BenchmarkCacheStats& stats) {
-        const uint64_t accesses = stats.hits + stats.misses;
-        const double miss_rate = accesses == 0 ? 0.0
-                                               : 100.0 * static_cast<double>(stats.misses) /
-                                                     static_cast<double>(accesses);
+        const auto metrics = calculate_cache_metrics(stats);
         std::println("  {:<10}  {:>8}  {:>10}  {:>12}  {:>10.2f}%  {:>14}", name,
                      format_with_commas(stats.hits), format_with_commas(stats.misses),
-                     format_with_commas(accesses), miss_rate,
+                     format_with_commas(metrics.accesses), metrics.miss_rate_pct,
                      format_with_commas(stats.replacements));
     };
     print_cache_stats("I-Cache", report.icache_stats);
@@ -315,28 +330,20 @@ auto write_json(const BenchmarkReport& report, const std::string& path,
     out << "    },\n";
     out << "    \"cache\": {\n";
     out << "      \"sample\": \"first_measured_run\",\n";
-    const uint64_t icache_accesses = report.icache_stats.hits + report.icache_stats.misses;
-    const double icache_miss_rate_pct =
-        icache_accesses == 0 ? 0.0
-                             : 100.0 * static_cast<double>(report.icache_stats.misses) /
-                                   static_cast<double>(icache_accesses);
-    const uint64_t dcache_accesses = report.dcache_stats.hits + report.dcache_stats.misses;
-    const double dcache_miss_rate_pct =
-        dcache_accesses == 0 ? 0.0
-                             : 100.0 * static_cast<double>(report.dcache_stats.misses) /
-                                   static_cast<double>(dcache_accesses);
+    const auto icache_metrics = calculate_cache_metrics(report.icache_stats);
+    const auto dcache_metrics = calculate_cache_metrics(report.dcache_stats);
     out << "      \"icache\": {\n";
     out << "        \"hits\": " << report.icache_stats.hits << ",\n";
     out << "        \"misses\": " << report.icache_stats.misses << ",\n";
-    out << "        \"accesses\": " << icache_accesses << ",\n";
-    out << "        \"miss_rate_pct\": " << icache_miss_rate_pct << ",\n";
+    out << "        \"accesses\": " << icache_metrics.accesses << ",\n";
+    out << "        \"miss_rate_pct\": " << icache_metrics.miss_rate_pct << ",\n";
     out << "        \"replacements\": " << report.icache_stats.replacements << "\n";
     out << "      },\n";
     out << "      \"dcache\": {\n";
     out << "        \"hits\": " << report.dcache_stats.hits << ",\n";
     out << "        \"misses\": " << report.dcache_stats.misses << ",\n";
-    out << "        \"accesses\": " << dcache_accesses << ",\n";
-    out << "        \"miss_rate_pct\": " << dcache_miss_rate_pct << ",\n";
+    out << "        \"accesses\": " << dcache_metrics.accesses << ",\n";
+    out << "        \"miss_rate_pct\": " << dcache_metrics.miss_rate_pct << ",\n";
     out << "        \"replacements\": " << report.dcache_stats.replacements << "\n";
     out << "      }\n";
     out << "    }\n";
