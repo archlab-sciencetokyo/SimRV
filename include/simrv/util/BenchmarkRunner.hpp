@@ -52,6 +52,10 @@ struct BenchmarkStats {
     double cv_percent = 0.0;
 };
 
+/**
+ * @struct BenchmarkCacheStats
+ * @brief Hit, miss, and replacement counts for a cache in a benchmark run.
+ */
 struct BenchmarkCacheStats {
     uint64_t hits = 0;
     uint64_t misses = 0;
