@@ -42,6 +42,7 @@ Makefile            text eol=lf
 # -----------------------------------------------------------------------------
 *.sh      text eol=lf
 *.bash    text eol=lf
+*.py      text diff=python eol=lf
 
 # -----------------------------------------------------------------------------
 # Device Tree & Hardware Configurations

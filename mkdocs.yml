@@ -1,0 +1,97 @@
+site_name: SimRV
+site_description: An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with interactive TUI, cycle-accurate in-order modeling, and full-system Linux emulation.
+site_author: SimRV Contributors
+site_url: !ENV [SIMRV_DOCS_SITE_URL, 'https://archlab-sciencetokyo.github.io/SimRV/stable/']
+site_dir: !ENV [SIMRV_DOCS_SITE_DIR, 'site']
+repo_name: archlab-sciencetokyo/SimRV
+repo_url: https://github.com/archlab-sciencetokyo/SimRV
+edit_uri: !ENV [SIMRV_DOCS_EDIT_URI, 'edit/main/docs/']
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+extra:
+  version:
+    provider: mike
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - tables
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - def_list
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Installation: user/install.md
+      - Quickstart & CLI: user/index.md
+      - Interactive TUI Workbench: user/tui.md
+      - Bare-Metal & Embedded: user/baremetal.md
+      - Full-System Linux Boot: user/linux.md
+      - Student Architecture Guide: user/classroom.md
+  - Architecture:
+      - System & Pipeline Overview: architecture/overview.md
+      - ISA Compliance & Boundaries: architecture/compliance.md
+  - Hardware & Extensions:
+      - Custom Extensions & Instructions: hardware/extensions.md
+  - Development & Contributing:
+      - Developer Guide & Standards: development/contributing.md
+
+not_in_nav: |
+  SUPPORT_MATRIX.md
