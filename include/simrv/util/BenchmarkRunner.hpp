@@ -53,6 +53,16 @@ struct BenchmarkStats {
 };
 
 /**
+ * @struct BenchmarkCacheStats
+ * @brief Hit, miss, and replacement counts for a cache in a benchmark run.
+ */
+struct BenchmarkCacheStats {
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+    uint64_t replacements = 0;
+};
+
+/**
  * @struct BenchmarkReport
  * @brief Complete benchmark execution record including metadata and statistics.
  */
@@ -65,6 +75,8 @@ struct BenchmarkReport {
     BenchmarkStats wall_time_ms_stats{};
     BenchmarkStats mips_stats{};
     BenchmarkStats ipc_stats{};
+    BenchmarkCacheStats icache_stats{};
+    BenchmarkCacheStats dcache_stats{};
     uint64_t total_instructions_retired = 0;
 };
 
