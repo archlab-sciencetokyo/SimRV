@@ -248,6 +248,27 @@ void print_table(const BenchmarkReport& report) {
                  report.mips_stats.stddev, report.mips_stats.cv_percent, report.ipc_stats.stddev);
     std::println(
         "{}",
+        cyan("--------------------------------------------------------------------------------"));
+    std::println("  {:<10}  {:>8}  {:>10}  {:>12}  {:>11}  {:>14}", "Cache", "Hits", "Misses",
+                 "Accesses", "Miss Rate", "Replacements");
+
+    std::println(
+        "{}",
+        cyan("--------------------------------------------------------------------------------"));
+    const auto print_cache_stats = [](std::string_view name, const BenchmarkCacheStats& stats) {
+        const uint64_t accesses = stats.hits + stats.misses;
+        const double miss_rate = accesses == 0 ? 0.0
+                                               : 100.0 * static_cast<double>(stats.misses) /
+                                                     static_cast<double>(accesses);
+        std::println("  {:<10}  {:>8}  {:>10}  {:>12}  {:>10.2f}%  {:>14}", name,
+                     format_with_commas(stats.hits), format_with_commas(stats.misses),
+                     format_with_commas(accesses), miss_rate,
+                     format_with_commas(stats.replacements));
+    };
+    print_cache_stats("I-Cache", report.icache_stats);
+    print_cache_stats("D-Cache", report.dcache_stats);
+    std::println(
+        "{}",
         cyan("================================================================================"));
     std::println("  {} Median Throughput: {} MIPS", green("-->"),
                  green(std::format("{:.3f}", report.mips_stats.median)));
@@ -634,6 +655,7 @@ auto run_benchmark(const BenchmarkOptions& options) -> int {
     RuntimeOptions benchmark_opts = options;
     benchmark_opts.fn_memimg = target_elf;
     benchmark_opts.tuimode = false;
+    benchmark_opts.execution_mode_explicit = true;
     benchmark_opts.explicit_cli_mode = true;
     benchmark_opts.quiet = true;
     benchmark_opts.log_level = simrv::log::Level::Warn;
@@ -724,6 +746,18 @@ auto run_benchmark(const BenchmarkOptions& options) -> int {
             std::chrono::duration_cast<std::chrono::nanoseconds>(end_wall - start_wall);
         const double wall_sec = static_cast<double>(wall_ns.count()) / 1e9;
         const double wall_ms = static_cast<double>(wall_ns.count()) / 1e6;
+
+        if (r == 0) {
+            for (size_t h = 0; h < machine->num_harts(); ++h) {
+                const auto& hart = machine->hart(h);
+                report.icache_stats.hits += hart.icache.hit_count();
+                report.icache_stats.misses += hart.icache.miss_count();
+                report.icache_stats.replacements += hart.icache.replacement_count();
+                report.dcache_stats.hits += hart.dcache.hit_count();
+                report.dcache_stats.misses += hart.dcache.miss_count();
+                report.dcache_stats.replacements += hart.dcache.replacement_count();
+            }
+        }
 
         uint64_t icount = machine->retired_instruction_count();
         if (icount == 0) {
