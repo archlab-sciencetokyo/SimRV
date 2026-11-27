@@ -115,6 +115,18 @@
             "cacheVariables": {}
         },
         {
+            "name": "rv64-ca-full",
+            "displayName": "RV64 Full Cycle-Accurate ISA Corpus (Ninja)",
+            "inherits": [
+                "simrv-dev",
+                "simrv-rv64"
+            ],
+            "binaryDir": "${sourceDir}/build/rv64-ca-full",
+            "cacheVariables": {
+                "SIMRV_CA_FULL_ISA_TESTS": "ON"
+            }
+        },
+        {
             "name": "rv32-dev",
             "displayName": "RV32 Fast Dev Release (No LTO, -g1, Ninja)",
             "inherits": [
@@ -289,6 +301,18 @@
             "filter": {
                 "include": {
                     "label": "gate"
+                }
+            }
+        },
+        {
+            "name": "rv64-ca-full",
+            "configurePreset": "rv64-ca-full",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "^ca$"
                 }
             }
         },

@@ -576,6 +576,21 @@ if(BUILD_TESTING)
     endforeach()
   endforeach()
 
+  option(SIMRV_CA_FULL_ISA_TESTS
+         "Register the complete available ISA corpus for both cycle pipelines" OFF)
+  if(SIMRV_CA_FULL_ISA_TESTS)
+    foreach(ca_pipeline IN ITEMS 5stage 3stage)
+      foreach(ca_test IN LISTS ALL_ISA_TESTS)
+        if(NOT ca_test IN_LIST CA_SMOKE_TESTS)
+          register_ca_isa_test("${ca_test}" "${ca_pipeline}")
+          set_tests_properties(
+            "ca-${ca_pipeline}-${ca_test}" PROPERTIES LABELS
+            "external;isa;ca;pipeline;rv${SIMRV_XLEN}gc")
+        endif()
+      endforeach()
+    endforeach()
+  endif()
+
   if(SPIKE_BIN)
     foreach(test_name IN LISTS SMOKE_LIST)
       register_lockstep_isa_test("${test_name}")
@@ -620,6 +635,20 @@ if(BUILD_TESTING)
       set_tests_properties(
         vector-suite PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} LABELS
                                 "external;vector;required" TIMEOUT 600)
+      if(SIMRV_CA_FULL_ISA_TESTS)
+        add_test(
+          NAME vector-suite-ca
+          COMMAND
+            $<TARGET_FILE:simrv-vector> --simrv $<TARGET_FILE:SimRV>
+            --xlen ${SIMRV_XLEN} --gcc ${RISCV_GCC} --objcopy ${RISCV_OBJCOPY}
+            --nm ${RISCV_NM} --work-dir ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen
+            --vector-tests-dir ${SIMRV_VECTOR_TESTS_DIR} --mode cycle-accurate
+            --vlen 128 --timeout 120 --jobs 4)
+        set_tests_properties(
+          vector-suite-ca PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+          LABELS "external;vector;ca" TIMEOUT 7200
+          ENVIRONMENT "GOCACHE=${CMAKE_CURRENT_BINARY_DIR}/.go-cache")
+      endif()
     endif()
   endif()
 

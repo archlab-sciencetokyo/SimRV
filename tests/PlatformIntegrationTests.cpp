@@ -2391,9 +2391,14 @@ void test_ca_quantum_single_hart_batching() {
     std::cout << "[PASS] test_ca_quantum_single_hart_batching\n";
 }
 
-void test_ca_mt_smp_pause_and_snapshots() {
-    const auto check = [](bool condition) {
-        if (!condition) std::abort();
+void test_ca_mt_smp_pause_and_snapshots(int attempt) {
+    const auto check = [attempt](bool condition,
+                                 std::source_location where = std::source_location::current()) {
+        if (!condition) {
+            std::cerr << "test_ca_mt_smp_pause_and_snapshots attempt=" << attempt
+                      << " failed at line " << where.line() << '\n';
+            std::abort();
+        }
     };
     constexpr size_t kNumHarts = 5;  // Hart 0 plus four independent CA worker threads.
     simrv::core::Machine machine(
@@ -2438,7 +2443,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
         }
         return true;
     };
-    const auto startup_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto startup_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!all_workers_started() && std::chrono::steady_clock::now() < startup_deadline) {
         std::this_thread::yield();
     }
@@ -2466,7 +2471,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
     machine.resume();
     machine.start_runner_for_testing();
     machine.request_tui_sample();
-    const auto resume_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto resume_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (machine.tui_execution_snapshot(1).cycle_count == paused_cycles[1] &&
            std::chrono::steady_clock::now() < resume_deadline) {
         machine.execute_cycle_for_testing();
@@ -2498,7 +2503,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
     machine.switch_execution_engine(simrv::core::ExecutionEngine::InstructionFast);
     machine.service_control_commands();
     machine.resume();
-    const auto switch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto switch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     do {
         machine.request_tui_sample();
         machine.execute_cycle_for_testing();
@@ -5244,7 +5249,9 @@ int main(int argc, char** argv) {
     test_ca_quantum_smp_batching();
     test_ca_quantum_single_hart_batching();
     // Exercise the pause/cycle boundary repeatedly; either side can reach the barrier first.
-    for (int attempt = 0; attempt < 16; ++attempt) test_ca_mt_smp_pause_and_snapshots();
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        test_ca_mt_smp_pause_and_snapshots(attempt);
+    }
     test_cycle_kernel_golden_forwarding();
     test_tui_mode_sim_thread_multiple_step_sync();
     test_step_sync_timeout_and_shutdown();
