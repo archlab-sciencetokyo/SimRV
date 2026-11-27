@@ -1,20 +1,36 @@
 # Building Linux Images for SimRV
 
-This guide explains how to build RISC-V RV32GC (or RV64GC) Linux kernel and rootfs
-images for SimRV testing.
+This guide explains how to build RISC-V Linux kernel and rootfs images for SimRV's
+RVA23-targeted RV64 system and its supported RV32 compatibility configurations. The default
+RV64 image builder also provisions a reproducible Alpine
+Linux graphical path using Xorg, JWM, VirtIO framebuffer/input, a terminal, and small
+offline-friendly demo applications.
 
 ## Overview
 
 SimRV supports full Linux OS boot as part of its integration validation gate. You need:
 
-- **`SIMRV_LINUX_MEM_IMG`**: Firmware payload image (BBL + Linux kernel)
+- **`SIMRV_LINUX_MEM_IMG`**: OpenSBI `FW_PAYLOAD` convenience image containing Linux
 - **`SIMRV_LINUX_DISK_IMG`**: Root filesystem image
-- **`SIMRV_LINUX_DTB`** (optional): Device tree blob
+- **`SIMRV_LINUX_DTB`**: Required device tree blob for Linux boots when `-f/--dtb` is omitted
 
-Pre-built images for both RV32 and RV64 should be placed under
-`linux-images/rv32/` and `linux-images/rv64/` respectively. The
-`scripts/build-linux-image.sh` script automates
-building them from source.
+Every build also publishes standalone `Image`, `opensbi-dynamic.bin`, `devicetree.dtb`, and
+`manifest.json` artifacts. The payload is convenient for SimRV; FPGA bootloaders should use
+the standalone OpenSBI/Linux/DTB/rootfs set and supply the next-stage handoff.
+
+Pre-built images are grouped by architecture and profile under
+`images/<arch>/<rootfs>-<profile>/` (for example, `images/rv64/alpine-gui/`, or
+`images/rv64/buildroot/` when rootfs and profile match). The
+native `simrv-linux-builder` program automates building them from source. The historical
+`build-linux-image.sh` command remains as a compatibility launcher and passes options to that
+program.
+
+In a source checkout, generated profiles go under the repository's `images/` directory. The
+installed `simrv-tools` builder writes profiles to `${XDG_DATA_HOME:-~/.local/share}/SimRV/images`
+and keeps source trees and build files under `${XDG_CACHE_HOME:-~/.cache}/SimRV/linux-build`.
+To build the tool from a source checkout, configure it with
+`cmake --preset rv64-release -DSIMRV_ENABLE_LINUX_TOOLS=ON`, then build the
+`simrv-linux-builder` target with that preset.
 
 ---
 
@@ -24,67 +40,290 @@ building them from source.
 
 ```bash
 # Default build (auto-detects musl / glibc toolchain)
-./scripts/build-linux-image.sh
+simrv-linux-builder
 
 # Build with explicit C library target & cross compiler prefix
-./scripts/build-linux-image.sh --libc musl --cross-compile riscv64-unknown-linux-musl-
-./scripts/build-linux-image.sh --libc glibc --cross-compile riscv64-unknown-linux-gnu-
+simrv-linux-builder --libc musl --cross-compile riscv64-unknown-linux-musl-
+simrv-linux-builder --libc glibc --cross-compile riscv64-unknown-linux-gnu-
+
+# Optional generic serial Buildroot root filesystem
+simrv-linux-builder --arch rv64 --rootfs buildroot --profile buildroot \
+    --libc musl --cross-compile riscv64-unknown-linux-musl-
+
+# Optional Alpine image with both simplefb and VirtIO GPU framebuffers
+simrv-linux-builder --arch rv64 --rootfs alpine --profile virtio-gpu
+
+# Optional alternate Alpine mirror (also settable via SIMRV_ALPINE_MIRROR)
+simrv-linux-builder --alpine-mirror https://dl-5.alpinelinux.org/alpine
+
+# Alpine Linux with a RISC-V EFI-stub kernel and GPT disk with an EFI System Partition
+simrv-linux-builder --arch rv64 --rootfs alpine --profile uefi
+
+# Show full make/compiler commands when diagnosing a failed build
+simrv-linux-builder --verbose
+
+# Matching published kernels are reused automatically; force a kernel rebuild with:
+simrv-linux-builder --rebuild-kernel
 ```
 
-This will:
+The UEFI profile builds the pinned EDK2 RISC-V virt firmware and publishes
+`RISCV_VIRT_CODE.fd`, a pristine `RISCV_VIRT_VARS.fd` template, `uefi-kernel.efi`, and
+`uefi-disk.img` under `images/rv64/alpine-uefi/`. The disk contains a FAT32 EFI System
+Partition with `EFI/BOOT/BOOTRISCV64.EFI` and the Alpine root filesystem as a second GPT
+partition. `setup.sh` exports the firmware, kernel, and disk paths.
 
-1. ✅ Check for a pre-installed RISC-V GNU toolchain (or build one from source)
-2. ✅ Download Linux kernel and Buildroot sources
-3. ✅ Build kernel and rootfs
-4. ✅ Create compatible images in `./linux-images/rv32/`
+The boot chain is OpenSBI in M-mode, EDK2 in S-mode from PFlash0 (`0x20000000`), then the EFI-stub
+Linux kernel. Copy the VARS template to a writable working file before starting; EDK2 persists
+firmware changes to that copy:
+
+```bash
+cp "$SIMRV_UEFI_VARS_TEMPLATE" ./simrv-uefi-vars.fd
+simrv --uefi "$SIMRV_UEFI_CODE" --uefi-vars ./simrv-uefi-vars.fd \
+  -m "$SIMRV_LINUX_OPENSBI" -D "$SIMRV_UEFI_DISK_IMG" --cli
+```
+
+The simulator passes the generated FDT in `a1` and an OpenSBI FW_DYNAMIC structure in `a2`. OpenSBI
+then enters EDK2 at the configured flash base in S-mode. The UEFI images fit SimRV's two 32 MiB
+pflash devices; the firmware VARS template remains unchanged by booting from the copied working
+file.
+
+By default, the builder preserves the existing Linux build tree and checks the published image
+manifest and kernel hash. It skips the kernel compile only when the architecture, Linux version,
+profile, rootfs, initramfs, and kernel configuration all match. If they differ, it cleans generated
+kernel objects and rebuilds using the selected configuration. Use `--rebuild-kernel` or set
+`SIMRV_LINUX_REUSE_KERNEL=0` to force a kernel compile.
+
+### Selecting Guest Component Versions
+
+The builder accepts version overrides for Linux, OpenSBI, BusyBox, Alpine, and Buildroot. For
+example:
+
+```bash
+simrv-linux-builder --linux-version 7.3.5 --opensbi-version 1.9 \
+    --alpine-version 3.24.4
+```
+
+The current defaults are Linux 7.3.5, OpenSBI 1.9, BusyBox 1.38.0, Alpine 3.24.4, and Buildroot
+2026.08.1. When selecting another Buildroot release, pass its archive SHA-256 as
+`--buildroot-sha256`; the builder verifies the archive before extracting it. Source archives are
+cached by version, so switching versions keeps the previously downloaded sources available.
+
+Check upstream versions without starting a build:
+
+```bash
+simrv-linux-builder --check-updates
+```
+
+For an interactive picker that reads release lists from configured upstream catalogs, run
+`simrv-linux-builder --tui`. The picker also lets users edit catalog URLs, provide a
+custom archive URL or local archive file, and set its SHA-256. These values remain in the plain
+`key=value` file `scripts/linux-versions.conf` in a source checkout. When using the packaged
+builder, its defaults are copied on first run to
+`${XDG_CONFIG_HOME:-~/.config}/SimRV/linux-versions.conf`. Set `SIMRV_LINUX_VERSION_FILE` to use
+another editable configuration. `--update-versions` prints and saves the newest
+versions returned by the catalogs, then starts a build. Add `--prune-old-sources` to remove cached
+sources for other versions after confirmation, or pass `--yes` to accept that cleanup. A Buildroot
+pin change requires the matching verified archive SHA-256 in the config file or
+`--buildroot-sha256`.
+
+To add guest files, set `custom_rootfs_overlay` in the same config to a directory. Files under
+that directory are copied to matching paths in the guest (for example, `etc/motd` becomes
+`/etc/motd`); symbolic links are kept, and matching image files are replaced. Relative paths are
+resolved from the config file's directory. The same option can be passed for a one-off build with
+`--rootfs-overlay ./my-overlay`. `scripts/linux/custom-overlay/README.md` has a small example.
+Archive URL and local archive overrides are separate: they let you supply custom source archives
+for Linux, OpenSBI, BusyBox, Alpine, or Buildroot, with optional SHA-256 verification.
+
+The builder checks for a suitable RISC-V cross compiler, downloads the selected kernel, OpenSBI
+and root filesystem sources, builds the boot artifacts, and writes the image manifest. It does not
+build the cross compiler. Build output is concise by default; use `--verbose` to show compiler and
+make output.
 
 **Time estimate:**
 
 | Scenario | First Build | Subsequent |
-|:---|:---|:---|
-| With pre-installed toolchain | ~10–15 min | ~5–10 min |
-| Building toolchain from scratch | ~25–40 min | ~5–10 min |
+| :--- | :--- | :--- |
+| With a pre-installed toolchain | ~10–15 min | ~5–10 min |
 
 ### Setup Environment
 
 After building, export the image paths:
 
 ```bash
-source ./linux-images/rv32/setup.sh
+source ./images/rv64/alpine-gui/setup.sh
 ```
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.
+It also exports `SIMRV_LINUX_IMAGE`, `SIMRV_LINUX_OPENSBI`, `SIMRV_LINUX_ROOTFS`, and
+`SIMRV_LINUX_PROFILE` for bootloaders and test harnesses. The Alpine guest configures `eth0` with
+DHCP; SimRV's default user-mode network provides DHCP, DNS, and outbound NAT without host-side
+network setup or elevated permissions.
 
-### Direct lifecycle helper
+### Generic Buildroot profile
 
-Generated root filesystems include `simrv-power`, a small root-only `/dev/mem`
-fallback for directly exercising SimRV's power MMIO device:
+The Buildroot option creates an editable BusyBox-based root filesystem with serial login, DHCP, and
+an ext4 disk. Its defconfigs and rootfs overlay are ordinary files under
+`configs/buildroot/simrv-buildroot/`; customize them or provide a user overlay before building.
 
-```sh
-simrv-power poweroff
-simrv-power reboot
-simrv-power exit 7
-simrv-power crash 1
+```bash
+simrv-linux-builder --arch rv64 --rootfs buildroot \
+    --libc musl --cross-compile riscv64-unknown-linux-musl-
+source images/rv64/buildroot/setup.sh
+build/rv64-release/simrv-check-artifacts images/rv64/buildroot
 ```
 
-Normal OS `poweroff` and `reboot` commands remain preferred because they sync
-filesystems and stop services first. The helper writes the SiFive test-finisher
-register at physical address `0x00100000`; use it only on SimRV and only as root.
-The shell builtin `exit` merely ends the current login shell, after which init may
-spawn another login. Use `simrv-power exit [status]` to terminate the simulator,
-including its TUI. This `exit` request is a SimRV extension; the other requests use
-the platform's SiFive test-finisher protocol.
+The profile is serial-first and contains no hardware-lab drivers or applications.
+
+The builder also copies the matching SimRV firmware and DTB into Buildroot's `images/` directory.
+Pass the Buildroot output directory to SimRV to select firmware, DTB, and rootfs together:
+
+```mermaid
+flowchart LR
+    OUT[Buildroot output or published bundle]
+    OUT --> FW[Matching firmware]
+    OUT --> DTB[Matching device tree]
+    OUT --> ROOT[Root filesystem]
+    FW --> SIMRV[simrv --buildroot-output]
+    DTB --> SIMRV
+    ROOT --> SIMRV
+    SIMRV --> GUEST[Linux guest]
+```
+
+```bash
+build/rv64-release/simrv --cli --buildroot-output linux-build/buildroot-output-rv64
+```
+
+`--buildroot-output` accepts either the Buildroot output directory or its `images/` subdirectory.
+It also accepts the published `images/<arch>/buildroot/` bundle directory. SimRV checks
+that all three files exist and reports the missing artifact by name before starting the machine.
+When the matching SimRV manifest is present, SimRV also uses its recorded DRAM size.
+
+!!! warning "Keep the firmware, DTB, and root filesystem together"
+    SimRV resolves these three files as one image set. Mixing artifacts from different builds can
+    produce a DTB with the wrong memory map or a root filesystem that does not match the guest's
+    kernel and boot arguments.
+
+### Share a host directory with VirtIO-FS
+
+Pass `--virtiofs <DIR>` to expose an existing host directory to the guest. The directory is
+mounted by the guest on demand; writes go directly to the selected host directory and remain after
+SimRV exits. Use a dedicated output directory for logs and test artifacts.
+
+```bash
+mkdir -p /tmp/simrv-guest-output
+build/rv64-release/simrv --cli --os \
+  -m images/rv64/alpine-gui/opensbi-linux-payload.elf \
+  -D images/rv64/alpine-gui/rootfs.img \
+  -f images/rv64/alpine-gui/devicetree.dtb \
+  --virtiofs /tmp/simrv-guest-output
+```
+
+Inside a Linux guest with the VirtIO-FS driver enabled, mount the default share tag:
+
+```bash
+mkdir -p /mnt/host-output
+mount -t virtiofs simrv /mnt/host-output
+printf 'guest log\n' > /mnt/host-output/guest.log
+```
+
+The guest can create, read, write, rename, and remove regular files and directories in the share.
+The implementation confines resolved paths to the selected directory. The guest kernel must include
+VirtIO-FS support (`CONFIG_VIRTIO_FS`).
+
+### Expanded debug profile
+
+The debug profile extends the Alpine GUI image with kernel diagnostics useful for boot and VirtIO
+profiling: timestamped/caller-attributed printk, debugfs, full kallsyms, Magic SysRq, function
+tracing, block I/O tracing, stack traces, and DWARF-5 debug information. It is opt-in and writes
+to a separate profile directory so the normal GUI image remains small:
+
+```sh
+simrv-linux-builder --arch rv64 --rootfs alpine --profile debug \
+  --alpine-mirror https://dl-cdn.alpinelinux.org/alpine/v3.24
+build/rv64-release/simrv-check-artifacts images/rv64/alpine-debug
+```
+
+The same profile is available through CMake as `linux-images-debug` when
+`SIMRV_ENABLE_LINUX_TOOLS` is enabled. The manifest records the exact kernel
+configuration hash and enabled debug feature set for reproducibility. Because this is an explicit
+early-userspace debug profile, its DTB also includes `rdinit=/init` and `loglevel=7`. Image
+templates use the Linux default `loglevel=7`. Linux boots require a supplied DTB; SimRV patches
+its RAM range and CPU status to match `--dram-size` and `--smp` while preserving boot arguments.
+The DTB must include enough CPU nodes for the selected hart count.
+
+### VirtIO GPU comparison profile
+
+The RV64 Alpine `virtio-gpu` profile retains the simple framebuffer and enables the VirtIO DRM
+GPU fbdev driver. Its boot arguments map `tty1` to `fb0` and `tty2` to `fb1`; switch consoles with
+Ctrl+Alt+F1 and Ctrl+Alt+F2. Both consoles appear on the simulator's single display, while the
+second path exercises VirtIO 2D transfers. The image lives under
+`images/rv64/alpine-virtio-gpu/` and includes a getty on each virtual terminal. SimRV
+implements software 2D resource/scanout commands for sixel display; it does not provide VirGL 3D
+acceleration.
+
+All profiles retain conventional built-in initramfs, serial console, VirtIO, ext4/JBD2, procfs,
+sysfs, and tmpfs support. Debug tracing is deliberately excluded from the normal GUI and FPGA
+baseline images.
+
+### Guest Lifecycle Management
+
+SimRV supports clean guest shutdown and reboot via standard OpenSBI SBI reset services and the SiFive test-finisher MMIO device (`0x00100000`):
+
+```sh
+poweroff   # Syncs filesystems, stops services, and halts SimRV
+reboot     # Cleanly restarts the guest system
+```
+
+### RV64 graphical smoke path
+
+The RV64 disk image contains an idempotent `start-jwm` helper, exposed as the `startx` login
+command. The image builder bundles the pinned desktop packages when the RISC-V user emulator is
+available; otherwise `startx` installs them on its first networked run. Getty provides login
+prompts on both `ttyS0` and framebuffer console `tty1`; logging in leaves the shell available, and
+you can launch the desktop with `startx`. The helper waits for `/dev/fb0` and the VirtIO input
+device, then starts Xorg on the simulated framebuffer and JWM.
+The JWM Applications
+menu includes a System Monitor entry for `htop` and one SimRV Games submenu for Chess, Gomoku,
+Klondike, and Snake; these entries are rebuilt idempotently on every boot so persistent root
+filesystems do not accumulate duplicate menus. The guest log reports
+`[JWM]` and `[NET]` milestones on the UART, which makes the path suitable for headless CI smoke
+checks as well as interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use
+the guest serial console; guest graphics are independent of Sixel presentation.
+
+The Alpine simulator image intentionally has an empty root password so serial login and privilege
+tests work out of the box. Set a board-specific password or key-based policy before using an image
+on shared or production FPGA hardware.
+
+The guest image includes Alpine's `alpine-conf` package, which provides `setup-alpine` and related
+system setup tools for image administration. The SimRV image is already configured for its virtual
+hardware, so these tools are available on demand and are not run automatically during image build or
+guest startup.
+
+The default `user` network mode provides an isolated IPv4 subnet with DHCP, DNS, and outbound NAT
+through libslirp. Guest connections use the launching user's host network permissions, so no TAP
+device, firewall changes, or `sudo` setup is needed. It does not accept unsolicited inbound
+connections; use host-side port forwarding when that capability is added. User-mode NAT does not
+reliably support ICMP echo, so `ping` timeouts do not establish that TCP, UDP, or DNS forwarding
+is broken.
+
+SimRV opens the selected disk image read-only and stores guest writes in a sparse temporary overlay.
+The original `rootfs.img` therefore remains unchanged, and test runs can use it directly without
+cloning it first. Overlay data is discarded when SimRV exits, including after a clean guest poweroff;
+copy the image yourself before launch if you need to preserve guest filesystem changes. VirtIO Block
+supports flush, discard, and write-zeroes requests; discard attempts to reclaim temporary overlay
+space, while write-zeroes guarantees subsequent guest reads return zeroes.
 
 ### Run Linux Boot Test
 
 **Direct invocation:**
 
 ```bash
-source ./linux-images/rv32/setup.sh
-./build/rv32-release/SimRV \
+source ./images/rv32/alpine-gui/setup.sh
+./build/rv32-release/simrv \
     -m $SIMRV_LINUX_MEM_IMG \
     -D $SIMRV_LINUX_DISK_IMG \
-    -f $SIMRV_LINUX_DTB
+    --fdt $SIMRV_LINUX_DTB \
+    --cli
 ```
 
 **TUI mode:**
@@ -102,7 +341,7 @@ cmake --build --preset rv32-release --target run-linux
 **Full integration gate (includes Linux boot test):**
 
 ```bash
-source ./linux-images/rv32/setup.sh
+source ./images/rv32/alpine-gui/setup.sh
 cmake --build --preset rv32-release --target integration-gate
 ```
 
@@ -124,9 +363,28 @@ sudo apt-get install -y \
 
 ```bash
 sudo dnf install -y \
-    gcc g++ flex bison bc openssl-devel \
-    git wget texinfo dtc
+    gcc gcc-c++ clang cmake ninja-build make ccache \
+    flex bison bc perl python3 git wget curl \
+    tar xz bzip2 cpio fakeroot patch rsync dtc dwarves \
+    openssl openssl-devel elfutils-libelf-devel ncurses-devel \
+    zlib-devel libzstd-devel e2fsprogs \
+    perl-ExtUtils-MakeMaker \
+    gcc-riscv64-linux-gnu gcc-c++-riscv64-linux-gnu \
+    binutils-riscv64-linux-gnu
 ```
+
+`e2fsprogs` provides `mkfs.ext4`, which is required when packaging the RV64
+Alpine root disk. Fedora's RISC-V GCC packages provide a kernel-capable cross
+compiler and binutils, but do **not** provide a target glibc sysroot. They
+therefore cannot statically link the RV32 BusyBox rootfs by themselves.
+
+If APK reports that `dl-cdn.alpinelinux.org` cannot resolve, test host DNS and
+HTTPS access first. The mirror is normally healthy; restricted containers or
+WSL-generated resolvers can block DNS from the build environment. Use an
+approved host-network build or set `SIMRV_ALPINE_MIRROR` to a reachable Alpine
+mirror. The builder writes the selected mirror into the guest's
+`/etc/repositories`, so host-side APK bundling and the guest first-boot
+fallback use the same repository family.
 
 ---
 
@@ -136,18 +394,60 @@ The build script needs a RISC-V cross-compilation toolchain. You have two option
 
 ### Option A: Pre-installed Toolchain (Recommended)
 
-Install the [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain)
-and make sure `riscv64-unknown-linux-gnu-gcc` (for RV32) or `riscv64-linux-gnu-gcc`
-is in your `PATH`, or set `RISCV_GNU_TOOLCHAIN_DIR`:
+Install complete Linux-targeting
+[riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain)
+builds with glibc. A locally built multilib toolchain can serve both targets;
+the official release archives use separate RV32 and RV64 prefixes. Verify that
+each compiler resolves its target startup files before building:
 
 ```bash
-RISCV_GNU_TOOLCHAIN_DIR=/opt/riscv ./scripts/build-linux-image.sh
+export PATH=/opt/riscv/linux-glibc-rv64/bin:/opt/riscv/linux-glibc-rv32/bin:$PATH
+riscv64-unknown-linux-gnu-gcc -march=rv64gc -mabi=lp64d -print-file-name=crt1.o
+riscv32-unknown-linux-gnu-gcc -march=rv32gc -mabi=ilp32d -print-file-name=crt1.o
+
+simrv-linux-builder --arch rv32 \
+    --cross-compile riscv32-unknown-linux-gnu-
+simrv-linux-builder --arch rv64 \
+    --cross-compile riscv64-unknown-linux-gnu-
 ```
+
+Each command must print an existing target path rather than the bare string
+`crt1.o`.
 
 ### Option B: Build Toolchain from Source
 
-If no toolchain is found, the script will automatically build one from source.
-This adds ~25–40 minutes to the first run and requires ~3–5 GB of disk space.
+Install the additional toolchain-build prerequisites, then build a multilib
+Linux/glibc toolchain:
+
+```bash
+sudo dnf install -y \
+    autoconf automake libmpc-devel mpfr-devel gmp-devel gawk \
+    texinfo patchutils expat-devel libslirp-devel meson
+
+git clone https://github.com/riscv-collab/riscv-gnu-toolchain
+cd riscv-gnu-toolchain
+./configure --prefix=/opt/riscv --enable-linux --enable-multilib
+make linux -j"$(nproc)"
+```
+
+The source checkout and build require several gigabytes. The image script does
+not build the cross-toolchain automatically.
+
+### Building on Scratch Storage
+
+Keep large kernel trees, root filesystems, and generated images off the source
+filesystem by setting both supported roots:
+
+```bash
+export SIMRV_LINUX_BUILD_DIR=/scratch/$USER/simrv-linux/build
+export SIMRV_LINUX_IMAGES_ROOT=/scratch/$USER/simrv-linux/images
+mkdir -p "$SIMRV_LINUX_BUILD_DIR" "$SIMRV_LINUX_IMAGES_ROOT"
+
+simrv-linux-builder --arch rv32 \
+    --cross-compile riscv32-unknown-linux-gnu-
+simrv-linux-builder --arch rv64 \
+    --cross-compile riscv64-unknown-linux-gnu-
+```
 
 ---
 
@@ -156,7 +456,7 @@ This adds ~25–40 minutes to the first run and requires ~3–5 GB of disk space
 ### Clean Rebuild
 
 ```bash
-./scripts/build-linux-image.sh --clean
+simrv-linux-builder --clean
 ```
 
 Deletes the previous build and starts fresh.
@@ -166,17 +466,17 @@ Deletes the previous build and starts fresh.
 Control build parallelism:
 
 ```bash
-JOBS=4 ./scripts/build-linux-image.sh
+SIMRV_LINUX_JOBS=4 simrv-linux-builder
 ```
 
-Default is `$(nproc)` (number of CPU cores).
+The default is four jobs. Set `SIMRV_LINUX_JOBS` to a positive integer to use a different limit.
 
 ### Architecture Selection
 
 RV32GC is the default. For RV64GC:
 
 ```bash
-./scripts/build-linux-image.sh --arch rv64
+simrv-linux-builder --arch rv64
 ```
 
 The CMake `linux-images` target uses the `SIMRV_XLEN` preset automatically:
@@ -184,6 +484,9 @@ The CMake `linux-images` target uses the `SIMRV_XLEN` preset automatically:
 ```bash
 cmake --build --preset rv32-release --target linux-images
 cmake --build --preset rv64-release --target linux-images
+
+# Build the generic Buildroot root filesystem
+cmake --build --preset rv64-release --target linux-images-buildroot
 ```
 
 ---
@@ -192,39 +495,48 @@ cmake --build --preset rv64-release --target linux-images
 
 ### Directory Structure
 
-```
+```text
 linux-build/
 ├── sources/
-│   ├── linux-6.1.x.tar.xz
-│   └── buildroot-2026.02.tar.gz
-├── linux/
-│   └── arch/riscv/boot/Image
-├── buildroot/
-│   └── output/images/rootfs.ext2
-└── riscv-gnu-toolchain/         # (if built from scratch)
-    └── bin/riscv64-unknown-linux-gnu-*
+│   ├── linux-7.3.5.tar.xz
+│   ├── opensbi-1.9.tar.gz
+│   └── buildroot-2026.08.1.tar.xz   # Buildroot profiles
+├── linux-7.3.5/               # shared extracted kernel source/build tree
+│   └── vmlinux
+├── initramfs-rv64/             # generated per architecture
+├── rootfs-disk-rv64/            # recreated during each image build
+└── buildroot-output-rv64/       # Buildroot profile only
+    └── images/rootfs.ext4
 
-linux-images/
+images/
 ├── rv32/
-│   ├── fw_payload.bin    # Berkeley Boot Loader + Linux kernel
-│   ├── root.bin          # Root filesystem image
-│   ├── devicetree.dtb    # Device tree blob
-│   ├── virt.dts          # Device tree source
-│   └── setup.sh          # Environment variable export script
-└── rv64/                 # (when built with --arch rv64)
-    └── ...
+│   └── alpine-gui/             # Default Alpine profile
+└── rv64/
+    ├── alpine-gui/             # Default Alpine desktop profile
+    ├── alpine-debug/           # Expanded early-userspace debug profile
+    └── buildroot/          # Optional generic BusyBox baseline profile
 ```
 
 ### Output Components
 
-#### `fw_payload.bin` (Firmware Payload)
+#### `opensbi-linux-payload.elf` (OpenSBI Firmware Payload)
 
-Combined Berkeley Boot Loader (BBL) + Linux kernel image. Loaded by SimRV via
-`-m` and executed starting at `0x80000000`.
+OpenSBI generic-platform `FW_PAYLOAD` image containing the Linux kernel and generated device tree.
+Loaded by SimRV via `-m` and executed starting at `0x80000000`.
 
-#### `root.bin` (Root Filesystem)
+#### `opensbi-dynamic.bin`, `Image`, and `manifest.json`
 
-Minimal ext2 filesystem containing:
+These are the canonical separable artifacts for FPGA work. `opensbi-dynamic.bin` is OpenSBI firmware
+for a bootloader that supplies the next-stage address and DTB; `Image` is the Linux kernel binary;
+`manifest.json` records exact versions, DTB memory size, kernel arguments, the rootfs label, and
+hashes. Validate a profile with `simrv-check-artifacts` before handing it to FPGA tools.
+For a board handoff, compare the DTB memory range with the board DRAM, preserve the published
+rootfs UUID, and use the manifest boot arguments or provide equivalent console and root-device
+settings in the board firmware.
+
+#### `rootfs.img` (Root Filesystem)
+
+Standard ext4 filesystem with journaling enabled, containing:
 
 - BusyBox shell utilities
 - Essential C libraries (musl or glibc)
@@ -236,15 +548,16 @@ Minimal ext2 filesystem containing:
 Describes the simulated hardware to Linux. Includes:
 
 - CPU core (RV32GC or RV64GC, 1 hart)
-- 256 MB DRAM at `0x80000000`
+- The selected DRAM size at `0x80000000` (512 MB by default; override with `--dram-size-mb`)
 - UART serial console
 - VirtIO block device controller (disk)
 - PLIC interrupt controller
 - CLINT timer
 
-> [!NOTE]
-> The DRAM size in the device tree must match the SimRV build-time
-> `SIMRV_DRAM_SIZE_MB` setting (default: 256 MB).
+!!! note "DRAM Size Alignment"
+    The published DTB and simulator must use the same DRAM size. The builder defaults to 512 MB,
+    matching the Linux boot memory floor; use `--dram-size-mb` and the corresponding simulator
+    `--dram-size` option when targeting a different FPGA memory map.
 
 ---
 
@@ -256,7 +569,7 @@ The RISC-V cross-compiler was not found. Install the toolchain or point the
 script at an existing one:
 
 ```bash
-RISCV_GNU_TOOLCHAIN_DIR=/opt/riscv ./scripts/build-linux-image.sh
+RISCV_GNU_TOOLCHAIN_DIR=/opt/riscv simrv-linux-builder
 ```
 
 Or install the toolchain from source:
@@ -274,10 +587,10 @@ Internet connectivity issue. Clear the source cache and retry:
 
 ```bash
 rm -f linux-build/sources/*
-./scripts/build-linux-image.sh
+simrv-linux-builder
 ```
 
-### `linux-images/` directory empty after build
+### `images/` directory empty after build
 
 Verify the underlying build artifacts exist:
 
@@ -286,7 +599,7 @@ ls -la linux-build/buildroot/output/images/
 ls -la linux-build/linux/arch/riscv/boot/
 ```
 
-If files exist there but not under `linux-images/`, the copy step failed —
+If files exist there but not under `images/`, the copy step failed —
 check the script output for errors.
 
 ### `dtc not found` warning
@@ -297,11 +610,9 @@ Install the device-tree compiler and retry:
 sudo apt-get install device-tree-compiler
 ```
 
-Or compile the device tree manually:
-
-```bash
-dtc -I dts -O dtb -o linux-images/rv32/devicetree.dtb linux-images/rv32/virt.dts
-```
+The builder compiles the device tree as part of the image build. Re-run
+`simrv-linux-builder` after installing `dtc` so the profile directory receives a
+matching `devicetree.dtb` and manifest.
 
 ---
 
@@ -309,7 +620,7 @@ dtc -I dts -O dtb -o linux-images/rv32/devicetree.dtb linux-images/rv32/virt.dts
 
 ### Kernel Configuration
 
-1. Start a build: `./scripts/build-linux-image.sh`
+1. Start a build: `simrv-linux-builder`
 2. Stop at the desired point (or use `--clean` to reset)
 3. Uncomment the `make menuconfig` line in the script to enable interactive
    kernel config
@@ -317,7 +628,8 @@ dtc -I dts -O dtb -o linux-images/rv32/devicetree.dtb linux-images/rv32/virt.dts
 
 ### Rootfs Contents
 
-Edit the Buildroot config section in `create_rootfs_buildroot()` inside the script:
+Customize the Buildroot external-tree overlay under
+`configs/buildroot/simrv-buildroot/rootfs-overlay/` and the architecture defconfigs in the same directory:
 
 ```bash
 # Example additions to buildroot .config:
@@ -328,7 +640,7 @@ BR2_PACKAGE_CURL=y
 Then rebuild:
 
 ```bash
-./scripts/build-linux-image.sh --clean
+simrv-linux-builder --clean
 ```
 
 ---
@@ -338,7 +650,7 @@ Then rebuild:
 The generated images integrate with the comprehensive CMake validation gate:
 
 ```bash
-source linux-images/rv32/setup.sh
+source images/rv32/alpine-gui/setup.sh
 cmake --build --preset rv32-release --target integration-gate
 ```
 
@@ -371,7 +683,7 @@ in `integration-gate`.
 
 After images are ready:
 
-1. ✅ Export environment: `source linux-images/rv32/setup.sh`
-2. ✅ Manual boot test: `./build/rv32-release/SimRV -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG -f $SIMRV_LINUX_DTB`
+1. ✅ Export environment: `source images/rv32/alpine-gui/setup.sh`
+2. ✅ Manual boot test: `./build/rv32-release/simrv -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG --fdt $SIMRV_LINUX_DTB --cli`
 3. ✅ TUI boot: `cmake --build --preset rv32-release --target run-tui`
 4. ✅ Full validation: `cmake --build --preset rv32-release --target integration-gate`

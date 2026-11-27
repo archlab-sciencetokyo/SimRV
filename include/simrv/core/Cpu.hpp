@@ -5,24 +5,46 @@
 #pragma once
 
 #include <array>
-#include <deque>
+#include <atomic>
 #include <expected>
-#include <fstream>
-#include <vector>
+#include <iosfwd>
+#include <optional>
+#include <string>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
+#include "simrv/cache/TimingCache.hpp"
+#include "simrv/core/BlockCache.hpp"
 #include "simrv/core/CsrFile.hpp"
+#include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/DecodeCache.hpp"
+#include "simrv/core/FastBatchPolicy.hpp"
+#include "simrv/core/PerformanceCounters.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
-#include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
+#include "simrv/core/TlbTypes.hpp"
+#include "simrv/core/TrapController.hpp"
+#include "simrv/device/Clint.hpp"
+#include "simrv/device/Plic.hpp"
+#include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/InstructionFields.hpp"
+#include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/IsaTypes.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/Bus.hpp"
+#include "simrv/memory/Mmu.hpp"
+#include "simrv/memory/RamView.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/CycleTransition.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/pipeline/PipelineTask.hpp"
+#include "simrv/pipeline/PipelineTopology.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -32,77 +54,288 @@ class Machine;
  * @brief Groups all architectural registers and CSRs into a cohesive block.
  */
 struct alignas(128) ArchState {
-    Register pc{};        ///< Program Counter (instruction address pointer)
-    RegisterFile regs{};  ///< General-purpose integer, FP, and vector registers
+    simrv::xlen::VirtAddr pc{};  ///< Architectural virtual program counter
+    RegisterFile regs{};         ///< General-purpose integer, FP, and vector registers
 
     /* Machine Mode CSRs */
-    CSRValue
+    simrv::xlen::CsrValue
         mstatus{};  ///< Machine Status (tracks processor mode, interrupt states, extension states)
-    CSRValue mtvec{};  ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
-    CSRValue mscratch{};  ///< Machine Scratch register (used for temporary context swapping)
-    CSRValue mepc{};      ///< Machine Exception Program Counter (returns address on MRET)
-    TrapCause mcause{};   ///< Machine Trap Cause (interrupt vs exception and exact code)
-    CSRValue mtval{};     ///< Machine Trap Value (holds faulting addresses or instruction bytes)
-    CSRValue mhartid{};   ///< Machine Hardware Thread ID (processor core identifier)
-    CSRValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
-    CSRValue mie{};                     ///< Machine Interrupt Enable
-    CSRValue mip{};                     ///< Machine Interrupt Pending
+    simrv::xlen::CsrValue mstatush{};  ///< Machine Status High (RV32, 0x310)
+    simrv::xlen::CsrValue
+        mtvec{};  ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
+    simrv::xlen::CsrValue
+        mscratch{};  ///< Machine Scratch register (used for temporary context swapping)
+    simrv::xlen::CsrValue mepc{};  ///< Machine Exception Program Counter (returns address on MRET)
+    simrv::xlen::TrapCause
+        mcause{};  ///< Machine Trap Cause (interrupt vs exception and exact code)
+    simrv::xlen::CsrValue
+        mtval{};  ///< Machine Trap Value (holds faulting addresses or instruction bytes)
+    simrv::xlen::CsrValue mtinst{};   ///< Machine Trap Instruction (H extension)
+    simrv::xlen::CsrValue mtval2{};   ///< Machine Second Trap Value (H extension)
+    simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
+    simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
+    bool supervisor_mode_supported{true};
+    bool user_mode_supported{true};
+    isa::ExtensionSet enabled_extensions{};  ///< Multi-letter ISA extensions bitset
+    uint64_t zkr_entropy_state =
+        0x9E3779B97F4A7C15ULL;  ///< Per-hart deterministic PRNG state for Zkr seed CSR
+    simrv::xlen::Word fetch_align_mask =
+        (isa::kMisaDefault & (simrv::xlen::CsrValue{1} << 2)) != 0
+            ? 1u
+            : 3u;  ///< Cached fetch alignment mask: 1u for C-ext (2-byte align), 3u for non-C
+    simrv::xlen::CsrValue mie{};  ///< Machine Interrupt Enable
+    simrv::xlen::CsrValue mip{};  ///< Machine Interrupt Pending
     bool seip_software{};  ///< Software-writable component of mip.SEIP (ORed with PLIC signal).
     bool seip_external{};  ///< PLIC-driven component of mip.SEIP.
     bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
     bool stip_timer{};     ///< Direct-SBI timer signal component of mip.STIP.
-    CSRValue
+    bool stip_sstc{};      ///< Ratified Sstc stimecmp timer component of mip.STIP.
+    bool vstip_sstc{};     ///< Ratified Sstc vstimecmp timer component of hip.VSTIP.
+    simrv::xlen::CsrValue
         medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
-    CSRValue mideleg{};  ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
-    CSRValue mcounteren{};  ///< Machine Counter Enable (controls user/supervisor access to
-                            ///< performance counters)
+    simrv::xlen::CsrValue
+        mideleg{};  ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
+    simrv::xlen::CsrValue mcounteren{};     ///< Machine Counter Enable (controls user/supervisor
+                                            ///< access to performance counters)
+    simrv::xlen::CsrValue mcountinhibit{};  ///< Machine Counter Inhibit (mcountinhibit, 0x320)
+    std::array<uint64_t, 4> mstateen{};     ///< Machine State Enable banks (0x30C-30F)
+    simrv::xlen::Counter minstret{};        ///< Architectural retired-instruction counter
+    simrv::xlen::CsrValue menvcfg{};        ///< Machine Environment Configuration (menvcfg, 0x30A)
+    simrv::xlen::CsrValue menvcfgh{};  ///< Machine Environment Configuration High (RV32, 0x31A)
+    simrv::xlen::CsrValue mseccfg{};   ///< Machine Security Configuration (Smepmp, 0x747)
+    simrv::xlen::CsrValue mseccfgh{};  ///< Machine Security Configuration High (RV32, 0x757)
+    simrv::xlen::CsrValue jvt{};       ///< Jump Vector Table (Zcmt, 0x017)
+
+    /* Indirect CSR Access (Smcsrind / Sscsrind) & RNMI (Smrnmi) */
+    struct IndirectRegEntry {
+        simrv::xlen::CsrValue select{};
+        std::array<simrv::xlen::CsrValue, 6> regs{};
+        bool valid{false};
+    };
+    simrv::xlen::CsrValue miselect{};
+    simrv::xlen::CsrValue siselect{};
+    simrv::xlen::CsrValue vsiselect{};
+    std::array<IndirectRegEntry, 16> mireg_bank{};
+    std::array<IndirectRegEntry, 16> sireg_bank{};
+    std::array<IndirectRegEntry, 16> vsireg_bank{};
+    simrv::xlen::CsrValue mnscratch{};
+    simrv::xlen::CsrValue mnepc{};
+    simrv::xlen::CsrValue mncause{};
+    simrv::xlen::CsrValue mnstatus{simrv::xlen::CsrValue{1} << 3U};  ///< NMIE=1 at reset
+
+    /* Smcntrpmf, Smaia/Ssaia, and Zicfilp/Zicfiss (CFI) */
+    uint64_t mcyclecfg{};
+    uint64_t minstretcfg{};
+    simrv::xlen::CsrValue mvien{};
+    simrv::xlen::CsrValue mvip{};
+    simrv::xlen::CsrValue hvien{};
+    simrv::xlen::CsrValue ssp{};
+    bool elp{false};
 
     /* Supervisor Mode CSRs */
-    CSRValue stvec{};  ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
-    CSRValue sscratch{};  ///< Supervisor Scratch register
-    CSRValue sepc{};      ///< Supervisor Exception Program Counter (returns address on SRET)
-    TrapCause scause{};   ///< Supervisor Trap Cause
-    CSRValue stval{};     ///< Supervisor Trap Value
-    CSRValue satp{};  ///< Supervisor Address Translation and Protection (virtual memory mode and
-                      ///< page table base physical address)
-    CSRValue scounteren{};  ///< Supervisor Counter Enable
+    simrv::xlen::CsrValue
+        stvec{};  ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
+    simrv::xlen::CsrValue sscratch{};  ///< Supervisor Scratch register
+    simrv::xlen::CsrValue senvcfg{};   ///< Supervisor Environment Configuration (0x10A)
+    simrv::xlen::TimeBaseTicks stimecmp{
+        UINT64_MAX};  ///< Supervisor Timer Compare (Sstc, 0x14D / 0x15D)
+    simrv::xlen::TimeBaseTicks vstimecmp{
+        UINT64_MAX};  ///< Virtual Supervisor Timer Compare (Sstc, 0x24D / 0x25D)
+    simrv::xlen::CsrValue
+        sepc{};  ///< Supervisor Exception Program Counter (returns address on SRET)
+    simrv::xlen::TrapCause scause{};     ///< Supervisor Trap Cause
+    simrv::xlen::CsrValue stval{};       ///< Supervisor Trap Value
+    simrv::xlen::CsrValue satp{};        ///< Supervisor Address Translation and Protection (virtual
+                                         ///< memory mode and page table base physical address)
+    simrv::xlen::CsrValue scounteren{};  ///< Supervisor Counter Enable
+    simrv::xlen::CsrValue hcounteren{};  ///< Hypervisor Counter Enable (0x606)
+    simrv::xlen::CsrValue htimedelta{};  ///< Virtual time offset (0x605)
+    simrv::xlen::CsrValue hgeie{};       ///< Guest external interrupt enable (0x607)
+    simrv::xlen::CsrValue hgeip{};       ///< Guest external interrupt pending (0xE12)
+    std::array<uint64_t, 4> sstateen{};  ///< Supervisor State Enable banks (0x10C-10F)
+    std::array<uint64_t, 4> hstateen{};  ///< Hypervisor State Enable banks (0x60C-60F)
+
+    /* Hypervisor and Virtual Supervisor CSRs */
+    simrv::xlen::CsrValue hstatus{};
+    simrv::xlen::CsrValue hedeleg{};
+    simrv::xlen::CsrValue hideleg{};
+    simrv::xlen::CsrValue hie{};
+    simrv::xlen::CsrValue hip{};
+    simrv::xlen::CsrValue hvip{};
+    simrv::xlen::CsrValue henvcfg{};
+    simrv::xlen::CsrValue htval{};
+    simrv::xlen::CsrValue htinst{};
+    simrv::xlen::CsrValue hgatp{};
+    simrv::xlen::CsrValue vsstatus{};
+    simrv::xlen::CsrValue vsie{};
+    simrv::xlen::CsrValue vsip{};
+    simrv::xlen::CsrValue vstvec{};
+    simrv::xlen::CsrValue vsscratch{};
+    simrv::xlen::CsrValue vsepc{};
+    simrv::xlen::TrapCause vscause{};
+    simrv::xlen::CsrValue vstval{};
+    simrv::xlen::CsrValue vsatp{};
+
+    [[nodiscard]] constexpr auto zicfilp_enabled_in_current_mode() const noexcept -> bool {
+        if (!enabled_extensions.has(isa::MultiLetterExtension::Zicfilp)) return false;
+        if (priv == simrv::xlen::PrivilegeLevel::Machine) {
+            return (static_cast<uint64_t>(mseccfg) & (uint64_t{1} << 10U)) != 0;
+        }
+        if (priv == simrv::xlen::PrivilegeLevel::Supervisor) {
+            return virt ? ((static_cast<uint64_t>(henvcfg) & (uint64_t{1} << 2U)) != 0)
+                        : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 2U)) != 0);
+        }
+        const bool has_s = supervisor_mode_supported;
+        return has_s ? ((static_cast<uint64_t>(senvcfg) & (uint64_t{1} << 2U)) != 0)
+                     : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 2U)) != 0);
+    }
+
+    [[nodiscard]] constexpr auto zicfiss_enabled_in_current_mode() const noexcept -> bool {
+        if (!enabled_extensions.has(isa::MultiLetterExtension::Zicfiss)) return false;
+        if (priv == simrv::xlen::PrivilegeLevel::Machine) {
+            return false;
+        }
+        if (priv == simrv::xlen::PrivilegeLevel::Supervisor) {
+            return virt ? ((static_cast<uint64_t>(henvcfg) & (uint64_t{1} << 3U)) != 0)
+                        : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 3U)) != 0);
+        }
+        const bool has_s = supervisor_mode_supported;
+        return has_s ? ((static_cast<uint64_t>(senvcfg) & (uint64_t{1} << 3U)) != 0)
+                     : ((static_cast<uint64_t>(menvcfg) & (uint64_t{1} << 3U)) != 0);
+    }
+
+    /** Pending external interrupt for the guest interrupt file selected by hstatus.VGEIN. */
+    [[nodiscard]] constexpr auto selected_guest_external_pending() const noexcept
+        -> simrv::xlen::CsrValue {
+        constexpr simrv::xlen::CsrValue kVgeinMask = simrv::xlen::CsrValue{0x3F} << 12U;
+        const auto vgein = (hstatus & kVgeinMask) >> 12U;
+        if (vgein == 0 || vgein >= sizeof(simrv::xlen::CsrValue) * 8U ||
+            ((hgeip & hgeie) & (simrv::xlen::CsrValue{1} << vgein)) == 0) {
+            return 0;
+        }
+        return simrv::xlen::CsrValue{1} << 10U;
+    }
+
+    [[nodiscard]] constexpr auto supervisor_guest_external_pending() const noexcept
+        -> simrv::xlen::CsrValue {
+        return (hgeip & hgeie) != 0 ? (simrv::xlen::CsrValue{1} << 12U) : 0;
+    }
 
     /* Floating-Point CSRs */
-    CSRValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode and cumulative
-                      ///< exception flags)
+    simrv::xlen::CsrValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode
+                                   ///< and cumulative exception flags)
 
     /* Vector Extension CSRs */
-    CSRValue vstart{};  ///< Vector Start Index (specifies the register element index to start
-                        ///< vector execution)
-    CSRValue vxsat{};   ///< Vector Fixed-Point Saturation flag
-    CSRValue vxrm{};    ///< Vector Fixed-Point Rounding Mode selector
-    CSRValue
+    simrv::xlen::CsrValue vstart{};  ///< Vector Start Index (specifies the register element index
+                                     ///< to start vector execution)
+    simrv::xlen::CsrValue vxsat{};   ///< Vector Fixed-Point Saturation flag
+    simrv::xlen::CsrValue vxrm{};    ///< Vector Fixed-Point Rounding Mode selector
+    simrv::xlen::CsrValue
         vl{};  ///< Vector Length (active number of elements to process in a vector instruction)
-    CSRValue
+    simrv::xlen::CsrValue
         vtype{};  ///< Vector Type (contains element width VSEW, vector group multiplier LMUL, etc.)
 
-    PrivilegeLevel priv = kPrivMachine;  ///< Current processor privilege level
+    simrv::xlen::PrivilegeLevel priv = kPrivMachine;  ///< Current processor privilege level
+    bool virt{};  ///< H-extension virtualization mode (VS/VU when set)
 
-    Address load_res{};   ///< Active memory physical address reservation for Load-Reserved /
-                          ///< Store-Conditional (LR/SC)
-    CSRValue reserved{};  ///< Reserved for internal architectural extensions or tracking
+    simrv::xlen::Address load_res{};     ///< Active memory physical address reservation for
+                                         ///< Load-Reserved / Store-Conditional (LR/SC)
+    bool lr_reservation_active = false;  ///< Active reservation flag for LR/SC
+    uint32_t consecutive_traps = 0;      ///< Consecutive traps without instruction retirement
+
+    /* Physical Memory Protection (PMP) */
+    static constexpr size_t kNumPmpEntries = 16;
+    std::array<uint8_t, kNumPmpEntries> pmpcfg{};
+    std::array<simrv::xlen::Address, kNumPmpEntries> pmpaddr{};
+    size_t num_active_pmp = 0;
+    bool has_locked_pmp = false;
+
+    /* Debug Triggers (Sdtrig) */
+    static constexpr size_t kNumTriggers = 4;
+    simrv::xlen::CsrValue tselect = 0;
+    std::array<simrv::xlen::CsrValue, kNumTriggers> tdata1{};
+    std::array<simrv::xlen::CsrValue, kNumTriggers> tdata2{};
+    std::array<simrv::xlen::CsrValue, kNumTriggers> tdata3{};
+    bool has_active_triggers = false;
+
+    constexpr void refresh_trigger_status() noexcept {
+        has_active_triggers = false;
+        for (size_t i = 0; i < kNumTriggers; ++i) {
+            if (tdata1[i] != 0) {
+                has_active_triggers = true;
+                break;
+            }
+        }
+    }
+
+    constexpr void refresh_misa_status() noexcept {
+        fetch_align_mask = (misa & (simrv::xlen::CsrValue{1} << 2)) != 0 ? 1u : 3u;
+    }
+
+    constexpr void set_misa(simrv::xlen::CsrValue new_misa) noexcept {
+        misa = new_misa;
+        refresh_misa_status();
+    }
+
+    constexpr void refresh_pmp_status() {
+        num_active_pmp = 0;
+        has_locked_pmp = (mseccfg & static_cast<simrv::xlen::CsrValue>(0x3u)) != 0;
+        for (size_t i = 0; i < kNumPmpEntries; ++i) {
+            const uint8_t mode = pmpcfg[i] & 0x18;
+            if (mode != 0) {
+                num_active_pmp = i + 1;
+            }
+            if ((pmpcfg[i] & 0x80) != 0) {
+                has_locked_pmp = true;
+            }
+        }
+    }
+
+    /** Synchronize aliased hypervisor/VS interrupt enable registers from mie and hideleg. */
+    constexpr void refresh_hypervisor_enables() noexcept {
+        constexpr simrv::xlen::CsrValue kVsMask = (simrv::xlen::CsrValue{1} << 2U) |
+                                                  (simrv::xlen::CsrValue{1} << 6U) |
+                                                  (simrv::xlen::CsrValue{1} << 10U);
+        constexpr simrv::xlen::CsrValue kHsMask = kVsMask | (simrv::xlen::CsrValue{1} << 12U);
+        if (!isa::misa_has_extension(misa, isa::IsaExtension::H)) {
+            hie = 0;
+            vsie = 0;
+            return;
+        }
+        hie = mie & kHsMask;
+        vsie = h_interrupts_to_vs(mie & hideleg & kVsMask);
+    }
 
     /** Recompute supervisor pending bits that combine independent software/device sources. */
     constexpr void refresh_supervisor_pending() {
         if (seip_software || seip_external)
-            mip |= enum_mask(MipBit::Seip);
+            mip |= MipBit::Seip;
         else
-            mip &= ~enum_mask(MipBit::Seip);
-        if (stip_software || stip_timer)
-            mip |= enum_mask(MipBit::Stip);
+            mip &= ~MipBit::Seip;
+        if (stip_software || stip_timer || stip_sstc)
+            mip |= MipBit::Stip;
         else
-            mip &= ~enum_mask(MipBit::Stip);
+            mip &= ~MipBit::Stip;
+        if (isa::misa_has_extension(misa, isa::IsaExtension::H)) {
+            constexpr simrv::xlen::CsrValue kVsMask = (simrv::xlen::CsrValue{1} << 2U) |
+                                                      (simrv::xlen::CsrValue{1} << 6U) |
+                                                      (simrv::xlen::CsrValue{1} << 10U);
+            constexpr simrv::xlen::CsrValue kHsMask = kVsMask | (simrv::xlen::CsrValue{1} << 12U);
+            const simrv::xlen::CsrValue h_pending =
+                (hvip & kVsMask) | (vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U) |
+                selected_guest_external_pending() | supervisor_guest_external_pending();
+            hip = h_pending;
+            vsip = h_interrupts_to_vs(hvip & hideleg) & (simrv::xlen::CsrValue{1} << 1U);
+            mip = (mip & ~kHsMask) | h_pending;
+            refresh_hypervisor_enables();
+        }
     }
 
     /**
      * @brief Determines the active XLEN (register width in bits: 32 or 64) based on the CPU state.
      */
-    [[nodiscard]] constexpr auto xlen_for_privilege(PrivilegeLevel level) const -> unsigned {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto xlen_for_privilege(
+        simrv::xlen::PrivilegeLevel level) const noexcept -> unsigned {
         if constexpr (!simrv::xlen::kIsXLen64) {
             return 32;
         } else {
@@ -110,13 +343,16 @@ struct alignas(128) ArchState {
             if (mxl == 1) {
                 return 32;
             }
-            if (level == PrivilegeLevel::Machine) {
+            if (level == simrv::xlen::PrivilegeLevel::Machine) {
                 return 64;
-            } else if (level == PrivilegeLevel::Supervisor) {
-                const unsigned sxl = (mstatus >> 34) & 3;
+            } else if (level == simrv::xlen::PrivilegeLevel::Supervisor) {
+                const auto status = virt ? hstatus : mstatus;
+                const unsigned shift = virt ? 32U : 34U;
+                const unsigned sxl = (status >> shift) & 3;
                 return (sxl == 1) ? 32 : 64;
             } else {  // User
-                const unsigned uxl = (mstatus >> 32) & 3;
+                const auto status = virt ? vsstatus : mstatus;
+                const unsigned uxl = (status >> 32) & 3;
                 return (uxl == 1) ? 32 : 64;
             }
         }
@@ -126,10 +362,34 @@ struct alignas(128) ArchState {
         return xlen_for_privilege(priv);
     }
 
+    [[nodiscard]] constexpr auto hart_id() const noexcept -> simrv::xlen::HartId {
+        return simrv::xlen::HartId{static_cast<uint32_t>(mhartid)};
+    }
+
+    SIMRV_ALWAYS_INLINE constexpr void canonicalize_pc() noexcept {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (simrv::compiler::unlikely(regs.xlen == 32)) {
+                pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(pc.raw())))};
+            }
+        }
+    }
+
     /**
      * @brief Updates the active XLEN configurations in register file proxies.
      */
     constexpr void update_xlen() { regs.xlen = current_xlen(); }
+
+    /** Both status CSRs gate extension state while executing in VS/VU mode. */
+    [[nodiscard]] constexpr auto extension_state_enabled(MstatusBit field) const noexcept -> bool {
+        return (mstatus & field) != 0 && (!virt || (vsstatus & field) != 0);
+    }
+
+    /** Modifying guest extension state dirties both the HS and guest status fields. */
+    constexpr void mark_extension_dirty(MstatusBit field) noexcept {
+        mstatus |= field;
+        if (virt) vsstatus |= field;
+    }
 
     /**
      * @brief Initialize SXL/UXL consistently with the selected machine XLEN.
@@ -138,103 +398,172 @@ struct alignas(128) ArchState {
      * case lower privilege modes must remain RV32 when a trap enters S/U mode.
      */
     constexpr void initialize_lower_xlen_fields() {
-        const bool has_s = isa::misa_has_extension(misa, isa::IsaExtension::S);
-        const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
+        const bool has_s = supervisor_mode_supported;
+        const bool has_u = user_mode_supported;
         const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
         const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
+        const bool has_h = isa::misa_has_extension(misa, isa::IsaExtension::H);
         if constexpr (simrv::xlen::kIsXLen64) {
             constexpr uint64_t kLowerXlenMask = uint64_t{0xFU} << 32U;
-            const unsigned mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
+            const auto mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
             const uint64_t lower_xlen = (mxl == 1U) ? 1U : 2U;
             const uint64_t updated = (static_cast<uint64_t>(mstatus) & ~kLowerXlenMask) |
                                      (has_u ? (lower_xlen << 32U) : 0U) |
                                      (has_s ? (lower_xlen << 34U) : 0U);
-            mstatus = static_cast<CSRValue>(updated);
+            mstatus = static_cast<simrv::xlen::CsrValue>(updated);
+            if (has_h) {
+                constexpr uint64_t kVsxlMask = uint64_t{0x3U} << 32U;
+                hstatus = static_cast<simrv::xlen::CsrValue>(
+                    (static_cast<uint64_t>(hstatus) & ~kVsxlMask) | (lower_xlen << 32U));
+                vsstatus = static_cast<simrv::xlen::CsrValue>(
+                    (static_cast<uint64_t>(vsstatus) & ~kVsxlMask) | (lower_xlen << 32U));
+            }
+            menvcfgh = static_cast<simrv::xlen::CsrValue>(static_cast<uint64_t>(menvcfg) >> 32U);
         }
         mstatus = mstatus_legalize_mpp(mstatus, has_s, has_u);
-        mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v);
+        mstatus &=
+            mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h,
+                                  enabled_extensions.has(isa::MultiLetterExtension::Ssdbltrp),
+                                  enabled_extensions.has(isa::MultiLetterExtension::Smdbltrp),
+                                  enabled_extensions.has(isa::MultiLetterExtension::Zicfilp));
         update_xlen();
     }
 };
-
-#include <deque>
 
 /**
  * @struct SoftTlbEntry
  * @brief Compact software TLB entry (32 bytes) for the fast-path translation cache.
  *
- * Packs vpn, asid, priv, and valid into a single 64-bit tag for efficient comparison.
+ * Packs vpn, asid, and priv into a single 64-bit tag for efficient comparison.
  * Tag layout (64-bit):
- *   bits [63:16] = VPN (page-frame number, vaddr >> 12)
- *   bits [15: 2] = ASID (14-bit ASID from satp)
+ *   bits [63:18] = VPN (46-bit fast-cache domain, vaddr >> 12)
+ *   bits [17: 2] = ASID (16-bit ASID from satp)
  *   bits [ 1: 0] = privilege (0=User, 1=Supervisor, 3=Machine)
+ * VPNs above this domain bypass the compact fast TLB rather than aliasing a lower address.
  * valid == false when tag == kInvalidTag.
  */
 struct alignas(32) SoftTlbEntry {
     static constexpr uint64_t kInvalidTag = ~uint64_t{0};
+    static constexpr uint64_t kVpnMask = (uint64_t{1} << 46U) - 1U;
 
-    uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
-    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF) (8 bytes)
-    Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
-    uint32_t epoch = 0;             ///< TLB generation epoch (4 bytes)
-    uint32_t reserved = 0;          ///< Padding to 32 bytes (4 bytes)
+    uint64_t tag = kInvalidTag;  ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
+    simrv::xlen::PhysAddr paddr_base{0};  ///< Physical page base (paddr & ~0xFFF) (8 bytes)
+    uintptr_t host_offset = 0;  ///< Direct host offset: (host_base - (vpn << 12)) (8 bytes)
+    uint32_t epoch = 0;         ///< TLB generation epoch (4 bytes)
+    bool global = false;        ///< Global translation flag (1 byte)
+    bool has_host = false;      ///< Direct host pointer valid flag (1 byte)
 
     /// Build a lookup tag from the three key fields.
-    [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
-                                                 PrivilegeLevel priv) noexcept -> uint64_t {
-        return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_tag(
+        simrv::xlen::VpnIndex vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept
+        -> uint64_t {
+        return ((vpn & kVpnMask) << 18U) | ((asid & 0xFFFFu) << 2U) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
-    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid, PrivilegeLevel priv,
-                                         uint32_t current_epoch) const noexcept -> bool {
-        return epoch == current_epoch && tag == make_tag(vpn, asid, priv);
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_asid_priv_tag(
+        uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept -> uint32_t {
+        return static_cast<uint32_t>(((asid & 0xFFFFu) << 2) |
+                                     static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u));
     }
 
-    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, uint32_t current_epoch,
-             Address paddr_base_in, Byte* host_ptr_base_in) noexcept {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches_fast(
+        simrv::xlen::VpnIndex vpn, uint32_t asid_priv_tag, uint32_t priv_tag,
+        uint32_t current_epoch) const noexcept -> bool {
+        if ((vpn & ~kVpnMask) != 0) return false;
+        if (simrv::compiler::likely(epoch == current_epoch && tag != kInvalidTag)) {
+            const uint64_t expected_tag = ((vpn & kVpnMask) << 18U) | asid_priv_tag;
+            if (simrv::compiler::likely(tag == expected_tag)) return true;
+            return simrv::compiler::unlikely(global) &&
+                   ((tag & ~uint64_t{0x3FFFCULL}) == (((vpn & kVpnMask) << 18U) | priv_tag));
+        }
+        return false;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches(simrv::xlen::VpnIndex vpn,
+                                                             uint64_t asid,
+                                                             simrv::xlen::PrivilegeLevel priv,
+                                                             uint32_t current_epoch) const noexcept
+        -> bool {
+        if ((vpn & ~kVpnMask) != 0) return false;
+        if (simrv::compiler::likely(epoch == current_epoch && tag != kInvalidTag)) {
+            const uint64_t expected_tag = make_tag(vpn, asid, priv);
+            if (simrv::compiler::likely(tag == expected_tag)) return true;
+            return simrv::compiler::unlikely(global) &&
+                   ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
+        }
+        return false;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE bool has_host_ptr() const noexcept { return has_host; }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr(simrv::xlen::VirtAddr vaddr) const noexcept
+        -> simrv::xlen::Byte* {
+        return reinterpret_cast<simrv::xlen::Byte*>(host_offset +
+                                                    static_cast<uintptr_t>(vaddr.raw()));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr_base() const noexcept -> simrv::xlen::Byte* {
+        return has_host ? reinterpret_cast<simrv::xlen::Byte*>(host_offset + ((tag >> 18U) << 12U))
+                        : nullptr;
+    }
+
+    void set(simrv::xlen::VpnIndex vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv,
+             uint32_t current_epoch, simrv::xlen::PhysAddr paddr_base_in,
+             simrv::xlen::Byte* host_ptr_base_in, bool is_global = false) noexcept {
+        if ((vpn & ~kVpnMask) != 0) return;
         tag = make_tag(vpn, asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
-        host_ptr_base = host_ptr_base_in;
+        has_host = (host_ptr_base_in != nullptr);
+        host_offset = has_host ? (reinterpret_cast<uintptr_t>(host_ptr_base_in) -
+                                  (static_cast<uintptr_t>(vpn) << 12U))
+                               : 0;
+        global = is_global;
     }
 
     void invalidate() noexcept {
         tag = kInvalidTag;
-        paddr_base = 0;
-        host_ptr_base = nullptr;
+        paddr_base = simrv::xlen::PhysAddr{};
+        host_offset = 0;
+        has_host = false;
+        global = false;
     }
+
     [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
         return epoch == current_epoch && tag != kInvalidTag;
     }
 };
+static_assert(sizeof(SoftTlbEntry) == 32, "SoftTlbEntry must be exactly 32 bytes");
 
-struct MemWriteRecord {
-    Address addr = 0;
-    Word old_data = 0;
-    Instruction funct3 = 0;
-};
-
-struct ClintState {
-    Counter mtime = 0;
-    Counter mtimecmp = 0;
-    Counter mcycle = 0;
-    int rtc_divider = 0;
-};
-
-struct UndoStep {
-    simrv::core::ArchState state;
-    std::vector<MemWriteRecord> mem_writes;
-    simrv::pipeline::PipelineContext pipeline_context;
-    std::optional<simrv::pipeline::PipelineSimState> pipeline_sim_state;
-    ClintState clint_state;
-    uint64_t e_icount = 0;
-    Counter e_ccount = 0;
-    std::array<uint64_t, isa::OperationIdCount> e_instmix{};
+enum class HartStatus : uint8_t {
+    Started = 0,
+    Stopped = 1,
+    StartPending = 2,
+    StopPending = 3,
+    Suspended = 4,
+    SuspendPending = 5,
+    ResumePending = 6
 };
 
 class CPU {
    public:
+    inline static thread_local CPU* active_execution_cpu_ = nullptr;
+    [[nodiscard]] static auto current_execution_cpu() noexcept -> CPU* {
+        return active_execution_cpu_;
+    }
+    /**
+     * @brief Compute the soft TLB slot index using bit-mixed XOR hashing to prevent power-of-two
+     * stride aliasing.
+     * @param vpn Virtual page number (vaddr >> 12).
+     * @return Slot index in range [0, 2047].
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto soft_tlb_index(
+        simrv::xlen::VpnIndex vpn) noexcept -> size_t {
+        return static_cast<size_t>((vpn ^ (vpn >> 11)) & 2047u);
+    }
+
+    std::atomic<HartStatus> hart_status{HartStatus::Started};
     /**
      * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting
      * initial status values.
@@ -253,29 +582,47 @@ class CPU {
     void TLB_flush();
 
     /**
+     * @brief Flushes user-space TLB and decode cache entries on satp switch while preserving
+     * global kernel translations.
+     */
+    void TLB_flush_satp();
+
+    /**
+     * @brief Flushes only data TLB and soft-TLB entries (e.g., on SUM/MXR changes) while
+     * preserving instruction TLB, I-Cache, and DecodeCache.
+     */
+    void flush_data_tlb();
+
+    /**
+     * @brief Selectively flushes TLB entries matching the specified filter criteria.
+     * @param filter The selective flush criteria.
+     */
+    void TLB_flush(const core::TlbFlushFilter& filter);
+
+    /**
      * @brief Selectively flushes TLB entries matching virtual address and/or Address Space
      * Identifier (ASID).
-     * @param match_all_vaddr If true, ignores the vaddr matching criteria (flushes all virtual
-     * addresses matching ASID).
-     * @param vaddr The target virtual address to match.
-     * @param match_all_asid If true, ignores the ASID matching criteria.
-     * @param asid The target ASID to match.
      */
-    void TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
+    inline void TLB_flush(bool match_all_vaddr, simrv::xlen::VirtAddr vaddr, bool match_all_asid,
+                          simrv::xlen::Word asid) {
+        TLB_flush(core::TlbFlushFilter{
+            .vaddr = match_all_vaddr ? std::nullopt : std::make_optional(vaddr),
+            .asid = match_all_asid ? std::nullopt : std::make_optional(static_cast<Asid>(asid))});
+    }
 
     /**
      * @brief Writes the `mstatus` CSR, applying any architectural side effects (such as flushing
      * the TLB if configuration changes).
      * @param val The new value to write to `mstatus`.
      */
-    void set_mstatus(CSRValue val);
+    void set_mstatus(simrv::xlen::CsrValue val);
 
     /**
      * @brief Reads a masked `mstatus` value with active architectural projections.
      * @param mask The bitmask of the status fields to retrieve.
      * @return The masked `mstatus` register value.
      */
-    [[nodiscard]] auto get_mstatus(CSRValue mask) const -> CSRValue;
+    [[nodiscard]] auto get_mstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrValue;
 
     /**
      * @brief Reads a value from a specified Control and Status Register (CSR).
@@ -283,7 +630,8 @@ class CPU {
      * @return The CSR's value if successful, or an ExceptionCode if the access is unauthorized or
      * invalid.
      */
-    [[nodiscard]] auto read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
+    [[nodiscard]] auto read_csr(simrv::xlen::CsrNumber addr) const
+        -> std::expected<simrv::xlen::CsrValue, ExceptionCode>;
 
     /**
      * @brief Writes a value to a specified Control and Status Register (CSR).
@@ -291,7 +639,66 @@ class CPU {
      * @param val The new value to write.
      * @return A void result if successful, or an ExceptionCode on failure.
      */
-    auto write_csr(CSRAddress addr, CSRValue val) -> std::expected<void, ExceptionCode>;
+    auto write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue val)
+        -> std::expected<void, ExceptionCode>;
+
+    /**
+     * @brief Checks if an instruction fetch PC matches any active Sdtrig execution trigger.
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_pc(
+        simrv::xlen::VirtAddr pc) const noexcept -> bool {
+        if (!state_.has_active_triggers) return false;
+        const unsigned xlen = state_.regs.xlen;
+        for (size_t i = 0; i < ArchState::kNumTriggers; ++i) {
+            const auto t1 = state_.tdata1[i];
+            if (t1 == 0) continue;
+            const auto type = (static_cast<uint64_t>(t1) >> (xlen == 64 ? 60U : 28U)) & 0xFU;
+            if (type != 2) continue;
+            if ((t1 & (1U << 19U)) != 0) continue;  // select=1 matches data, not address
+            if ((t1 & (1U << 2U)) == 0) continue;   // execute not enabled
+            const bool m = (t1 & (1U << 6U)) != 0;
+            const bool s = (t1 & (1U << 4U)) != 0;
+            const bool u = (t1 & (1U << 3U)) != 0;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Machine && !m) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Supervisor && !s) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::User && !u) continue;
+            if (pc == state_.tdata2[i]) return true;
+        }
+        return false;
+    }
+
+    /**
+     * @brief Checks if a memory access range matches any active Sdtrig load/store trigger.
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_mem(simrv::xlen::VirtAddr addr,
+                                                              uint32_t size,
+                                                              bool is_write) const noexcept
+        -> bool {
+        if (!state_.has_active_triggers) return false;
+        const unsigned xlen = state_.regs.xlen;
+        const uint32_t span = (size > 0) ? size : 1u;
+        for (size_t i = 0; i < ArchState::kNumTriggers; ++i) {
+            const auto t1 = state_.tdata1[i];
+            if (t1 == 0) continue;
+            const auto type = (static_cast<uint64_t>(t1) >> (xlen == 64 ? 60U : 28U)) & 0xFU;
+            if (type != 2) continue;
+            if ((t1 & (1U << 19U)) != 0) continue;  // select=1 matches data, not address
+            if (is_write) {
+                if ((t1 & (1U << 1U)) == 0) continue;  // store not enabled
+            } else {
+                if ((t1 & (1U << 0U)) == 0) continue;  // load not enabled
+            }
+            const bool m = (t1 & (1U << 6U)) != 0;
+            const bool s = (t1 & (1U << 4U)) != 0;
+            const bool u = (t1 & (1U << 3U)) != 0;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Machine && !m) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Supervisor && !s) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::User && !u) continue;
+            const simrv::xlen::Address trigger_address = state_.tdata2[i];
+            if (addr <= trigger_address && trigger_address < addr + span) return true;
+        }
+        return false;
+    }
 
     /**
      * @brief Handles execution return from a machine-mode trap (MRET instruction).
@@ -306,6 +713,12 @@ class CPU {
     void sret();
 
     /**
+     * @brief Handles execution return from a resumable non-maskable interrupt (MNRET instruction).
+     * Restores privilege level, virtualization mode, and NMIE from `mnstatus`.
+     */
+    void mnret();
+
+    /**
      * @brief Recomputes the MIP (Machine Interrupt Pending) register based on currently active
      * external interrupts.
      */
@@ -316,7 +729,9 @@ class CPU {
      * @param irq_num The interrupt request number.
      * @param state The state to write (1 for asserted, 0 for deasserted).
      */
-    void plic_set_irq(int irq_num, int state);
+    void plic_set_irq(simrv::xlen::IrqNumber irq_num, simrv::xlen::IrqLevel state);
+    void plic_set_irq(simrv::xlen::IrqNumber irq_num, bool asserted = true);
+    void plic_set_irq(simrv::xlen::IrqNumber irq_num, int state);
 
     /**
      * @brief Triggers an architectural exception or interrupt trap, transitioning privilege levels
@@ -325,20 +740,48 @@ class CPU {
      * @param tval The trap-specific value (bad address, illegal instruction word, etc.) to save in
      * `mtval`/`stval`.
      */
-    void raise_exception(TrapCause cause, CSRValue tval);
+    void raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval);
+    inline void raise_exception(ExceptionCode code, simrv::xlen::CsrValue tval) {
+        raise_exception(static_cast<simrv::xlen::TrapCause>(code), tval);
+    }
 
     /**
      * @brief Evaluates CLINT (Core Local Interruptor) timer interrupts against `mtimecmp`.
      * Asserts timer interrupt pending flags in `mip` if current `mtime` >= `mtimecmp`.
      */
     void evaluate_timer_interrupt();
+    /**
+     * @brief Fast-forwards simulation virtual time (mtime) to the next timer deadline (mtimecmp or
+     * stimecmp) on WFI when no interrupts are pending, coalescing idle spin loops.
+     */
+    void fast_forward_wfi(Machine& machine);
+    /// Queue external interrupt wire changes for application by this hart at its next boundary.
+    void queue_interrupt_line(core::MipBit bit, bool asserted) noexcept;
+    void apply_pending_interrupt_lines(Machine& machine);
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto has_pending_interrupt_lines() const noexcept -> bool {
+        return pending_interrupt_lines_.load(std::memory_order_relaxed) != 0;
+    }
+    [[nodiscard]] auto next_logical_issue_sequence() noexcept -> simrv::xlen::Counter {
+        return next_logical_issue_sequence_++;
+    }
+    /// Apply HSM status transitions only from the hart's own execution thread.
+    void apply_hart_control_boundary() noexcept;
 
     /**
-     * @brief Executes one full CPU cycle. Resolves all pipeline stages or steps coroutine
-     * execution.
+     * @brief Advances the selected execution engine by one scheduling step.
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle(Machine& machine);
+    /// Advance exactly one authoritative CA transition.  Machine owns the global CA clock and
+    /// calls this directly; IA never uses this entry point.
+    void advance_ca_cycle(Machine& machine);
+    void run_ca_cycle_fast(Machine& machine);
+    void execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired_before);
+    [[nodiscard]] auto is_wfi_quiescent() const noexcept -> bool { return wfi_quiescent_; }
+    void wake_from_wfi() noexcept { wfi_quiescent_ = false; }
+    void run_ca_pipeline_cycle(Machine& machine);
+    /// Install a validated model before reset/reboot and recreate CA-local timing state.
+    void apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config);
 
     /**
      * @brief Executes one full CPU cycle in optimized baremetal mode.
@@ -346,6 +789,10 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle_baremetal(Machine& machine);
+    void run_fast_cycle_miss(Machine& machine);
+    void run_cycle_baremetal_miss(Machine& machine);
+    /// Advance architectural time by one deterministic global CA clock.
+    void tick_cycle_clock(Machine& machine, bool interrupt_boundary = true);
 
     /**
      * @brief Records active instruction details to the TUI (Text User Interface) trace buffer if
@@ -359,8 +806,15 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration.
      * @param op Reference to the cached pre-decoded operation.
      */
-    template <bool kCopyContext = false, bool kInstMix = false>
-    SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op);
+    template <bool kCopyContext = false, bool kInstMix = false, bool kDeferAluCommit = false>
+    void execute_cached_op_fast(Machine& machine, CachedOp& op, const simrv::memory::RamView& ram);
+    template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
+    SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast(CachedOp& op) -> bool;
+
+    template <FastKernelSpec Spec>
+    SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
+                                                       const simrv::memory::RamView& ram,
+                                                       bool poll_pause) -> uint32_t;
 
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
@@ -368,14 +822,20 @@ class CPU {
      * @param machine Reference to top-level Machine.
      * @param batch_size Maximum number of instructions to execute in the batch.
      */
-    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size);
+    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
+                                  const FastBatchPolicy& policy);
+
+    template <FastKernelSpec Spec>
+    SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size,
+                                                const simrv::memory::RamView& ram) -> uint32_t;
 
     /**
-     * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
-     * @param machine Pointer to the top-level machine orchestration unit.
-     * @return PipelineTask handle.
+     * @brief Executes a batch of cached operations in a tight inlined loop for OS
+     * acceleration.
+     * @param machine Reference to top-level Machine.
+     * @param batch_size Maximum number of instructions to execute in the batch.
      */
-    simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine* machine);
+    void run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBatchPolicy& policy);
 
    public:
     /**
@@ -426,7 +886,7 @@ class CPU {
     /**
      * @brief Functional monadic Fetch stage (C++23 expected monadic structure).
      */
-    [[nodiscard]] auto fetch_stage(Machine& machine, Address pc) -> bool;
+    [[nodiscard]] auto fetch_stage(Machine& machine, simrv::xlen::VirtAddr pc) -> bool;
 
     /**
      * @brief Functional monadic Decode stage.
@@ -452,6 +912,16 @@ class CPU {
      * @brief Functional monadic Commit stage.
      */
     [[nodiscard]] auto commit_stage(Machine& machine) -> bool;
+
+    /**
+     * Translate one address. In CA mode this resumes a typed page walk and returns nullopt while
+     * its physical PTE transaction is outstanding; IA drives the same MMU state synchronously.
+     */
+    auto translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtual_address,
+                                 PteAccess access, simrv::xlen::PrivilegeLevel privilege,
+                                 unsigned active_xlen, simrv::memory::TlPort port,
+                                 simrv::pipeline::TimedPageWalkState& timed_walk)
+        -> std::optional<std::expected<PageWalkResult, simrv::xlen::TrapCause>>;
 
    private:
     /// Translate fetch addresses and prime IF transient context.
@@ -484,15 +954,36 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    private:
-    auto execute_cached_jal(CachedOp& op) -> void;
-    auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
-                                           Register& out_val) -> bool;
-    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
-                                            Register rrs2) -> bool;
-    auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
-    auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
+    SIMRV_ALWAYS_INLINE auto execute_cached_jal(CachedOp& op) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_jalr(CachedOp& op, simrv::xlen::Register rrs1) -> void;
+    template <isa::OperationId kBranchOp, bool kCopyContext>
+    SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, simrv::xlen::Register rrs1,
+                                                   simrv::xlen::Register rrs2) -> void;
+    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, simrv::xlen::VirtAddr mem_addr,
+                                           isa::Funct3 funct3, simrv::xlen::Register& out_val,
+                                           const simrv::memory::RamView& ram) -> bool;
+    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, simrv::xlen::VirtAddr mem_addr,
+                                            isa::Funct3 funct3, simrv::xlen::Register rrs2,
+                                            const simrv::memory::RamView& ram) -> bool;
+    template <isa::OperationId kLoadOp>
+    SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op,
+                                                 simrv::xlen::Register rrs1,
+                                                 const simrv::memory::RamView& ram) -> bool;
+    template <isa::OperationId kStoreOp>
+    SIMRV_ALWAYS_INLINE auto execute_cached_store(Machine& machine, CachedOp& op,
+                                                  simrv::xlen::Register rrs1,
+                                                  simrv::xlen::Register rrs2,
+                                                  const simrv::memory::RamView& ram) -> bool;
+    template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
+    SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op, FastOp kind) -> bool;
+    template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
+    SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op) -> bool;
+    [[gnu::noinline]] auto advance_sequential_miss_baremetal(CachedOp* chained,
+                                                             simrv::xlen::VirtAddr next_pc) noexcept
+        -> CachedOp*;
+    [[gnu::noinline]] auto resolve_branch_target_baremetal(CachedOp* chained,
+                                                           simrv::xlen::VirtAddr target_pc) noexcept
+        -> CachedOp*;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
     SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
@@ -500,69 +991,173 @@ class CPU {
             dispatch_pending_interrupts();
         }
     }
-    inline void pc_sign_extend() {
-        if constexpr (simrv::xlen::kIsXLen64) {
-            if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-                state_.pc =
-                    static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-            }
+    SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
+
+    [[nodiscard]] static constexpr auto counter_mode_inhibited(uint64_t cfg,
+                                                               simrv::xlen::PrivilegeLevel priv,
+                                                               bool virt) noexcept -> bool {
+        if (cfg == 0) return false;
+        if (priv == simrv::xlen::PrivilegeLevel::Machine) return (cfg & (uint64_t{1} << 62U)) != 0;
+        if (virt) {
+            return priv == simrv::xlen::PrivilegeLevel::Supervisor
+                       ? (cfg & (uint64_t{1} << 59U)) != 0
+                       : (cfg & (uint64_t{1} << 58U)) != 0;
+        }
+        return priv == simrv::xlen::PrivilegeLevel::Supervisor ? (cfg & (uint64_t{1} << 61U)) != 0
+                                                               : (cfg & (uint64_t{1} << 60U)) != 0;
+    }
+
+    SIMRV_ALWAYS_INLINE void account_arch_cycles(uint64_t count = 1) noexcept {
+        if ((state_.mcountinhibit & 1U) == 0 &&
+            !counter_mode_inhibited(state_.mcyclecfg, state_.priv, state_.virt)) {
+            clint_mmio.mcycle += count;
         }
     }
 
-    /// Advance PC by op.len, update instruction counters, sign-extend PC, and process interrupts.
-    SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
-        state_.pc += op.len;
-        e_icount++;
-        if (op.cinsn) e_ccount++;
-        pc_sign_extend();
-        handle_cached_interrupts();
+    /// Advance PC by op.len() and update instruction counters for straight ALU ops without
+    /// branch/interrupt overhead.
+    SIMRV_ALWAYS_INLINE void advance_cached_pc_alu(const CachedOp& op) {
+        state_.pc += op.len();
+        account_retirement();
+        record_hpm_event(HpmEvent::Instructions);
+        record_hpm_event(HpmEvent::Cycles);
+        record_hpm_instruction_classes(op.op_id, op.opcode(), op.cinsn != 0);
+        e_ccount += (op.cinsn != 0);
     }
 
-    /// Set PC to target_pc, update instruction counters, sign-extend PC, and process interrupts.
-    SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op, Register target_pc) {
-        state_.pc = target_pc;
-        e_icount++;
-        if (op.cinsn) e_ccount++;
+    /// Advance PC by op.len(), update instruction counters, and sign-extend PC.
+    /// The enclosing fast-execution kernel processes interrupts once after the instruction.
+    SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
+        state_.pc += op.len();
+        account_retirement();
+        record_hpm_event(HpmEvent::Instructions);
+        record_hpm_event(HpmEvent::Cycles);
+        record_hpm_instruction_classes(op.op_id, op.opcode(), op.cinsn != 0);
+        e_ccount += (op.cinsn != 0);
         pc_sign_extend();
-        handle_cached_interrupts();
+    }
+
+    /// Set PC to target_pc, update instruction counters, and sign-extend PC.
+    /// The enclosing fast-execution kernel processes interrupts once after the instruction.
+    SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op,
+                                                         simrv::xlen::VirtAddr target_pc) {
+        state_.pc = target_pc;
+        account_retirement();
+        record_hpm_event(HpmEvent::Instructions);
+        record_hpm_event(HpmEvent::Cycles);
+        record_hpm_instruction_classes(op.op_id, op.opcode(), op.cinsn != 0);
+        e_ccount += (op.cinsn != 0);
+        pc_sign_extend();
     }
 
     ArchState state_;
     ArchState prev_state_;
+    bool hypervisor_memory_access_active_ = false;
+    // Six dirty bits followed by six value bits: MTIP, MSIP, MEIP, STIP, SSIP, SEIP.
+    std::atomic<uint16_t> pending_interrupt_lines_{0};
+    simrv::xlen::Counter next_register_trace_sequence_ = 0;
+    simrv::xlen::Counter next_logical_issue_sequence_ = 0;
 
    public:
+    /// Account instruction retirement: clears consecutive traps, advances e_icount and
+    /// architectural minstret.
+    SIMRV_ALWAYS_INLINE void account_retirement(uint64_t count = 1) noexcept {
+        state_.consecutive_traps = 0;
+        e_icount += count;
+        if ((state_.mcountinhibit & 4U) == 0 &&
+            !counter_mode_inhibited(state_.minstretcfg, state_.priv, state_.virt)) {
+            state_.minstret += count;
+        }
+    }
+
     /// Zero-cost read-only access to architectural state for tracing/logging.
     [[nodiscard]] constexpr auto state() const -> const ArchState& { return state_; }
     /// Mutable access to architectural state for decoupled controllers.
     [[nodiscard]] constexpr auto state() -> ArchState& { return state_; }
     /// Access to architectural state prior to current step for diff rendering.
     [[nodiscard]] constexpr auto prev_state() const -> const ArchState& { return prev_state_; }
+    /// Strongly typed Hart identifier for SMP topology and interrupt routing.
+    [[nodiscard]] constexpr auto hart_id() const noexcept -> simrv::xlen::HartId {
+        return state_.hart_id();
+    }
 
-    struct TraceHistoryEntry {
-        Address pc = 0;
-        Instruction inst = 0;
-        std::string symbol;
-    };
-
-    /// Circular ring buffer for instruction trace history (TUI trace panel).
-    /// Fixed capacity of 50; O(1) push with no heap allocation after initialization.
-    static constexpr std::size_t kTraceHistoryCapacity = 50;
-    std::array<TraceHistoryEntry, kTraceHistoryCapacity> trace_history_buf_{};
-    std::size_t trace_history_head_ = 0;  ///< Next write position (wraps around)
-    std::size_t trace_history_size_ = 0;  ///< Number of valid entries (≤ capacity)
-
-    /// Provides a read-only view over trace history in chronological order.
-    /// Returned as a vector for backward compatibility with TUI consumers.
-    [[nodiscard]] auto trace_history_view() const -> std::vector<TraceHistoryEntry>;
-
-    void push_trace_history(Address pc, Instruction inst, const std::string& symbol);
-
-    /// Get the effective privilege level for data accesses (considering MPRV).
-    [[nodiscard]] constexpr auto effective_data_privilege() const -> PrivilegeLevel {
-        if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Mprv)) != 0)) {
-            return static_cast<PrivilegeLevel>((state_.mstatus & enum_mask(MstatusBit::Mpp)) >> 11);
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_privilege() const noexcept
+        -> simrv::xlen::PrivilegeLevel {
+        if (hypervisor_memory_access_active_) {
+            constexpr simrv::xlen::CsrValue kHstatusSpvp = simrv::xlen::CsrValue{1} << 8U;
+            return (state_.hstatus & kHstatusSpvp) != 0 ? kPrivSupervisor : kPrivUser;
+        }
+        if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
+                                      (state_.mstatus & MstatusBit::Mprv) != 0)) {
+            return mstatus_mpp(state_.mstatus);
         }
         return state_.priv;
+    }
+
+    /// Effective virtualization state for explicit data accesses (including HLV/HSV and MPRV+MPV).
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_virt() const noexcept -> bool {
+        if (simrv::compiler::unlikely(hypervisor_memory_access_active_)) {
+            return true;
+        }
+        if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
+                                      (state_.mstatus & MstatusBit::Mprv) != 0)) {
+            return mstatus_mpp(state_.mstatus) != kPrivMachine &&
+                   (state_.mstatus & MstatusBit::Mpv) != 0;
+        }
+        return state_.virt;
+    }
+
+    /// SATP selected by the current virtualization mode for address translation.
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_satp() const noexcept
+        -> simrv::xlen::CsrValue {
+        return effective_data_virt() ? state_.vsatp : state_.satp;
+    }
+
+    /// Status fields used by VS-stage translation, with HS MXR applying to both stages.
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_translation_status() const noexcept
+        -> simrv::xlen::CsrValue {
+        return effective_data_virt() ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
+                                     : state_.mstatus;
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto fetch_translation_active() const noexcept
+        -> bool {
+        if (state_.priv == kPrivMachine) return false;
+        const auto satp = state_.virt ? state_.vsatp : state_.satp;
+        return simrv::xlen::satp_translation_enabled(satp, state_.regs.xlen) ||
+               (state_.virt && state_.regs.xlen == 64 &&
+                simrv::xlen::satp_translation_enabled(state_.hgatp, state_.regs.xlen));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto data_translation_active() const noexcept
+        -> bool {
+        const auto eff_priv = effective_data_privilege();
+        if (eff_priv == kPrivMachine) return false;
+        const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
+        return simrv::xlen::satp_translation_enabled(active_satp(), active_xlen) ||
+               (effective_data_virt() && active_xlen == 64 &&
+                simrv::xlen::satp_translation_enabled(state_.hgatp, active_xlen));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto data_pointer_masking_active() const noexcept
+        -> bool {
+        const auto eff_priv = effective_data_privilege();
+        if (state_.xlen_for_privilege(eff_priv) != 64) return false;
+        constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
+        if (eff_priv == kPrivUser) {
+            return ((static_cast<uint64_t>(state_.senvcfg) & kPmmMask) >> 32U) == 2U;
+        }
+        if (eff_priv == kPrivSupervisor && effective_data_virt()) {
+            return ((static_cast<uint64_t>(state_.henvcfg) & kPmmMask) >> 32U) == 2U;
+        }
+        return false;
+    }
+
+    [[nodiscard]] constexpr auto hypervisor_memory_access_active() const noexcept -> bool {
+        return hypervisor_memory_access_active_;
+    }
+    constexpr void set_hypervisor_memory_access_active(bool active) noexcept {
+        hypervisor_memory_access_active_ = active;
     }
 
     /**
@@ -571,43 +1166,170 @@ class CPU {
      * The privileged architecture requires MPRV accesses to use MPP's XLEN,
      * which can differ from the currently executing M-mode XLEN.
      */
-    [[nodiscard]] constexpr auto effective_data_xlen() const -> unsigned {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_xlen() const noexcept
+        -> unsigned {
         return state_.xlen_for_privilege(effective_data_privilege());
+    }
+
+    /**
+     * @brief Computes a 6-bit architectural decode context tag encoding privilege, active
+     * instruction translation state, active XLEN, and FS/VS enable state.
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto compute_decode_context() const noexcept
+        -> uint8_t {
+        const uint8_t priv_bits = static_cast<uint8_t>(state_.priv) & 0x3u;
+        const bool satp_en = fetch_translation_active() || data_translation_active();
+        const uint8_t satp_bit = satp_en ? 0x04u : 0u;
+        const uint8_t xlen_bit = (state_.regs.xlen == 64) ? 0x08u : 0u;
+        const uint8_t fs_bit = state_.extension_state_enabled(MstatusBit::Fs) ? 0x10u : 0u;
+        const uint8_t vs_bit = state_.extension_state_enabled(MstatusBit::Vs) ? 0x20u : 0u;
+        return static_cast<uint8_t>(priv_bits | satp_bit | xlen_bit | fs_bit | vs_bit);
+    }
+
+    SIMRV_ALWAYS_INLINE void sync_decode_context() noexcept {
+        const auto ctx = compute_decode_context();
+        if (simrv::compiler::unlikely(ctx != cached_decode_context_)) {
+            cached_decode_context_ = ctx;
+            decode_cache.set_active_context(ctx);
+            block_cache.flush();
+        }
+    }
+
+    SIMRV_ALWAYS_INLINE void record_hpm_event(HpmEvent event, uint64_t count = 1) noexcept {
+        if (perf_counters.notify_event(event, count, static_cast<uint32_t>(state_.mcountinhibit),
+                                       state_.priv, state_.virt)) {
+            if (state_.supervisor_mode_supported) {
+                state_.mip |= MipBit::Lcofip;
+            }
+        }
+    }
+
+    /// Record instruction-class events at retirement/completion through programmable HPMs.
+    SIMRV_ALWAYS_INLINE void record_hpm_instruction_classes(isa::OperationId op, isa::Opcode opcode,
+                                                            bool compressed) noexcept {
+        if (simrv::compiler::unlikely(perf_counters.has_instruction_class_listeners())) {
+            record_hpm_instruction_classes<true>(op, opcode, compressed);
+        }
+    }
+
+    template <int kEventMode>
+    SIMRV_ALWAYS_INLINE void record_hpm_instruction_classes(isa::OperationId op, isa::Opcode opcode,
+                                                            bool compressed) noexcept {
+        if constexpr (kEventMode == 0) return;
+        if constexpr (kEventMode == 2) {
+            if (simrv::compiler::unlikely(!perf_counters.has_instruction_class_listeners())) return;
+        }
+        using pipeline::operation::ControlFlowKind;
+        using pipeline::operation::ExecutionClass;
+        using pipeline::operation::MemoryAccessKind;
+        const auto info = pipeline::operation::info(op);
+        if (info.control == ControlFlowKind::Branch) record_hpm_event(HpmEvent::BranchInstruction);
+        if (info.memory == MemoryAccessKind::Load) record_hpm_event(HpmEvent::LoadInstruction);
+        if (info.memory == MemoryAccessKind::Store) record_hpm_event(HpmEvent::StoreInstruction);
+        if (info.execution_class == ExecutionClass::Multiply ||
+            info.execution_class == ExecutionClass::DivideOrRemainder)
+            record_hpm_event(HpmEvent::MulDivInstruction);
+        if (isa::is_f_op(op) || isa::is_d_op(op) || isa::is_zfhmin_op(op))
+            record_hpm_event(HpmEvent::FloatInstruction);
+        if (isa::is_vector_op(op)) record_hpm_event(HpmEvent::VectorInstruction);
+        if (compressed) record_hpm_event(HpmEvent::CompressedInstruction);
+        const bool integer_alu_opcode = opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
+                                        opcode == isa::Opcode::Op32 ||
+                                        opcode == isa::Opcode::OpImm32 ||
+                                        opcode == isa::Opcode::Lui || opcode == isa::Opcode::Auipc;
+        if (integer_alu_opcode && info.execution_class == ExecutionClass::Default &&
+            info.memory == MemoryAccessKind::None && info.control == ControlFlowKind::None)
+            record_hpm_event(HpmEvent::IntegerAluInstruction);
     }
 
     Tlb tlb;
 
-    PlicMmio plic_mmio;
-    ClintMmio clint_mmio;
+    simrv::device::Plic plic_mmio;
+    simrv::device::Clint clint_mmio;
     CsrFile csr_file;
     execute::ExecuteUnit execute_unit;
+    execute::CfuUnit cfu_unit;
     simrv::pipeline::PipelineContext pipeline_context;
+    simrv::pipeline::PipelineContext* active_context_ = &pipeline_context;
+    [[nodiscard]] constexpr auto& active_context() noexcept { return *active_context_; }
+    [[nodiscard]] constexpr const auto& active_context() const noexcept { return *active_context_; }
+    [[nodiscard]] constexpr auto& scoreboard() noexcept { return ca_pipeline.scoreboard; }
+    [[nodiscard]] constexpr const auto& scoreboard() const noexcept {
+        return ca_pipeline.scoreboard;
+    }
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
+    simrv::cache::TimingCacheHierarchy instruction_cache_timing;
     sbi::Sbi sbi;
-    std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
-    simrv::pipeline::PipelineTask pipeline_task;
     simrv::pipeline::PipelineSim pipeline_sim;
+    simrv::pipeline::CpuModelConfig cpu_model_config{};
+    simrv::pipeline::BranchPredictor branch_predictor;
+    simrv::pipeline::HartCycleState ca_state{};
+    simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
+    BlockCache block_cache;
+
+    struct RasEntry {
+        simrv::xlen::Register ret_pc{0};
+        BasicBlock* ret_bb{nullptr};
+    };
+    static constexpr size_t kRasCapacity = 16;
+    static constexpr size_t kRasMask = kRasCapacity - 1;
+    std::array<RasEntry, kRasCapacity> ras_{};
+    uint8_t ras_top_{0};
+
+    SIMRV_ALWAYS_INLINE void ras_push(simrv::xlen::Register ret_pc, BasicBlock* ret_bb) noexcept {
+        ras_top_ = (ras_top_ + 1) & kRasMask;
+        ras_[ras_top_] = {ret_pc, ret_bb};
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto ras_peek_match(simrv::xlen::Register target_pc) noexcept
+        -> BasicBlock* {
+        const auto& entry = ras_[ras_top_];
+        if (entry.ret_pc == target_pc && entry.ret_bb != nullptr &&
+            entry.ret_bb->pc.raw() == target_pc && entry.ret_bb->valid()) {
+            return entry.ret_bb;
+        }
+        return nullptr;
+    }
+
+    SIMRV_ALWAYS_INLINE void ras_pop() noexcept { ras_top_ = (ras_top_ - 1) & kRasMask; }
+
+    uint8_t cached_decode_context_{0xFF};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_inst{};
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
-    void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
-                                  Word asid);
+    void soft_tlb_flush_selective(const core::TlbFlushFilter& filter);
+    bool wfi_quiescent_{false};
 
     // ========== Execution Metrics ==========
-    uint64_t e_icount{0};                                     // Total instruction count
-    Counter e_ccount = 0;                                     // Compressed instructions executed
-    std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
+    simrv::xlen::Counter e_icount{0};  // Total instruction count
+    std::array<uint64_t, 32> sbi_pmu_selector{};
+    std::array<bool, 32> sbi_pmu_configured{};
+    std::array<bool, 32> sbi_pmu_started{};
+    simrv::xlen::Counter e_ccount = 0;  // Compressed instructions executed
+    simrv::xlen::LatencyCycles cycle_counter_start_delay_ = 0;
+    simrv::xlen::CycleCount last_retire_cycle_{0};
+    PerformanceCounters perf_counters{};
+    std::array<simrv::xlen::Counter, isa::OperationIdCount>
+        e_instmix{};  // Instruction-mix statistics
 
-    // ========== Reverse Stepping / Time-Travel Debugging ==========
-    std::deque<UndoStep> undo_stack;
-    void push_undo_state();
-    void record_mem_write(Address paddr, Word old_data, Instruction funct3);
-    auto perform_backstep() -> bool;
+   private:
+    struct CaPolicySpec {
+        simrv::pipeline::PipelineTopologySpec topology{};
+        bool observable = false;
+        friend auto operator==(const CaPolicySpec&, const CaPolicySpec&) -> bool = default;
+    };
+
+    template <simrv::pipeline::PipelineTopologySpec Spec>
+    void run_ca_pipeline_cycle_impl(Machine& machine);
+
+    template <CaPolicySpec Policy>
+    void execute_ca_cycle_stages_impl(Machine& machine, simrv::xlen::Counter retired_before);
 };
 
 }  // namespace simrv::core

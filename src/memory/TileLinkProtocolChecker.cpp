@@ -1,0 +1,209 @@
+/** @file TileLinkProtocolChecker.cpp */
+#include "simrv/memory/TileLinkProtocolChecker.hpp"
+
+#include <format>
+
+namespace simrv::memory {
+
+auto TileLinkProtocolChecker::accept_a(const TlChannelA& request)
+    -> std::expected<void, std::string> {
+    if (request.size > kTlBlockSize) {
+        return std::unexpected(
+            std::format("A source {} has illegal size {}", request.source, request.size));
+    }
+    const auto bytes = static_cast<simrv::xlen::Address>(simrv::xlen::Address{1} << request.size);
+    if ((request.address & (bytes - 1u)) != 0) {
+        return std::unexpected(
+            std::format("A source {} address is not naturally aligned", request.source));
+    }
+    const bool coherent =
+        request.opcode == TlOpcodeA::AcquireBlock || request.opcode == TlOpcodeA::AcquirePerm;
+    const bool intent = request.opcode == TlOpcodeA::Intent;
+    if (coherent && request.size != kTlBlockSize) {
+        return std::unexpected(
+            std::format("A source {} acquire is not one cache block", request.source));
+    }
+    const bool multibeat_memory = request.opcode == TlOpcodeA::Get ||
+                                  request.opcode == TlOpcodeA::PutFullData ||
+                                  request.opcode == TlOpcodeA::PutPartialData;
+    const bool has_data =
+        request.opcode == TlOpcodeA::PutFullData || request.opcode == TlOpcodeA::PutPartialData ||
+        request.opcode == TlOpcodeA::ArithmeticData || request.opcode == TlOpcodeA::LogicalData;
+    if (request.corrupt && !has_data) {
+        return std::unexpected(
+            std::format("A source {} marks a data-less message corrupt", request.source));
+    }
+    if (!coherent && !intent && !multibeat_memory && request.size > kTlBeatSize) {
+        return std::unexpected(
+            std::format("A source {} uncached transfer exceeds one beat", request.source));
+    }
+    const TlMask natural_mask = TlChannelA::compute_mask(request.size, request.address);
+    const bool partial = request.opcode == TlOpcodeA::PutPartialData;
+    const bool valid_mask =
+        partial ? ((request.mask & ~natural_mask) == 0) : request.mask == natural_mask;
+    if (!valid_mask) {
+        return std::unexpected(std::format("A source {} has an illegal byte mask", request.source));
+    }
+    if (!sources_.emplace(request.source, request).second) {
+        return std::unexpected(
+            std::format("A source {} was reused before its response", request.source));
+    }
+    return {};
+}
+
+auto TileLinkProtocolChecker::accept_b(const TlChannelB& probe)
+    -> std::expected<void, std::string> {
+    if (probe.size > kTlBlockSize) {
+        return std::unexpected(std::format("B probe has illegal size {}", probe.size));
+    }
+    if ((probe.address.raw() & (kTlBlockBytes - 1u)) != 0) {
+        return std::unexpected(
+            std::format("B probe address {:#x} is not block-aligned", probe.address.raw()));
+    }
+    if (probe.opcode != TlOpcodeB::ProbeBlock && probe.opcode != TlOpcodeB::ProbePerm) {
+        return std::unexpected("B probe contains an illegal opcode");
+    }
+    if (probe.mask != TlChannelA::compute_mask(probe.size, probe.address)) {
+        return std::unexpected("B probe has an illegal byte mask");
+    }
+    if (!active_probes_.emplace(probe.source, probe).second) {
+        return std::unexpected(std::format(
+            "B probe source {} is already active or capacity is exhausted", probe.source));
+    }
+    return {};
+}
+
+auto TileLinkProtocolChecker::accept_c(const TlChannelC& response)
+    -> std::expected<void, std::string> {
+    if (response.size > kTlBlockSize) {
+        return std::unexpected(std::format("C response has illegal size {}", response.size));
+    }
+    if ((response.address.raw() & (kTlBlockBytes - 1u)) != 0) {
+        return std::unexpected(
+            std::format("C response address {:#x} is not block-aligned", response.address.raw()));
+    }
+    if (response.opcode == TlOpcodeC::Release || response.opcode == TlOpcodeC::ReleaseData) {
+        if (response.opcode == TlOpcodeC::ReleaseData &&
+            response.mask != TlChannelA::compute_mask(response.size, response.address)) {
+            return std::unexpected("C ReleaseData has an illegal byte mask");
+        }
+        if (!releases_.emplace(response.source, response).second) {
+            return std::unexpected(
+                std::format("C release source {} was reused before ReleaseAck", response.source));
+        }
+    } else if (response.opcode == TlOpcodeC::ProbeAck ||
+               response.opcode == TlOpcodeC::ProbeAckData) {
+        const auto probe = active_probes_.find(response.source);
+        if (probe == active_probes_.end()) {
+            return std::unexpected(
+                std::format("C ProbeAck references idle source {}", response.source));
+        }
+        if (probe->second.address != response.address || probe->second.size != response.size) {
+            return std::unexpected(
+                std::format("C ProbeAck does not match B source {}", response.source));
+        }
+        if (response.opcode == TlOpcodeC::ProbeAckData && response.report != TlReport::TtoB &&
+            response.report != TlReport::TtoN) {
+            return std::unexpected("C ProbeAckData must report a trunk-state transition");
+        }
+        if (response.opcode == TlOpcodeC::ProbeAckData &&
+            response.mask != TlChannelA::compute_mask(response.size, response.address)) {
+            return std::unexpected("C ProbeAckData has an illegal byte mask");
+        }
+        active_probes_.erase(probe);
+    } else {
+        return std::unexpected("C response contains an illegal opcode");
+    }
+    return {};
+}
+
+auto TileLinkProtocolChecker::accept_d(const TlChannelD& response)
+    -> std::expected<void, std::string> {
+    if (response.opcode == TlOpcodeD::ReleaseAck) {
+        auto rel_it = releases_.find(response.source);
+        if (rel_it != releases_.end()) {
+            if (response.size != rel_it->second.size) {
+                return std::unexpected(
+                    std::format("D ReleaseAck size does not match C source {}", response.source));
+            }
+            releases_.erase(rel_it);
+            return {};
+        }
+    }
+    const auto source = sources_.find(response.source);
+    if (source == sources_.end()) {
+        return std::unexpected(
+            std::format("D response references idle source {}", response.source));
+    }
+    const auto request_opcode = source->second.opcode;
+    const bool response_matches = [&] {
+        switch (request_opcode) {
+            case TlOpcodeA::PutFullData:
+            case TlOpcodeA::PutPartialData:
+                return response.opcode == TlOpcodeD::AccessAck;
+            case TlOpcodeA::Get:
+            case TlOpcodeA::ArithmeticData:
+            case TlOpcodeA::LogicalData:
+                return response.opcode == TlOpcodeD::AccessAckData;
+            case TlOpcodeA::Intent:
+                return response.opcode == TlOpcodeD::HintAck;
+            case TlOpcodeA::AcquireBlock:
+                return response.opcode == TlOpcodeD::GrantData;
+            case TlOpcodeA::AcquirePerm:
+                return response.opcode == TlOpcodeD::Grant;
+        }
+        return false;
+    }();
+    if (!response_matches) {
+        return std::unexpected(std::format("D opcode does not match A source {}", response.source));
+    }
+    if (response.size != source->second.size) {
+        return std::unexpected(std::format("D size does not match A source {}", response.source));
+    }
+    const bool grant =
+        response.opcode == TlOpcodeD::Grant || response.opcode == TlOpcodeD::GrantData;
+    if (grant) {
+        if (!response.denied && response.sink == 0) {
+            return std::unexpected("D grant uses reserved sink 0");
+        }
+        if (!response.denied && !sinks_.emplace(response.sink, response.source).second) {
+            return std::unexpected(std::format("D grant reused live sink {}", response.sink));
+        }
+    }
+    sources_.erase(source);
+    return {};
+}
+
+auto TileLinkProtocolChecker::accept_e(const TlChannelE& acknowledgement)
+    -> std::expected<void, std::string> {
+    if (acknowledgement.opcode != TlOpcodeE::GrantAck) {
+        return std::unexpected("E channel contains an unsupported opcode");
+    }
+    if (sinks_.erase(acknowledgement.sink) != 1) {
+        return std::unexpected(
+            std::format("E acknowledgement references idle sink {}", acknowledgement.sink));
+    }
+    return {};
+}
+
+void TileLinkProtocolChecker::cancel(TlSourceId source) {
+    sources_.erase(source);
+    releases_.erase(source);
+    active_probes_.erase(source);
+    for (auto it = sinks_.begin(); it != sinks_.end();) {
+        if (it->second == source) {
+            it = sinks_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void TileLinkProtocolChecker::reset() {
+    sources_.clear();
+    releases_.clear();
+    active_probes_.clear();
+    sinks_.clear();
+}
+
+}  // namespace simrv::memory

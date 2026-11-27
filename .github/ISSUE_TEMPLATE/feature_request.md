@@ -1,20 +1,21 @@
 ---
 name: Feature request
-about: Suggest an idea for this project
+about: Suggest an improvement or a new capability
 title: ''
 labels: ''
 assignees: ''
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+For a large change, share the idea here before starting implementation. This gives us a chance to
+discuss the approach together.
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**What are you trying to do?**
+Describe the problem or task you want SimRV to help with.
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**What change would help?**
+Describe what you would like SimRV to do. If this is about a plugin, say what device or behavior it
+would add.
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+**Other approaches or useful context**
+Could a plugin, configuration, or external tool solve this? Add any other details that might help.

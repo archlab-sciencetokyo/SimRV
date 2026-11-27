@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.dev/schemas/v3/run-manifest.schema.json",
+  "title": "SimRV 3 Run Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "program"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "program": { "type": "string", "minLength": 1 },
+    "disk": { "type": "string" },
+    "device_tree": { "type": "string" },
+    "output_directory": { "type": "string" },
+    "interaction": { "enum": ["headless", "tui"] },
+    "baremetal": { "type": "boolean" },
+    "cycle_accurate": { "type": "boolean" },
+    "harts": { "type": "integer", "minimum": 1 },
+    "vlen": { "type": "integer", "minimum": 0 },
+    "misa": { "type": "string", "minLength": 1 },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+        }
+      }
+    }
+  }
+}

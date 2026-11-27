@@ -8,27 +8,21 @@
  */
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <ranges>
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/CompilerHints.hpp"
+#include "simrv/isa/InstructionFields.hpp"
+#include "simrv/memory/RamView.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::memory {
 
-#ifndef SIMRV_DRAM_SIZE_MB
-#define SIMRV_DRAM_SIZE_MB 256
-#endif
-
-inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
-inline constexpr Address kDramSize = static_cast<Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
-inline constexpr Address kDramMask = kDramSize - 1;
-
-inline constexpr Word kTlbSize = 2048;
-inline constexpr Word kPageShift = 12;
-inline constexpr Word kPageMask = (1u << kPageShift) - 1;
+inline constexpr simrv::xlen::Word kTlbSize = 2048;
+inline constexpr simrv::xlen::Word kPageShift = 12;
+inline constexpr simrv::xlen::Word kPageMask = (1u << kPageShift) - 1;
 
 /**
  * @brief Check if an address or integer value is aligned to an N-byte boundary.
@@ -63,44 +57,18 @@ concept WordLike = std::integral<T> && requires(T w) {
 template <typename T>
 concept StoreFunct3Like = std::unsigned_integral<T>;
 
-// ========== Memory Region Classification ==========
-
-extern bool g_appmode;
-extern Address g_dram_base;
-
-/// Overflow-safe containment test for a physical memory region.
-[[nodiscard]] constexpr auto address_range_contains(Address base, Address extent, Address address,
-                                                    size_t size) -> bool {
-    return size != 0 && size <= extent && address >= base && address - base <= extent - size;
-}
-
-/// Check whether the complete physical byte range is backed by DRAM.
-inline auto is_dram_access(Address p_addr, size_t size) -> bool {
-    return address_range_contains(g_dram_base, simrv::memory::kDramSize, p_addr, size);
-}
-
-/// Check if one physical byte is within the implemented DRAM range.
-inline auto is_dram_addr(Address p_addr) -> bool { return is_dram_access(p_addr, 1); }
-
-/// Check if a physical address is in a legacy reserved region (MMIO)
-inline auto is_legacy_reserved_region(Address p_addr) -> bool {
-    switch (p_addr & static_cast<Address>(0xF0000000u)) {
-        case static_cast<Address>(0x10000000u):
-        case static_cast<Address>(0x20000000u):
-        case static_cast<Address>(0x30000000u):
-        case static_cast<Address>(0x70000000u):
-            return true;
-        default:
-            return false;
-    }
+/// Check a physical range against explicitly supplied DRAM geometry.
+[[nodiscard]] constexpr auto is_dram_access(simrv::xlen::PhysAddr base, simrv::xlen::Address extent,
+                                            simrv::xlen::PhysAddr p_addr, size_t size) -> bool {
+    return address_range_contains(base, extent, p_addr, size);
 }
 
 // ========== XLEN-Aware Store Width Calculation ==========
 
 /// Compute store byte count from funct3 field for the configured XLEN
 /// Supports: SB (1), SH (2), SW (4), SD (8 on RV64 only)
-constexpr auto store_width_bytes(Instruction funct3) -> size_t {
-    constexpr auto kStoreSizeMask = static_cast<Instruction>(0x3u);
+constexpr auto store_width_bytes(simrv::xlen::Instruction funct3) -> size_t {
+    constexpr auto kStoreSizeMask = static_cast<simrv::xlen::Instruction>(0x3u);
     const auto base_width = static_cast<size_t>(1u << (funct3 & kStoreSizeMask));
 
     // In RV64, SD (funct3=3) is 8 bytes; in RV32, it's treated as word (4 bytes)
@@ -112,71 +80,217 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
     return base_width;
 }
 
+/// Compute store byte count from typed funct3 field
+constexpr auto store_width_bytes(isa::Funct3 funct3) -> size_t {
+    return store_width_bytes(static_cast<simrv::xlen::Instruction>(funct3));
+}
+
+// ========== Loaded Value Sign/Zero Extension Helper ==========
+
+/// Extend raw memory read data according to RISC-V load funct3 rules (sign vs zero extension).
+[[nodiscard]] constexpr auto extend_loaded_value(simrv::xlen::Word raw_data,
+                                                 uint8_t funct3) noexcept -> simrv::xlen::Word {
+    const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+    const unsigned bits = 8 * req_size_bytes;
+    if (bits < simrv::xlen::kXLenBits) {
+        const simrv::xlen::Word mask = (static_cast<simrv::xlen::Word>(1) << bits) - 1;
+        raw_data &= mask;
+        constexpr auto kSignExtendBit = 0x4u;
+        if ((funct3 & kSignExtendBit) == 0) {
+            const simrv::xlen::Word sign_bit = static_cast<simrv::xlen::Word>(1) << (bits - 1);
+            if ((raw_data & sign_bit) != 0) {
+                raw_data |= ~mask;
+            }
+        }
+    }
+    return raw_data;
+}
+
+/// Extend raw memory read data according to typed RISC-V load funct3 rules.
+[[nodiscard]] constexpr auto extend_loaded_value(simrv::xlen::Word raw_data,
+                                                 isa::Funct3 funct3) noexcept -> simrv::xlen::Word {
+    return extend_loaded_value(raw_data, static_cast<uint8_t>(funct3));
+}
+
 // ========== Fast Host Memory Read/Write Operations (Direct Translation Fast Path) ==========
 
-inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
-    auto read = [host_ptr]<typename T>() -> T {
-        T value{};
-        std::memcpy(&value, host_ptr, sizeof(value));
-        return value;
-    };
-    switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
-        case isa::Funct3::Lb:
-            return static_cast<Word>(static_cast<SignedWord>(read.template operator()<int8_t>()));
-        case isa::Funct3::Lbu:
-            return static_cast<Word>(read.template operator()<uint8_t>());
-        case isa::Funct3::Lh:
-            return static_cast<Word>(static_cast<SignedWord>(read.template operator()<int16_t>()));
-        case isa::Funct3::Lhu:
-            return static_cast<Word>(read.template operator()<uint16_t>());
-        case isa::Funct3::Lw:
-            return static_cast<Word>(static_cast<SignedWord>(read.template operator()<int32_t>()));
-        case isa::Funct3::Lwu:
-            return static_cast<Word>(read.template operator()<uint32_t>());
-        case isa::Funct3::Ld:
-            return static_cast<Word>(read.template operator()<uint64_t>());
+template <std::unsigned_integral T>
+[[nodiscard]] SIMRV_ALWAYS_INLINE auto load_unaligned(const simrv::xlen::Byte* host_ptr) noexcept
+    -> T {
+    T value{};
+    std::memcpy(&value, host_ptr, sizeof(T));
+    return value;
+}
+
+template <std::unsigned_integral T>
+SIMRV_ALWAYS_INLINE void store_unaligned(simrv::xlen::Byte* host_ptr, T value) noexcept {
+    std::memcpy(host_ptr, &value, sizeof(T));
+}
+
+SIMRV_ALWAYS_INLINE auto host_read_fast(const simrv::xlen::Byte* host_ptr,
+                                        simrv::xlen::Instruction funct3) noexcept
+    -> simrv::xlen::Word {
+    switch (funct3 & 0x7u) {
+        case 0:
+            return static_cast<simrv::xlen::Word>(static_cast<simrv::xlen::SignedWord>(
+                static_cast<int8_t>(load_unaligned<uint8_t>(host_ptr))));
+        case 1:
+            return static_cast<simrv::xlen::Word>(static_cast<simrv::xlen::SignedWord>(
+                static_cast<int16_t>(load_unaligned<uint16_t>(host_ptr))));
+        case 2:
+            return static_cast<simrv::xlen::Word>(static_cast<simrv::xlen::SignedWord>(
+                static_cast<int32_t>(load_unaligned<uint32_t>(host_ptr))));
+        case 3:
+            if constexpr (simrv::xlen::kIsXLen64) {
+                return load_unaligned<uint64_t>(host_ptr);
+            } else {
+                return load_unaligned<uint32_t>(host_ptr);
+            }
+        case 4:
+            return load_unaligned<uint8_t>(host_ptr);
+        case 5:
+            return load_unaligned<uint16_t>(host_ptr);
+        case 6:
+            return static_cast<simrv::xlen::Word>(load_unaligned<uint32_t>(host_ptr));
         default:
-            return 0;
+            if constexpr (simrv::xlen::kIsXLen64) {
+                return load_unaligned<uint64_t>(host_ptr);
+            } else {
+                return load_unaligned<uint32_t>(host_ptr);
+            }
     }
 }
 
-inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
-    auto write = [host_ptr]<typename T>(Register value) {
-        const T narrowed = static_cast<T>(value);
-        std::memcpy(host_ptr, &narrowed, sizeof(narrowed));
-    };
-    switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
-        case isa::Funct3::Sb:
-            write.template operator()<uint8_t>(val);
-            break;
-        case isa::Funct3::Sh:
-            write.template operator()<uint16_t>(val);
-            break;
-        case isa::Funct3::Sw:
-            write.template operator()<uint32_t>(val);
-            break;
-        case isa::Funct3::Sd:
-            write.template operator()<uint64_t>(val);
-            break;
+SIMRV_ALWAYS_INLINE auto host_read_fast_aligned(const simrv::xlen::Byte* host_ptr,
+                                                simrv::xlen::Instruction funct3) noexcept
+    -> simrv::xlen::Word {
+    const auto f3 = funct3 & 0x7u;
+    if (f3 == 3) {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            return load_unaligned<uint64_t>(host_ptr);
+        } else {
+            return load_unaligned<uint32_t>(host_ptr);
+        }
+    }
+    if (f3 == 1) {
+        return static_cast<simrv::xlen::Word>(static_cast<simrv::xlen::SignedWord>(
+            static_cast<int16_t>(load_unaligned<uint16_t>(host_ptr))));
+    }
+    if (f3 == 4) {
+        return load_unaligned<uint8_t>(host_ptr);
+    }
+    if (f3 == 2) {
+        return static_cast<simrv::xlen::Word>(static_cast<simrv::xlen::SignedWord>(
+            static_cast<int32_t>(load_unaligned<uint32_t>(host_ptr))));
+    }
+    if (f3 == 5) {
+        return load_unaligned<uint16_t>(host_ptr);
+    }
+    if (f3 == 0) {
+        return static_cast<simrv::xlen::Word>(static_cast<simrv::xlen::SignedWord>(
+            static_cast<int8_t>(load_unaligned<uint8_t>(host_ptr))));
+    }
+    if (f3 == 6) {
+        return static_cast<simrv::xlen::Word>(load_unaligned<uint32_t>(host_ptr));
+    }
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_unreachable();
+#else
+    return 0;
+#endif
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast(simrv::xlen::Byte* host_ptr, simrv::xlen::Register val,
+                                         simrv::xlen::Instruction funct3) noexcept {
+    switch (funct3 & 0x3u) {
+        case 0:
+            store_unaligned(host_ptr, static_cast<uint8_t>(val));
+            return;
+        case 1:
+            store_unaligned(host_ptr, static_cast<uint16_t>(val));
+            return;
+        case 2:
+            store_unaligned(host_ptr, static_cast<uint32_t>(val));
+            return;
         default:
-            break;
+            if constexpr (simrv::xlen::kIsXLen64) {
+                store_unaligned(host_ptr, static_cast<uint64_t>(val));
+            } else {
+                store_unaligned(host_ptr, static_cast<uint32_t>(val));
+            }
+            return;
     }
 }
 
-/// ========== Fast RAM Read Operations ==========
+SIMRV_ALWAYS_INLINE void host_write_fast_aligned(simrv::xlen::Byte* host_ptr,
+                                                 simrv::xlen::Register val,
+                                                 simrv::xlen::Instruction funct3) noexcept {
+    const auto f3 = funct3 & 0x3u;
+    if (f3 == 3) {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            store_unaligned(host_ptr, static_cast<uint64_t>(val));
+            return;
+        } else {
+            store_unaligned(host_ptr, static_cast<uint32_t>(val));
+            return;
+        }
+    }
+    if (f3 == 2) {
+        store_unaligned(host_ptr, static_cast<uint32_t>(val));
+        return;
+    }
+    if (f3 == 0) {
+        store_unaligned(host_ptr, static_cast<uint8_t>(val));
+        return;
+    }
+    store_unaligned(host_ptr, static_cast<uint16_t>(val));
+}
 
-/// Fast inline RAM read with support for various load formats
-/// Requires: addr to be valid DRAM address; ram pointer must be non-null
-inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
-    return host_read_fast(ram + (addr & simrv::memory::kDramMask), funct3);
+SIMRV_ALWAYS_INLINE auto host_read_fast_aligned(const simrv::xlen::Byte* host_ptr,
+                                                isa::Funct3 funct3) noexcept -> simrv::xlen::Word {
+    return host_read_fast_aligned(host_ptr, static_cast<simrv::xlen::Instruction>(funct3));
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast_aligned(simrv::xlen::Byte* host_ptr,
+                                                 simrv::xlen::Register val,
+                                                 isa::Funct3 funct3) noexcept {
+    host_write_fast_aligned(host_ptr, val, static_cast<simrv::xlen::Instruction>(funct3));
+}
+
+/// Fast inline RAM read. The caller validates the physical address against its RamView.
+SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Instruction funct3,
+                                       const RamView& ram) noexcept -> simrv::xlen::Word {
+    return host_read_fast(ram.unchecked_ptr(addr), funct3);
+}
+
+SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, isa::Funct3 funct3,
+                                       const RamView& ram) noexcept -> simrv::xlen::Word {
+    return ram_read_fast(addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
 // ========== Fast RAM Write Operations ==========
 
-/// Fast inline RAM write with support for various store formats
+/// Fast inline RAM write. The caller validates the physical address against its RamView.
 /// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
-inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, Byte* ram) {
-    host_write_fast(ram + (addr & simrv::memory::kDramMask), wdata, funct3);
+SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,
+                                        simrv::xlen::Instruction funct3,
+                                        const RamView& ram) noexcept {
+    host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
+}
+
+SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,
+                                        isa::Funct3 funct3, const RamView& ram) noexcept {
+    ram_write_fast(addr, wdata, static_cast<simrv::xlen::Instruction>(funct3), ram);
+}
+
+SIMRV_ALWAYS_INLINE auto host_read_fast(const simrv::xlen::Byte* host_ptr,
+                                        isa::Funct3 funct3) noexcept -> simrv::xlen::Word {
+    return host_read_fast(host_ptr, static_cast<simrv::xlen::Instruction>(funct3));
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast(simrv::xlen::Byte* host_ptr, simrv::xlen::Word val,
+                                         isa::Funct3 funct3) noexcept {
+    host_write_fast(host_ptr, val, static_cast<simrv::xlen::Instruction>(funct3));
 }
 
 }  // namespace simrv::memory

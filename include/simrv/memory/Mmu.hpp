@@ -9,24 +9,15 @@
 
 #include <expected>
 
-#include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/memory/PageTableWalker.hpp"
+#include "simrv/memory/RamView.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+
+namespace simrv::core {
+struct ArchState;
+}  // namespace simrv::core
 
 namespace simrv {
-
-using PteFlags = uint8_t;
-
-enum class PteFlag : PteFlags {
-    V = (1 << 0),
-    R = (1 << 1),
-    W = (1 << 2),
-    X = (1 << 3),
-    U = (1 << 4),
-    A = (1 << 6),
-    D = (1 << 7),
-};
-
-enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 
 /**
  * @class Mmu
@@ -37,15 +28,21 @@ enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
  */
 class Mmu {
    public:
-    /**
-     * @brief Construct an MMU instance.
-     * @param mmem Pointer to machine memory
-     * @param dram_base Guest physical base of the backing memory
-     * @param dram_size Size in bytes of the backing memory
-     */
-    explicit Mmu(Byte* mmem, Address dram_base, Address dram_size);
+    explicit Mmu(memory::RamView ram = {}) noexcept : walker_(ram) {}
+    explicit Mmu(simrv::xlen::Byte* mmem, simrv::xlen::PhysAddr dram_base,
+                 simrv::xlen::Address dram_size) noexcept
+        : walker_(mmem, dram_base, dram_size) {}
 
-    [[nodiscard]] auto mmem() const -> Byte* { return mmem_; }
+    [[nodiscard]] auto walker() const noexcept -> const memory::PageTableWalker& { return walker_; }
+    [[nodiscard]] auto walker() noexcept -> memory::PageTableWalker& { return walker_; }
+
+    [[nodiscard]] auto mmem() const noexcept -> simrv::xlen::Byte* {
+        return walker_.ram_view().data();
+    }
+    [[nodiscard]] auto ram_view() const noexcept -> memory::RamView { return walker_.ram_view(); }
+    void set_ram_view(memory::RamView ram) noexcept { walker_.set_ram_view(ram); }
+    void flush_pdc() noexcept { walker_.flush_pdc(); }
+    void flush_pdc_vaddr(simrv::xlen::VirtAddr vaddr) noexcept { walker_.flush_pdc_vaddr(vaddr); }
 
     /**
      * @brief Perform a page walk using the active supported satp mode.
@@ -57,11 +54,13 @@ class Mmu {
      * @param satp Current CPU satp register
      * @param xlen Execution width (32 or 64)
      * @param update_access_bits Whether to update page table A/D bits
+     * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    auto page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen, bool update_access_bits = true)
-        -> std::expected<Address, TrapCause>;
+    std::expected<PageWalkResult, simrv::xlen::TrapCause> page_walk(
+        simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
+        simrv::xlen::CsrValue mstatus, simrv::xlen::Word satp, unsigned xlen,
+        bool update_access_bits = true, const core::ArchState* arch_state = nullptr);
 
     /**
      * @brief Translate address without performing page walk.
@@ -76,11 +75,32 @@ class Mmu {
      * @param satp Current CPU satp register
      * @param xlen Execution width (32 or 64)
      * @param update_access_bits Whether to update page table A/D bits
+     * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen, bool update_access_bits = true)
-        -> std::expected<Address, TrapCause>;
+    std::expected<PageWalkResult, simrv::xlen::TrapCause> translate(
+        simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
+        simrv::xlen::CsrValue mstatus, simrv::xlen::Word satp, unsigned xlen,
+        bool update_access_bits = true, const core::ArchState* arch_state = nullptr,
+        memory::GuestPhysAddr* guest_fault_address = nullptr,
+        bool* implicit_vs_stage_page_table_fault = nullptr);
+
+    /// Start a walk without performing any implicit physical-memory access.
+    [[nodiscard]] PageWalkState begin_page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
+                                                simrv::xlen::PrivilegeLevel priv,
+                                                simrv::xlen::CsrValue mstatus,
+                                                simrv::xlen::Word satp, unsigned xlen,
+                                                bool update_access_bits = true,
+                                                const core::ArchState* arch_state = nullptr) const;
+
+    /// Consume the PTE returned by the current ReadPte request.
+    void accept_page_walk_pte(PageWalkState& state, simrv::xlen::Word pte) const;
+
+    /// Complete the current accessed/dirty-bit WritePte request.
+    static void accept_page_walk_write(PageWalkState& state) noexcept;
+
+    /// Convert a physical PTE transaction failure into the original access-fault class.
+    static void fail_page_walk_access(PageWalkState& state) noexcept;
 
     /**
      * @brief Verify if a virtual address is canonical according to the active SV mode.
@@ -90,85 +110,14 @@ class Mmu {
      * @param xlen Current execution XLEN
      * @return true if the address is canonical, false otherwise
      */
-    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp, unsigned xlen)
+    [[nodiscard]] static constexpr auto is_canonical(simrv::xlen::VirtAddr v_addr,
+                                                     simrv::xlen::Word satp, unsigned xlen)
         -> bool {
-        if (xlen == 32) {
-            return true;
-        } else {
-            const Word mode = simrv::xlen::satp_mode(satp, 64);
-            if (mode == 8) {  // Sv39
-                constexpr Word shift = 64 - 39;
-                return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                       static_cast<SignedWord>(v_addr);
-            } else if (mode == 9) {  // Sv48
-                constexpr Word shift = 64 - 48;
-                return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                       static_cast<SignedWord>(v_addr);
-            }
-            return true;
-        }
+        return memory::PageTableWalker::is_canonical(v_addr, satp, xlen);
     }
 
    private:
-    Byte* mmem_;
-    Address dram_base_;
-    Address dram_size_;
-
-    /**
-     * @brief Test whether an implicit page-table access is backed by RAM.
-     *
-     * RISC-V page-table walks are physical memory accesses. A PMA/PMP or bus
-     * failure during the implicit PTE access raises the access-fault exception
-     * corresponding to the original instruction, load, or store—not a page
-     * fault. SimRV has no PMP yet, so the implemented RAM extent is its PMA.
-     */
-    [[nodiscard]] auto pte_access_valid(Address address, unsigned size) const -> bool;
-
-    // Per-address-space translation helpers
-    /**
-     * @brief Validate PTE access permissions for current privilege level.
-     *
-     * Checks that the PTE has valid permissions bits (XWR), proper privilege
-     * level access, and sufficient access rights for the requested operation.
-     *
-     * @param pte Page table entry value
-     * @param permission_bits Extract XWR (execute, write, read) bits from PTE
-     * @param access Requested access type (read/write/execute)
-     * @param priv Current CPU privilege level
-     * @param mstatus Current CPU mstatus register
-     * @return true if access is allowed, false if access should fault
-     */
-    [[nodiscard]] auto validate_pte_permissions(Word pte, Word permission_bits, PteAccess access,
-                                                PrivilegeLevel priv, CSRValue mstatus) const
-        -> bool;
-
-    /**
-     * @brief Update PTE accessed (A) and dirty (D) flag bits per RISC-V spec.
-     *
-     * Sets the accessed bit on every access and dirty bit on writes,
-     * then writes the updated PTE back to memory.
-     *
-     * @param pte_addr Physical address of the PTE in memory
-     * @param pte_value Page table entry value to update
-     * @param access Access type that triggered the update
-     * @param pte_size Size of the PTE in bytes (4 or 8)
-     */
-    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access,
-                                unsigned pte_size);
-
-    // Page table structure constants
-    static constexpr Word kPteShift = 10;  // PPN to PTE conversion shift
-
-    // Cached SATP configuration parameters to accelerate page walks
-    Word cached_satp_ = ~Word{0};
-    unsigned cached_xlen_ = 0;
-    int cached_levels_ = 2;
-    int cached_pte_size_ = 4;
-    int cached_vpn_bits_per_level_ = 10;
-    Word cached_root_ppn_ = 0;
-    Address cached_root_pt_addr_ = 0;
-    Word cached_satp_mode_ = 0;
-    bool cached_valid_ = false;
+    memory::PageTableWalker walker_;
 };
 
 }  // namespace simrv

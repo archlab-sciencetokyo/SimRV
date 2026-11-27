@@ -1,0 +1,142 @@
+/**
+ * @file RamView.hpp
+ * @brief Non-owning, runtime-sized DRAM mapping view.
+ */
+#pragma once
+
+#include <cstddef>
+#include <cstring>
+#include <limits>
+#include <optional>
+#include <span>
+#include <utility>
+
+#include "simrv/CompilerHints.hpp"
+#include "simrv/SafetyProfiles.hpp"
+#include "simrv/core/BuildConfig.hpp"
+#include "simrv/core/PlatformMap.h"
+#include "simrv/xlen/AddressTypes.hpp"
+
+namespace simrv::memory {
+
+inline constexpr simrv::xlen::PhysAddr kDramBaseAddress{
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_DRAM_BASE)};
+inline constexpr simrv::xlen::Address kDramSize =
+    static_cast<simrv::xlen::Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
+
+/// Overflow-safe containment test for a physical memory region.
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto address_range_contains(
+    simrv::xlen::PhysAddr base, simrv::xlen::Address extent, simrv::xlen::PhysAddr address,
+    size_t size) noexcept -> bool {
+    return size != 0 && size <= extent && address >= base &&
+           address.raw() - base.raw() <= extent - size &&
+           std::cmp_less_equal(size - 1,
+                               std::numeric_limits<simrv::xlen::Address>::max() - address.raw());
+}
+
+/**
+ * @class RamView
+ * @brief A non-owning, runtime-sized DRAM mapping.
+ *
+ * Fast paths receive this value rather than relying on the build-time DRAM mask,
+ * so a configured machine never aliases addresses above 256 MiB.
+ */
+class SIMRV_GSL_POINTER RamView {
+   public:
+    constexpr RamView() = default;
+    constexpr RamView(simrv::xlen::Byte* data, simrv::xlen::PhysAddr base,
+                      simrv::xlen::Address size)
+        : data_(data), base_(base), size_(size) {}
+    constexpr RamView(std::span<simrv::xlen::Byte> storage,
+                      simrv::xlen::PhysAddr base = kDramBaseAddress)
+        : data_(storage.data()),
+          base_(base),
+          size_(static_cast<simrv::xlen::Address>(storage.size())) {}
+
+    [[nodiscard]] constexpr auto data() const noexcept -> simrv::xlen::Byte* { return data_; }
+    [[nodiscard]] constexpr auto base() const noexcept -> simrv::xlen::PhysAddr { return base_; }
+    [[nodiscard]] constexpr auto size() const noexcept -> simrv::xlen::Address { return size_; }
+    /// A fast lookup requires a nonempty mapping that does not wrap the physical address space.
+    [[nodiscard]] constexpr auto has_nonwrapping_range() const noexcept -> bool {
+        return size_ != 0 &&
+               size_ - 1 <= std::numeric_limits<simrv::xlen::Address>::max() - base_.raw();
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_offset() const noexcept -> uintptr_t {
+        return reinterpret_cast<uintptr_t>(data_) - base_.raw();
+    }
+    [[nodiscard]] constexpr auto span() const noexcept -> std::span<simrv::xlen::Byte> {
+        if (data_ == nullptr || size_ == 0) {
+            return {};
+        }
+        return {data_, static_cast<std::size_t>(size_)};
+    }
+    [[nodiscard]] constexpr auto subspan(simrv::xlen::PhysAddr address, size_t bytes) const noexcept
+        -> std::span<simrv::xlen::Byte> {
+        auto* ptr = try_get_ptr(address, bytes);
+        if (ptr == nullptr) {
+            return {};
+        }
+        return {ptr, bytes};
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::PhysAddr address,
+                                                              size_t bytes = 1) const noexcept
+        -> bool {
+        return data_ != nullptr && address >= base_ && bytes <= size_ &&
+               address.raw() - base_.raw() <= size_ - bytes &&
+               (bytes == 0 ||
+                std::cmp_less_equal(
+                    bytes - 1, std::numeric_limits<simrv::xlen::Address>::max() - address.raw()));
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto try_get_ptr(simrv::xlen::PhysAddr address,
+                                                                 size_t bytes = 1) const noexcept
+        -> simrv::xlen::Byte* {
+        if (simrv::compiler::likely(contains(address, bytes))) {
+            return data_ + (address.raw() - base_.raw());
+        }
+        return nullptr;
+    }
+    /// Requires non-null storage, a nonwrapping mapping, and 0 < bytes <= size().
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto try_get_ptr_fast(simrv::xlen::PhysAddr address,
+                                                                      size_t bytes) const noexcept
+        -> simrv::xlen::Byte* {
+        const auto offset = static_cast<simrv::xlen::Address>(address.raw() - base_.raw());
+        if (simrv::compiler::likely(offset <= (size_ - bytes))) {
+            return data_ + offset;
+        }
+        return nullptr;
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto unchecked_ptr(
+        simrv::xlen::PhysAddr address) const noexcept -> simrv::xlen::Byte* {
+        return data_ + (address.raw() - base_.raw());
+    }
+
+    template <typename T>
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto read_fast(simrv::xlen::PhysAddr address) const noexcept
+        -> std::optional<T> {
+        const auto* ptr = try_get_ptr(address, sizeof(T));
+        if (simrv::compiler::unlikely(ptr == nullptr)) {
+            return std::nullopt;
+        }
+        T value{};
+        std::memcpy(&value, ptr, sizeof(T));
+        return value;
+    }
+
+    template <typename T>
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto write_fast(simrv::xlen::PhysAddr address,
+                                                      T value) const noexcept -> bool {
+        auto* ptr = try_get_ptr(address, sizeof(T));
+        if (simrv::compiler::unlikely(ptr == nullptr)) {
+            return false;
+        }
+        std::memcpy(ptr, &value, sizeof(T));
+        return true;
+    }
+
+   private:
+    simrv::xlen::Byte* data_ = nullptr;
+    simrv::xlen::PhysAddr base_ = kDramBaseAddress;
+    simrv::xlen::Address size_ = 0;
+};
+
+}  // namespace simrv::memory

@@ -8,69 +8,495 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <print>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
-#include "simrv/Define.hpp"
-#include "simrv/core/BaremetalMachine.hpp"
 #include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
+#include "simrv/core/ExitCode.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/OSMachine.hpp"
+#include "simrv/core/TelemetrySink.hpp"
+#include "simrv/core/Tracer.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/util/HostCache.hpp"
+#include "simrv/util/SoCManifest.hpp"
+#include "simrv/util/ThirdPartyNotices.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 using namespace simrv::util;
 
-auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
-    bool is_tui = (::isatty(STDIN_FILENO) != 0);
-    bool skip_banner = false;
-    for (int i = 1; i < argc; ++i) {
-        std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-c") {
-            is_tui = false;
-        } else if (arg == "--tui" || arg == "-u") {
-            is_tui = true;
-        } else if (arg == "-h" || arg == "--help" || arg == "--version") {
-            skip_banner = true;
+namespace {
+
+class UartTranscriptSink final : public simrv::core::IConsoleSink {
+   public:
+    UartTranscriptSink(const std::string& path,
+                       std::shared_ptr<simrv::core::IConsoleSink> downstream)
+        : stream_(path, std::ios::binary | std::ios::trunc), downstream_(std::move(downstream)) {}
+
+    [[nodiscard]] auto is_open() const -> bool { return stream_.is_open(); }
+
+    void handle_char_write(char ch) override {
+        if (downstream_) {
+            downstream_->handle_char_write(ch);
+        } else {
+            std::print("{}", ch);
+            std::fflush(stdout);
+        }
+        stream_.put(ch);
+    }
+
+   private:
+    std::ofstream stream_;
+    std::shared_ptr<simrv::core::IConsoleSink> downstream_;
+};
+
+auto lifecycle_event_name(simrv::core::LifecycleEventKind kind) -> std::string_view {
+    switch (kind) {
+        case simrv::core::LifecycleEventKind::Initialized:
+            return "initialized";
+        case simrv::core::LifecycleEventKind::Started:
+            return "started";
+        case simrv::core::LifecycleEventKind::Running:
+            return "running";
+        case simrv::core::LifecycleEventKind::Stopped:
+            return "stopped";
+        case simrv::core::LifecycleEventKind::Completed:
+            return "completed";
+        case simrv::core::LifecycleEventKind::Failed:
+            return "failed";
+        case simrv::core::LifecycleEventKind::RebootRequested:
+            return "reboot_requested";
+        case simrv::core::LifecycleEventKind::ExitRequested:
+            return "exit_requested";
+    }
+    return "unknown";
+}
+
+auto lifecycle_timestamp() -> std::string {
+    const auto now = std::chrono::system_clock::now();
+    const auto millis =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+    gmtime_r(&time, &utc);
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", utc.tm_year + 1900,
+                       utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec,
+                       millis.count());
+}
+
+auto event_name(simrv::core::MachineEventKind kind) -> std::string_view {
+    switch (kind) {
+        case simrv::core::MachineEventKind::InterruptAsserted:
+            return "interrupt_asserted";
+        case simrv::core::MachineEventKind::InterruptDeasserted:
+            return "interrupt_deasserted";
+        case simrv::core::MachineEventKind::DmaStarted:
+            return "dma_started";
+        case simrv::core::MachineEventKind::DmaCompleted:
+            return "dma_completed";
+        case simrv::core::MachineEventKind::DmaCancelled:
+            return "dma_cancelled";
+    }
+    return "unknown";
+}
+
+auto json_escape(std::string_view value) -> std::string {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const unsigned char ch : value) {
+        if (ch == '"' || ch == '\\') {
+            escaped.push_back('\\');
+            escaped.push_back(static_cast<char>(ch));
+        } else if (ch < 0x20) {
+            escaped += std::format("\\u{:04x}", static_cast<unsigned>(ch));
+        } else {
+            escaped.push_back(static_cast<char>(ch));
+        }
+    }
+    return escaped;
+}
+
+auto write_machine_event(std::ofstream& out, const simrv::core::MachineEvent& event) -> void {
+    if (!out) return;
+    out << "{\"schema_version\":2,\"event\":\"" << event_name(event.kind) << "\",\"timestamp\":\""
+        << lifecycle_timestamp() << "\",\"cycle\":" << event.cycle;
+    if (event.hart) out << ",\"hart\":" << event.hart->raw();
+    out << ",\"component\":\"" << json_escape(event.component) << "\",\"payload\":{";
+    if (event.kind == simrv::core::MachineEventKind::InterruptAsserted ||
+        event.kind == simrv::core::MachineEventKind::InterruptDeasserted) {
+        if (!event.hart) {
+            out << "\"source_id\":" << event.interrupt_source;
+        } else {
+            out << "\"cause\":" << event.interrupt_cause;
+        }
+    } else {
+        out << "\"transfer_id\":" << event.transfer_id << ",\"byte_count\":" << event.byte_count
+            << ",\"request_cycle\":" << event.request_cycle
+            << ",\"start_cycle\":" << event.start_cycle
+            << ",\"completion_cycle\":" << event.completion_cycle;
+    }
+    out << "}}\n";
+    out.flush();
+}
+
+auto privilege_mode(simrv::xlen::PrivilegeLevel privilege) -> std::string_view {
+    switch (privilege) {
+        case simrv::xlen::PrivilegeLevel::User:
+            return "U";
+        case simrv::xlen::PrivilegeLevel::Supervisor:
+            return "S";
+        case simrv::xlen::PrivilegeLevel::Machine:
+            return "M";
+    }
+    return "unknown";
+}
+
+auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machine,
+                           simrv::core::LifecycleEventKind kind, int status = 0) -> void {
+    if (!out) return;
+    const auto& hart = machine.primary_hart();
+    out << "{\"schema_version\":2,\"event\":\"" << lifecycle_event_name(kind)
+        << "\",\"timestamp\":\"" << lifecycle_timestamp()
+        << "\",\"cycle\":" << hart.clint_mmio.mcycle << ",\"hart\":0,\"pc\":\"0x" << std::hex
+        << hart.state().pc.raw() << std::dec << "\",\"mode\":\""
+        << privilege_mode(hart.state().priv) << "\",\"payload\":{\"status\":\""
+        << (status == 0 ? "ok" : "failed") << "\",\"stop_reason\":\""
+        << simrv::core::Machine::stop_reason_name(machine.stop_reason())
+        << "\",\"retired_instructions\":" << hart.e_icount
+        << ",\"cycles\":" << hart.clint_mmio.mcycle;
+    if (status != 0) out << ",\"exit_status\":" << status;
+    out << "}}\n";
+    out.flush();
+}
+
+auto print_isa_info() -> void {
+    std::println("SimRV {} capabilities", simrv::buildinfo::kVersion);
+    std::println("  host build       : RV{}", simrv::xlen::kXLenBits);
+    std::println(
+        "  public profiles  : RVI20U32/U64, RVA20U/S64, RVA22U/S64, RVA23U/S64, RVB23U/S64");
+    std::println("  ISA strings      : canonical RISC-V ISA strings; X extensions are preserved");
+    std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
+    std::println("  privilege        : M/S/U, H, Sv32 (RV32), Sv39 (RV64)");
+    std::println("  debug frontends  : TUI, GDB RSP");
+    std::println(
+        "  qualified caveats: complete RVV coverage and formal RVI certification are not claimed");
+    std::println("  see               : docs/architecture/compliance.md");
+}
+
+auto print_doctor() -> int {
+    const char* term = std::getenv("TERM");
+    const char* colorterm = std::getenv("COLORTERM");
+    const char* term_program = std::getenv("TERM_PROGRAM");
+    const char* wt_session = std::getenv("WT_SESSION");
+    const char* kitty_pid = std::getenv("KITTY_PID");
+    const char* kitty_window = std::getenv("KITTY_WINDOW_ID");
+    const char* simrv_graphics = std::getenv("SIMRV_GRAPHICS");
+    const char* simrv_display = std::getenv("SIMRV_ENABLE_DISPLAY");
+    const bool tty = ::isatty(STDIN_FILENO) != 0 && ::isatty(STDOUT_FILENO) != 0;
+
+    const std::string_view term_value = term != nullptr ? term : "";
+    const std::string_view color_value = colorterm != nullptr ? colorterm : "";
+    const std::string_view program_value = term_program != nullptr ? term_program : "";
+
+    std::string prog_lower;
+    prog_lower.reserve(program_value.size());
+    for (char c : program_value) {
+        prog_lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    std::string detected_term;
+    if (wt_session != nullptr) {
+        detected_term = "Windows Terminal (WT_SESSION)";
+    } else if (kitty_pid != nullptr || kitty_window != nullptr || term_value == "xterm-kitty") {
+        detected_term = "Kitty (environment)";
+    } else if (prog_lower.contains("ghostty")) {
+        detected_term = "Ghostty";
+    } else if (prog_lower.contains("wezterm")) {
+        detected_term = "WezTerm";
+    } else if (prog_lower.contains("foot")) {
+        detected_term = "foot";
+    } else if (prog_lower.contains("contour")) {
+        detected_term = "Contour";
+    } else if (prog_lower.contains("vscode")) {
+        detected_term = "VS Code Terminal";
+    } else if (std::getenv("TMUX") != nullptr) {
+        detected_term = "tmux multiplexer";
+    } else if (!program_value.empty()) {
+        detected_term = std::string(program_value);
+    } else if (!term_value.empty()) {
+        detected_term = std::string(term_value);
+    } else {
+        detected_term = "unknown";
+    }
+
+    const bool sixel = term_value.contains("sixel") || color_value.contains("sixel") ||
+                       prog_lower.contains("foot") || prog_lower.contains("contour") ||
+                       prog_lower.contains("wezterm") || prog_lower.contains("ghostty") ||
+                       prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
+                       (wt_session != nullptr);
+
+    const bool kitty = kitty_pid != nullptr || kitty_window != nullptr ||
+                       term_value == "xterm-kitty" || prog_lower.contains("ghostty") ||
+                       prog_lower.contains("wezterm");
+    bool force_sixel = false;
+    bool force_kitty = false;
+    bool graphics_disabled = false;
+
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "sixel")
+            force_sixel = true;
+        else if (g == "kitty")
+            force_kitty = true;
+        else if (g == "all" || g == "both" || g == "1" || g == "true") {
+            force_sixel = true;
+            force_kitty = true;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "1" || d == "true")
+            force_sixel = true;
+        else if (d == "0" || d == "false")
+            graphics_disabled = true;
+    }
+    if (simrv_graphics != nullptr) {
+        const std::string_view g(simrv_graphics);
+        if (g == "none" || g == "0" || g == "false" || g == "off") {
+            graphics_disabled = true;
         }
     }
 
-    if (!is_tui && !skip_banner) {
-        simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
-                         simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
-                         simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
+    std::string sixel_status;
+    if (graphics_disabled) {
+        sixel_status = "disabled by override";
+    } else if (force_sixel) {
+        sixel_status = "enabled by override (terminal support not verified)";
+    } else if (sixel) {
+        if (wt_session != nullptr) {
+            sixel_status = "detected (Windows Terminal 1.22+ supports Sixel)";
+        } else if (term_value.contains("sixel") || color_value.contains("sixel")) {
+            sixel_status = "detected (advertised in TERM/COLORTERM)";
+        } else if (!detected_term.empty()) {
+            sixel_status = std::format("detected (supported by {})", detected_term);
+        } else {
+            sixel_status = "detected";
+        }
+    } else {
+        sixel_status = "not detected in environment (runtime probe queries terminal via DA1)";
     }
 
-    // Write startup entry to MMU debug log
-    std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
+    std::string kitty_status;
+    if (graphics_disabled) {
+        kitty_status = "disabled by override";
+    } else if (force_kitty) {
+        kitty_status = "enabled by override (terminal support not verified)";
+    } else if (kitty) {
+        kitty_status = std::format("detected (supported by {})", detected_term);
+    } else {
+        kitty_status = "not detected in environment (runtime probe queries terminal via APC)";
+    }
 
-    std::optional<bool> override_appmode;
-    std::optional<std::string> override_binary;
-    std::optional<std::string> override_disk;
-    std::optional<bool> override_cycle_accurate;
-    std::optional<bool> override_debug_mode;
-    std::optional<bool> override_high_performance;
-    std::optional<bool> override_rollback;
-    std::optional<bool> override_high_contrast;
-    std::optional<bool> override_use_mix;
-    std::optional<bool> override_bp_trace;
-    std::optional<bool> override_traplog_mode;
-    std::optional<bool> override_dlog_mode;
-    std::optional<bool> override_lockstep_mode;
-    std::optional<bool> override_gdb_mode;
-    std::optional<bool> override_misa_override;
-    std::optional<uint64_t> override_misa_profile;
-    std::optional<unsigned int> override_misa_xlen;
+#if defined(__linux__)
+    constexpr std::string_view host_os = "Linux";
+#elif defined(__APPLE__)
+    constexpr std::string_view host_os = "macOS";
+#elif defined(_WIN32)
+    constexpr std::string_view host_os = "Windows";
+#elif defined(__FreeBSD__)
+    constexpr std::string_view host_os = "FreeBSD";
+#else
+    constexpr std::string_view host_os = "Unix";
+#endif
 
+#if defined(__x86_64__) || defined(_M_X64)
+    constexpr std::string_view host_arch = "x86-64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr std::string_view host_arch = "aarch64";
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    constexpr std::string_view host_arch = "riscv64";
+#elif defined(__riscv) && (__riscv_xlen == 32)
+    constexpr std::string_view host_arch = "riscv32";
+#elif defined(__i386__) || defined(_M_IX86)
+    constexpr std::string_view host_arch = "x86-32";
+#else
+    constexpr std::string_view host_arch = "unknown";
+#endif
+
+    std::println("SimRV environment diagnostics");
+    std::println("  version          : {} (RV{} build target)", simrv::buildinfo::kVersion,
+                 simrv::xlen::kXLenBits);
+    std::println("  host             : {} ({})", host_os, host_arch);
+    const auto cache_info = simrv::util::detect_host_cache_topology();
+    if (cache_info.detected) {
+        std::println(
+            "  host cache       : L1d {} KiB (line {} B), L1i {} KiB, L2 {} MiB, L3 {} MiB",
+            cache_info.l1d_bytes / 1024, cache_info.line_bytes, cache_info.l1i_bytes / 1024,
+            cache_info.l2_bytes / (1024 * 1024), cache_info.l3_bytes / (1024 * 1024));
+    }
+    std::println("  interactive TTY  : {}",
+                 tty ? "yes (stdin & stdout connected to a terminal)"
+                     : "no (piped or background; use --cli for headless runs)");
+    std::println("  terminal         : {} (TERM={}, COLORTERM={})", detected_term,
+                 term_value.empty() ? "(unset)" : term_value,
+                 color_value.empty() ? "(unset)" : color_value);
+    std::println("  Sixel graphics   : {}", sixel_status);
+    std::println("  Kitty graphics   : {}", kitty_status);
+    if (simrv_graphics != nullptr || simrv_display != nullptr) {
+        std::println("  graphics override: SIMRV_GRAPHICS={}, SIMRV_ENABLE_DISPLAY={}",
+                     simrv_graphics != nullptr ? simrv_graphics : "(unset)",
+                     simrv_display != nullptr ? simrv_display : "(unset)");
+    }
+    std::println("  mouse protocol   : SGR mode (1006) requested by interactive TUI (SGR-pixel "
+                 "1016 for image frames)");
+    std::println(
+        "  framebuffer TUI  : streaming via Sixel or Kitty when detected; text TUI always "
+        "available");
+
+    const char* guest_build = std::getenv("SIMRV_GUEST_BUILD_DIR");
+    if (!guest_build) guest_build = std::getenv("SIMRV_LINUX_BUILD_DIR");
+    if (!guest_build) guest_build = std::getenv("SIMRV_LINUX_BUILDS_DIR");
+
+    const char* guest_images = std::getenv("SIMRV_GUEST_IMAGES_DIR");
+    if (!guest_images) guest_images = std::getenv("SIMRV_LINUX_IMAGES_DIR");
+
+    std::error_code ec;
+    std::string build_status;
+    if (guest_build) {
+        build_status = std::filesystem::is_directory(guest_build, ec)
+                           ? std::format("{} (active)", guest_build)
+                           : std::format("{} (not found)", guest_build);
+    } else if (std::filesystem::is_directory("linux-build", ec)) {
+        build_status = "linux-build (auto-detected)";
+    } else {
+        build_status = "(unset; defaults to linux-build)";
+    }
+
+    std::string images_status;
+    if (guest_images) {
+        images_status = std::filesystem::is_directory(guest_images, ec)
+                            ? std::format("{} (active)", guest_images)
+                            : std::format("{} (not found)", guest_images);
+    } else {
+        auto defaultImages = std::filesystem::path{"images"} /
+                             std::format("rv{}/alpine-gui", simrv::xlen::kXLenBits);
+        if (!std::filesystem::is_directory(defaultImages, ec)) {
+            const char* dataHome = std::getenv("XDG_DATA_HOME");
+            const char* home = std::getenv("HOME");
+            const auto userData =
+                dataHome != nullptr && *dataHome != '\0'
+                    ? std::filesystem::path{dataHome}
+                    : std::filesystem::path{home != nullptr && *home != '\0' ? home : "."} /
+                          ".local/share";
+            defaultImages =
+                userData / "SimRV/images" / std::format("rv{}/alpine-gui", simrv::xlen::kXLenBits);
+        }
+        if (std::filesystem::is_directory(defaultImages, ec)) {
+            images_status = std::format("{} (auto-detected)", defaultImages.string());
+        } else {
+            images_status =
+                std::format("(unset; defaults to images/rv{}/alpine-gui)", simrv::xlen::kXLenBits);
+        }
+    }
+
+    std::println("  guest build dir  : {}", build_status);
+    std::println("  guest image dir  : {}", images_status);
+    return 0;
+}
+
+std::atomic<simrv::core::Machine*> g_active_cli_machine{nullptr};
+
+void handle_cli_termination_signal(int sig) {
+    simrv::util::restore_terminal_mode();
+    if (auto* machine = g_active_cli_machine.load(std::memory_order_relaxed)) {
+        machine->exit_code.store(128 + sig);
+        machine->stop(simrv::core::Machine::StopReason::ExternalStop);
+    }
+    ::signal(sig, SIG_DFL);
+    ::raise(sig);
+}
+
+void install_cli_signal_handlers() {
+    struct sigaction sa{};
+    sa.sa_handler = handle_cli_termination_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+    sigaction(SIGHUP, &sa, nullptr);
+    sigaction(SIGQUIT, &sa, nullptr);
+    sigaction(SIGPIPE, &sa, nullptr);
+}
+
+}  // namespace
+
+auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
+    bool is_tui = simrv::util::interactive_tui_available();
+    bool skip_banner = false;
+    for (int i = 1; i < argc; ++i) {
+        std::string_view const arg(argv[i]);
+        if (arg == "--cli" || arg == "-c" || arg == "run") {
+            is_tui = false;
+        } else if (arg == "--gdb") {
+            is_tui = false;
+        } else if (arg == "--tui" || arg == "-u") {
+            is_tui = true;
+        } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
+                   arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
+                   arg == "--notices" || arg == "--third-party" || arg == "completion") {
+            skip_banner = true;
+        } else if (arg == "-q" || arg == "--quiet") {
+            skip_banner = true;
+            simrv::log::set_level(simrv::log::Level::Warn);
+        } else if (arg == "-v" || arg == "--verbose") {
+            simrv::log::set_level(simrv::log::Level::Debug);
+        } else if (arg == "--log-level" && i + 1 < argc) {
+            if (auto lvl = simrv::log::parse_level(argv[i + 1])) {
+                simrv::log::set_level(*lvl);
+                if (*lvl > simrv::log::Level::Info) {
+                    skip_banner = true;
+                }
+            }
+        } else if (arg == "--log-format" && i + 1 < argc) {
+            if (const auto format = simrv::log::parse_format(argv[i + 1]))
+                simrv::log::set_format(*format);
+        } else if (arg == "--log-stderr") {
+            simrv::log::set_log_to_stderr(true);
+        }
+    }
+
+    simrv::log::set_tui_mode(is_tui);
+
+    if (!is_tui) {
+        install_cli_signal_handlers();
+    }
+
+    std::optional<simrv::core::MachineConfig> staged_configuration;
+    std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
+
+    std::ofstream event_stream;
+    bool event_stream_opened = false;
+    std::mutex event_stream_mutex;
     bool keep_running = true;
     int final_exit_code = 0;
     while (keep_running) {
@@ -80,159 +506,297 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             option_error(parsed.error());
         }
 
-        if (override_appmode.has_value()) {
-            parsed->options.appmode = *override_appmode;
-        }
-        if (override_binary.has_value()) {
-            parsed->options.fn_memimg = *override_binary;
-        }
-        if (override_disk.has_value()) {
-            parsed->options.fn_dskimg = *override_disk;
-            parsed->options.use_disk = !override_disk->empty();
-        }
-        if (override_cycle_accurate.has_value()) {
-            parsed->options.cycle_accurate = *override_cycle_accurate;
-        }
-        if (override_debug_mode.has_value()) {
-            parsed->options.debug_mode = *override_debug_mode;
-        }
-        if (override_high_performance.has_value()) {
-            parsed->options.high_performance = *override_high_performance;
-        }
-        if (override_rollback.has_value()) {
-            parsed->options.rollback = *override_rollback;
-        }
-        if (override_high_contrast.has_value()) {
-            parsed->options.high_contrast = *override_high_contrast;
-        }
-        if (override_use_mix.has_value()) {
-            parsed->options.use_mix = *override_use_mix;
-        }
-        if (override_bp_trace.has_value()) {
-            parsed->options.bp_trace = *override_bp_trace;
-        }
-        if (override_traplog_mode.has_value()) {
-            parsed->options.traplog_mode = *override_traplog_mode;
-        }
-        if (override_dlog_mode.has_value()) {
-            parsed->options.dlog_mode = *override_dlog_mode;
-        }
-        if (override_lockstep_mode.has_value()) {
-            parsed->options.lockstep_mode = *override_lockstep_mode;
-        }
-        if (override_gdb_mode.has_value()) {
-            parsed->options.gdb_mode = *override_gdb_mode;
-        }
-
         switch (parsed->action) {
             case CliAction::ShowHelp:
-                usage(args.front(), 0);
+                usage(args.front(), simrv::core::HostExitCode::Success);
             case CliAction::ShowVersion:
                 std::println("{} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
-                std::exit(0);
-            case CliAction::ExplainInstruction:
-                simrv::util::explain_instruction(parsed->options.explain_inst_val);
-                std::exit(0);
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::ShowIsaInfo:
+                print_isa_info();
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::Doctor:
+                std::exit(print_doctor());
+            case CliAction::ShowLicense:
+                std::println("SimRV {} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
+                std::println("Licensed under the MIT License.");
+                std::println("Copyright (c) 2024-2026 Lennart Trunk and ArchLab @ ScienceTokyo");
+                std::println(
+                    "Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md (or run "
+                    "--notices)");
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::ShowThirdPartyNotices:
+                simrv::util::print_third_party_notices();
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::ExplainQuery: {
+                const auto query_type = parsed->options.explain_query_type;
+                const std::string_view query_type_name =
+                    query_type == simrv::util::ExplainQueryType::Instruction ? "instruction"
+                    : query_type == simrv::util::ExplainQueryType::Profile   ? "profile"
+                    : query_type == simrv::util::ExplainQueryType::Extension ? "extension"
+                                                                             : "auto";
+                const bool ok =
+                    simrv::explain::explain_query(parsed->options.explain_query, query_type_name);
+                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                       : simrv::core::HostExitCode::UsageError));
+            }
+            case CliAction::DumpCpuModel: {
+                const std::string target = parsed->options.dump_cpu_model_target;
+                simrv::pipeline::CpuModelConfig model{};
+                const auto path = simrv::core::resolve_cpu_model_path(target);
+                bool loaded = false;
+                if (path) loaded = simrv::core::load_cpu_config(*path, model);
+                else if (std::filesystem::exists(target))
+                    loaded = simrv::core::load_cpu_config(target, model);
+                else if (const auto preset = simrv::pipeline::parse_cpu_model_preset(target)) {
+                    model = simrv::pipeline::make_cpu_model_preset(*preset);
+                    loaded = true;
+                }
+                if (!loaded) {
+                    simrv::log::error("Unknown CPU model preset or config: {}", target);
+                    std::exit(simrv::core::to_exit_code(
+                        simrv::core::HostExitCode::ConfigurationError));
+                }
+                if (!parsed->options.dump_cpu_model_output.empty() &&
+                    parsed->options.dump_cpu_model_output != "-") {
+                    if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, model,
+                                                      target)) {
+                        simrv::log::error("Failed to write CPU model config to {}",
+                                          parsed->options.dump_cpu_model_output);
+                        std::exit(simrv::core::to_exit_code(
+                            simrv::core::HostExitCode::GeneralError));
+                    }
+                    std::println("Wrote CPU model configuration to {}",
+                                 parsed->options.dump_cpu_model_output);
+                } else {
+                    simrv::core::serialize_cpu_config(model, std::cout, target);
+                }
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::ExportSoCManifest: {
+                const auto target = parsed->options.soc_manifest_preset;
+                auto config = simrv::core::SoCConfig::preset(target);
+                if (!config) {
+                    if (const auto path = simrv::core::resolve_cpu_model_path(target)) {
+                        simrv::core::SoCConfig loaded{};
+                        if (simrv::core::load_soc_config(*path, loaded)) config = loaded;
+                    }
+                }
+                if (!config) {
+                    simrv::log::error("Unknown SoC preset or config file: {}", target);
+                    std::exit(simrv::core::to_exit_code(
+                        simrv::core::HostExitCode::ConfigurationError));
+                }
+                const bool ok = parsed->options.soc_manifest_output.empty() ||
+                                parsed->options.soc_manifest_output == "-"
+                    ? simrv::util::serialize_soc_manifest(*config, std::cout)
+                    : simrv::util::save_soc_manifest(parsed->options.soc_manifest_output, *config);
+                if (!ok) {
+                    simrv::log::error("Failed to export SoC manifest for {}", target);
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
+                }
+                if (!parsed->options.soc_manifest_output.empty() &&
+                    parsed->options.soc_manifest_output != "-")
+                    std::println("Wrote SoC manifest to {}", parsed->options.soc_manifest_output);
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
             case CliAction::Run:
+                if (!parsed->options.tuimode && !skip_banner) {
+                    simrv::log::info("{} v{} ({}@{})\nRunning in headless CLI mode.\n",
+                                     simrv::buildinfo::kProjectDescription,
+                                     simrv::buildinfo::kVersion, simrv::buildinfo::kGitBranch,
+                                     simrv::buildinfo::kGitSha);
+                }
                 break;
         }
 
-        std::unique_ptr<simrv::core::Machine> sim_machine;
-        if (parsed->options.appmode) {
-            sim_machine = std::make_unique<simrv::core::BaremetalMachine>();
+        if (parsed->options.log_level.has_value()) {
+            simrv::log::set_level(*parsed->options.log_level);
+        }
+        simrv::log::set_format(parsed->options.log_format);
+        simrv::log::set_log_to_stderr(parsed->options.log_stderr);
+
+        if (!parsed->options.fn_log.empty() && !simrv::log::set_log_file(parsed->options.fn_log)) {
+            option_error("cannot open log file: " + parsed->options.fn_log,
+                         simrv::core::HostExitCode::ConfigurationError);
+        }
+
+        auto machine_config = staged_configuration.value_or(parsed->options.to_machine_config());
+        if (const auto valid = machine_config.validate(); !valid) {
+            option_error(valid.error(), simrv::core::HostExitCode::ConfigurationError);
+        }
+        auto sim_machine = std::make_unique<simrv::core::Machine>(std::move(machine_config));
+        std::vector<std::string> command_line;
+        command_line.reserve(static_cast<size_t>(argc));
+        for (int arg = 0; arg < argc; ++arg) command_line.emplace_back(argv[arg]);
+        sim_machine->trace().set_command_line(std::move(command_line));
+
+        if (staged_runtime_profile.has_value()) {
+            sim_machine->runtime_profile = *staged_runtime_profile;
         } else {
-            sim_machine = std::make_unique<simrv::core::OSMachine>();
-        }
-
-        auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
-        if (!applied) {
-            option_error(applied.error(), 0);
-        }
-
-        if (override_misa_override.has_value() && *override_misa_override) {
-            sim_machine->s_misa_override = true;
-            if (override_misa_profile.has_value()) {
-                sim_machine->s_misa_profile = *override_misa_profile;
-                sim_machine->cpu.state().misa = *override_misa_profile;
-            }
-            if (override_misa_xlen.has_value()) {
-                sim_machine->s_misa_xlen = *override_misa_xlen;
+            auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
+            if (!applied) {
+                option_error(applied.error(), simrv::core::HostExitCode::ConfigurationError);
             }
         }
 
-        const int init_result = sim_machine->initialize();
-        if (init_result != 0) {
-            return init_result;
+        std::string lifecycle_path = parsed->options.fn_events;
+        if (lifecycle_path.empty() && !parsed->options.fn_archtrace.empty()) {
+            const std::filesystem::path retire_path(parsed->options.fn_archtrace);
+            const auto directory = retire_path.has_parent_path() ? retire_path.parent_path()
+                                                                 : std::filesystem::path(".");
+            lifecycle_path = (directory / "events.jsonl").string();
+        }
+        if (!lifecycle_path.empty() && !event_stream_opened) {
+            event_stream.open(lifecycle_path, std::ios::trunc);
+            event_stream_opened = true;
+            if (!event_stream) {
+                simrv::log::error("Cannot open lifecycle event stream {}", lifecycle_path);
+                return simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError);
+            }
         }
 
-        sim_machine->s_start_time = std::chrono::steady_clock::now();
+        if (event_stream) {
+            (void)sim_machine->add_lifecycle_observer(
+                [&event_stream, &event_stream_mutex,
+                 machine = sim_machine.get()](const simrv::core::LifecycleEvent& event) {
+                    const std::scoped_lock lock(event_stream_mutex);
+                    write_lifecycle_event(event_stream, *machine, event.kind, event.exit_status);
+                });
+            (void)sim_machine->add_event_observer(
+                [&event_stream, &event_stream_mutex](const simrv::core::MachineEvent& event) {
+                    const std::scoped_lock lock(event_stream_mutex);
+                    write_machine_event(event_stream, event);
+                });
+        }
 
-        // Initialize terminal in raw mode for simulator I/O.
+        const auto init_result = sim_machine->initialize();
+        if (!init_result) {
+            simrv::log::set_tui_mode(false);
+            simrv::log::error("Machine initialization failed: {}", init_result.error());
+            if (event_stream) {
+                event_stream << "{\"schema_version\":2,\"event\":\"failed\",\"timestamp\":\""
+                             << lifecycle_timestamp()
+                             << "\",\"cycle\":0,\"payload\":{\"status\":\"failed\",\"error\":"
+                                "\"initialization failed\"}}\n";
+                event_stream.flush();
+            }
+            return simrv::core::to_exit_code(simrv::core::HostExitCode::InitializationError);
+        }
+        sim_machine->trace().refresh_runtime_trace_metadata();
+        if (!parsed->options.fn_load_checkpoint.empty()) {
+            const auto restored = sim_machine->load_checkpoint(parsed->options.fn_load_checkpoint);
+            if (!restored) {
+                simrv::log::error("Checkpoint restore failed: {}", restored.error());
+                return simrv::core::to_exit_code(simrv::core::HostExitCode::CheckpointError);
+            }
+        }
+
+        sim_machine->set_start_time(std::chrono::steady_clock::now());
+
+        std::shared_ptr<simrv::tui::Tui> tui;
+        if (sim_machine->tui_enabled()) {
+            tui = std::make_shared<simrv::tui::Tui>(*sim_machine);
+            sim_machine->set_telemetry_sink(tui);
+            sim_machine->set_console_sink(tui);
+            tui->initialize();
+        }
+
+        std::shared_ptr<UartTranscriptSink> uart_transcript;
+        if (!parsed->options.fn_uart_transcript.empty()) {
+            uart_transcript = std::make_shared<UartTranscriptSink>(
+                parsed->options.fn_uart_transcript, sim_machine->console_sink());
+            if (!uart_transcript->is_open()) {
+                simrv::log::error("Cannot open UART transcript {}",
+                                  parsed->options.fn_uart_transcript);
+                return simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError);
+            }
+            sim_machine->set_console_sink(uart_transcript);
+        }
+
+        // Change terminal attributes only when this process owns the foreground terminal.
+        // The TUI manages its own terminal lifecycle; batch/redirected CLI runs must not
+        // attempt raw mode at all.
         TerminalModeGuard terminal_mode;
-        if (!terminal_mode.enable_raw_mode()) {
-            if (!is_tui) {
-                simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
-            }
+        const bool owns_terminal = simrv::util::owns_interactive_terminal();
+        const bool forward_ctrl_c = sim_machine->uart_device() != nullptr;
+        if (!sim_machine->tui_enabled() && owns_terminal &&
+            !terminal_mode.enable_raw_mode(forward_ctrl_c)) {
+            simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
         }
-        if ((sim_machine->s_gui_mode && sim_machine->framebuffer) || sim_machine->s_tuimode) {
-            sim_machine->s_multithreaded = true;
-            if (sim_machine->s_gui_mode && sim_machine->framebuffer) {
-                sim_machine->framebuffer->set_multithreaded(true);
-            }
+        if (sim_machine->tui_enabled()) {
             auto* machine_ptr = sim_machine.get();
             std::thread sim_thread([machine_ptr]() -> void { machine_ptr->run(); });
-
-            while (machine_ptr->is_running()) {
-                if (machine_ptr->s_tuimode) {
-                    if (simrv::tui::g_resized) {
-                        machine_ptr->tui->render(true);
-                    }
-                    machine_ptr->tui->update();
-                    machine_ptr->tui->render(false);
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
-            }
 
             if (sim_thread.joinable()) {
                 sim_thread.join();
             }
+            simrv::log::set_tui_mode(false);
         } else {
+            g_active_cli_machine.store(sim_machine.get(), std::memory_order_release);
             sim_machine->run();
+            g_active_cli_machine.store(nullptr, std::memory_order_release);
         }
 
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            override_cycle_accurate = sim_machine->s_cycle_accurate;
-            override_high_performance = sim_machine->s_high_performance;
-            override_debug_mode = sim_machine->s_debug_mode;
-            override_rollback = sim_machine->s_rollback_enabled;
-            override_high_contrast = sim_machine->s_high_contrast;
-            override_use_mix = sim_machine->s_use_mix;
-            override_bp_trace = sim_machine->s_bp_trace;
-            override_traplog_mode = sim_machine->s_traplog_mode;
-            override_dlog_mode = sim_machine->s_dlog_mode;
-            override_lockstep_mode = sim_machine->s_lockstep_mode;
-            override_gdb_mode = sim_machine->s_gdb_mode;
+            auto next_config =
+                sim_machine->take_staged_reconfiguration().value_or(sim_machine->configuration());
 
-            if (sim_machine->s_misa_override) {
-                override_misa_override = true;
-                override_misa_profile = sim_machine->s_misa_profile;
-                override_misa_xlen = sim_machine->s_misa_xlen;
-            }
-
-            auto pending = sim_machine->get_pending_reboot();
-            if (!pending.binary_path.empty()) {
-                override_binary = pending.binary_path;
-                override_appmode = pending.appmode;
-                override_disk = pending.disk_path;
-            }
+            staged_configuration = std::move(next_config);
+            staged_runtime_profile = sim_machine->runtime_profile;
             continue;
         } else {
             keep_running = false;
             final_exit_code = sim_machine->exit_code.load();
-            if (!sim_machine->s_tuimode) {
-                sim_machine->tracer.print_summary();
+            if (final_exit_code == 0) {
+                switch (sim_machine->stop_reason()) {
+                    case simrv::core::Machine::StopReason::UnhandledTrap:
+                    case simrv::core::Machine::StopReason::TrapLoop:
+                    case simrv::core::Machine::StopReason::LockstepDivergence:
+                    case simrv::core::Machine::StopReason::GuestCrash:
+                    case simrv::core::Machine::StopReason::TohostFail:
+                        final_exit_code =
+                            simrv::core::to_exit_code(simrv::core::HostExitCode::ExecutionError);
+                        break;
+                    case simrv::core::Machine::StopReason::ExternalStop:
+                        final_exit_code = 130;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            if (!sim_machine->tui_enabled()) {
+                sim_machine->trace().print_summary();
+            }
+            if (!parsed->options.fn_summary.empty() &&
+                !sim_machine->trace().write_summary_json(parsed->options.fn_summary)) {
+                simrv::log::error("Cannot write execution summary to {}",
+                                  parsed->options.fn_summary);
+                if (final_exit_code == 0) {
+                    final_exit_code =
+                        simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError);
+                }
+            }
+            if (!parsed->options.fn_signature.empty() &&
+                !sim_machine->dump_signature(parsed->options.fn_signature)) {
+                simrv::log::error("Cannot write architectural signature to {}",
+                                  parsed->options.fn_signature);
+                if (final_exit_code == 0) {
+                    final_exit_code =
+                        simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError);
+                }
+            }
+            if (!parsed->options.fn_save_checkpoint.empty()) {
+                const auto saved = sim_machine->save_checkpoint(parsed->options.fn_save_checkpoint);
+                if (!saved) {
+                    simrv::log::error("Checkpoint save failed: {}", saved.error());
+                    if (final_exit_code == 0) {
+                        final_exit_code =
+                            simrv::core::to_exit_code(simrv::core::HostExitCode::CheckpointError);
+                    }
+                }
             }
         }
     }

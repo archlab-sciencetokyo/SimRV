@@ -2,104 +2,1646 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/SoCConfig.hpp"
+#include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/IsaTypes.hpp"
+#include "simrv/isa/Zk.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/PipelineTopology.hpp"
 
 namespace simrv::core {
 
-inline auto trim(const std::string& str) -> std::string {
-    size_t first = str.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return "";
-    size_t last = str.find_last_not_of(" \t\r\n");
+namespace detail {
+
+inline auto trim(std::string_view str) -> std::string_view {
+    const auto first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return "";
+    const auto last = str.find_last_not_of(" \t\r\n");
     return str.substr(first, (last - first + 1));
 }
 
-inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig& config) -> bool {
-    std::ifstream file(path);
-    if (!file.is_open()) {
+inline auto unquote(std::string_view str) -> std::string_view {
+    str = trim(str);
+    if (str.size() >= 2) {
+        if ((str.front() == '"' && str.back() == '"') ||
+            (str.front() == '\'' && str.back() == '\'')) {
+            return str.substr(1, str.size() - 2);
+        }
+    }
+    return str;
+}
+
+inline auto iequals(std::string_view a, std::string_view b) -> bool {
+    return std::ranges::equal(a, b, [](char ca, char cb) {
+        return std::tolower(static_cast<unsigned char>(ca)) ==
+               std::tolower(static_cast<unsigned char>(cb));
+    });
+}
+
+inline auto parse_bool(std::string_view val) -> std::optional<bool> {
+    val = unquote(val);
+    if (iequals(val, "true") || iequals(val, "1") || iequals(val, "yes") || iequals(val, "on")) {
+        return true;
+    }
+    if (iequals(val, "false") || iequals(val, "0") || iequals(val, "no") || iequals(val, "off")) {
         return false;
     }
+    return std::nullopt;
+}
+
+inline void add_isa_extension(std::vector<std::string>& extensions, std::string_view value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const char ch : value) {
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    if (normalized.empty()) return;
+    if (simrv::isa::is_zb_extension(normalized)) {
+        simrv::isa::add_zb_extension(extensions, normalized);
+        return;
+    }
+    if (simrv::isa::is_zk_extension(normalized)) {
+        simrv::isa::add_zk_extension(extensions, normalized);
+        return;
+    }
+    if (std::ranges::find(extensions, normalized) == extensions.end()) {
+        extensions.push_back(std::move(normalized));
+    }
+}
+
+inline void parse_isa_extensions(std::vector<std::string>& extensions, std::string_view value) {
+    value = unquote(value);
+    std::string token;
+    for (const char ch : value) {
+        if (ch == ',' || ch == '_' || ch == ' ' || ch == '\t') {
+            add_isa_extension(extensions, token);
+            token.clear();
+        } else {
+            token.push_back(ch);
+        }
+    }
+    add_isa_extension(extensions, token);
+}
+
+inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> {
+    value = unquote(value);
+    if (value.empty()) return std::nullopt;
+    uint64_t multiplier = 1;
+    const char suffix = static_cast<char>(std::tolower(static_cast<unsigned char>(value.back())));
+    if (suffix == 'k' || suffix == 'm' || suffix == 'g') {
+        multiplier = suffix == 'k'   ? 1024ULL
+                     : suffix == 'm' ? 1024ULL * 1024ULL
+                                     : 1024ULL * 1024ULL * 1024ULL;
+        value.remove_suffix(1);
+    }
+    try {
+        return std::stoull(std::string(value), nullptr, 0) * multiplier;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+}  // namespace detail
+
+/**
+ * @brief Canonical lookup resolution for CPU model configuration files.
+ *
+ * Lookup order:
+ * 1. Exact path if existing file.
+ * 2. Exact path + ".cfg" if existing file.
+ * 3. ./configs/models/<name>.cfg
+ * 4. $SIMRV_CONFIG_DIR/models/<name>.cfg or $SIMRV_CONFIG_DIR/<name>.cfg
+ */
+inline auto resolve_cpu_model_path(std::string_view name_or_path) -> std::optional<std::string> {
+    if (name_or_path.empty()) return std::nullopt;
+
+    std::error_code ec;
+    std::filesystem::path p(name_or_path);
+    if (std::filesystem::is_regular_file(p, ec)) {
+        return p.string();
+    }
+
+    std::filesystem::path p_ext = p;
+    p_ext += ".cfg";
+    if (std::filesystem::is_regular_file(p_ext, ec)) {
+        return p_ext.string();
+    }
+
+    const std::vector<std::filesystem::path> search_roots = {
+        std::filesystem::path("."), std::filesystem::path(".."), std::filesystem::path("../..")};
+
+    for (const auto& root : search_roots) {
+        const std::filesystem::path rel_direct = root / p;
+        if (std::filesystem::is_regular_file(rel_direct, ec)) {
+            return rel_direct.string();
+        }
+        const std::filesystem::path rel_direct_ext = root / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(rel_direct_ext, ec)) {
+            return rel_direct_ext.string();
+        }
+        const std::filesystem::path rel_models =
+            root / "configs" / "models" / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(rel_models, ec)) {
+            return rel_models.string();
+        }
+    }
+
+#if defined(__linux__)
+    const std::filesystem::path exe_path = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !exe_path.empty()) {
+        const auto exe_dir = exe_path.parent_path();
+        const std::vector<std::filesystem::path> exe_roots = {exe_dir, exe_dir.parent_path(),
+                                                              exe_dir.parent_path().parent_path()};
+        for (const auto& root : exe_roots) {
+            const std::filesystem::path rel_models =
+                root / "configs" / "models" / (std::string(name_or_path) + ".cfg");
+            if (std::filesystem::is_regular_file(rel_models, ec)) {
+                return rel_models.string();
+            }
+            const std::filesystem::path installed_models =
+                root / "share" / "SimRV" / "models" / (std::string(name_or_path) + ".cfg");
+            if (std::filesystem::is_regular_file(installed_models, ec)) {
+                return installed_models.string();
+            }
+        }
+    }
+#endif
+
+    for (const auto& system_root : {std::filesystem::path("/usr/share/SimRV/models"),
+                                    std::filesystem::path("/usr/local/share/SimRV/models")}) {
+        const auto sys_cfg = system_root / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(sys_cfg, ec)) {
+            return sys_cfg.string();
+        }
+        const auto sys_direct = system_root / p;
+        if (std::filesystem::is_regular_file(sys_direct, ec)) {
+            return sys_direct.string();
+        }
+    }
+
+    const char* env_dir = std::getenv("SIMRV_CONFIG_DIR");
+    if (env_dir != nullptr && *env_dir != '\0') {
+        const std::filesystem::path env_root(env_dir);
+        for (const auto& root : {env_root, env_root.parent_path()}) {
+            const std::filesystem::path env_p = root / p;
+            if (std::filesystem::is_regular_file(env_p, ec)) {
+                return env_p.string();
+            }
+            const std::filesystem::path env_p_ext = root / p_ext;
+            if (std::filesystem::is_regular_file(env_p_ext, ec)) {
+                return env_p_ext.string();
+            }
+        }
+        const std::filesystem::path env_model =
+            env_root / "models" / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(env_model, ec)) {
+            return env_model.string();
+        }
+        const std::filesystem::path env_direct = env_root / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(env_direct, ec)) {
+            return env_direct.string();
+        }
+    }
+
+    return std::nullopt;
+}
+
+struct DiscoveredCpuModel {
+    std::string name;
+    std::string path;
+};
+
+/**
+ * @brief Dynamically discover all CPU model `.cfg` presets across standard search roots.
+ */
+inline auto discover_cpu_models() -> std::vector<DiscoveredCpuModel> {
+    std::vector<DiscoveredCpuModel> models;
+    std::vector<std::filesystem::path> dirs;
+    for (const auto& root : {std::filesystem::path("."), std::filesystem::path(".."),
+                             std::filesystem::path("../..")}) {
+        dirs.push_back(root / "configs" / "models");
+    }
+#if defined(__linux__)
+    std::error_code exe_ec;
+    const std::filesystem::path exe_path = std::filesystem::read_symlink("/proc/self/exe", exe_ec);
+    if (!exe_ec && !exe_path.empty()) {
+        const auto exe_dir = exe_path.parent_path();
+        for (const auto& root :
+             {exe_dir, exe_dir.parent_path(), exe_dir.parent_path().parent_path()}) {
+            dirs.push_back(root / "configs" / "models");
+            dirs.push_back(root / "share" / "SimRV" / "models");
+        }
+    }
+#endif
+    dirs.emplace_back("/usr/share/SimRV/models");
+    dirs.emplace_back("/usr/local/share/SimRV/models");
+    if (const char* env_dir = std::getenv("SIMRV_CONFIG_DIR");
+        env_dir != nullptr && *env_dir != '\0') {
+        const std::filesystem::path env_root(env_dir);
+        dirs.push_back(env_root / "models");
+        dirs.push_back(env_root);
+    }
+
+    std::error_code ec;
+    for (const auto& dir : dirs) {
+        if (!std::filesystem::is_directory(dir, ec)) continue;
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            if (ec || !entry.is_regular_file(ec)) continue;
+            if (entry.path().extension() != ".cfg") continue;
+            const std::string stem = entry.path().stem().string();
+            const bool already = std::ranges::any_of(
+                models, [&](const DiscoveredCpuModel& m) { return m.name == stem; });
+            if (!already) {
+                models.push_back({.name = stem, .path = entry.path().string()});
+            }
+        }
+    }
+    std::ranges::sort(models, {}, &DiscoveredCpuModel::name);
+    return models;
+}
+
+inline auto load_cpu_config_impl(std::string_view file_path,
+                                 simrv::pipeline::CpuModelConfig& config, unsigned int depth)
+    -> bool;
+
+/**
+ * @brief Parse CPU model configuration from text stream supporting sections and flat keys.
+ *
+ * Performs syntactic and model parsing without enforcing simulator architecture validation.
+ */
+inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config,
+                                    unsigned int depth = 0) -> bool {
+    enum class Section {
+        Global,
+        Cpu,
+        Pipeline,
+        BranchPredictor,
+        InstructionFrontCache,
+        InstructionCache,
+        DataCache,
+        Interconnect,
+        Dma,
+        Axi,
+        Isa,
+        Cfu,
+        SocMetadata,
+        MemoryMetadata,
+        BootMetadata,
+        DeviceMetadata,
+        SmpMetadata,
+        PluginsMetadata
+    };
+    Section current_section = Section::Global;
 
     std::string line;
-    while (std::getline(file, line)) {
+    while (std::getline(stream, line)) {
         // Strip comments
-        size_t comment_pos = line.find('#');
-        if (comment_pos != std::string::npos) {
-            line = line.substr(0, comment_pos);
-        }
-        comment_pos = line.find(';');
-        if (comment_pos != std::string::npos) {
-            line = line.substr(0, comment_pos);
-        }
+        const auto comment_hash = line.find('#');
+        if (comment_hash != std::string::npos) line = line.substr(0, comment_hash);
+        const auto comment_semi = line.find(';');
+        if (comment_semi != std::string::npos) line = line.substr(0, comment_semi);
 
-        line = trim(line);
-        if (line.empty()) {
+        const auto trimmed = detail::trim(line);
+        if (trimmed.empty()) continue;
+
+        // Section headers: [section_name]
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            const auto sec_name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
+            if (detail::iequals(sec_name, "platform")) {
+                simrv::log::warn("Deprecated CPU model section [platform]; use [soc]");
+                return false;
+            } else if (detail::iequals(sec_name, "uart")) {
+                simrv::log::warn("Deprecated device section [uart]; use [device.uart]");
+                return false;
+            } else if (detail::iequals(sec_name, "cpu") || detail::iequals(sec_name, "model")) {
+                current_section = Section::Cpu;
+            } else if (detail::iequals(sec_name, "pipeline") || detail::iequals(sec_name, "core")) {
+                current_section = Section::Pipeline;
+            } else if (detail::iequals(sec_name, "branch_predictor") ||
+                       detail::iequals(sec_name, "bpu") || detail::iequals(sec_name, "bpred")) {
+                current_section = Section::BranchPredictor;
+            } else if (detail::iequals(sec_name, "instruction_cache") ||
+                       detail::iequals(sec_name, "icache") ||
+                       detail::iequals(sec_name, "cache.instruction")) {
+                current_section = Section::InstructionCache;
+            } else if (detail::iequals(sec_name, "instruction_front_cache") ||
+                       detail::iequals(sec_name, "l0_instruction_cache") ||
+                       detail::iequals(sec_name, "l0_icache")) {
+                current_section = Section::InstructionFrontCache;
+            } else if (detail::iequals(sec_name, "data_cache") ||
+                       detail::iequals(sec_name, "dcache") ||
+                       detail::iequals(sec_name, "cache.data")) {
+                current_section = Section::DataCache;
+            } else if (detail::iequals(sec_name, "interconnect") ||
+                       detail::iequals(sec_name, "bus") || detail::iequals(sec_name, "fabric")) {
+                current_section = Section::Interconnect;
+            } else if (detail::iequals(sec_name, "dma")) {
+                current_section = Section::Dma;
+            } else if (detail::iequals(sec_name, "axi") || detail::iequals(sec_name, "bus.axi")) {
+                current_section = Section::Axi;
+            } else if (detail::iequals(sec_name, "isa") ||
+                       detail::iequals(sec_name, "extensions")) {
+                current_section = Section::Isa;
+            } else if (detail::iequals(sec_name, "cfu") ||
+                       detail::iequals(sec_name, "custom_unit")) {
+                current_section = Section::Cfu;
+            } else if (detail::iequals(sec_name, "soc")) {
+                current_section = Section::SocMetadata;
+            } else if (detail::iequals(sec_name, "memory")) {
+                current_section = Section::MemoryMetadata;
+            } else if (detail::iequals(sec_name, "boot")) {
+                current_section = Section::BootMetadata;
+            } else if (sec_name.starts_with("device.") || sec_name.starts_with("device")) {
+                current_section = Section::DeviceMetadata;
+            } else if (sec_name.starts_with("smp")) {
+                current_section = Section::SmpMetadata;
+            } else if (detail::iequals(sec_name, "plugins")) {
+                current_section = Section::PluginsMetadata;
+            } else {
+                simrv::log::warn("Unknown config section: [{}]", sec_name);
+            }
             continue;
         }
 
-        size_t eq_pos = line.find('=');
-        if (eq_pos == std::string::npos) {
-            continue;
-        }
+        const auto eq_pos = trimmed.find('=');
+        if (eq_pos == std::string_view::npos) continue;
 
-        std::string key = trim(line.substr(0, eq_pos));
-        std::string val_str = trim(line.substr(eq_pos + 1));
+        const auto key = detail::trim(trimmed.substr(0, eq_pos));
+        const auto val_raw = detail::trim(trimmed.substr(eq_pos + 1));
+        const auto val_str = detail::unquote(val_raw);
+        if (key.empty() || val_str.empty()) continue;
 
-        if (key.empty() || val_str.empty()) {
+        // SoC metadata is parsed separately by parse_soc_config_stream. Keep the
+        // combined preset file valid when it is consumed as a CPU model.
+        if (current_section == Section::SocMetadata || current_section == Section::MemoryMetadata ||
+            current_section == Section::BootMetadata ||
+            current_section == Section::DeviceMetadata || current_section == Section::SmpMetadata ||
+            current_section == Section::PluginsMetadata) {
             continue;
         }
 
         try {
-            // Handle string-valued keys first
-            if (key == "bp_type") {
-                using BPT = simrv::pipeline::BranchPredictorType;
-                if (val_str == "static-not-taken")
-                    config.bp_type = BPT::StaticNotTaken;
-                else if (val_str == "static-taken")
-                    config.bp_type = BPT::StaticTaken;
-                else if (val_str == "1bit")
-                    config.bp_type = BPT::OneBitBimodal;
-                else if (val_str == "gshare")
-                    config.bp_type = BPT::Gshare;
-                else
-                    config.bp_type = BPT::TwoBitBimodal;
+            // 1. CPU Section & Presets
+            if (key == "extends") {
+                if (depth >= 4) {
+                    simrv::log::warn("CPU model inheritance depth exceeded for '{}'", val_str);
+                    return false;
+                }
+                if (const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
+                    parsed && *parsed != simrv::pipeline::CpuModelPreset::Custom) {
+                    config = simrv::pipeline::make_cpu_model_preset(*parsed);
+                    continue;
+                }
+                if (const auto base_path = resolve_cpu_model_path(val_str)) {
+                    if (!load_cpu_config_impl(*base_path, config, depth + 1)) {
+                        simrv::log::warn("Failed to load extended CPU model '{}'", *base_path);
+                        return false;
+                    }
+                    continue;
+                }
+                simrv::log::warn("Unknown extended CPU model '{}'", val_str);
+                return false;
+            }
+            if (key == "preset" || key == "cpu_preset") {
+                const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
+                if (!parsed || *parsed == simrv::pipeline::CpuModelPreset::Custom) {
+                    simrv::log::warn("Unsupported CPU model preset '{}'", val_str);
+                    return false;
+                }
+                config = simrv::pipeline::make_cpu_model_preset(*parsed);
+                continue;
+            }
+            if (key == "name" || key == "model_name") {
+                config.name = std::string(val_str);
+                const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
+                if (parsed.has_value()) {
+                    config.preset = *parsed;
+                } else {
+                    config.preset = simrv::pipeline::CpuModelPreset::Custom;
+                }
+                continue;
+            }
+            if (key == "xlen" || key == "supported_xlen") {
+                config.supported_xlen = static_cast<uint8_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "isa_preset" || key == "isa") {
+                const auto unquoted = detail::unquote(val_str);
+                if (const auto parsed_isa = simrv::isa::parse_isa_spec(unquoted)) {
+                    config.isa = *parsed_isa;
+                    for (const auto& ext : parsed_isa->extensions) {
+                        detail::add_isa_extension(config.isa_extensions, ext);
+                    }
+                } else {
+                    simrv::log::warn("Unknown ISA specification '{}'", val_str);
+                }
+                if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
+                    config.isa.has(simrv::isa::IsaExtension::E)) {
+                    if (config.supported_xlen == 0) config.supported_xlen = 32;
+                } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
+                    if (config.supported_xlen == 0) config.supported_xlen = 64;
+                }
+                continue;
+            }
+            if ((current_section == Section::Isa && key == "extensions") ||
+                key == "isa_extensions") {
+                detail::parse_isa_extensions(config.isa_extensions, val_str);
+                continue;
+            }
+            if (key == "description") {
+                config.description = std::string(val_str);
                 continue;
             }
 
-            uint32_t val = static_cast<uint32_t>(std::stoul(val_str));
-            if (key == "icache_miss_penalty") {
-                config.icache_miss_penalty = val;
-            } else if (key == "dcache_miss_penalty") {
-                config.dcache_miss_penalty = val;
-            } else if (key == "tlb_miss_penalty") {
-                config.tlb_miss_penalty = val;
-            } else if (key == "mul_latency") {
-                config.mul_latency = val;
-            } else if (key == "div_latency") {
-                config.div_latency = val;
-            } else if (key == "branch_mispredict_penalty") {
-                config.branch_mispredict_penalty = val;
-            } else if (key == "enable_forwarding") {
-                config.enable_forwarding = (val != 0);
-            } else if (key == "enable_ex_forwarding") {
-                config.enable_ex_forwarding = (val != 0);
-            } else if (key == "enable_mem_forwarding") {
-                config.enable_mem_forwarding = (val != 0);
-            } else if (key == "btb_entries") {
-                config.btb_entries = val;
-            } else if (key == "global_history_bits") {
-                config.global_history_bits = val;
+            if (current_section == Section::Cfu) {
+                if (key == "enabled" || key == "enable") {
+                    if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                        config.cfu.enabled = *b;
+                    }
+                    continue;
+                }
+                if (key == "opcode") {
+                    config.cfu.opcode = std::string(val_str);
+                    continue;
+                }
+                if (key == "plugin") {
+                    config.cfu.plugin = std::string(val_str);
+                    continue;
+                }
+                if (key == "rtl_module" || key == "module") {
+                    config.cfu.rtl_module = std::string(val_str);
+                    continue;
+                }
+                if (key == "interface") {
+                    config.cfu.interface = std::string(val_str);
+                    continue;
+                }
+                if (key == "default_latency" || key == "latency") {
+                    config.cfu.default_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+            }
+
+            // Explicit overrides mark the preset as custom unless matched
+            if (config.preset != simrv::pipeline::CpuModelPreset::Tiny &&
+                config.preset != simrv::pipeline::CpuModelPreset::Balanced &&
+                config.preset != simrv::pipeline::CpuModelPreset::Performance) {
+                config.preset = simrv::pipeline::CpuModelPreset::Custom;
+            }
+
+            // 2. Pipeline settings
+            if (key == "pipeline_type" || (current_section == Section::Pipeline && key == "type")) {
+                const auto parsed = simrv::pipeline::parse_pipeline_type(val_str);
+                if (!parsed) {
+                    simrv::log::warn("Unsupported pipeline '{}' in configuration", val_str);
+                    return false;
+                }
+                config.pipeline.pipeline_type = *parsed;
+                continue;
+            }
+            if (key == "enable_forwarding" || key == "forwarding") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.enable_forwarding = *b;
+                }
+                continue;
+            }
+            if (key == "divider_early_out" || key == "early_out_div") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.divider_early_out = *b;
+                }
+                continue;
+            }
+            if (key == "tohost_requires_high_word") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.tohost_requires_high_word = *b;
+                }
+                continue;
+            }
+            if (key == "tohost_pair_fallback_cycles") {
+                config.pipeline.tohost_pair_fallback_cycles =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "mul_latency") {
+                config.pipeline.mul_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "div_latency") {
+                config.pipeline.div_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "fp_alu_latency") {
+                config.pipeline.fp_alu_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "fp_div_latency") {
+                config.pipeline.fp_div_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "branch_mispredict_penalty" || key == "mispredict_penalty") {
+                config.pipeline.branch_mispredict_penalty =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "cycle_counter_start_delay") {
+                config.pipeline.cycle_counter_start_delay =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            } else if (key == "startup_cycle_offset") {
+                config.pipeline.startup_cycle_offset = std::stoull(std::string(val_str));
+                continue;
+            } else if (key == "startup_instruction_offset") {
+                config.pipeline.startup_instruction_offset = std::stoull(std::string(val_str));
+                continue;
+            }
+            if (key == "host_interface_latency") {
+                config.pipeline.host_interface_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "host_interface_phase_period") {
+                config.pipeline.host_interface_phase_period =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "tohost_requires_high_word") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.tohost_requires_high_word = *b;
+                }
+                continue;
+            }
+            if (key == "tohost_pair_fallback_cycles") {
+                config.pipeline.tohost_pair_fallback_cycles =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "csr_flush_penalty") {
+                config.pipeline.csr_flush_penalty =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "fence_flush_penalty") {
+                config.pipeline.fence_flush_penalty =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+
+            // 3. Branch Predictor settings
+            if (key == "bpred_type" || key == "branch_predictor" || key == "bpred" ||
+                (current_section == Section::BranchPredictor && key == "type")) {
+                const auto parsed = simrv::pipeline::parse_branch_predictor_type(val_str);
+                if (!parsed) {
+                    simrv::log::warn("Unsupported branch predictor '{}' in configuration", val_str);
+                    return false;
+                }
+                config.pipeline.branch_predictor.type = *parsed;
+                continue;
+            }
+            if (key == "bht_size" || key == "bht_entries") {
+                config.pipeline.branch_predictor.bht_entries =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "btb_size" || key == "btb_entries") {
+                config.pipeline.branch_predictor.btb_entries =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "ras_size" || key == "ras_entries") {
+                config.pipeline.branch_predictor.ras_entries =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "ghr_bits") {
+                config.pipeline.branch_predictor.ghr_bits =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "pc_shift") {
+                config.pipeline.branch_predictor.pc_shift =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "bht_initial_state") {
+                config.pipeline.branch_predictor.bht_initial_state =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "enable_btb") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.enable_btb = *b;
+                }
+                continue;
+            }
+            if (key == "enable_ras") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.enable_ras = *b;
+                }
+                continue;
+            }
+            if (key == "untagged_btb") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.untagged_btb = *b;
+                }
+                continue;
+            }
+            if (key == "predict_non_control") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.predict_non_control = *b;
+                }
+                continue;
+            }
+            if (key == "jump_uses_direction_counter") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.jump_uses_direction_counter = *b;
+                }
+                continue;
+            }
+            if (key == "jump_uses_current_btb") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.jump_uses_current_btb = *b;
+                }
+                continue;
+            }
+            if (key == "registered_btb_read") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.registered_btb_read = *b;
+                }
+                continue;
+            }
+
+            // 4. Cache settings
+            if (current_section == Section::InstructionFrontCache) {
+                auto& cache = config.instruction_front_cache;
+                if (key == "capacity_bytes" || key == "capacity") {
+                    cache.capacity_bytes = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "associativity" || key == "ways") {
+                    cache.associativity = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "line_bytes" || key == "line_size") {
+                    cache.line_bytes = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "hit_latency") {
+                    cache.hit_latency = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "refill_latency" || key == "miss_latency") {
+                    cache.refill_latency = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "backing_refill_latency") {
+                    cache.backing_refill_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "startup_refill_latencies") {
+                    cache.startup_refill_latencies.clear();
+                    std::istringstream values(std::string(detail::unquote(val_str)));
+                    std::string value;
+                    while (std::getline(values, value, ',')) {
+                        cache.startup_refill_latencies.push_back(
+                            static_cast<uint32_t>(std::stoul(value)));
+                    }
+                    continue;
+                }
+                if (key == "freeze_pipeline_on_refill") {
+                    if (const auto value = detail::parse_bool(val_str); value.has_value()) {
+                        cache.freeze_pipeline_on_refill = *value;
+                    }
+                    continue;
+                }
+            } else if (current_section == Section::InstructionCache) {
+                if (key == "capacity_bytes" || key == "capacity") {
+                    config.instruction_cache.capacity_bytes =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "associativity" || key == "ways") {
+                    config.instruction_cache.associativity =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "line_bytes" || key == "line_size") {
+                    config.instruction_cache.line_bytes =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "hit_latency") {
+                    config.instruction_cache.hit_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "miss_latency") {
+                    config.instruction_cache.miss_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+            } else if (current_section == Section::DataCache) {
+                if (key == "capacity_bytes" || key == "capacity") {
+                    config.data_cache.capacity_bytes =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "associativity" || key == "ways") {
+                    config.data_cache.associativity =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "line_bytes" || key == "line_size") {
+                    config.data_cache.line_bytes =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "hit_latency") {
+                    config.data_cache.hit_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "miss_latency") {
+                    config.data_cache.miss_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+            }
+
+            // Flat cache keys
+            if (key == "icache_capacity" || key == "icache_capacity_bytes") {
+                config.instruction_cache.capacity_bytes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_capacity" || key == "dcache_capacity_bytes") {
+                config.data_cache.capacity_bytes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "icache_associativity") {
+                config.instruction_cache.associativity =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_associativity") {
+                config.data_cache.associativity =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "cache_line_bytes" || key == "line_bytes") {
+                const auto val = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                config.instruction_cache.line_bytes = val;
+                config.data_cache.line_bytes = val;
+            } else if (key == "icache_line_bytes") {
+                config.instruction_cache.line_bytes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_line_bytes") {
+                config.data_cache.line_bytes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "icache_hit_latency") {
+                config.instruction_cache.hit_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_hit_latency") {
+                config.data_cache.hit_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "icache_miss_latency") {
+                config.instruction_cache.miss_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_miss_latency") {
+                config.data_cache.miss_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "dcache_write_through" ||
+                       (current_section == Section::DataCache && key == "write_through")) {
+                if (const auto parsed = detail::parse_bool(val_str)) {
+                    config.data_cache.write_through = *parsed;
+                }
+            } else if (key == "dcache_write_allocate" ||
+                       (current_section == Section::DataCache && key == "write_allocate")) {
+                if (const auto parsed = detail::parse_bool(val_str)) {
+                    config.data_cache.write_allocate = *parsed;
+                }
+            } else if (key == "interconnect_request_latency" ||
+                       (current_section == Section::Interconnect && key == "request_latency")) {
+                config.interconnect.request_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "interconnect_response_latency" ||
+                       (current_section == Section::Interconnect && key == "response_latency")) {
+                config.interconnect.response_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "data_request_latency" && current_section == Section::Interconnect) {
+                config.interconnect.data_request_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "data_response_latency" && current_section == Section::Interconnect) {
+                config.interconnect.data_response_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "startup_data_response_latency" &&
+                       current_section == Section::Interconnect) {
+                config.interconnect.startup_data_response_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Interconnect &&
+                       (key == "protocol" || key == "name" || key == "label")) {
+                // Handled by SoCConfig parser.
+            } else if (current_section == Section::Dma && (key == "enabled" || key == "enable")) {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.dma.enabled = *b;
+                }
+            } else if (current_section == Section::Dma &&
+                       (key == "setup_latency" || key == "setup")) {
+                config.dma.setup_latency = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Dma &&
+                       (key == "bandwidth_bytes_per_cycle" || key == "bandwidth" ||
+                        key == "bytes_per_cycle")) {
+                config.dma.bandwidth_bytes_per_cycle =
+                    std::max(1u, static_cast<uint32_t>(std::stoul(std::string(val_str))));
+            } else if (current_section == Section::Dma &&
+                       (key == "memory_contention_penalty" || key == "contention_penalty")) {
+                config.dma.memory_contention_penalty =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && (key == "enabled" || key == "enable")) {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.axi.enabled = *b;
+                }
+            } else if (current_section == Section::Axi &&
+                       (key == "data_width_bytes" || key == "width_bytes" || key == "data_width")) {
+                config.axi.data_width_bytes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi &&
+                       (key == "id_width_bits" || key == "id_width")) {
+                config.axi.id_width_bits = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && key == "max_outstanding_reads") {
+                config.axi.max_outstanding_reads =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && key == "max_outstanding_writes") {
+                config.axi.max_outstanding_writes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi &&
+                       (key == "burst_length_max" || key == "max_burst_length" ||
+                        key == "burst_len")) {
+                config.axi.burst_length_max =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && (key == "trace_axi" || key == "trace")) {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.axi.trace_axi = *b;
+                }
+            } else if (key == "enable_idle_spans") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.enable_idle_spans = *b;
+                }
+            } else if (key == "mmio_console_redirect" || key == "console_redirect") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.mmio_console_redirect = *b;
+                }
+            } else if (key == "bram_prewarm") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.bram_prewarm = *b;
+                }
             } else {
-                simrv::log::warn("Unknown CPU config key: {}", key);
+                simrv::log::warn("Unknown config key: {}", key);
             }
         } catch (const std::exception& e) {
             simrv::log::warn("Failed to parse value '{}' for key '{}': {}", val_str, key, e.what());
         }
     }
+
+    return true;
+}
+
+/** Parse the platform portion of a combined CPU/SoC preset file. */
+inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
+    enum class Section {
+        Global,
+        Soc,
+        Bus,
+        Pcie,
+        Memory,
+        Boot,
+        Device,
+        Smp,
+        SmpCluster,
+        SmpL3,
+        Plugins
+    };
+    Section section = Section::Global;
+    simrv::core::SoCDeviceConfig* device = nullptr;
+    simrv::core::SmpClusterConfig* cluster = nullptr;
+    std::string line;
+    while (std::getline(stream, line)) {
+        const auto comment_hash = line.find('#');
+        if (comment_hash != std::string::npos) line = line.substr(0, comment_hash);
+        const auto comment_semi = line.find(';');
+        if (comment_semi != std::string::npos) line = line.substr(0, comment_semi);
+        const auto trimmed = detail::trim(line);
+        if (trimmed.empty()) continue;
+
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            const auto name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
+            device = nullptr;
+            cluster = nullptr;
+            if (detail::iequals(name, "platform")) {
+                simrv::log::warn("Deprecated SoC section [platform]; use [soc]");
+                return false;
+            } else if (detail::iequals(name, "uart")) {
+                simrv::log::warn("Deprecated device section [uart]; use [device.uart]");
+                return false;
+            } else if (detail::iequals(name, "soc")) {
+                section = Section::Soc;
+            } else if (detail::iequals(name, "bus")) {
+                section = Section::Bus;
+            } else if (detail::iequals(name, "plugins")) {
+                section = Section::Plugins;
+            } else if (detail::iequals(name, "pcie")) {
+                section = Section::Pcie;
+            } else if (detail::iequals(name, "memory")) {
+                section = Section::Memory;
+            } else if (detail::iequals(name, "boot")) {
+                section = Section::Boot;
+            } else if (detail::iequals(name, "smp")) {
+                section = Section::Smp;
+            } else if (detail::iequals(name, "smp.l3")) {
+                section = Section::SmpL3;
+            } else if (name.starts_with("smp.cluster.")) {
+                const auto id_text = detail::trim(name.substr(12));
+                const auto parsed_id = detail::parse_scaled_u64(id_text);
+                if (!parsed_id || *parsed_id > std::numeric_limits<uint32_t>::max()) {
+                    section = Section::Global;
+                    continue;
+                }
+                const auto id = static_cast<uint32_t>(*parsed_id);
+                auto found = std::ranges::find_if(config.smp.clusters,
+                                                  [id](const auto& item) { return item.id == id; });
+                if (found == config.smp.clusters.end()) {
+                    config.smp.clusters.push_back({.id = id, .harts = {}});
+                    cluster = &config.smp.clusters.back();
+                } else {
+                    cluster = &*found;
+                }
+                section = Section::SmpCluster;
+            } else {
+                auto device_name = name;
+                const bool explicit_device = device_name.starts_with("device.");
+                if (explicit_device) device_name.remove_prefix(7);
+                if (explicit_device && device_name.starts_with("dummy-mmio.")) {
+                    const auto instance_name = device_name.substr(11);
+                    if (instance_name.empty()) {
+                        section = Section::Global;
+                        continue;
+                    }
+                    section = Section::Device;
+                    const auto existing =
+                        std::ranges::find_if(config.devices, [instance_name](const auto& item) {
+                            return item.kind == SoCDeviceKind::DummyMmio &&
+                                   item.name == instance_name;
+                        });
+                    if (existing == config.devices.end()) {
+                        auto dummy = soc_device_default(SoCDeviceKind::DummyMmio);
+                        dummy.name = std::string(instance_name);
+                        config.devices.push_back(std::move(dummy));
+                        device = &config.devices.back();
+                    } else {
+                        device = &*existing;
+                    }
+                } else if (explicit_device && device_name.starts_with("custom-mmio.")) {
+                    const auto instance_name = device_name.substr(12);
+                    if (instance_name.empty()) {
+                        section = Section::Global;
+                        continue;
+                    }
+                    section = Section::Device;
+                    const auto existing =
+                        std::ranges::find_if(config.devices, [instance_name](const auto& item) {
+                            return item.kind == SoCDeviceKind::CustomMmio &&
+                                   item.name == instance_name;
+                        });
+                    if (existing == config.devices.end()) {
+                        auto custom = soc_device_default(SoCDeviceKind::CustomMmio);
+                        custom.name = std::string(instance_name);
+                        config.devices.push_back(std::move(custom));
+                        device = &config.devices.back();
+                    } else {
+                        device = &*existing;
+                    }
+                } else if (explicit_device && soc_device_kind(device_name)) {
+                    const auto kind = soc_device_kind(device_name);
+                    section = Section::Device;
+                    const auto existing = std::ranges::find_if(
+                        config.devices, [kind](const auto& item) { return item.kind == *kind; });
+                    if (existing == config.devices.end()) {
+                        config.devices.push_back(soc_device_default(*kind));
+                        device = &config.devices.back();
+                    } else {
+                        device = &*existing;
+                    }
+                } else {
+                    section = Section::Global;
+                }
+            }
+            continue;
+        }
+
+        const auto eq_pos = trimmed.find('=');
+        if (eq_pos == std::string_view::npos) continue;
+        const auto key = detail::trim(trimmed.substr(0, eq_pos));
+        const auto value = detail::unquote(detail::trim(trimmed.substr(eq_pos + 1)));
+        if (key.empty() || value.empty()) continue;
+
+        if (section == Section::Smp) {
+            if (const auto parsed = detail::parse_scaled_u64(value);
+                parsed && *parsed <= std::numeric_limits<uint32_t>::max()) {
+                if (key == "hart_count" || key == "harts")
+                    config.smp.hart_count = static_cast<uint32_t>(*parsed);
+                else if (key == "synchronization_quantum" || key == "sync_quantum")
+                    config.smp.synchronization_quantum = static_cast<uint32_t>(*parsed);
+            } else if (key == "mode") {
+                if (detail::iequals(value, "single-threaded") ||
+                    detail::iequals(value, "lockstep") || detail::iequals(value, "cycle-accurate"))
+                    config.smp.mode = simrv::core::SmpMode::SingleThreaded;
+                else if (detail::iequals(value, "multi-threaded") ||
+                         detail::iequals(value, "parallel") ||
+                         detail::iequals(value, "cycle-oriented"))
+                    config.smp.mode = simrv::core::SmpMode::MultiThreaded;
+                else
+                    return false;
+            }
+        } else if (section == Section::SmpCluster && cluster != nullptr) {
+            if (key == "harts") {
+                cluster->harts.clear();
+                std::istringstream hart_stream{std::string(value)};
+                std::string hart_text;
+                while (std::getline(hart_stream, hart_text, ',')) {
+                    const auto parsed = detail::parse_scaled_u64(detail::trim(hart_text));
+                    if (!parsed || *parsed > std::numeric_limits<uint32_t>::max()) return false;
+                    cluster->harts.push_back(simrv::xlen::HartId{static_cast<uint32_t>(*parsed)});
+                }
+            } else if (key == "l2_enabled") {
+                if (const auto parsed = detail::parse_bool(value)) cluster->l2.enabled = *parsed;
+            } else if (const auto parsed = detail::parse_scaled_u64(value);
+                       parsed && *parsed <= std::numeric_limits<uint32_t>::max()) {
+                const auto number = static_cast<uint32_t>(*parsed);
+                if (key == "l2_capacity_bytes")
+                    cluster->l2.capacity_bytes = number;
+                else if (key == "l2_associativity")
+                    cluster->l2.associativity = number;
+                else if (key == "l2_line_bytes")
+                    cluster->l2.line_bytes = number;
+                else if (key == "l2_hit_latency")
+                    cluster->l2.hit_latency = number;
+                else if (key == "l2_miss_latency")
+                    cluster->l2.miss_latency = number;
+            }
+        } else if (section == Section::SmpL3) {
+            if (key == "enabled") {
+                if (const auto parsed = detail::parse_bool(value)) config.smp.l3.enabled = *parsed;
+            } else if (const auto parsed = detail::parse_scaled_u64(value);
+                       parsed && *parsed <= std::numeric_limits<uint32_t>::max()) {
+                const auto number = static_cast<uint32_t>(*parsed);
+                if (key == "capacity_bytes")
+                    config.smp.l3.capacity_bytes = number;
+                else if (key == "associativity")
+                    config.smp.l3.associativity = number;
+                else if (key == "line_bytes")
+                    config.smp.l3.line_bytes = number;
+                else if (key == "hit_latency")
+                    config.smp.l3.hit_latency = number;
+                else if (key == "miss_latency")
+                    config.smp.l3.miss_latency = number;
+            }
+        } else if (section == Section::Soc) {
+            if (key == "name")
+                config.name = std::string(value);
+            else if (key == "cpu_model" || key == "cpu_preset")
+                config.cpu_model = std::string(value);
+            else if (key == "platform") {
+                config.enable_pcie = detail::iequals(value, "pcie");
+                config.enable_mmio = detail::iequals(value, "mmio");
+            } else if (key == "enable_pcie") {
+                if (const auto parsed = detail::parse_bool(value)) config.enable_pcie = *parsed;
+            } else if (key == "enable_mmio") {
+                if (const auto parsed = detail::parse_bool(value)) config.enable_mmio = *parsed;
+            } else if (key == "device_policy") {
+                config.disable_unlisted_devices =
+                    detail::iequals(value, "explicit") || detail::iequals(value, "listed-only");
+            } else if (key == "disable_unlisted_devices") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.disable_unlisted_devices = *parsed;
+                }
+            } else if (key == "mmio_console_redirect" || key == "console_redirect") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.mmio_console_redirect = *parsed;
+                }
+            } else if (key == "bram_prewarm") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.bram_prewarm = *parsed;
+                }
+            } else if (key == "bus_protocol" || key == "bus") {
+                if (const auto* entry = simrv::memory::find_bus_catalog_entry(value)) {
+                    config.bus_protocol = entry->protocol;
+                }
+            } else if (key == "cpu_clock_hz") {
+                if (const auto parsed = detail::parse_scaled_u64(value))
+                    config.cpu_clock_hz = *parsed;
+            } else if (key == "timebase_hz") {
+                if (const auto parsed = detail::parse_scaled_u64(value))
+                    config.timebase_hz = *parsed;
+            }
+        } else if (section == Section::Bus) {
+            if (key == "protocol" || key == "bus_protocol" || key == "type") {
+                if (const auto* entry = simrv::memory::find_bus_catalog_entry(value)) {
+                    config.bus_protocol = entry->protocol;
+                }
+            } else if (key == "name" || key == "label") {
+                config.bus_name = std::string(value);
+            }
+        } else if (section == Section::Pcie) {
+            if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "ecam_base")
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max())
+                        return false;
+                    else
+                        config.pcie.ecam_base =
+                            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                else if (key == "ecam_size")
+                    config.pcie.ecam_size = *parsed;
+                else if (key == "mmio_base")
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max())
+                        return false;
+                    else
+                        config.pcie.mmio_base =
+                            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                else if (key == "mmio_size")
+                    config.pcie.mmio_size = *parsed;
+                else if (key == "first_bus" || key == "last_bus") {
+                    if (*parsed > std::numeric_limits<uint8_t>::max()) return false;
+                    auto& bus = key == "first_bus" ? config.pcie.first_bus : config.pcie.last_bus;
+                    bus = static_cast<uint8_t>(*parsed);
+                }
+            }
+        } else if (section == Section::Memory) {
+            if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "dram_base" || key == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.dram_base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "dram_size" || key == "size")
+                    config.dram_size = *parsed;
+            } else if (key == "bram_prewarm") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.bram_prewarm = *parsed;
+                }
+            }
+        } else if (section == Section::Boot) {
+            if (key == "bootargs") {
+                config.bootargs = std::string(value);
+            } else if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "reset_pc" || key == "start_pc") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.reset_pc =
+                        simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "tohost") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    config.tohost =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                }
+            }
+        } else if (section == Section::Device && device != nullptr) {
+            if (key.starts_with("region.")) {
+                const auto region_key = key.substr(7);
+                const auto separator = region_key.rfind('.');
+                if (separator == std::string_view::npos) continue;
+                const auto region_name = region_key.substr(0, separator);
+                const auto field = region_key.substr(separator + 1);
+                const auto parsed = detail::parse_scaled_u64(value);
+                if (!parsed || region_name.empty() || (field != "base" && field != "size"))
+                    continue;
+                auto region = std::ranges::find_if(
+                    device->regions,
+                    [region_name](const auto& item) { return item.name == region_name; });
+                if (region == device->regions.end()) {
+                    device->regions.push_back({.name = std::string(region_name),
+                                               .base = simrv::xlen::PhysAddr{},
+                                               .size = 0});
+                    region = std::prev(device->regions.end());
+                }
+                if (field == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    region->base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                }
+                if (field == "size") region->size = *parsed;
+            } else if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "base") {
+                    if (*parsed > std::numeric_limits<simrv::xlen::Address>::max()) return false;
+                    device->base =
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*parsed)};
+                } else if (key == "size")
+                    device->size = *parsed;
+                else if (key == "irq" && *parsed <= std::numeric_limits<uint32_t>::max())
+                    device->irq = static_cast<uint32_t>(*parsed);
+                else if (key == "read_value" && *parsed <= std::numeric_limits<uint32_t>::max())
+                    device->read_value = static_cast<uint32_t>(*parsed);
+                else if (key == "clock_hz")
+                    device->clock_hz = *parsed;
+                else if (key == "pci_bus") {
+                    if (*parsed > std::numeric_limits<uint8_t>::max()) return false;
+                    device->pci_bus = static_cast<uint8_t>(*parsed);
+                } else if (key == "pci_slot") {
+                    if (*parsed > 31) return false;
+                    device->pci_slot = static_cast<uint8_t>(*parsed);
+                } else if (key == "pci_function") {
+                    if (*parsed > 7) return false;
+                    device->pci_function = static_cast<uint8_t>(*parsed);
+                } else if (key == "pci_intx_source") {
+                    if (*parsed > std::numeric_limits<uint32_t>::max()) return false;
+                    device->pci_intx_source = static_cast<uint32_t>(*parsed);
+                } else if (key == "mac_address" && *parsed <= 0xffffffffffffULL) {
+                    for (size_t i = 0; i < device->mac_address.size(); ++i) {
+                        const auto shift = static_cast<unsigned>((5 - i) * 8);
+                        device->mac_address[i] = static_cast<uint8_t>(*parsed >> shift);
+                    }
+                }
+            } else if (key == "compatible") {
+                device->compatible = std::string(value);
+            } else if (key == "name") {
+                device->name = std::string(value);
+            } else if (key == "plugin") {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                config.plugins.push_back(clean_val);
+            }
+        } else if (section == Section::Plugins) {
+            std::string plugin_spec;
+            if (value.empty() || value == "\"\"" || value == "true") {
+                plugin_spec = std::string(key);
+            } else if (key == "device" || key == "plugin") {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                plugin_spec = clean_val;
+            } else {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                plugin_spec = std::string(key) + "=" + clean_val;
+            }
+            config.plugins.push_back(plugin_spec);
+        }
+    }
+    return true;
+}
+
+inline auto parse_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
+    -> bool {
+    if (path == "-") {
+        return parse_soc_config_stream(std::cin, config);
+    }
+    std::ifstream file(path);
+    return file.is_open() && parse_soc_config_stream(file, config);
+}
+
+/**
+ * @brief Load SoC configuration from a filesystem path and validate its regions and devices.
+ */
+inline auto load_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
+    -> bool {
+    if (!parse_soc_config(path, config)) return false;
+    const auto valid = config.validate();
+    if (!valid) {
+        simrv::log::warn("Invalid SoC configuration: {}", valid.error());
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Load a combined CPU and SoC platform configuration from a filesystem path.
+ */
+inline auto load_platform_config(const std::filesystem::path& path,
+                                 simrv::pipeline::CpuModelConfig& cpu_model,
+                                 simrv::core::SoCConfig& soc_config) -> bool {
+    std::string content;
+    if (path == "-") {
+        content.assign((std::istreambuf_iterator<char>(std::cin)),
+                       std::istreambuf_iterator<char>());
+    } else {
+        std::ifstream file(path);
+        if (!file.is_open()) return false;
+        content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    }
+    std::istringstream stream_cpu{content};
+    std::istringstream stream_soc{content};
+    (void)parse_cpu_config_stream(stream_cpu, cpu_model);
+    (void)parse_soc_config_stream(stream_soc, soc_config);
+    return true;
+}
+
+/**
+ * @brief Parse CPU configuration from an in-memory string without validation against machine XLEN.
+ */
+inline auto parse_cpu_config_string(std::string_view content,
+                                    simrv::pipeline::CpuModelConfig& config) -> bool {
+    std::istringstream stream{std::string(content)};
+    return parse_cpu_config_stream(stream, config);
+}
+
+/**
+ * @brief Parse CPU configuration from a filesystem path without validation against machine XLEN.
+ */
+inline auto parse_cpu_config(const std::filesystem::path& path,
+                             simrv::pipeline::CpuModelConfig& config) -> bool {
+    if (path == "-") {
+        return parse_cpu_config_stream(std::cin, config);
+    }
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+    return parse_cpu_config_stream(file, config);
+}
+
+/**
+ * @brief Parse CPU configuration from a string path without validation against machine XLEN.
+ */
+inline auto parse_cpu_config(const std::string& path, simrv::pipeline::CpuModelConfig& config)
+    -> bool {
+    return parse_cpu_config(std::filesystem::path(path), config);
+}
+
+/**
+ * @brief Load CPU configuration from a stream and validate against the current simulator.
+ */
+inline auto load_cpu_config_impl(std::string_view file_path,
+                                 simrv::pipeline::CpuModelConfig& config, unsigned int depth)
+    -> bool {
+    std::ifstream file{std::filesystem::path{file_path}};
+    if (!file.is_open()) {
+        return false;
+    }
+    return parse_cpu_config_stream(file, config, depth);
+}
+
+inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config)
+    -> bool {
+    if (!parse_cpu_config_stream(stream, config)) {
+        return false;
+    }
+    const auto valid = config.validate();
+    if (!valid) {
+        simrv::log::warn("Invalid configuration: {}", valid.error());
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Load CPU configuration from a filesystem path and validate against the current simulator.
+ */
+inline auto load_cpu_config(const std::filesystem::path& path,
+                            simrv::pipeline::CpuModelConfig& config) -> bool {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+    return load_cpu_config_stream(file, config);
+}
+
+/**
+ * @brief Load CPU configuration from a string path and validate against the current simulator.
+ */
+inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuModelConfig& config)
+    -> bool {
+    return load_cpu_config(std::filesystem::path(path), config);
+}
+
+/**
+ * @brief Load CPU configuration from an in-memory string and validate against the current
+ * simulator.
+ */
+inline auto load_cpu_config_string(std::string_view content,
+                                   simrv::pipeline::CpuModelConfig& config) -> bool {
+    std::istringstream stream{std::string(content)};
+    return load_cpu_config_stream(stream, config);
+}
+
+/**
+ * @brief Serialize a CPU model configuration to formatted .cfg INI text.
+ */
+inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, std::ostream& out,
+                                 std::string_view model_name = "",
+                                 std::string_view description = "") {
+    const auto name =
+        model_name.empty()
+            ? (config.name.empty() ? simrv::pipeline::cpu_model_preset_name(config.preset)
+                                   : std::string_view(config.name))
+            : model_name;
+
+    out << "# SimRV CPU Model Configuration\n";
+    out << "[cpu]\n";
+    out << "name = \"" << name << "\"\n";
+    const auto desc = description.empty() ? config.description : std::string(description);
+    if (!desc.empty()) {
+        out << "description = \"" << desc << "\"\n";
+    }
+    if (config.supported_xlen != 0) {
+        out << "xlen = " << static_cast<unsigned int>(config.supported_xlen) << "\n";
+    }
+    out << "isa_preset = \"" << config.isa.canonical_string() << "\"\n";
+    out << "\n";
+
+    if (!config.isa_extensions.empty()) {
+        out << "[isa]\n";
+        out << "extensions = \"";
+        for (size_t index = 0; index < config.isa_extensions.size(); ++index) {
+            if (index != 0) out << ',';
+            out << config.isa_extensions[index];
+        }
+        out << "\"\n\n";
+    }
+
+    out << "[cfu]\n";
+    out << "enabled = " << (config.cfu.enabled ? "true" : "false") << "\n";
+    out << "opcode = \"" << config.cfu.opcode << "\"\n";
+    out << "default_latency = " << config.cfu.default_latency << "\n";
+    if (!config.cfu.plugin.empty()) out << "plugin = \"" << config.cfu.plugin << "\"\n";
+    if (!config.cfu.rtl_module.empty()) {
+        out << "rtl_module = \"" << config.cfu.rtl_module << "\"\n";
+    }
+    out << "interface = \"" << config.cfu.interface << "\"\n\n";
+
+    out << "[pipeline]\n";
+    out << "type = \"";
+    if (config.pipeline.pipeline_type == simrv::pipeline::PipelineType::ThreeStage) {
+        out << "three-stage";
+    } else if (config.pipeline.pipeline_type == simrv::pipeline::PipelineType::FiveStage) {
+        out << "five-stage";
+    } else {
+        out << simrv::pipeline::topology_entry(config.pipeline.pipeline_type).cli_name;
+    }
+    out << "\"\n";
+    out << "enable_forwarding = " << (config.pipeline.enable_forwarding ? "true" : "false") << "\n";
+    out << "divider_early_out = " << (config.pipeline.divider_early_out ? "true" : "false") << "\n";
+    out << "mul_latency = " << config.pipeline.mul_latency << "\n";
+    out << "div_latency = " << config.pipeline.div_latency << "\n";
+    out << "fp_alu_latency = " << config.pipeline.fp_alu_latency << "\n";
+    out << "fp_div_latency = " << config.pipeline.fp_div_latency << "\n";
+    out << "branch_mispredict_penalty = " << config.pipeline.branch_mispredict_penalty << "\n";
+    out << "cycle_counter_start_delay = " << config.pipeline.cycle_counter_start_delay << "\n";
+    if (config.pipeline.startup_cycle_offset != 0) {
+        out << "startup_cycle_offset = " << config.pipeline.startup_cycle_offset << "\n";
+    }
+    if (config.pipeline.startup_instruction_offset != 0) {
+        out << "startup_instruction_offset = " << config.pipeline.startup_instruction_offset
+            << "\n";
+    }
+    out << "host_interface_latency = " << config.pipeline.host_interface_latency << "\n";
+    out << "host_interface_phase_period = " << config.pipeline.host_interface_phase_period << "\n";
+    out << "tohost_requires_high_word = "
+        << (config.pipeline.tohost_requires_high_word ? "true" : "false") << "\n";
+    out << "tohost_pair_fallback_cycles = " << config.pipeline.tohost_pair_fallback_cycles << "\n";
+    out << "csr_flush_penalty = " << config.pipeline.csr_flush_penalty << "\n";
+    out << "fence_flush_penalty = " << config.pipeline.fence_flush_penalty << "\n";
+    out << "\n";
+
+    const auto& bp = config.pipeline.branch_predictor;
+    out << "[branch_predictor]\n";
+    auto bp_name = [](simrv::pipeline::BranchPredictorType t) -> std::string_view {
+        switch (t) {
+            case simrv::pipeline::BranchPredictorType::Disabled:
+                return "none";
+            case simrv::pipeline::BranchPredictorType::Static:
+                return "static";
+            case simrv::pipeline::BranchPredictorType::Bimodal:
+                return "bimodal";
+            case simrv::pipeline::BranchPredictorType::GShare:
+                return "gshare";
+            case simrv::pipeline::BranchPredictorType::Tournament:
+                return "tournament";
+        }
+        return "bimodal";
+    };
+    out << "type = \"" << bp_name(bp.type) << "\"\n";
+    out << "btb_entries = " << bp.btb_entries << "\n";
+    out << "bht_entries = " << bp.bht_entries << "\n";
+    out << "ras_entries = " << bp.ras_entries << "\n";
+    out << "ghr_bits = " << bp.ghr_bits << "\n";
+    out << "pc_shift = " << static_cast<unsigned int>(bp.pc_shift) << "\n";
+    out << "enable_btb = " << (bp.enable_btb ? "true" : "false") << "\n";
+    out << "enable_ras = " << (bp.enable_ras ? "true" : "false") << "\n";
+    out << "untagged_btb = " << (bp.untagged_btb ? "true" : "false") << "\n";
+    out << "predict_non_control = " << (bp.predict_non_control ? "true" : "false") << "\n";
+    out << "jump_uses_direction_counter = " << (bp.jump_uses_direction_counter ? "true" : "false")
+        << "\n";
+    out << "jump_uses_current_btb = " << (bp.jump_uses_current_btb ? "true" : "false") << "\n";
+    out << "registered_btb_read = " << (bp.registered_btb_read ? "true" : "false") << "\n";
+    out << "bht_initial_state = " << static_cast<unsigned int>(bp.bht_initial_state) << "\n";
+    out << "\n";
+
+    out << "[instruction_cache]\n";
+    out << "capacity_bytes = " << config.instruction_cache.capacity_bytes << "\n";
+    out << "associativity = " << config.instruction_cache.associativity << "\n";
+    out << "line_bytes = " << config.instruction_cache.line_bytes << "\n";
+    out << "hit_latency = " << config.instruction_cache.hit_latency << "\n";
+    out << "miss_latency = " << config.instruction_cache.miss_latency << "\n";
+    out << "\n";
+
+    if (config.instruction_front_cache.capacity_bytes != 0) {
+        out << "[instruction_front_cache]\n";
+        out << "capacity_bytes = " << config.instruction_front_cache.capacity_bytes << "\n";
+        out << "associativity = " << config.instruction_front_cache.associativity << "\n";
+        out << "line_bytes = " << config.instruction_front_cache.line_bytes << "\n";
+        out << "hit_latency = " << config.instruction_front_cache.hit_latency << "\n";
+        out << "refill_latency = " << config.instruction_front_cache.refill_latency << "\n";
+        out << "backing_refill_latency = " << config.instruction_front_cache.backing_refill_latency
+            << "\n";
+        out << "freeze_pipeline_on_refill = "
+            << (config.instruction_front_cache.freeze_pipeline_on_refill ? "true" : "false")
+            << "\n";
+        if (!config.instruction_front_cache.startup_refill_latencies.empty()) {
+            out << "startup_refill_latencies = \"";
+            for (size_t index = 0;
+                 index < config.instruction_front_cache.startup_refill_latencies.size(); ++index) {
+                if (index != 0) out << ',';
+                out << config.instruction_front_cache.startup_refill_latencies[index];
+            }
+            out << "\"\n";
+        }
+        out << "\n";
+    }
+
+    out << "[data_cache]\n";
+    out << "capacity_bytes = " << config.data_cache.capacity_bytes << "\n";
+    out << "associativity = " << config.data_cache.associativity << "\n";
+    out << "line_bytes = " << config.data_cache.line_bytes << "\n";
+    out << "hit_latency = " << config.data_cache.hit_latency << "\n";
+    out << "miss_latency = " << config.data_cache.miss_latency << "\n";
+    if (config.data_cache.write_through) {
+        out << "write_through = true\n";
+    }
+    if (!config.data_cache.write_allocate) {
+        out << "write_allocate = false\n";
+    }
+    out << "\n";
+
+    out << "[interconnect]\n";
+    out << "request_latency = " << config.interconnect.request_latency << "\n";
+    out << "response_latency = " << config.interconnect.response_latency << "\n";
+    if (config.interconnect.data_request_latency != 0) {
+        out << "data_request_latency = " << config.interconnect.data_request_latency << "\n";
+    }
+    if (config.interconnect.data_response_latency != 0) {
+        out << "data_response_latency = " << config.interconnect.data_response_latency << "\n";
+    }
+    if (config.interconnect.startup_data_response_latency != 0) {
+        out << "startup_data_response_latency = "
+            << config.interconnect.startup_data_response_latency << "\n";
+    }
+    out << "\n";
+
+    out << "[dma]\n";
+    out << "enabled = " << (config.dma.enabled ? "true" : "false") << "\n";
+    out << "setup_latency = " << config.dma.setup_latency << "\n";
+    out << "bandwidth_bytes_per_cycle = " << config.dma.bandwidth_bytes_per_cycle << "\n";
+    out << "memory_contention_penalty = " << config.dma.memory_contention_penalty << "\n\n";
+
+    out << "[axi]\n";
+    out << "enabled = " << (config.axi.enabled ? "true" : "false") << "\n";
+    out << "data_width_bytes = " << config.axi.data_width_bytes << "\n";
+    out << "id_width_bits = " << config.axi.id_width_bits << "\n";
+    out << "max_outstanding_reads = " << config.axi.max_outstanding_reads << "\n";
+    out << "max_outstanding_writes = " << config.axi.max_outstanding_writes << "\n";
+    out << "burst_length_max = " << config.axi.burst_length_max << "\n";
+    out << "trace_axi = " << (config.axi.trace_axi ? "true" : "false") << "\n";
+}
+
+/**
+ * @brief Save a CPU model configuration to a .cfg file path.
+ */
+inline auto save_cpu_config(const std::string& path, const simrv::pipeline::CpuModelConfig& config,
+                            std::string_view model_name = "", std::string_view description = "")
+    -> bool {
+    std::filesystem::path fs_path(path);
+    std::error_code ec;
+    if (fs_path.has_parent_path()) {
+        std::filesystem::create_directories(fs_path.parent_path(), ec);
+    }
+    std::ofstream out(path);
+    if (!out.is_open()) return false;
+    serialize_cpu_config(config, out, model_name, description);
     return true;
 }
 

@@ -1,0 +1,469 @@
+# Extending CPU Presets and MMIO Platforms
+
+This guide covers two different kinds of extension:
+
+1. Create a CPU timing model with a configuration file. This does not require C++ changes.
+2. Add a new emulated MMIO device to SimRV. This requires a device implementation and platform
+   integration.
+
+Start with a model file when your goal is to describe a CPU's timing or select devices SimRV
+already supports. Implement a new device only when the hardware's register behavior is not already
+modeled.
+
+!!! info "A preset configures models SimRV already implements"
+    CPU presets describe timing and platform configuration. They do not add new instruction
+    semantics or MMIO register behavior; those require a simulator implementation.
+
+## Create a custom CPU model
+
+Copy a model close to the target, or scaffold a starter file:
+
+```bash
+simrv-tools scaffold cpu balanced configs/models/my-core.cfg
+```
+
+You can also scaffold starter device plugins and CFU plugins:
+
+```bash
+# Scaffold an external MMIO device plugin C project
+simrv-tools scaffold device my_device ./my_device_plugin/
+
+# Scaffold a Custom Function Unit (CFU) plugin C project
+simrv-tools scaffold cfu my_cfu ./my_cfu_plugin/
+```
+
+To seed a device project from a board DTB, select one of its importable MMIO nodes:
+
+```bash
+simrv-tools scaffold device --from-dtb board.dtb ./my_device_plugin/
+```
+
+The compatible string, MMIO base/size, and simple IRQ are copied into the plugin and
+editable platform configuration. DTBs do not define register behavior, so implement
+the generated read/write handlers for the device.
+
+Edit the `[cpu]`, `[pipeline]`, cache, branch predictor, interconnect, and optional accelerator
+sections to describe the target. Use the parameter reference in [Microarchitectural Models &
+Tuning](models.md) for supported keys and units. Latencies are additional stall cycles after issue
+where documented; convert a vendor's total instruction latency to the model's convention before
+using it.
+
+Validate the file by loading it in cycle-accurate mode:
+
+```bash
+simrv --ca --config configs/models/my-core.cfg -m program.elf
+```
+
+The path can be supplied through `--config`. A custom file is a
+user-authored model; it does not add a named built-in preset. To add a built-in preset, update the
+preset enum, name parsing, factory/default configuration, and preset-focused tests. Keep the
+compiled fallback behavior intentional and document whether the preset supports RV32, RV64, or
+both.
+
+If the preset describes a complete platform, add `[soc]` and `[device.<kind>]` sections. For
+example:
+
+```ini
+[soc]
+device_policy = "explicit"
+
+[device.uart]
+name = "uart0"
+base = 0x10000000
+size = 0x10
+irq = 1
+```
+
+`device_policy = "explicit"` means only the configured device set is registered. Otherwise the
+platform's implicit defaults may remain enabled. Device kinds and configurable descriptor fields
+are defined by the current registry; a config entry cannot create a new device implementation or
+change its register semantics. A project can add specialized device implementations as independent plugins. The following hardware-specific example is maintained outside the generic simulator. The Ethernet descriptor's `base` selects the CSR window; RX and
+TX ring windows are configurable with `region.rxbuf.base` / `region.rxbuf.size` and
+`region.txbuf.base` / `region.txbuf.size`. The `mac_address` field accepts a 48-bit hexadecimal
+value. These values feed the normalized SoC map used
+for runtime registration and the SoC manifest. Linux device trees are supplied separately by the
+user and should describe the configured guest devices. Check the resolved result with:
+
+```bash
+simrv config export-soc virt-mmio /tmp/my-core-soc.json
+```
+
+Use a built-in preset or your custom configuration file. For custom CPU/SoC files, use the CPU model
+configuration workflow and inspect the platform in a guest boot.
+
+### Reserve a device window with a dummy model
+
+When a custom SoC has an address range with no matching SimRV model, configure a dummy device. It
+returns a constant value on reads and ignores writes. The MMIO router records accesses in the
+normal device trace, so guest writes can be inspected without producing an unbounded log:
+
+```ini
+[device.dummy-mmio.watchdog]
+base = 0x10010000
+size = 0x1000
+compatible = "acme,watchdog"
+read_value = 0
+
+[device.dummy-mmio.board-control]
+base = 0x10011000
+size = 0x1000
+compatible = "acme,board-control"
+read_value = 0xffffffff
+```
+
+Select an instance with `--trace-device watchdog` or `--trace-device board-control`, for example
+`simrv --cli -m program.elf --arch-trace trace.jsonl --trace-level 1 --trace-device watchdog`.
+Select the `mmio_write` event when using trace event filters to retain writes to that window. Dummy
+windows appear in the SoC manifest, but do not implement the hardware named by their
+compatible string. The section suffix supplies the trace name; set `name = "..."` to choose a
+different name.
+
+!!! warning "Dummy windows are not hardware models"
+    Dummy devices reserve an address range, return a configured constant on reads, and ignore
+    writes. They are useful for integration and logging, but guest software that expects register
+    side effects will need a real device implementation.
+
+### Attach a custom C++ MMIO model
+
+An embedding application can register a C++ device factory for a custom compatible string. Add a
+custom descriptor to the SoC file:
+
+```ini
+[device.custom-mmio.timer]
+name = "timer"
+base = 0x10012000
+size = 0x1000
+irq = 0
+compatible = "acme,timer"
+```
+
+Register the factory on the machine before calling `initialize()`:
+
+```cpp
+simrv::core::MachineConfig config;
+simrv::core::Machine machine(config);
+machine.device_registry().register_mmio_compatible(
+    "acme,timer", [](simrv::core::Machine& machine,
+                     const simrv::core::SoCDeviceConfig& config) {
+        return std::make_unique<MyTimer>(machine, config.name, config.base, config.size);
+    });
+machine.initialize();
+```
+
+`MyTimer` derives from `simrv::memory::MmioDevice`; its name, base address, and size must match
+the descriptor. Factories are scoped to one `Machine`, so embedding applications can run different
+custom SoCs side by side without sharing a process-global registration table. A registered device
+is owned by the machine runtime and installed on the system bus. If no factory is registered, the
+range remains present as an inert constant-read, ignored-write
+device, so a custom SoC config can still be inspected and traced without the model. IRQ wiring is
+not part of this factory API yet; use `irq = 0`. The compatible, range, and device name are emitted
+to the SoC manifest in either case. `Machine::device_registry()` is scoped to one
+machine and also constructs SimRV's built-in reset-control device through the same factory path.
+
+!!! warning "Custom C++ device factories do not wire interrupts yet"
+    Keep `irq = 0` for a registered custom factory. The descriptor field is present for platform
+    metadata, but this factory API does not connect a custom device to a hart interrupt line.
+
+Factories create the node during initialization; the runtime owns it and attaches it to the system
+bus. Embedders can subscribe with `Machine::add_event_observer()` to observe interrupt line edges and
+DMA start, completion, and cancellation events independently of architectural trace-file settings.
+For example, an embedding application can attach a small observer before machine initialization:
+
+```cpp
+const auto observer_id = machine.add_event_observer([](const simrv::core::MachineEvent& event) {
+    if (event.kind == simrv::core::MachineEventKind::InterruptAsserted ||
+        event.kind == simrv::core::MachineEventKind::InterruptDeasserted) {
+        std::println("cycle {}: {} interrupt from {}", event.cycle,
+                     event.kind == simrv::core::MachineEventKind::InterruptAsserted ? "asserted"
+                                                                                     : "cleared",
+                     event.component);
+    }
+});
+machine.initialize();
+machine.run();
+// Remove the observer before its captured state or output sink is destroyed.
+machine.remove_event_observer(observer_id);
+```
+
+Observers run synchronously on the simulation thread that produces the event (which can be a hart
+worker in multithreaded SMP mode), so keep callbacks short and synchronize shared output sinks.
+Use `MachineEventKind::DmaStarted`, `DmaCompleted`, and `DmaCancelled` with the transfer ID,
+component, byte count, and request/start/completion cycle fields for DMA tracking. These hooks report
+machine activity; they do not provide a device IRQ-routing API or change a device's modeled timing.
+
+## Add an emulated MMIO device
+
+First check `SoCDeviceKind` and `SoCDeviceRegistry` for an existing device kind. If SimRV already
+implements the hardware, configure its descriptor or add it to a platform preset rather than
+creating a second device class.
+
+For a new device, a typical implementation derives from `simrv::memory::MmioDevice`. Implement the
+register reads and writes, and provide stable `name()`, `base_address()`, and `size()` values from
+the `TileLinkNode` interface. `MmioDevice` adapts typed register accesses to the simulator's
+TileLink-style request interface and offers DMA helpers when the device needs guest-memory access.
+Use a direct `TileLinkNode` implementation only when the device needs custom request/response
+handling. Keep device state owned by the machine runtime so registered bus-node pointers remain
+valid for the full machine lifetime.
+
+Integrate a preset-configurable device through the shared SoC description rather than registering
+it in only one code path:
+
+1. Add the kind and descriptor defaults to `SoCConfig` and include it in `SoCDeviceRegistry`.
+2. Parse and validate its configuration, including nonzero, nonwrapping address range and
+   interrupt rules. Preserve overlap rejection.
+3. Construct and own the device during machine initialization, then register it on the system bus
+   according to the device policy.
+4. Connect interrupts, DMA, reset, and any transport or backing storage it requires.
+5. Export the normalized registry with `simrv config export-soc` when platform tooling needs to discover the device.
+   Update the supplied guest device tree separately when Linux needs to discover it.
+6. Add device-level register tests, address-map/config tests, and guest-facing integration
+   coverage. Validate both RV32 and RV64 builds when the device is available in both.
+
+Some devices are composed by `PlatformBuilder` or exposed through PCIe/VirtIO transports rather
+than constructed as simple base nodes. Follow the nearest existing device implementation and
+verify transport discovery as well as MMIO access. Do not assign a standard VirtIO register layout
+to custom RTL hardware just to make it discoverable.
+
+## Dynamic External Device Plugins (C ABI)
+
+While architectural peripherals (CLINT, PLIC, AIA, 16550 UART, VirtIO) are built into SimRV core, board-specific, experimental, or custom hardware blocks should be modeled as **dynamic external device plugins**. Similar to how Custom Function Unit (CFU) plugins extend the instruction execution pipeline (`--cfu-plugin`), external device plugins attach memory-mapped peripherals to the TileLink interconnect (`--plugin`) without modifying or recompiling the simulator core.
+
+### The External Device C ABI
+
+Plugins interface with SimRV through the versioned C ABI declared in [`include/simrv/device/ExternalDevice.h`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/device/ExternalDevice.h):
+
+To replace the configured UART, a plugin may additionally export
+`simrv_serial_plugin_init`, returning the versioned descriptor declared in
+`simrv/device/ExternalSerialDevice.h`. Set the UART device's `compatible` to the plugin's
+compatible string and load the plugin normally. The simulator selects the serial implementation
+instead of the built-in 16550 and routes terminal input, PTY traffic, MMIO and cycle callbacks to
+it. The optional serial descriptor does not change the existing `SimRvExternalDevice` or
+`SimRvHostServices` layouts; existing plugins continue to use the original ABI.
+
+`receive_byte` can run on an input thread concurrently with MMIO and cycle callbacks; the plugin
+must synchronize its state. `advance_cycles` and `service_interrupts` run on the simulation thread.
+For a v2 serial plugin, both the device and serial `advance_cycles` callbacks are invoked if supplied.
+Serial output uses `SimRvSerialHostServices::write_byte` on that thread. Both host-service tables
+remain valid through the device's destroy callback. The serial capability is required for UART
+replacement; an ordinary MMIO plugin alone cannot receive console input. The configured interrupt
+number is available in the serial host-service table.
+
+An ordinary MMIO plugin can also replace the standalone power or RTC device when its compatible
+string matches the configured device. Other built-in devices are not generally replaceable yet:
+timers, interrupt controllers, DMA and VirtIO have additional simulator-owned state or transports.
+Custom MMIO devices may still be added independently of those built-ins.
+
+A custom MMIO plugin can expose a display by exporting `simrv_framebuffer_plugin_init` and the
+versioned descriptor in `simrv/device/ExternalFramebufferDevice.h`. Its callbacks receive the
+same device context as MMIO. Keep the returned pixel buffer valid while the device exists and
+synchronize access with the simulation and display threads. The optional frame ID allows the TUI
+to avoid redrawing an unchanged frame; returning zero selects the normal framebuffer check.
+
+A plugin can receive host keyboard events by exporting the optional
+`simrv_input_plugin_init` symbol and returning the versioned descriptor in
+`simrv/device/ExternalInputDevice.h`. This capability is independent of the existing device ABI;
+the plugin still exports `simrv_device_plugin_init` and implements the MMIO device. The
+`send_key` callback receives Linux input keycodes and a press/release flag on the simulation thread.
+Use it to translate host input into the device's guest-visible protocol. A project-specific plugin can translate those events into the target system’s guest-visible protocol.
+
+```c
+// my_device.c
+#include <stdint.h>
+#include <stdlib.h>
+#include "simrv/device/ExternalDevice.h"
+
+struct DeviceState {
+    const SimRvHostServices* services;
+    uint32_t register_val;
+};
+
+static int my_init(void** out_ctx, const char* args) {
+    struct DeviceState* st = malloc(sizeof(struct DeviceState));
+    st->services = NULL;
+    st->register_val = 0;
+    *out_ctx = st;
+    return 0;
+}
+
+static void my_reset(void* ctx) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    st->register_val = 0;
+}
+
+static int my_read(void* ctx, uint64_t offset, uint32_t size, uint64_t* out_val) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    if (offset == 0) {
+        *out_val = st->register_val;
+        return 0;
+    }
+    *out_val = 0;
+    return 0;
+}
+
+static int my_write(void* ctx, uint64_t offset, uint32_t size, uint64_t val) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    if (offset == 0) {
+        st->register_val = (uint32_t)val;
+        // Example: assert platform IRQ 2 when high bit is set
+        if (st->services && st->services->set_irq) {
+            st->services->set_irq(st->services->host_ctx, 2, (val & 0x80000000) != 0);
+        }
+    }
+    return 0;
+}
+
+static void my_destroy(void* ctx) {
+    free(ctx);
+}
+
+static void my_set_services(void* ctx, const SimRvHostServices* services) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    st->services = services;
+}
+
+static const SimRvExternalDevice kDescriptor = {
+    .api_version = SIMRV_EXTERNAL_DEVICE_API_VERSION,
+    .name = "my-device",
+    .compatible = "vendor,my-device",
+    .default_base = 0x20000000ULL,
+    .default_size = 0x1000ULL,
+    .init = my_init,
+    .reset = my_reset,
+    .read = my_read,
+    .write = my_write,
+    .destroy = my_destroy,
+    .set_host_services = my_set_services,
+};
+
+const SimRvExternalDevice* simrv_device_plugin_init(void) {
+    return &kDescriptor;
+}
+```
+
+### Compiling Plugins
+
+Compile the plugin into a position-independent shared object (`.so`):
+
+```bash
+# GCC
+gcc -O3 -shared -fPIC -Iinclude -o libsimrv-mydevice.so my_device.c
+
+# Clang
+clang -O3 -shared -fPIC -Iinclude -o libsimrv-mydevice.so my_device.c
+```
+
+### Advanced Device Capabilities (ABI v2)
+
+API version 2 (`SIMRV_EXTERNAL_DEVICE_API_VERSION = 2`) adds high-performance platform services and cycle ticking:
+
+- **Direct Memory Access (DMA)**: Plugins can act as bus masters using `services->dma_read` and `services->dma_write` to read or write physical RAM safely without CPU intervention.
+- **Cycle-Accurate Ticking**: Plugins providing `.advance_cycles = my_advance_cycles` are invoked each simulation cycle with the elapsed cycle delta, enabling hardware timers, PWMs, and coprocessors.
+- **Simulation Timebase Query**: `services->get_cycle_count(services->host_ctx)` retrieves the current total retired machine cycles.
+- **Structured Logging**: `services->log_msg(services->host_ctx, SIMRV_LOG_INFO, "message")` integrates directly with SimRV's unified logging subsystem (`simrv::log`).
+
+Runnable reference plugins are available in the repository:
+- `examples/plugins/timer/`: An interrupt-generating, cycle-ticking hardware timer.
+- `examples/plugins/dma_accel/`: A bus-mastering hardware accelerator performing DMA copy, byte inversion, and CRC-32 checksum calculations.
+
+### Loading and Auto-Discovery
+
+SimRV provides multiple seamless ways to load plugins:
+
+1. **Short CLI Flag with Logical Name**:
+   ```bash
+   simrv --plugin mydevice=image.bin ...
+   ```
+   SimRV automatically searches `./plugins/`, `<bindir>/plugins/`, `<bindir>/`, and `$SIMRV_PLUGIN_PATH`, matching `libsimrv-<name>.so`, `lib<name>.so`, or direct file paths.
+
+2. **Devicetree Compatible Auto-Discovery**:
+   When guest device trees declare custom `/soc` nodes (such as `compatible = "vendor,my-device"`), SimRV automatically searches the plugin directories for a plugin matching the compatible string and attaches it without manual flags.
+
+3. **Platform Configuration (`.cfg`) Declaration**:
+   Declare plugins directly in model configurations:
+   ```ini
+   [plugins]
+   mydevice = "image.bin"
+   ```
+
+---
+
+## Custom Function Unit (CFU) Plugins
+
+SimRV supports hardware accelerator instructions via the RISC-V Custom-0 (`0x0b`) opcode. Instructions are issued using the standard RISC-V R-type format:
+
+```text
+31      25 24   20 19   15 14  12 11    7 6      0
++---------+-------+-------+------+-------+-------+
+|  funct7 |  rs2  |  rs1  |funct3|  rd   | 0001011 |
++---------+-------+-------+------+-------+-------+
+```
+
+CFU behavior is dynamically extensible via shared library plugins loaded with `--cfu <path.so>`.
+
+### SimRV CFU Plugin ABI v2
+
+For simulators modeling 64-bit wide operations or variable cycle penalties, plugins export `simrv_cfu_init()` returning `SimRvCfuPlugin` declared in the pure C header [`include/simrv/execute/ExternalCfu.h`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/execute/ExternalCfu.h):
+
+```c
+#include "simrv/execute/ExternalCfu.h"
+
+static uint64_t my_exec64(uint32_t funct7, uint32_t funct3,
+                          uint64_t src1, uint64_t src2,
+                          uint32_t* latency_cycles) {
+    if (latency_cycles) *latency_cycles = (funct3 == 1) ? 3 : 1;
+    return src1 + src2;
+}
+
+static uint32_t my_query_latency(uint32_t funct7, uint32_t funct3) {
+    return (funct3 == 1) ? 3 : 1;
+}
+
+static const struct SimRvCfuPlugin kPlugin = {
+    .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
+    .execute = NULL,
+    .reset = NULL,
+    .execute64 = my_exec64,
+    .query_latency = my_query_latency,
+    .name = "my-accel",
+};
+
+const struct SimRvCfuPlugin* simrv_cfu_init(void) {
+    return &kPlugin;
+}
+```
+
+- **`execute64`**: Evaluates custom instructions with native 64-bit integer registers and returns operation latency.
+- **`query_latency`**: Inspects instruction latency statically during pipeline hazard analysis without side effects.
+- If `query_latency` is absent, SimRV calls the available execute callback with zero operands to
+  obtain latency, as it does for v1 plugins. Provide `query_latency` when execution has side effects.
+- **`name`**: Identifies the CFU in simulation logs and performance reports.
+
+A complete reference SIMD CFU plugin is provided in `examples/plugins/cfu/`.
+
+### Development Package (`simrv-devel`) & CMake Integration
+
+When building custom MMIO device plugins or CFU plugins using CMake, projects require the `simrv-devel` package. It exports the lightweight `SimRV::simrv-devel` (or alias `SimRV::devel`) interface target, providing all C and C++ API headers without linking the static simulator runtime into the plugin `.so`:
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my-plugin LANGUAGES C)
+
+find_package(SimRV 3.0 CONFIG REQUIRED COMPONENTS Development)
+
+add_library(my-plugin SHARED my_plugin.c)
+target_link_libraries(my-plugin PRIVATE SimRV::simrv-devel)
+```
+
+---
+
+## Validation checklist
+
+- Confirm the CPU model parses and passes its supported XLEN/ISA checks.
+- Check timing against the target's documented cycle convention and, for RTL-backed models, run
+  the applicable cycle-accuracy/parity gates.
+- Confirm the complete address map has no overlaps and matches the intended reset/boot setup.
+- Check that the supplied guest device tree and SoC manifest agree with registered runtime devices.
+- Exercise register side effects, invalid accesses, interrupts, reset, and DMA boundaries as
+  applicable.
+
+For the platform syntax, see [CPU Model Configuration](models.md).

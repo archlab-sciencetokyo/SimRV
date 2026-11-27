@@ -27,7 +27,7 @@ const char* g_theme_sky =
 const char* g_theme_pink =
     kAdaptivePink;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 const char* g_theme_modal_bg =
-    "\033[40m";  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    kAdaptiveModalBg;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 std::array<const char*, 16> g_theme_palette =
     kHighContrastPalette;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -35,29 +35,158 @@ std::array<const char*, 16> g_theme_bg_palette =
     kHighContrastBgPalette;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 bool g_high_contrast = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-TuiTheme g_tui_theme =
-    TuiTheme::Adaptive;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static const ThemeGlyphs kModernUnicodeGlyphs = {
+    .top_left = "╭",
+    .top_right = "╮",
+    .bot_left = "╰",
+    .bot_right = "╯",
+    .horiz = "─",
+    .vert = "│",
+    .tee_left = "├",
+    .tee_right = "┤",
+    .tee_top = "┬",
+    .tee_bot = "┴",
+    .cross = "┼",
+    .double_horiz = "═",
+    .double_vert = "║",
+    .bullet = "•",
+    .arrow_up = "▲",
+    .arrow_down = "▼",
+    .arrow_left = "◄",
+    .arrow_right = "►",
+    .icon_settings = "CFG",
+    .icon_help = " ? ",
+    .icon_theme = "THM",
+    .icon_power = "PWR",
+    .icon_warn = "[!]",
+    .icon_error = "[X]",
+};
 
-auto set_tui_theme(TuiTheme theme) -> void {
-    g_tui_theme = theme;
-    switch (theme) {
-        case TuiTheme::HighContrast:
-            g_high_contrast = true;
-            g_theme_border = kContrastBorder;
-            g_theme_text = kContrastText;
-            g_theme_val = kContrastVal;
-            g_theme_muted = kContrastMuted;
-            g_theme_mint = kContrastMint;
-            g_theme_peach = kContrastPeach;
-            g_theme_coral = kContrastCoral;
-            g_theme_sky = kContrastSky;
-            g_theme_pink = kContrastPink;
+static const ThemeGlyphs kClassicAnsiGlyphs = {
+    .top_left = "+",
+    .top_right = "+",
+    .bot_left = "+",
+    .bot_right = "+",
+    .horiz = "-",
+    .vert = "|",
+    .tee_left = "+",
+    .tee_right = "+",
+    .tee_top = "+",
+    .tee_bot = "+",
+    .cross = "+",
+    .double_horiz = "=",
+    .double_vert = "|",
+    .bullet = "*",
+    .arrow_up = "^",
+    .arrow_down = "v",
+    .arrow_left = "<",
+    .arrow_right = ">",
+    .icon_settings = "CFG",
+    .icon_help = " ? ",
+    .icon_theme = "THM",
+    .icon_power = "RST",
+    .icon_warn = "[!]",
+    .icon_error = "[X]",
+};
+
+static const ThemeGlyphs kSakuraPastelGlyphs = {
+    .top_left = "╭",
+    .top_right = "╮",
+    .bot_left = "╰",
+    .bot_right = "╯",
+    .horiz = "─",
+    .vert = "│",
+    .tee_left = "├",
+    .tee_right = "┤",
+    .tee_top = "┬",
+    .tee_bot = "┴",
+    .cross = "┼",
+    .double_horiz = "═",
+    .double_vert = "║",
+    .bullet = "•",
+    .arrow_up = "▲",
+    .arrow_down = "▼",
+    .arrow_left = "◄",
+    .arrow_right = "►",
+    .icon_settings = "CFG",
+    .icon_help = " ? ",
+    .icon_theme = "THM",
+    .icon_power = "PWR",
+    .icon_warn = "[!]",
+    .icon_error = "[X]",
+};
+
+TuiThemeStyle g_theme_style = TuiThemeStyle::ModernUnicode;
+
+auto get_theme_glyphs(TuiThemeStyle style) -> const ThemeGlyphs& {
+    switch (style) {
+        case TuiThemeStyle::ClassicAnsi:
+            return kClassicAnsiGlyphs;
+        case TuiThemeStyle::SakuraPastel:
+            return kSakuraPastelGlyphs;
+        case TuiThemeStyle::ModernUnicode:
+        default:
+            return kModernUnicodeGlyphs;
+    }
+}
+
+auto get_active_theme_style() -> TuiThemeStyle { return g_theme_style; }
+
+void set_theme_style(TuiThemeStyle style) {
+    g_theme_style = style;
+    set_high_contrast(g_high_contrast);
+}
+
+void cycle_theme_style() {
+    switch (g_theme_style) {
+        case TuiThemeStyle::ModernUnicode:
+            set_theme_style(TuiThemeStyle::ClassicAnsi);
+            break;
+        case TuiThemeStyle::ClassicAnsi:
+            set_theme_style(TuiThemeStyle::SakuraPastel);
+            break;
+        case TuiThemeStyle::SakuraPastel:
+        default:
+            set_theme_style(TuiThemeStyle::ModernUnicode);
+            break;
+    }
+}
+
+namespace {
+
+void apply_theme_palette() {
+    if (g_high_contrast) {
+        g_theme_border = kContrastBorder;
+        g_theme_text = kContrastText;
+        g_theme_val = kContrastVal;
+        g_theme_muted = kContrastMuted;
+        g_theme_mint = kContrastMint;
+        g_theme_peach = kContrastPeach;
+        g_theme_coral = kContrastCoral;
+        g_theme_sky = kContrastSky;
+        g_theme_pink = kContrastPink;
+        g_theme_modal_bg = "\033[40m";
+        g_theme_palette = kHighContrastPalette;
+        g_theme_bg_palette = kHighContrastBgPalette;
+        return;
+    }
+
+    switch (g_theme_style) {
+        case TuiThemeStyle::ClassicAnsi:
+            g_theme_border = kClassicAnsiBorder;
+            g_theme_text = kClassicAnsiText;
+            g_theme_val = kClassicAnsiVal;
+            g_theme_muted = kClassicAnsiMuted;
+            g_theme_mint = kClassicAnsiMint;
+            g_theme_peach = kClassicAnsiPeach;
+            g_theme_coral = kClassicAnsiCoral;
+            g_theme_sky = kClassicAnsiSky;
+            g_theme_pink = kClassicAnsiPink;
             g_theme_modal_bg = "\033[40m";
             g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
-        case TuiTheme::Adaptive:
-            g_high_contrast = false;
+        case TuiThemeStyle::ModernUnicode:
             g_theme_border = kAdaptiveBorder;
             g_theme_text = kAdaptiveText;
             g_theme_val = kAdaptiveVal;
@@ -67,13 +196,12 @@ auto set_tui_theme(TuiTheme theme) -> void {
             g_theme_coral = kAdaptiveCoral;
             g_theme_sky = kAdaptiveSky;
             g_theme_pink = kAdaptivePink;
-            g_theme_modal_bg = "\033[40m";
+            g_theme_modal_bg = kAdaptiveModalBg;
             g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
-        case TuiTheme::Sakura:
+        case TuiThemeStyle::SakuraPastel:
         default:
-            g_high_contrast = false;
             g_theme_border = kSakuraBorderConst;
             g_theme_text = kSakuraTextConst;
             g_theme_val = kSakuraValConst;
@@ -90,14 +218,11 @@ auto set_tui_theme(TuiTheme theme) -> void {
     }
 }
 
-auto get_tui_theme() -> TuiTheme { return g_tui_theme; }
+}  // namespace
 
 auto set_high_contrast(bool enable) -> void {
-    if (enable) {
-        set_tui_theme(TuiTheme::HighContrast);
-    } else if (g_tui_theme == TuiTheme::HighContrast) {
-        set_tui_theme(TuiTheme::Adaptive);
-    }
+    g_high_contrast = enable;
+    apply_theme_palette();
 }
 
 auto is_high_contrast() -> bool { return g_high_contrast; }
@@ -177,7 +302,7 @@ struct Utf8Cell {
 
 }  // namespace
 
-auto get_display_width(const std::string& s) -> int {
+auto get_display_width(std::string_view s) -> int {
     int len = 0;
     bool in_esc = false;
     bool in_csi = false;
@@ -271,7 +396,7 @@ static auto get_esc_seq_len(const std::string& str, std::size_t start) -> std::s
         return i - start;
     }
     if (c == 'P' || c == ']' || c == '_' || c == '^') {
-        // DCS (Sixel graphics), OSC, APC, PM sequences — terminated by ST (\033\) or BEL (\007)
+        // DCS (Sixel graphics), OSC, APC, PM sequences - terminated by ST (\033\) or BEL (\007)
         i++;
         while (i < str.length()) {
             if (str[i] == '\007') {

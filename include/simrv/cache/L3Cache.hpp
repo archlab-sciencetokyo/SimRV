@@ -1,0 +1,61 @@
+/**
+ * @file L3Cache.hpp
+ * @brief Shared Last-Level Cache (LLC) interface for multi-hart SMP.
+ */
+#pragma once
+
+#include "simrv/cache/BaseCache.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::cache {
+
+/**
+ * @class L3Cache
+ * @brief Shared multi-hart Last-Level Cache (default 512 KiB, 64-byte lines, 16 ways).
+ */
+class L3Cache : public BaseCache<16384, 64, 16> {
+   public:
+    L3Cache() = default;
+
+    [[nodiscard]] auto lookup_line(simrv::xlen::PhysAddr line_base,
+                                   std::array<simrv::xlen::Byte, kLineBytes>& out_data,
+                                   simrv::memory::MesiState& out_state) -> bool {
+        const uint32_t set_idx = get_set_index(line_base);
+        const auto tag = get_tag(line_base);
+        last_accessed_set_ = set_idx;
+
+        const auto [w, cache_line] = find_matching_line(set_idx, tag);
+        if (cache_line != nullptr) {
+            out_state = cache_line->state;
+            std::memcpy(out_data.data(), cache_line->data.data(), line_bytes());
+            cache_line->last_used = ++access_tick_;
+            ++hits_;
+            last_access_was_hit_ = true;
+            last_hit_way_ = w;
+            return true;
+        }
+
+        ++misses_;
+        last_access_was_hit_ = false;
+        last_hit_way_ = 0xFFFFFFFF;
+        return false;
+    }
+
+    void write_line(simrv::xlen::PhysAddr line_base,
+                    const std::array<simrv::xlen::Byte, kLineBytes>& in_data,
+                    simrv::memory::MesiState state = simrv::memory::MesiState::Exclusive) {
+        insert(line_base, in_data.data(), state);
+    }
+
+    void invalidate_line(simrv::xlen::PhysAddr line_base) {
+        (void)probe_line(line_base, simrv::memory::MesiState::Invalid);
+    }
+    template <std::integral I, typename... Args>
+    auto lookup_line(I, Args&&...) = delete;
+    template <std::integral I, typename... Args>
+    void write_line(I, Args&&...) = delete;
+    template <std::integral I>
+    void invalidate_line(I) = delete;
+};
+
+}  // namespace simrv::cache

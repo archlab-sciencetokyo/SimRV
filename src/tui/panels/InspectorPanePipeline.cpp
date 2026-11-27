@@ -1,0 +1,1212 @@
+/**
+ * @file InspectorPanePipeline.cpp
+ * @brief Pipeline visualization pane rendering for the TUI register panel.
+ *
+ * Designed to be readable by students learning about pipelining:
+ *   - Each stage section is labelled with its purpose
+ *   - Contextual descriptions replace raw hex dumps
+ *   - Computation equations show what the EX stage computed
+ *   - Memory access descriptions explain load/store behavior
+ */
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <format>
+#include <string>
+#include <vector>
+
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
+#include "simrv/isa/Common.hpp"
+#include "simrv/isa/TrapTypes.hpp"
+#include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
+
+namespace simrv::tui {
+
+using simrv::isa::Opcode;
+using simrv::isa::OperationId;
+using simrv::pipeline::PipelineStage;
+using enum simrv::isa::OperationId;
+using simrv::isa::InstFormat;
+
+namespace {
+
+struct TimelineInstruction {
+    uint64_t inst_id = 0;
+    simrv::xlen::VirtAddr pc{};
+    isa::OperationId op_id = isa::OperationId::ILLEGAL;
+
+    auto operator==(const TimelineInstruction& other) const -> bool {
+        return inst_id != 0 && other.inst_id != 0 ? inst_id == other.inst_id : pc == other.pc;
+    }
+};
+
+auto timeline_instructions(simrv::pipeline::PipelineHistoryView history)
+    -> std::vector<TimelineInstruction> {
+    std::vector<TimelineInstruction> instructions;
+    const int history_size = static_cast<int>(history.size());
+    for (int i = std::max(0, history_size - 14); i < history_size; ++i) {
+        const auto& snap = history.at(i);
+        const std::array stages = {&snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+        for (const auto* stage : stages) {
+            if (stage->valid && stage->pc != 0) {
+                const TimelineInstruction ref{stage->inst_id, stage->pc, stage->op_id};
+                if (!std::ranges::contains(instructions, ref)) instructions.push_back(ref);
+            }
+        }
+    }
+    constexpr size_t kMaxRows = 5;
+    if (instructions.size() > kMaxRows) {
+        instructions.erase(instructions.begin(), instructions.end() - kMaxRows);
+    }
+    return instructions;
+}
+
+// -----------------------------------------------------------------------
+// Shared helpers
+// -----------------------------------------------------------------------
+
+auto reg_name(simrv::xlen::RegId r) -> std::string {
+    const auto name = simrv::isa::gpr_abi_name(r);
+    if (name != "unknown") return std::string(name);
+    return std::format("x{}", std::to_underlying(r));
+}
+
+auto fp_reg_name(simrv::xlen::RegId r) -> std::string {
+    const auto name = simrv::isa::fpr_abi_name(simrv::xlen::to_fp_reg_id(r));
+    if (name != "unknown") return std::string(name);
+    return std::format("f{}", std::to_underlying(r));
+}
+
+auto reg_with_x(simrv::xlen::RegId r) -> std::string {
+    uint32_t idx = std::to_underlying(r);
+    if (idx >= 32) return std::format("x{}", idx);
+    return std::format("{} (x{})", kRegNames.at(idx), idx);
+}
+
+auto hex_val(simrv::xlen::Register v) -> std::string {
+    if constexpr (sizeof(simrv::xlen::Register) <= 4) {
+        return std::format("0x{:08x}", v);
+    } else {
+        auto val = static_cast<uint64_t>(v);
+        if ((val >> 32) == 0) {
+            return std::format("0x{:08x}", static_cast<uint32_t>(val));
+        }
+        return std::format("0x{:016x}", val);
+    }
+}
+
+auto hex_val(simrv::xlen::VirtAddr v) -> std::string { return hex_val(v.raw()); }
+auto hex_val(simrv::xlen::PhysAddr p) -> std::string { return hex_val(p.raw()); }
+
+auto privilege_name(simrv::xlen::PrivilegeLevel privilege) -> const char* {
+    switch (privilege) {
+        case simrv::xlen::PrivilegeLevel::Machine:
+            return "Machine";
+        case simrv::xlen::PrivilegeLevel::Supervisor:
+            return "Supervisor";
+        case simrv::xlen::PrivilegeLevel::User:
+            return "User";
+        default:
+            return "Unknown";
+    }
+}
+
+auto translation_name(simrv::xlen::Word mode, unsigned xlen) -> std::string {
+    if (mode == 0) return "Bare";
+    if (xlen == 32 && mode == 1) return "Sv32";
+    if (xlen == 64 && mode == 8) return "Sv39";
+    if (xlen == 64 && mode == 9) return "Sv48";
+    if (xlen == 64 && mode == 10) return "Sv57";
+    return std::format("mode {}", mode);
+}
+
+auto trap_summary(simrv::xlen::TrapCause cause) -> std::string {
+    if (trap_is_interrupt(cause)) return std::format("interrupt {}", trap_exception_code(cause));
+    switch (to_exception_code(cause)) {
+        case ExceptionCode::IllegalInstruction:
+            return "illegal insn";
+        case ExceptionCode::Breakpoint:
+            return "breakpoint";
+        case ExceptionCode::FaultLoad:
+            return "load fault";
+        case ExceptionCode::FaultStore:
+            return "store fault";
+        case ExceptionCode::FetchPageFault:
+            return "I-page fault";
+        case ExceptionCode::LoadPageFault:
+            return "load page";
+        case ExceptionCode::StorePageFault:
+            return "store page";
+        default:
+            return std::format("exception {}", trap_exception_code(cause));
+    }
+}
+
+auto short_op_name(const simrv::pipeline::PipelineReg& reg) -> std::string {
+    if (!reg.valid) return "-";
+    return std::string(simrv::pipeline::operation_name(reg.op_id));
+}
+
+/// Is this opcode a load instruction?
+auto is_load_opcode(Opcode opc) -> bool { return opc == Opcode::Load || opc == Opcode::LoadFp; }
+
+/// Is this opcode a store instruction?
+auto is_store_opcode(Opcode opc) -> bool { return opc == Opcode::Store || opc == Opcode::StoreFp; }
+
+/// Is this opcode a branch?
+auto is_branch_opcode(Opcode opc) -> bool { return opc == Opcode::Branch; }
+
+/// Build a one-line description of what the EX stage computed.
+auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width) -> std::string {
+    auto const opc = ctx.opcode;
+    const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
+
+    bool is_rs1_fp = simrv::isa::is_rs1_fp(opc, ctx.op_id);
+    bool is_rs2_fp = simrv::isa::is_rs2_fp(opc, ctx.op_id);
+    std::string reg1 = is_rs1_fp ? fp_reg_name(ctx.rs1) : reg_name(ctx.rs1);
+    std::string reg2 = is_rs2_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
+
+    if (is_load_opcode(opc)) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            std::string offset_str = (ctx.imm != 0) ? std::format(" + {}", ctx.imm) : "";
+            return std::format(" {}Computation : {}[{}{}] → {}\033[0m", kThemeText, kThemeMint,
+                               reg1, offset_str, hex_val(ctx.mem_rdata));
+        }
+        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
+    }
+    if (is_store_opcode(opc)) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            std::string offset_str = (ctx.imm != 0) ? std::format(" + {}", ctx.imm) : "";
+            return std::format(" {}Computation : {}{} ({}) → [{}{}]\033[0m", kThemeText, kThemeMint,
+                               reg2, hex_val(ctx.rrs2), reg1, offset_str);
+        }
+        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
+    }
+    if (is_branch_opcode(opc)) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            return std::format(" {}Computation : {}{} vs {} → {}\033[0m", kThemeText, kThemeMint,
+                               reg1, reg2, ctx.tkn ? "Taken" : "Not Taken");
+        }
+        return std::format(" {}Computation : {}Compare {} vs {} → {}\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2),
+                           ctx.tkn ? "Taken" : "Not Taken");
+    }
+    if (opc == Opcode::Jal) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            return std::format(" {}Computation : {}Jump → {} (link in rd)\033[0m", kThemeText,
+                               kThemeMint, hex_val(ctx.jmp_pc));
+        }
+        return std::format(" {}Computation : {}Jump to {} (link {} in rd)\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.jmp_pc), hex_val((ctx.cpc + 4).raw()));
+    }
+    if (opc == Opcode::Jalr) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            return std::format(" {}Computation : {}Jump → {} (link in rd)\033[0m", kThemeText,
+                               kThemeMint, hex_val(ctx.jmp_pc));
+        }
+        return std::format(" {}Computation : {}Jump to {} + {} = {} (link in rd)\033[0m",
+                           kThemeText, kThemeMint, hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.jmp_pc));
+    }
+    if (opc == Opcode::Lui) {
+        return std::format(" {}Computation : {}imm << 12 = {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.wb_data));
+    }
+    if (opc == Opcode::Auipc) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            return std::format(" {}Computation : {}PC + (imm << 12) = {}\033[0m", kThemeText,
+                               kThemeMint, hex_val(ctx.wb_data));
+        }
+        return std::format(" {}Computation : {}PC + (imm << 12) = {} + {} = {}\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.cpc.raw()),
+                           hex_val(static_cast<simrv::xlen::Register>(ctx.imm) << 12),
+                           hex_val(ctx.wb_data));
+    }
+    // System / CSR
+    if (opc == Opcode::System) {
+        if (ctx.op_id == ECALL) {
+            return std::format(" {}Computation : {}Environment call (trap to handler)\033[0m",
+                               kThemeText, kThemePeach);
+        }
+        if (ctx.op_id == EBREAK) {
+            return std::format(" {}Computation : {}Breakpoint (trap to debugger)\033[0m",
+                               kThemeText, kThemePeach);
+        }
+        return std::format(" {}Computation : {}CSR operation → {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.wb_data));
+    }
+    // Fence
+    if (opc == Opcode::MiscMem) {
+        return std::format(" {}Computation : {}Memory fence (ordering barrier)\033[0m", kThemeText,
+                           kThemeMuted);
+    }
+    // Default: ALU / FP / Atomic / Vector
+    // Show: operand1 <op> operand2 = result
+    InstFormat fmt = simrv::isa::get_instruction_format(opc);
+    if (fmt == InstFormat::R4 || pipeline::operation::reads_rs3(ctx.op_id)) {
+        return std::format(" {}Computation : {}{} * {} ± rs3 = {} [FMA 3-op]\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2), hex_val(ctx.wb_data));
+    }
+    if (fmt == InstFormat::R) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
+            return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
+                               reg1, op_name, reg2, hex_val(ctx.wb_data));
+        }
+        return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs1), op_name, hex_val(ctx.rrs2), hex_val(ctx.wb_data));
+    }
+    // I-type ALU
+    if (framework::active_render_context().density == framework::Density::Compact || width < 68) {
+        return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint, reg1,
+                           op_name, ctx.imm, hex_val(ctx.wb_data));
+    }
+    return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
+                       hex_val(ctx.rrs1), op_name, ctx.imm, hex_val(ctx.wb_data));
+}
+
+/// Build a description for the MEM stage.
+auto get_mem_stage_desc(const simrv::pipeline::PipelineContext& ctx)
+    -> std::pair<std::string, std::string> {
+    if (pipeline::operation::is_atomic(ctx.op_id)) {
+        return {std::format("Atomic RMW at {}", hex_val(ctx.mem_addr)), hex_val(ctx.mem_wdata)};
+    }
+    if (pipeline::operation::is_load(ctx.op_id) || is_load_opcode(ctx.opcode)) {
+        return {std::format("Load [{}]", hex_val(ctx.mem_addr)), hex_val(ctx.mem_rdata)};
+    }
+    if (pipeline::operation::is_store(ctx.op_id) || is_store_opcode(ctx.opcode)) {
+        return {std::format("Store [{}]", hex_val(ctx.mem_addr)), hex_val(ctx.mem_wdata)};
+    }
+    return {"None (not a load/store)", "—"};
+}
+
+/// Format the Source 2 description based on instruction format.
+auto get_src2_desc(const simrv::pipeline::PipelineContext& ctx, InstFormat fmt) -> std::string {
+    if (fmt == InstFormat::I || fmt == InstFormat::U || fmt == InstFormat::J) {
+        return std::format("(none — uses imm)");
+    }
+    if (fmt == InstFormat::S) {
+        bool is_fp = is_store_opcode(ctx.opcode) && ctx.opcode == Opcode::StoreFp;
+        std::string name = is_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
+        return std::format("{} = {}", name, hex_val(ctx.rrs2));
+    }
+    if (fmt == InstFormat::R || fmt == InstFormat::B || fmt == InstFormat::R4) {
+        bool is_fp = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+        std::string name = is_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
+        return std::format("{} = {}", name, hex_val(ctx.rrs2));
+    }
+    return "—";
+}
+
+// -----------------------------------------------------------------------
+// Cycle-accurate helpers
+// -----------------------------------------------------------------------
+
+auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
+                          const simrv::pipeline::PipelineReg& d_reg,
+                          const simrv::pipeline::PipelineReg& stage_reg) -> bool {
+    if (!stage_reg.valid || !stage_reg.writes_reg ||
+        stage_reg.rd == static_cast<simrv::xlen::RegId>(0)) {
+        return false;
+    }
+    if (ps.config.enable_forwarding) {
+        if (stage_reg.remaining_latency == 0) {
+            return false;
+        }
+    }
+    bool reads_rs1 = (d_reg.rs1 != static_cast<simrv::xlen::RegId>(0));
+    bool reads_rs2 = (d_reg.rs2 != static_cast<simrv::xlen::RegId>(0));
+    return (reads_rs1 && d_reg.rs1 == stage_reg.rd) || (reads_rs2 && d_reg.rs2 == stage_reg.rd);
+}
+
+auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
+    const auto& decode = ps.stage_reg(PipelineStage::Decode);
+    if (!decode.valid) return false;
+    return has_stage_raw_hazard(ps, decode, ps.stage_reg(PipelineStage::Execute)) ||
+           has_stage_raw_hazard(ps, decode, ps.stage_reg(PipelineStage::Memory));
+}
+
+auto compact_hex(simrv::xlen::Register v) -> std::string { return hex_val(v); }
+
+auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
+                    const std::string& stall_type, bool raw_stall = false) -> std::string {
+    if (!reg.valid) {
+        return std::format("{}bubble (empty)\033[0m", kThemeMuted);
+    }
+    const std::string_view op_name = simrv::pipeline::operation_name(reg.op_id);
+
+    std::string ops_info;
+    if (reg.rs1 != static_cast<simrv::xlen::RegId>(0) ||
+        reg.rs2 != static_cast<simrv::xlen::RegId>(0) ||
+        (reg.writes_reg && reg.rd != static_cast<simrv::xlen::RegId>(0))) {
+        std::vector<std::string> srcs;
+        if (reg.rs1 != static_cast<simrv::xlen::RegId>(0)) srcs.push_back(reg_name(reg.rs1));
+        if (reg.rs2 != static_cast<simrv::xlen::RegId>(0)) srcs.push_back(reg_name(reg.rs2));
+
+        std::string src_str =
+            srcs.empty() ? ""
+                         : (srcs.size() == 1 ? srcs[0] : std::format("{}, {}", srcs[0], srcs[1]));
+        if (reg.writes_reg && reg.rd != static_cast<simrv::xlen::RegId>(0)) {
+            if (!src_str.empty()) {
+                ops_info = std::format(" \033[90m[{} → {}]\033[0m", src_str, reg_name(reg.rd));
+            } else {
+                ops_info = std::format(" \033[90m[→ {}]\033[0m", reg_name(reg.rd));
+            }
+        } else if (!src_str.empty()) {
+            ops_info = std::format(" \033[90m[{}]\033[0m", src_str);
+        }
+    }
+
+    std::string desc = std::format("\033[1m{}{}\033[0m ({}{}{}){}", kThemeMint, op_name, kThemeSky,
+                                   compact_hex(reg.pc.raw()), "\033[0m", ops_info);
+    if (stall_rem > 0) {
+        std::string tag = stall_type;
+        if (tag == "I-Cache Miss")
+            tag = "I-Cache";
+        else if (tag == "D-Cache Miss")
+            tag = "D-Cache";
+        else if (tag == "TLB Miss")
+            tag = "TLB";
+        else if (tag == "Divider Busy")
+            tag = "Divider";
+        desc += std::format(" {}[{}: {}c]\033[0m", kThemeCoral, tag, stall_rem);
+    } else if (raw_stall) {
+        desc += std::format(" {}[RAW Stall]\033[0m", kThemeCoral);
+    } else if (reg.remaining_latency > 0) {
+        desc += std::format(" {}[Lat: {}c]\033[0m", kThemePeach, reg.remaining_latency);
+    }
+    return desc;
+}
+
+auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::VirtAddr {
+    const auto& execute = ps.stage_reg(PipelineStage::Execute);
+    if (execute.valid && (execute.is_branch || execute.is_jump)) {
+        return simrv::xlen::VirtAddr{execute.pc};
+    }
+    const auto& decode = ps.stage_reg(PipelineStage::Decode);
+    if (decode.valid && (decode.is_branch || decode.is_jump)) {
+        return simrv::xlen::VirtAddr{decode.pc};
+    }
+    return {};
+}
+
+auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
+    -> std::string {
+    if (pc == 0) {
+        return "No active branch";
+    }
+    return "No prediction (resolved in execute)";
+}
+
+auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
+    -> std::string {
+    if (pc == 0) {
+        return "No active branch";
+    }
+    return "Disabled in the current CA policy";
+}
+
+auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
+    -> std::vector<std::string> {
+    std::vector<std::string> paths;
+    if (!ps.config.enable_forwarding) return paths;
+
+    const auto& d = ps.stage_reg(PipelineStage::Decode);
+    if (!d.valid) return paths;
+
+    const auto& e = ps.stage_reg(PipelineStage::Execute);
+    const auto& m = ps.stage_reg(PipelineStage::Memory);
+    const auto& w = ps.stage_reg(PipelineStage::Writeback);
+
+    auto check_src = [&](simrv::xlen::RegId rs, const std::string& rs_label) -> void {
+        if (rs == static_cast<simrv::xlen::RegId>(0)) return;
+
+        if (e.valid && e.writes_reg && e.rd == rs) {
+            if (e.remaining_latency == 0) {
+                paths.push_back(std::format("EX→ID ({})", rs_label));
+                return;
+            }
+        }
+        if (m.valid && m.writes_reg && m.rd == rs) {
+            if (m.remaining_latency == 0) {
+                paths.push_back(std::format("MEM→ID ({})", rs_label));
+                return;
+            }
+        }
+        if (w.valid && w.writes_reg && w.rd == rs) {
+            paths.push_back(std::format("WB→ID ({})", rs_label));
+            return;
+        }
+    };
+
+    check_src(d.rs1, reg_name(d.rs1));
+    check_src(d.rs2, reg_name(d.rs2));
+
+    return paths;
+}
+
+}  // namespace
+
+// =======================================================================
+// Top-level dispatch
+// =======================================================================
+
+auto InspectorPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row,
+                                           int col_width, int right_width) -> std::string {
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        // CA mode: rows 0-8 timeline, rows 9+ stage details
+        if (logical_row < 9) {
+            return render_pipeline_timeline(cpu, logical_row, col_width + right_width);
+        }
+        return render_pipeline_stages_cycle_accurate(cpu, logical_row, col_width, right_width);
+    } else {
+        return render_pipeline_stages_functional(cpu, logical_row, col_width, right_width);
+    }
+}
+
+// =======================================================================
+// Cycle-Accurate mode
+// =======================================================================
+
+auto InspectorPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
+                                                          int logical_row, int col_width,
+                                                          int right_width) -> std::string {
+    // Adjusted row index relative to the start of the non-timeline area.
+    // Timeline occupies rows 0-8, so stage details begin at row 9.
+    int const val = logical_row - 9;
+    if (val >= 0 && val <= 6) {
+        return render_pipeline_stages_ca_core(cpu, val, col_width + right_width);
+    }
+    if (val >= 7 && val <= 12) {
+        return render_pipeline_stages_ca_hazards(cpu, val, col_width, right_width);
+    }
+    return render_pipeline_stages_ca_pred(cpu, val, col_width + right_width);
+}
+
+auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx,
+                                                   int width) -> std::string {
+    auto& ps = cpu.pipeline_sim;
+    const auto& fetch = ps.stage_reg(PipelineStage::Fetch);
+    const auto& decode = ps.stage_reg(PipelineStage::Decode);
+    const auto& execute = ps.stage_reg(PipelineStage::Execute);
+    const auto& memory = ps.stage_reg(PipelineStage::Memory);
+    const auto& writeback = ps.stage_reg(PipelineStage::Writeback);
+    bool is_raw_stalled = is_raw_hazard_stalled(ps);
+
+    const auto ptype = ps.config.pipeline_type;
+
+    if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
+        switch (stage_idx) {
+            case 0:
+                return section_line("3-Stage Embedded Core (Ibex/E21)", width);
+            case 1: {
+                std::string diagram = std::format(
+                    " [1;36mIF:{}\033[0m → \033[1;32mID/EX:{}\033[0m → "
+                    "\033[1;34mMEM/WB:{}\033[0m",
+                    short_op_name(fetch), short_op_name(execute), short_op_name(writeback));
+                return format_to_width(diagram, width);
+            }
+            case 2: {
+                std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
+                uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
+                                                                  : ps.icache_stall_remaining();
+                return format_to_width(std::format(" [1m{}IF   (Fetch)\033[0m     : {}", kThemeSky,
+                                                   get_stage_desc(fetch, stall_rem, stall_type)),
+                                       width);
+            }
+            case 3:
+                return format_to_width(
+                    std::format(" [1m{}ID/EX(Execute)\033[0m   : {}", kThemeSky,
+                                get_stage_desc(execute, ps.div_busy_cycles_remaining(),
+                                               "Divider Busy", is_raw_stalled)),
+                    width);
+            case 4:
+                return format_to_width(
+                    std::format(
+                        " [1m{}MEM/WB(Write)\033[0m   : {}", kThemeSky,
+                        get_stage_desc(writeback, ps.dcache_stall_remaining(), "D-Cache Miss")),
+                    width);
+            case 5:
+                return format_to_width(
+                    std::format(" [90m{:<29} : Single-issue In-order\033[0m", "Microarchitecture"),
+                    width);
+            case 6:
+                return format_to_width("", width);
+            default:
+                return format_to_width("", width);
+        }
+    }
+
+    // Default: 5-Stage Rocket In-Order
+    switch (stage_idx) {
+        case 0:
+            return section_line("Current Pipeline State (5-Stage)", width);
+        case 1: {
+            std::string diagram = std::format(
+                " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → "
+                "\033[1;32mEX:{}\033[0m "
+                "→ "
+                "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
+                short_op_name(fetch), short_op_name(decode), short_op_name(execute),
+                short_op_name(memory), short_op_name(writeback));
+            return format_to_width(diagram, width);
+        }
+        case 2: {
+            std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
+            uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
+                                                              : ps.icache_stall_remaining();
+            return format_to_width(std::format(" [1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
+                                               get_stage_desc(fetch, stall_rem, stall_type)),
+                                   width);
+        }
+        case 3:
+            return format_to_width(std::format(" [1m{}ID  (Decode)\033[0m    : {}", kThemeSky,
+                                               get_stage_desc(decode, 0, "", is_raw_stalled)),
+                                   width);
+        case 4:
+            return format_to_width(
+                std::format(
+                    " [1m{}EX  (Execute)\033[0m   : {}", kThemeSky,
+                    get_stage_desc(execute, ps.div_busy_cycles_remaining(), "Divider Busy")),
+                width);
+        case 5:
+            return format_to_width(
+                std::format(" [1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
+                            get_stage_desc(memory, ps.dcache_stall_remaining(), "D-Cache Miss")),
+                width);
+        case 6:
+            return format_to_width(std::format(" [1m{}WB  (Write-Back)\033[0m: {}", kThemeSky,
+                                               get_stage_desc(writeback, 0, "")),
+                                   width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto InspectorPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx,
+                                                      int col_width, int right_width)
+    -> std::string {
+    auto& ps = cpu.pipeline_sim;
+    int const width = col_width + right_width;
+    bool is_raw_stalled = is_raw_hazard_stalled(ps);
+
+    auto status_str = [](bool active,
+                         const char* active_msg = "Active") -> std::pair<const char*, const char*> {
+        return active ? std::pair{active_msg, kThemePeach} : std::pair{"None", kThemeMint};
+    };
+
+    auto [raw_status, raw_color] = status_str(is_raw_stalled);
+    auto [div_status, div_color] = status_str(ps.div_busy_cycles_remaining() > 0);
+    auto [ic_status, ic_color] = status_str(ps.icache_stall_remaining() > 0);
+    auto [dc_status, dc_color] = status_str(ps.dcache_stall_remaining() > 0);
+    auto [tlb_status, tlb_color] = status_str(ps.tlb_stall_remaining() > 0);
+    auto [ctrl_status, ctrl_color] = status_str(ps.control_bubble_remaining() > 0, "Flushing");
+
+    switch (stage_idx) {
+        case 7:
+            return section_line("Hazards & Forwarding", width);
+        case 8:
+            return render_pair("Data Hazard (RAW)", raw_status, raw_color, "Long-Latency Op",
+                               div_status, div_color, col_width, right_width, 18);
+        case 9:
+            return render_pair("I-Cache Miss", ic_status, ic_color, "D-Cache Miss", dc_status,
+                               dc_color, col_width, right_width, 18);
+        case 10:
+            return render_pair("TLB Miss", tlb_status, tlb_color, "Control Hazard", ctrl_status,
+                               ctrl_color, col_width, right_width, 18);
+        case 11: {
+            if (!ps.config.enable_forwarding) {
+                return format_to_width(
+                    std::format(" {}Forwarding\033[0m        : {}Disabled\033[0m", kThemeText,
+                                kThemeMuted),
+                    width);
+            }
+            auto paths = get_active_forwarding_paths(ps);
+            std::string paths_str = "Enabled · idle";
+            if (!paths.empty()) {
+                paths_str = "Enabled · ";
+                for (size_t i = 0; i < paths.size(); ++i) {
+                    if (i > 0) paths_str += ", ";
+                    paths_str += paths[i];
+                }
+            }
+            const char* paths_color = paths.empty() ? kThemeVal : kThemeMint;
+            return format_to_width(std::format(" {}Forwarding\033[0m        : {}{}\033[0m",
+                                               kThemeText, paths_color, paths_str),
+                                   width);
+        }
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx,
+                                                   int width) -> std::string {
+    auto& ps = cpu.pipeline_sim;
+
+    switch (stage_idx) {
+        case 13:
+            return section_line("Branch Prediction", width);
+        case 14: {
+            const auto pc = get_active_branch_pc(ps);
+            std::string bht_str = get_bht_string(ps, pc);
+            return format_to_width(std::format(" {}Branch History\033[0m : {}{}\033[0m", kThemeText,
+                                               kThemeVal, bht_str),
+                                   width);
+        }
+        case 15: {
+            const auto pc = get_active_branch_pc(ps);
+            std::string btb_str = get_btb_string(ps, pc);
+            return format_to_width(std::format(" {}Target Buffer\033[0m  : {}{}\033[0m", kThemeText,
+                                               kThemeVal, btb_str),
+                                   width);
+        }
+        default:
+            return format_to_width("", width);
+    }
+}
+
+// =======================================================================
+// Functional (non-cycle-accurate) mode
+// =======================================================================
+
+auto InspectorPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row,
+                                                      int col_width, int right_width)
+    -> std::string {
+    if (logical_row >= 0 && logical_row < 16) {
+        return render_pipeline_stages_functional_low(cpu, logical_row, col_width, right_width);
+    }
+    return render_pipeline_stages_functional_high(cpu, logical_row, col_width, right_width);
+}
+
+auto InspectorPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu,
+                                                          int logical_row, int col_width,
+                                                          int right_width) -> std::string {
+    if (logical_row >= 0 && logical_row <= 7) {
+        return render_pipeline_stages_functional_low_part1(cpu, logical_row, col_width,
+                                                           right_width);
+    }
+    if (logical_row >= 8 && logical_row <= 15) {
+        return render_pipeline_stages_functional_low_part2(cpu, logical_row, col_width,
+                                                           right_width);
+    }
+    return format_to_width(std::format(" {}Pipeline page\033[0m", kThemeMuted),
+                           col_width + right_width);
+}
+
+// Rows 0-7: Current Instruction overview + IF stage + ID stage header
+auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu,
+                                                                int logical_row, int col_width,
+                                                                int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto& ctx = cpu.pipeline_context;
+
+    // Get operation info for labels
+    const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
+    auto isa_ext = simrv::explain::get_isa_extension_name(ctx.op_id);
+    InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
+    bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
+
+    switch (logical_row) {
+        // Current Instruction
+        case 0:
+            return section_line("Current Instruction", width);
+        case 1: {
+            // Resolve against the instruction being presented rather than the architectural PC,
+            // which may already have advanced while the functional pipeline view is rendered.
+            std::string sym = machine_.symbol_table().lookup(ctx.cpc);
+            std::string pc_str = sym.empty() ? hex_val(ctx.cpc.raw())
+                                             : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
+
+            std::string asm_str = simrv::explain::format_instruction_assembly(
+                ctx.ir_org, ctx.cpc, cpu.state().current_xlen());
+
+            return render_pair("PC", pc_str, kThemeMint, "Asm", asm_str, kThemePeach, col_width,
+                               right_width, 10);
+        }
+        case 2: {
+            // Hex encoding + Format name
+            std::string hex_str = is_compressed
+                                      ? std::format("0x{:04X} (compressed)", ctx.ir_org & 0xFFFF)
+                                      : std::format("0x{:08X}", ctx.ir_org);
+            std::string fmt_str = std::string(simrv::isa::get_instruction_format_name(fmt));
+            return render_pair("Encoding", hex_str, kThemeVal, "Format", fmt_str, kThemeVal,
+                               col_width, right_width, 10);
+        }
+
+        // IF Instruction Fetch
+        case 3:
+            return section_line("IF  Instruction Fetch", width);
+        case 4:
+            return render_pair("Fetch PC", hex_val(ctx.cpc.raw()), kThemeMint, "Raw Word",
+                               std::format("0x{:08x}", ctx.ir_org), kThemeVal, col_width,
+                               right_width, 10);
+        case 5: {
+            std::string comp_str = is_compressed ? "Yes → decompressed" : "No";
+            return render_pair("Compressed", comp_str, kThemeVal, "Phys Addr", hex_val(ctx.padr1),
+                               kThemeVal, col_width, right_width, 10);
+        }
+
+        // ID Decode & Operand Read
+        case 6:
+            return section_line("ID  Decode & Operand Read", width);
+        case 7: {
+            std::string op_str = std::format("{} ({})", op_name, isa_ext);
+            bool is_dst_fp = pipeline::operation::writes_float(ctx.op_id);
+            bool has_dest = pipeline::operation::writes_rd(ctx.op_id);
+            std::string dst_str = !has_dest
+                                      ? "(none — no dest)"
+                                      : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
+            return render_pair("Operation", op_str, kThemeVal, "Dest Reg", dst_str, kThemeMint,
+                               col_width, right_width, 10);
+        }
+        default:
+            return format_to_width("", width);
+    }
+}
+
+// Rows 8-15: Source operands + EX stage + MEM stage + WB header
+auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu,
+                                                                int logical_row, int col_width,
+                                                                int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto& ctx = cpu.pipeline_context;
+    InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
+
+    bool is_rs1_fp = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
+
+    switch (logical_row) {
+        // ID continued: Source operands
+        case 8: {
+            // Source 1
+            std::string src1_str;
+            if (fmt == InstFormat::U || fmt == InstFormat::J) {
+                src1_str = "(none)";
+            } else {
+                std::string name = is_rs1_fp ? fp_reg_name(ctx.rs1) : reg_name(ctx.rs1);
+                src1_str = std::format("{} = {}", name, hex_val(ctx.rrs1));
+            }
+
+            // Source 2 or Immediate
+            std::string src2_label = "Source 2";
+            std::string src2_str = get_src2_desc(ctx, fmt);
+            if (fmt == InstFormat::I || fmt == InstFormat::S || fmt == InstFormat::B ||
+                fmt == InstFormat::U || fmt == InstFormat::J) {
+                src2_label = "Immediate";
+                src2_str = std::format("{} (0x{:X})", ctx.imm, static_cast<uint32_t>(ctx.imm));
+            }
+
+            return render_pair("Source 1", src1_str, kThemeMint, src2_label, src2_str, kThemeMint,
+                               col_width, right_width, 10);
+        }
+
+        // EX (Execute)
+        case 9:
+            return section_line("EX  Execute", width);
+        case 10:
+            return format_to_width(get_computation_desc(ctx, width), width);
+        case 11: {
+            std::string branch_str =
+                is_branch_opcode(ctx.opcode)
+                    ? (ctx.tkn ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
+                               : std::format("{}No (fall through)\033[0m", kThemeMint))
+                    : "No";
+            std::string jump_str = (ctx.opcode == Opcode::Jal || ctx.opcode == Opcode::Jalr)
+                                       ? hex_val(ctx.jmp_pc)
+                                       : "—";
+            return render_pair("Branch?", branch_str, kThemeVal, "Jump PC", jump_str, kThemeMint,
+                               col_width, right_width, 10);
+        }
+
+        // MEM (Memory Access)
+        case 12:
+            return section_line("MEM  Memory Access", width);
+        case 13: {
+            auto [access_str, data_str] = get_mem_stage_desc(ctx);
+            return render_pair("Access", access_str, kThemeMint, "Data", data_str, kThemeMint,
+                               col_width, right_width, 10);
+        }
+
+        // WB (Write-Back)
+        case 14:
+            return section_line("WB  Write-Back", width);
+        case 15: {
+            bool is_dst_fp = pipeline::operation::writes_float(ctx.op_id);
+            bool has_dest = pipeline::operation::writes_rd(ctx.op_id);
+            std::string dst_str =
+                has_dest ? (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd)) : "(none)";
+            std::string result_str = has_dest ? hex_val(ctx.wb_data) : "—";
+            if (ctx.fp_wb_enable) {
+                result_str = std::format("0x{:016x} (FP)", ctx.fp_wb_data);
+            }
+            return render_pair("Writes To", dst_str, kThemeMint, "Result", result_str, kThemeMint,
+                               col_width, right_width, 10);
+        }
+        default:
+            return format_to_width("", width);
+    }
+}
+
+// Rows 16-19: Exception / trap info + end marker
+auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu,
+                                                           int logical_row, int col_width,
+                                                           int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto& ctx = cpu.pipeline_context;
+
+    switch (logical_row) {
+        case 16: {
+            if (ctx.pending_exception.has_value()) {
+                const auto cause = simrv::isa::to_trap_cause(*ctx.pending_exception);
+                const std::string canonical_name = simrv::core::trap_cause_name(cause);
+                std::string cause_name =
+                    canonical_name != "Unknown Trap"
+                        ? std::string(canonical_name)
+                        : std::format("Exception ({})",
+                                      static_cast<uint64_t>(*ctx.pending_exception));
+                return render_pair("Exception", cause_name, kThemePeach, "Trap Value",
+                                   hex_val(ctx.pending_tval), kThemeVal, col_width, right_width,
+                                   10);
+            }
+            return render_pair("Exception", "None", kThemeMint, "Trap Value", "—", kThemeVal,
+                               col_width, right_width, 10);
+        }
+        case 17: {
+            // CSR info if relevant
+            bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
+            if (is_csr) {
+                uint32_t csr_addr = ctx.imm & 0xFFF;
+                std::string csr_nm = simrv::explain::csr_name(csr_addr);
+                return render_pair("CSR Target", std::format("{} (0x{:03X})", csr_nm, csr_addr),
+                                   kThemeVal, "CSR Read", hex_val(ctx.rcsr), kThemeVal, col_width,
+                                   right_width, 10);
+            }
+            return format_to_width("", width);
+        }
+        case 18:
+            return section_line("Instruction Flight Flow", width);
+        case 19: {
+            const bool has_mem =
+                pipeline::operation::is_load(ctx.op_id) || pipeline::operation::is_store(ctx.op_id);
+            const bool has_wb = pipeline::operation::writes_integer(ctx.op_id) ||
+                                pipeline::operation::writes_float(ctx.op_id);
+            return format_to_width(
+                std::format(" \033[1;32m[IF]\033[0m → \033[1;33m[ID]\033[0m → "
+                            "\033[1;31m[EX]\033[0m → {} → {}",
+                            has_mem ? "\033[1;34m[MEM]\033[0m" : "\033[90m[mem:—]\033[0m",
+                            has_wb ? "\033[1;37m[WB]\033[0m" : "\033[90m[wb:—]\033[0m"),
+                width);
+        }
+        case 20: {
+            const auto r1_name = reg_name(ctx.rs1);
+            const auto r2_name = reg_name(ctx.rs2);
+            return format_to_width(
+                std::format(" \033[90mOperands:\033[0m {}:{}  {}:{} → \033[90mALU:\033[0m {}",
+                            r1_name, hex_val(ctx.rrs1), r2_name, hex_val(ctx.rrs2),
+                            hex_val(ctx.wb_data)),
+                width);
+        }
+        case 21: {
+            if (pipeline::operation::is_load(ctx.op_id)) {
+                return format_to_width(
+                    std::format(" \033[90mMemory:\033[0m Load from {} → Data: {}",
+                                hex_val(ctx.mem_addr), hex_val(ctx.wb_data)),
+                    width);
+            }
+            if (pipeline::operation::is_store(ctx.op_id)) {
+                return format_to_width(std::format(" \033[90mMemory:\033[0m Store to {} ↝ Data: {}",
+                                                   hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
+                                       width);
+            }
+            return format_to_width(" \033[90mMemory: None (ALU/Register-only)\033[0m", width);
+        }
+        case 22: {
+            if (pipeline::operation::writes_integer(ctx.op_id) &&
+                ctx.rd != simrv::xlen::RegId::Zero) {
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ↝ {} "
+                                                   "\033[38;5;158m[Committed]\033[0m",
+                                                   reg_name(ctx.rd), hex_val(ctx.wb_data)),
+                                       width);
+            }
+            if (pipeline::operation::writes_float(ctx.op_id)) {
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ↝ {} "
+                                                   "\033[38;5;158m[Committed]\033[0m",
+                                                   fp_reg_name(ctx.rd), hex_val(ctx.wb_data)),
+                                       width);
+            }
+            return format_to_width(
+                " \033[90mCommit: Branch / CSR / Trap \033[38;5;158m[Committed]\033[0m", width);
+        }
+        case 23:
+            return format_to_width("", width);
+        case 24:
+            return section_line("End Flight Flow", width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+// =======================================================================
+// Pipeline Execution Timeline (cycle-accurate mode, rows 0-8)
+// =======================================================================
+
+auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
+                                             int width) -> std::string {
+    auto const& ps = cpu.pipeline_sim;
+    auto const history = ps.cycle_history();
+
+    if (logical_row == 0) {
+        return section_line("Execution Timeline (Clock Cycles #NN)", width);
+    }
+
+    if (history.empty()) {
+        if (logical_row == 1) {
+            return format_to_width(std::format(" {}No cycle history yet — step the simulator to "
+                                               "see instructions flow.\033[0m",
+                                               kThemeMuted),
+                                   width);
+        }
+        return format_to_width("", width);
+    }
+
+    int const history_size = static_cast<int>(history.size());
+
+    const auto active_insts = timeline_instructions(history);
+
+    // Determine max PC width dynamically (10 for 8-digit hex e.g. 0x8000002a, 18 for full 64-bit)
+    int max_pc_width = 10;
+    for (auto const& ref : active_insts) {
+        if (hex_val(ref.pc.raw()).size() > 10) {
+            max_pc_width = 18;
+        }
+    }
+    int const header_prefix_len = max_pc_width + 8;  // e.g. 10 + 8 = 18
+    int const desc_width = header_prefix_len + 2;    // prefix + " |"
+    int const cycle_col_width = 5;
+    constexpr int kMaxCycleColumns = 14;
+    int const max_cycles = std::min(kMaxCycleColumns, (width - desc_width) / cycle_col_width);
+    if (max_cycles <= 0) {
+        if (logical_row == 1) {
+            return format_to_width("  TUI Pane too narrow for timeline.", width);
+        }
+        return format_to_width("", width);
+    }
+
+    // Determine cycle window to display
+    int const num_cols = std::min(max_cycles, history_size);
+    int const start_idx = history_size - num_cols;
+
+    if (logical_row == 1) {
+        std::string header = std::format("{:<{}} |", "Instruction", header_prefix_len);
+        for (int i = start_idx; i < history_size; ++i) {
+            bool const is_current = (i == history_size - 1);
+            if (is_current) {
+                header += std::format(" \033[1;33m#\033[0m{:<2d} ", history.at(i).cycle % 100);
+            } else {
+                header += std::format(" \033[90m#\033[0m{:<2d} ", history.at(i).cycle % 100);
+            }
+        }
+        return format_to_width(header, width);
+    }
+
+    int const inst_row = logical_row - 2;
+    if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size() && inst_row < 5) {
+        auto const& inst = active_insts.at(inst_row);
+
+        // Get assembly mnemonic (truncated to max 5 chars to ensure table alignment)
+        const std::string_view op_mnem = simrv::pipeline::operation_name(inst.op_id);
+        std::string mnem_5 =
+            (op_mnem.size() > 5) ? std::string(op_mnem.substr(0, 5)) : std::string(op_mnem);
+        std::string pc_str = hex_val(inst.pc.raw());
+        std::string line = std::format("  {:>{}} {:<5} |", pc_str, max_pc_width, mnem_5);
+
+        const auto ptype = ps.config.pipeline_type;
+
+        for (int i = start_idx; i < history_size; ++i) {
+            auto const& snap = history.at(i);
+            std::string stage_lbl = " .   ";
+            auto matches =
+                [&](const simrv::pipeline::PipelineCycleSnapshot::StageInfo& stage) -> bool {
+                if (!stage.valid) return false;
+                if (inst.inst_id != 0 && stage.inst_id != 0) {
+                    return stage.inst_id == inst.inst_id;
+                }
+                return stage.pc == inst.pc;
+            };
+
+            if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
+                if (matches(snap.w)) {
+                    stage_lbl = "\033[1;37m WB\033[0m  ";
+                } else if (matches(snap.e)) {
+                    stage_lbl =
+                        snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
+                } else if (matches(snap.f)) {
+                    stage_lbl =
+                        snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+                }
+            } else {
+                // 5-Stage Rocket
+                if (matches(snap.w)) {
+                    stage_lbl = "\033[1;37m WB\033[0m  ";
+                } else if (matches(snap.m)) {
+                    stage_lbl =
+                        snap.m.stalled ? "\033[38;5;203m MEM*\033[0m" : "\033[1;34m MEM\033[0m ";
+                } else if (matches(snap.e)) {
+                    stage_lbl =
+                        snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
+                } else if (matches(snap.d)) {
+                    stage_lbl =
+                        snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
+                } else if (matches(snap.f)) {
+                    stage_lbl =
+                        snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+                }
+            }
+            line += stage_lbl;
+        }
+        return format_to_width(line, width);
+    }
+
+    if (logical_row == 7) {
+        if (ps.config.pipeline_type == simrv::pipeline::PipelineType::ThreeStage) {
+            return section_line("IF → ID/EX → MEM/WB   (* = Stalled)", width);
+        }
+        return section_line("IF → ID → EX → MEM → WB   (* = Stalled)", width);
+    }
+
+    return format_to_width("", width);
+}
+
+auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::VirtAddr {
+    auto const& cpu = current_cpu();
+    auto const& ps = cpu.pipeline_sim;
+
+    // Execution Timeline instruction rows (logical rows 2..6)
+    if (logical_row >= 2 && logical_row <= 6) {
+        auto const history = ps.cycle_history();
+        if (history.empty()) return {};
+        const auto active_insts = timeline_instructions(history);
+
+        int const inst_row = logical_row - 2;
+        if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size()) {
+            return active_insts.at(inst_row).pc;
+        }
+    }
+
+    // CA Stage Detail rows (logical rows 11..15 in CA mode)
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        const auto stage_pc = [&ps](PipelineStage stage) {
+            const auto& reg = ps.stage_reg(stage);
+            return reg.valid ? reg.pc : simrv::xlen::VirtAddr{};
+        };
+        switch (logical_row) {
+            case 11:
+                return stage_pc(PipelineStage::Fetch);
+            case 12:
+                return stage_pc(PipelineStage::Decode);
+            case 13:
+                return stage_pc(PipelineStage::Execute);
+            case 14:
+                return stage_pc(PipelineStage::Memory);
+            case 15:
+                return stage_pc(PipelineStage::Writeback);
+            default:
+                break;
+        }
+    }
+    return {};
+}
+
+auto InspectorPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,
+                                                       int col_width, int right_width,
+                                                       bool single_column) -> std::string {
+    if (page_ == TuiRegPage::PIPELINE && logical_row >= 16 && logical_row <= 24) {
+        return render_pipeline_stages(cpu, logical_row, col_width, right_width);
+    }
+    if (page_ == TuiRegPage::BUS && logical_row >= 16 && logical_row <= 24) {
+        return render_io_stats(cpu, logical_row, col_width, right_width);
+    }
+    if (page_ == TuiRegPage::DTREE && logical_row >= 0 &&
+        logical_row < performance_start_row(false)) {
+        return render_device_tree_stats(logical_row, col_width + right_width);
+    }
+    if (!single_column && logical_row >= 16 && logical_row <= 20) {
+        return render_system_state(cpu, logical_row, col_width, right_width);
+    }
+    return "";
+}
+
+auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                        int right_width) -> std::string {
+    auto const& st = cpu.state();
+    int const width = col_width + right_width;
+    int label_pad = (width < 64) ? 0 : 11;
+
+    if (logical_row == 16) {
+        return section_line("Machine State", width);
+    }
+    if (logical_row == 17) {
+        return render_pair("mode", privilege_name(st.priv), kThemeMint, "hart",
+                           std::to_string(st.mhartid), kThemeSky, col_width, right_width,
+                           label_pad);
+    }
+    if (logical_row == 18) {
+        const bool global_enabled = st.priv == simrv::xlen::PrivilegeLevel::Machine
+                                        ? (st.mstatus & core::MstatusBit::Mie) != 0
+                                    : st.priv == simrv::xlen::PrivilegeLevel::Supervisor
+                                        ? (st.mstatus & core::MstatusBit::Sie) != 0
+                                        : true;
+        const simrv::xlen::CsrValue pending =
+            st.mip & core::interrupt_implemented_mask(st.supervisor_mode_supported);
+        const simrv::xlen::CsrValue eligible = pending & st.mie;
+        const std::string state = eligible != 0 ? (global_enabled ? "ready" : "masked")
+                                                : (global_enabled ? "enabled" : "disabled");
+        return render_pair(
+            "interrupts", state, eligible != 0 ? kThemePeach : kThemeMint, "pending",
+            pending == 0 ? "none" : std::format("{} source(s)", std::popcount(pending)),
+            pending == 0 ? kThemeMuted : kThemePeach, col_width, right_width, label_pad);
+    }
+    if (logical_row == 19) {
+        const unsigned active_xlen = st.current_xlen();
+        const simrv::xlen::Word mode = simrv::xlen::satp_mode(st.satp, active_xlen);
+        const bool translated = simrv::xlen::satp_translation_enabled(st.satp, active_xlen);
+        return render_pair(
+            "translation", translation_name(mode, active_xlen),
+            translated ? kThemeMint : kThemeMuted, "ASID",
+            translated ? std::to_string(simrv::xlen::satp_asid(st.satp, active_xlen)) : "-",
+            translated ? kThemeSky : kThemeMuted, col_width, right_width, label_pad);
+    }
+    if (logical_row == 20) {
+        const bool supervisor_trap = st.scause != 0 || st.stval != 0 || st.sepc != 0;
+        const simrv::xlen::TrapCause cause = supervisor_trap ? st.scause : st.mcause;
+        const simrv::xlen::CsrValue tval = supervisor_trap ? st.stval : st.mtval;
+        const simrv::xlen::CsrValue epc = supervisor_trap ? st.sepc : st.mepc;
+        // Timer and device interrupts are routine and their sticky trap CSRs
+        // would permanently consume a summary row.  Surface exception context
+        // only, where it is actionable while debugging guest execution.
+        if (!trap_is_interrupt(cause) && (cause != 0 || tval != 0 || epc != 0)) {
+            return render_pair("trap", trap_summary(cause), kThemePeach, "address",
+                               tval != 0 ? hex_val(tval) : hex_val(epc), kThemeVal, col_width,
+                               right_width, label_pad);
+        }
+    }
+    return format_to_width("", width);
+}
+
+}  // namespace simrv::tui

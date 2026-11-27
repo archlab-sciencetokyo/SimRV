@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.dev/schemas/v3/events.schema.json",
+  "title": "SimRV 3 Event Record",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "sequence", "kind"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "kind": { "type": "string", "minLength": 1 },
+    "timestamp_ns": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,4 @@
+NAME="SimRV Alpine Linux"
+ID=alpine
+ID_LIKE="alpine"
+PRETTY_NAME="SimRV Alpine Linux"

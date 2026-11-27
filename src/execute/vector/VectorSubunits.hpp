@@ -1,31 +1,45 @@
 #pragma once
 
-#include "simrv/Define.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
-namespace simrv::core {
-class CPU;
-class Machine;
-}  // namespace simrv::core
+namespace simrv::memory {
+class MemorySubsystem;
+}
 
 namespace simrv::execute::vector {
 
-void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir, RegId rd,
-                           RegId rs1, RegId rs2);
+void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::Instruction ir,
+                           simrv::xlen::RegId rd, simrv::xlen::RegId rs1, simrv::xlen::RegId rs2);
 
-void execute_vector_memory(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id, RegId rd,
-                           RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew);
+void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem, isa::OperationId op_id,
+                           simrv::xlen::RegId rd, simrv::xlen::RegId rs1, simrv::xlen::RegId rs2,
+                           bool vm, uint32_t vl, uint32_t sew, uint32_t nfields,
+                           uint32_t field_registers);
 
-void execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                            bool vm, uint32_t vl, uint32_t sew, Register rs1_val, int32_t simm5);
+[[nodiscard]] auto execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
+                                          simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                                          simrv::xlen::RegId rs2, bool vm, uint32_t vl,
+                                          uint32_t sew, simrv::xlen::Register rs1_val,
+                                          int32_t simm5) -> bool;
 
-void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                RegId rs2, bool vm, uint32_t vl, uint32_t sew, Register rs1_val,
+void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
+                                uint32_t vl, uint32_t sew, simrv::xlen::Register rs1_val,
                                 int32_t simm5);
 
-void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                          bool vm, uint32_t vl, uint32_t sew);
+void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                          simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm, uint32_t vl,
+                          uint32_t sew);
 
-void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                            bool vm, uint32_t vl, uint32_t sew, Register rs1_val, int32_t simm5);
+void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                            simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm, uint32_t vl,
+                            uint32_t sew, simrv::xlen::Register rs1_val, int32_t simm5);
+
+[[nodiscard]] auto execute_vector_crypto(core::CPU& cpu, isa::OperationId op_id,
+                                         simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                                         simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                         uint32_t uimm5) -> bool;
 
 }  // namespace simrv::execute::vector

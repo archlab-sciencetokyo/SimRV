@@ -1,0 +1,17 @@
+#ifndef _ARCH_TEST_H
+#define _ARCH_TEST_H
+
+#define RVTEST_ISA(_STR)
+#define RVTEST_CODE_BEGIN \
+    RVMODEL_BOOT
+#define RVTEST_CODE_END \
+    RVMODEL_HALT
+#define RVTEST_DATA_BEGIN \
+    RVMODEL_DATA_BEGIN
+#define RVTEST_DATA_END \
+    RVMODEL_DATA_END
+
+#define RVTEST_SIGBASE(_R, _SIG) \
+    la _R, _SIG
+
+#endif // _ARCH_TEST_H

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Keep the familiar command while preparing the bundled JWM session first.
+exec /usr/local/bin/start-jwm "$@"

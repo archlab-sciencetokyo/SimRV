@@ -1,0 +1,38 @@
+.TH SIMRV-CONFIG-WIZARD 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-config-wizard \- create CPU and platform configurations
+.SH SYNOPSIS
+.B simrv-config-wizard
+.RI [ options ]
+.SH DESCRIPTION
+.B simrv-config-wizard
+creates CPU model configurations or imports a compiled flattened device tree (DTB) to create a
+combined CPU/SoC configuration. With interactive terminals, it presents a simple text wizard and
+allows review of imported values before writing the configuration. It also validates model or
+platform configurations with \fB--validate\fR. The historic
+.B simrv-cpu-wizard
+name remains available as a compatibility alias.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.TP
+.B \-\-from-dtb \fIPATH\fR
+Import platform details from a compiled DTB.
+.TP
+.B \-\-validate \fIFILE|PRESET\fR
+Validate a CPU model or platform configuration.
+.TP
+.B \-\-name \fINAME\fR
+Set the output configuration name. The default is \fBcustom_riscv\fR.
+.TP
+.B \-\-template \fIPRESET\fR, \-\-preset \fIPRESET\fR
+Choose the CPU model preset: \fBbalanced\fR, \fBtiny\fR, \fBperformance\fR.
+.TP
+.B \-o, \-\-output \fIPATH\fR
+Write the configuration to this path. By default it is written below \fBconfigs/models/\fR.
+.TP
+.B \-\-non-interactive
+Generate without presenting the terminal review UI.
+.SH SEE ALSO
+.BR simrv (1)

@@ -4,13 +4,19 @@
  */
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <vector>
 
 #include "simrv/memory/Bus.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::core {
+class Tracer;
+}
 
 namespace simrv::memory {
 
@@ -23,6 +29,9 @@ class MmioRouter {
    public:
     MmioRouter() = default;
     ~MmioRouter() = default;
+
+    void set_tracer(simrv::core::Tracer* tracer) noexcept { tracer_ = tracer; }
+    [[nodiscard]] auto tracer() const noexcept -> simrv::core::Tracer* { return tracer_; }
 
     /**
      * @brief Register a device node with the MMIO router.
@@ -44,11 +53,37 @@ class MmioRouter {
     void clear();
 
     /**
+     * @brief Check whether any part of the address range [base, base + size) is already mapped.
+     * @param base Start byte address.
+     * @param size Size in bytes.
+     * @return true if any portion overlaps an existing device. Ambiguous sparse overlaps larger
+     * than 4096 bytes are conservatively reported as mapped.
+     */
+    [[nodiscard]] auto is_range_mapped(simrv::xlen::PhysAddr base, simrv::xlen::Address size) const
+        -> bool;
+
+    template <std::integral I>
+    auto is_range_mapped(I, simrv::xlen::Address) const -> bool = delete;
+
+    struct DeviceEntry {
+        simrv::xlen::PhysAddr base{};
+        simrv::xlen::PhysAddr end{};
+        TileLinkNode* node = nullptr;
+        simrv::xlen::Address alignment = 1;
+        bool is_read_only = false;
+    };
+
+    /**
      * @brief Resolve which registered MMIO device handles the target address.
      * @param addr Target byte address.
      * @return Pointer to target TileLinkNode if found, nullptr otherwise.
      */
-    [[nodiscard]] auto resolve_device(Address addr) const -> TileLinkNode*;
+    [[nodiscard]] auto resolve_device(simrv::xlen::PhysAddr addr) const -> TileLinkNode*;
+    [[nodiscard]] auto resolve_entry(simrv::xlen::PhysAddr addr) const -> const DeviceEntry*;
+    template <std::integral I>
+    auto resolve_device(I) const -> TileLinkNode* = delete;
+    template <std::integral I>
+    auto resolve_entry(I) const -> const DeviceEntry* = delete;
 
     /**
      * @brief Search for a device node by string name.
@@ -70,9 +105,11 @@ class MmioRouter {
      */
     [[nodiscard]] auto devices() const -> const std::vector<TileLinkNode*>& { return nodes_; }
 
-    [[nodiscard]] auto mmio_read_count() const -> uint64_t { return mmio_read_count_; }
-    [[nodiscard]] auto mmio_write_count() const -> uint64_t { return mmio_write_count_; }
-    [[nodiscard]] auto bus_error_count() const -> uint64_t { return bus_error_count_; }
+    [[nodiscard]] auto mmio_read_count() const -> simrv::xlen::Counter { return mmio_read_count_; }
+    [[nodiscard]] auto mmio_write_count() const -> simrv::xlen::Counter {
+        return mmio_write_count_;
+    }
+    [[nodiscard]] auto bus_error_count() const -> simrv::xlen::Counter { return bus_error_count_; }
 
     void reset_stats() {
         mmio_read_count_ = 0;
@@ -81,10 +118,20 @@ class MmioRouter {
     }
 
    private:
+    static constexpr size_t kMruCapacity = 4;
+
     std::vector<TileLinkNode*> nodes_;
-    uint64_t mmio_read_count_ = 0;
-    uint64_t mmio_write_count_ = 0;
-    uint64_t bus_error_count_ = 0;
+    std::vector<DeviceEntry> entries_;
+    simrv::xlen::Address min_base_ = std::numeric_limits<simrv::xlen::Address>::max();
+    simrv::xlen::Address max_end_ = 0;
+    mutable std::array<DeviceEntry, kMruCapacity> mru_entries_{};
+    mutable size_t mru_count_ = 0;
+    simrv::xlen::Counter mmio_read_count_ = 0;
+    simrv::xlen::Counter mmio_write_count_ = 0;
+    simrv::xlen::Counter bus_error_count_ = 0;
+    simrv::core::Tracer* tracer_ = nullptr;
+
+    void rebuild_entries();
 };
 
 }  // namespace simrv::memory

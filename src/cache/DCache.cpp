@@ -6,94 +6,42 @@
 
 #include <cstring>
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Math.hpp"
-
 namespace simrv::cache {
 
-auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
-    ++access_tick_;
-    const uint32_t set_idx = get_set_index(addr);
-    const Address tag = get_tag(addr);
-    const unsigned size_bytes = 1u << (funct3 & 0x3u);
-    last_accessed_set_ = set_idx;
+auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
+                          std::array<simrv::xlen::Byte, kLineBytes>& dirty_data) -> bool {
+    const auto target_state = simrv::memory::mesi_for(req.cap);
+    const simrv::xlen::PhysAddr line_base =
+        req.address & ~(static_cast<simrv::xlen::Address>(line_mask()));
+    const uint32_t set_idx = get_set_index(line_base);
+    const auto tag = get_tag(line_base);
 
-    for (uint32_t w = 0; w < kWays; ++w) {
-        auto& line = sets_[set_idx][w];
-        if (line.valid && line.tag == tag) {
-            const uint32_t byte_offset = addr & (kLineBytes - 1u);
-            if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
-                ++misses_;
-                last_access_was_hit_ = false;
-                last_hit_way_ = 0xFFFFFFFF;
-                return false;
-            }
-
-            Word raw = 0;
-            std::memcpy(&raw, line.data.data() + byte_offset, size_bytes);
-
-            if ((funct3 & 0x4u) == 0) {  // Signed load
-                data = sign_extend(raw, 8 * size_bytes);
+    for (uint32_t w = 0; w < associativity(); ++w) {
+        auto& cache_line = line(set_idx, w);
+        if (cache_line.valid && cache_line.tag == tag) {
+            const bool was_dirty = cache_line.state == simrv::memory::MesiState::Modified;
+            if (was_dirty) {
+                std::memcpy(dirty_data.data(), cache_line.data.data(), line_bytes());
+                resp.opcode = simrv::memory::TlOpcodeC::ProbeAckData;
             } else {
-                data = raw;
+                resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
             }
+            resp.address = line_base;
+            resp.report = simrv::memory::report_for(cache_line.state, req.cap);
 
-            line.last_used = access_tick_;
-            ++hits_;
-            last_access_was_hit_ = true;
-            last_hit_way_ = w;
+            cache_line.state = target_state;
+            if (target_state == simrv::memory::MesiState::Invalid) {
+                cache_line.valid = false;
+            }
             return true;
         }
     }
-    ++misses_;
-    last_access_was_hit_ = false;
-    last_hit_way_ = 0xFFFFFFFF;
+
+    // Line was not present in cache
+    resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
+    resp.address = line_base;
+    resp.report = simrv::memory::TlReport::NtoN;
     return false;
-}
-
-void DCache::write(Address addr, Word data, Instruction funct3) {
-    const unsigned size_bytes = 1u << (funct3 & 0x3u);
-    const uint32_t byte_offset = addr & (kLineBytes - 1u);
-
-    if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
-        const uint32_t set_idx = get_set_index(addr);
-        const Address tag = get_tag(addr);
-        last_accessed_set_ = set_idx;
-        bool found = false;
-        uint32_t found_way = 0xFFFFFFFF;
-        for (uint32_t w = 0; w < kWays; ++w) {
-            auto& line = sets_[set_idx][w];
-            if (line.valid && line.tag == tag) {
-                std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
-                found = true;
-                found_way = w;
-                break;
-            }
-        }
-        last_access_was_hit_ = found;
-        last_hit_way_ = found ? found_way : 0xFFFFFFFF;
-    } else {
-        const Address tag1 = get_tag(addr);
-        const uint32_t set_idx1 = get_set_index(addr);
-        last_accessed_set_ = set_idx1;
-        last_access_was_hit_ = false;
-        for (auto& line : sets_[set_idx1]) {
-            if (line.valid && line.tag == tag1) {
-                line.valid = false;
-                break;
-            }
-        }
-
-        const Address addr2 = addr + (kLineBytes - byte_offset);
-        const Address tag2 = get_tag(addr2);
-        const uint32_t set_idx2 = get_set_index(addr2);
-        for (auto& line : sets_[set_idx2]) {
-            if (line.valid && line.tag == tag2) {
-                line.valid = false;
-                break;
-            }
-        }
-    }
 }
 
 }  // namespace simrv::cache

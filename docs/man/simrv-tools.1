@@ -1,0 +1,39 @@
+.TH SIMRV-TOOLS 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-tools \- host-side helpers for SimRV
+.SH SYNOPSIS
+.B simrv-tools
+.I command
+.RI [ arguments ]
+.SH DESCRIPTION
+.B simrv-tools
+collects host-side file generators and validators separately from the simulator runtime.
+.SH COMMANDS
+.TP
+.B scaffold cpu [PRESET] [FILE]
+Write a CPU model configuration from a preset. Omit FILE or use \fB-\fR to write to standard output.
+.TP
+.B scaffold device NAME [DIR|FILE]
+Generate an editable external MMIO device plugin project.
+.TP
+.B scaffold device --from-dtb DTB [DIR]
+Choose an MMIO node from a compiled device tree and seed the plugin source and platform config with its compatible string, address range, and simple IRQ.
+.TP
+.B scaffold cfu NAME [DIR|FILE]
+Generate a starter custom function unit plugin project.
+.TP
+.B mission check FILE
+Validate and preview a classroom mission file.
+.TP
+.B mission create FILE
+Create a starter classroom mission file.
+.TP
+.B disk create FILE --kernel EFI [--rootfs IMAGE] [--size-mb MiB]
+Create an unprivileged GPT/FAT32 UEFI disk image.
+.TP
+.B completion [bash|zsh|fish]
+Write a shell completion script for the SimRV runtime command.
+.SH SEE ALSO
+.BR simrv (1),
+.BR simrv-config-wizard (1),
+.BR simrv-benchmark (1)

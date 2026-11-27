@@ -1,0 +1,107 @@
+if(SIMRV_ENABLE_LINUX_TOOLS AND UNIX)
+  function(simrv_add_linux_image_target target comment)
+    add_custom_target(
+      ${target}
+      COMMAND "${CMAKE_COMMAND}" -E env SIMRV_USE_LOCAL_SCRATCH=1
+              $<TARGET_FILE:simrv-linux-builder> --arch "rv${SIMRV_XLEN}"
+              ${ARGN}
+      DEPENDS simrv-linux-builder
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+      COMMENT "${comment}"
+      VERBATIM USES_TERMINAL)
+  endfunction()
+
+  simrv_add_linux_image_target(
+    linux-images "Building RV${SIMRV_XLEN}GC Linux kernel and rootfs images")
+  simrv_add_linux_image_target(
+    linux-images-buildroot "Building RV${SIMRV_XLEN}GC Buildroot Linux profile"
+    --rootfs buildroot --profile buildroot)
+  simrv_add_linux_image_target(
+    linux-images-debug "Building RV${SIMRV_XLEN}GC expanded Alpine debug Linux profile"
+    --rootfs alpine --profile debug)
+
+  add_custom_target(
+    linux-images-configure
+    COMMAND $<TARGET_FILE:simrv-linux-builder> --arch "rv${SIMRV_XLEN}" --tui
+    DEPENDS simrv-linux-builder
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Configure and build Linux images interactively"
+    VERBATIM USES_TERMINAL)
+endif()
+
+add_custom_target(
+  integration-gate
+  COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
+          --output-on-failure -L "gate"
+  DEPENDS SimRV
+  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  COMMENT "Running the complete SimRV integration gate"
+  VERBATIM USES_TERMINAL)
+if(BUILD_TESTING)
+  get_property(
+    SIMRV_NATIVE_TEST_TARGETS
+    GLOBAL
+    PROPERTY SIMRV_NATIVE_TEST_TARGETS)
+  add_custom_target(simrv-native-tests)
+  if(SIMRV_NATIVE_TEST_TARGETS)
+    add_dependencies(simrv-native-tests ${SIMRV_NATIVE_TEST_TARGETS})
+  endif()
+  add_dependencies(integration-gate simrv-native-tests)
+  add_custom_target(
+    microbenchmarks
+    COMMAND $<TARGET_FILE:simrv-microbenchmarks>
+    DEPENDS simrv-microbenchmarks
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Running SimRV subsystem microbenchmarks"
+    VERBATIM USES_TERMINAL)
+endif()
+
+if(SIMRV_ENABLE_TOOLING OR BUILD_TESTING)
+  add_custom_target(
+    release-check
+    COMMAND $<TARGET_FILE:simrv-release-check> --binary $<TARGET_FILE:SimRV>
+    DEPENDS simrv-release-check SimRV
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Validating SimRV release metadata and binary"
+    VERBATIM)
+endif()
+
+if(SIMRV_VECTOR_TESTS_DIR
+   AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}"
+   AND RISCV_GCC)
+  add_custom_target(
+    vector-gate
+    COMMAND
+      $<TARGET_FILE:simrv-vector> --simrv
+      $<TARGET_FILE:SimRV> --xlen ${SIMRV_XLEN} --gcc ${RISCV_GCC} --objcopy
+      ${RISCV_OBJCOPY} --nm ${RISCV_NM} --work-dir
+      ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen --vector-tests-dir
+      ${SIMRV_VECTOR_TESTS_DIR}
+    DEPENDS SimRV simrv-vector
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Running Full Vector validation gate")
+endif()
+
+if(SIMRV_ENABLE_LINUX_TOOLS)
+  function(simrv_add_linux_run_target target comment)
+    add_custom_target(
+      ${target}
+      COMMAND "${CMAKE_COMMAND}"
+              -D "SIMRV_BIN=$<TARGET_FILE:SimRV>"
+              -D "SIMRV_FW_PAYLOAD=${SIMRV_LINUX_IMAGES_DIR}/opensbi-linux-payload.elf"
+              -D "SIMRV_DISK_IMAGE=${SIMRV_LINUX_IMAGES_DIR}/rootfs.img"
+              -D "SIMRV_DTB=${SIMRV_LINUX_IMAGES_DIR}/devicetree.dtb"
+              ${ARGN}
+              -P "${PROJECT_SOURCE_DIR}/cmake/SimRVRunLinux.cmake"
+      DEPENDS SimRV
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+      COMMENT "${comment}"
+      VERBATIM USES_TERMINAL)
+  endfunction()
+
+  simrv_add_linux_run_target(run-tui "Booting RV${SIMRV_XLEN} Linux in TUI mode..."
+                             -D SIMRV_TUI=ON)
+  simrv_add_linux_run_target(run-linux
+                             "Booting RV${SIMRV_XLEN} Linux in standard console mode...")
+endif()
+

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/tui/TuiModal.hpp"
 
 namespace simrv::core {
@@ -21,12 +22,14 @@ using simrv::tui::SysConfigDraft;
 class SystemConfigModal {
    public:
     static void open(SysConfigDraft& draft, int& cursor, const simrv::core::Machine& machine);
-    static void move_cursor(int& cursor, int delta);
+    static void move_cursor(const SysConfigDraft& draft, int& cursor, int delta);
     static void adjust_setting(SysConfigDraft& draft, int index, int dir);
     static void toggle_setting(SysConfigDraft& draft, int index);
     static void push_digit(SysConfigDraft& draft, int cursor, std::string& input, char digit);
     static void pop_digit(SysConfigDraft& draft, int cursor, std::string& input);
     static auto submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool;
+    static auto apply_to_model(const SysConfigDraft& draft, simrv::pipeline::CpuModelConfig& model)
+        -> bool;
     static void render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
                        const SysConfigDraft& draft, int cursor, const std::string& input = "");

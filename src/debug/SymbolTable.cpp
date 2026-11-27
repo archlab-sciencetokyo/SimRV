@@ -4,28 +4,55 @@
  */
 #include "simrv/debug/SymbolTable.hpp"
 
-#include <elf.h>
-
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
+#include <map>
 #include <utility>
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/util/ElfTypes.hpp"
 
 namespace simrv::debug {
 
 namespace {
 
+constexpr size_t kElfIdentSize = 16;
+constexpr size_t kMaxElfSections = 4096;
+constexpr size_t kMaxElfSectionBytes = 64ULL * 1024ULL * 1024ULL;
+constexpr std::array<uint8_t, 4> kElfMagic = {0x7f, 'E', 'L', 'F'};
+using util::elf::Elf32_Ehdr;
+using util::elf::Elf32_Shdr;
+using util::elf::Elf32_Sym;
+using util::elf::Elf64_Ehdr;
+using util::elf::Elf64_Shdr;
+using util::elf::Elf64_Sym;
+using util::elf::kClass32;
+using util::elf::kClass64;
+using util::elf::kSymbolFunction;
+using util::elf::kSymbolNotype;
+using util::elf::kSymbolObject;
+using util::elf::kSymbolTable;
+
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
-auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_symbols,
-                       std::optional<Address>& out_entry, StTypeFunc get_type) -> bool {
+auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::VirtAddr, std::string>& out_symbols,
+                       std::map<simrv::xlen::VirtAddr, ElfFunctionSymbol>& out_functions,
+                       std::optional<simrv::xlen::VirtAddr>& out_entry, StTypeFunc get_type,
+                       SymbolLoadMode mode) -> bool {
     Ehdr ehdr{};
     if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
         return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    out_entry = static_cast<Address>(ehdr.e_entry);
+    out_entry = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(ehdr.e_entry)};
+
+    if (ehdr.e_shnum == 0) return true;
+    if (ehdr.e_shnum > kMaxElfSections || !std::in_range<std::streamoff>(ehdr.e_shoff)) {
+        return false;
+    }
 
     std::vector<Shdr> shdrs(ehdr.e_shnum);
     fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
@@ -39,37 +66,57 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
     int symtab_idx = -1;
     int strtab_idx = -1;
     for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
-        if (shdrs[i].sh_type == SHT_SYMTAB) {
+        if (shdrs[i].sh_type == kSymbolTable) {
             symtab_idx = i;
+            if (!std::in_range<int>(shdrs[i].sh_link)) return false;
             strtab_idx = static_cast<int>(shdrs[i].sh_link);
         }
     }
 
-    if (symtab_idx != -1 && strtab_idx != -1) {
-        std::vector<char> strtab(shdrs[strtab_idx].sh_size);
-        fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
-        if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size))) {
+    if (symtab_idx != -1) {
+        if (strtab_idx < 0 || !std::cmp_less(strtab_idx, shdrs.size())) return false;
+        const auto strtab_size = shdrs[strtab_idx].sh_size;
+        const auto symtab_size = shdrs[symtab_idx].sh_size;
+        if (strtab_size > kMaxElfSectionBytes || symtab_size > kMaxElfSectionBytes ||
+            !std::in_range<std::streamoff>(shdrs[strtab_idx].sh_offset) ||
+            !std::in_range<std::streamoff>(shdrs[symtab_idx].sh_offset)) {
             return false;
         }
+        std::vector<char> strtab(static_cast<size_t>(strtab_size));
+        if (!strtab.empty()) {
+            fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
+            if (!fs.read(strtab.data(), static_cast<std::streamsize>(strtab.size()))) {
+                return false;
+            }
+            strtab.back() = '\0';
+        }
 
-        size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Sym);
-        std::vector<Sym> syms(num_syms);
+        const size_t num_syms = static_cast<size_t>(symtab_size) / sizeof(Sym);
         fs.seekg(static_cast<std::streamoff>(shdrs[symtab_idx].sh_offset), std::ios::beg);
-        if (!fs.read(reinterpret_cast<char*>(syms.data()),
-                     static_cast<std::streamsize>(
-                         shdrs[symtab_idx]
-                             .sh_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-            return false;
-        }
-
-        for (const auto& sym : syms) {
+        for (size_t index = 0; index < num_syms; ++index) {
+            Sym sym{};
+            if (!fs.read(reinterpret_cast<char*>(&sym), sizeof(sym))) {
+                return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            }
             const auto type = get_type(sym.st_info);
             if (sym.st_name != 0 && static_cast<size_t>(sym.st_name) < strtab.size() &&
                 sym.st_value != 0 &&
-                (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
+                (type == kSymbolFunction || type == kSymbolObject || type == kSymbolNotype)) {
                 std::string name = &strtab[sym.st_name];
-                if (!name.empty() && name.find('$') == std::string::npos) {
-                    out_symbols[sym.st_value] = name;
+                const bool runtime_essential =
+                    name == "_start" || name == "tohost" || name == "begin_signature" ||
+                    name == "end_signature" || name == "rvtest_sig_begin" ||
+                    name == "rvtest_sig_end";
+                if (!name.empty() && name.find('$') == std::string::npos &&
+                    (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
+                    const simrv::xlen::VirtAddr addr{
+                        static_cast<simrv::xlen::Address>(sym.st_value)};
+                    out_symbols[addr] = name;
+                    if (type == kSymbolFunction) {
+                        out_functions[addr] = ElfFunctionSymbol{
+                            .name = std::move(name),
+                            .size = static_cast<simrv::xlen::Address>(sym.st_size)};
+                    }
                 }
             }
         }
@@ -80,27 +127,34 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
 }  // namespace
 
 auto SymbolTable::append_from_elf(const std::string& elf_path) -> bool {
-    return load_from_elf(elf_path, false);
+    return load_from_elf(elf_path, false, SymbolLoadMode::FullDebug);
 }
 
-auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing) -> bool {
+auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing,
+                                SymbolLoadMode mode) -> bool {
     if (clear_existing) {
         symbols_.clear();
+        functions_.clear();
         entry_point_.reset();
     }
     std::string path_to_load = elf_path;
 
-    // Helper to check if file has ELF magic
     auto is_valid_elf = [](const std::string& path) -> bool {
         std::ifstream test_fs(path, std::ios::binary);
         if (!test_fs.is_open()) return false;
         std::array<char, 4> magic{};
         if (!test_fs.read(magic.data(), 4)) return false;
-        return (magic[0] == ELFMAG0 && magic[1] == ELFMAG1 && magic[2] == ELFMAG2 &&
-                magic[3] == ELFMAG3);
+        return std::equal(magic.begin(), magic.end(), kElfMagic.begin());
     };
 
-    if (!is_valid_elf(path_to_load)) {
+    std::ifstream fs(path_to_load, std::ios::binary);
+    std::array<uint8_t, kElfIdentSize> ident{};
+    const bool valid_direct = fs.is_open() &&
+                              fs.read(reinterpret_cast<char*>(ident.data()), ident.size()) &&
+                              std::equal(kElfMagic.begin(), kElfMagic.end(), ident.begin());
+
+    if (!valid_direct) {
+        if (fs.is_open()) fs.close();
         // Try to find a companion ELF file if elf_path is a raw binary
         bool found = false;
         if (path_to_load.find_last_of('.') != std::string::npos) {
@@ -117,41 +171,29 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
         if (!found) {
             return false;
         }
+        fs.open(path_to_load, std::ios::binary);
+        if (!fs.is_open() || !fs.read(reinterpret_cast<char*>(ident.data()), ident.size()) ||
+            !std::equal(kElfMagic.begin(), kElfMagic.end(), ident.begin())) {
+            return false;
+        }
     }
 
-    std::ifstream fs(path_to_load, std::ios::binary);
-    if (!fs.is_open()) {
-        return false;
-    }
-
-    // Read ELF identity
-    std::array<char, EI_NIDENT> ident{};
-    if (!fs.read(ident.data(), EI_NIDENT)) {
-        return false;
-    }
-
-    // Check magic
-    if (ident[EI_MAG0] != ELFMAG0 || ident[EI_MAG1] != ELFMAG1 || ident[EI_MAG2] != ELFMAG2 ||
-        ident[EI_MAG3] != ELFMAG3) {
-        return false;
-    }
-
-    const auto elf_class = static_cast<uint8_t>(ident[EI_CLASS]);
-    if (elf_class != ELFCLASS32 && elf_class != ELFCLASS64) {
+    const auto elf_class = ident[4];
+    if (elf_class != kClass32 && elf_class != kClass64) {
         return false;
     }
 
     fs.seekg(0, std::ios::beg);
 
-    std::optional<Address> ep;
-    if (elf_class == ELFCLASS32) {
+    std::optional<simrv::xlen::VirtAddr> ep;
+    if (elf_class == kClass32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                fs, symbols_, ep, [](auto info) { return ELF32_ST_TYPE(info); })) {
+                fs, symbols_, functions_, ep, [](auto info) { return info & 0x0fU; }, mode)) {
             return false;
         }
     } else {
         if (!parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                fs, symbols_, ep, [](auto info) { return ELF64_ST_TYPE(info); })) {
+                fs, symbols_, functions_, ep, [](auto info) { return info & 0x0fU; }, mode)) {
             return false;
         }
     }
@@ -159,26 +201,28 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
         entry_point_ = ep;
     }
 
-    // Check for companion kernel ELF (e.g. vmlinux) in the same directory
+    // Companion images are presentation/debug metadata and are intentionally TUI-only.
     std::filesystem::path loaded_p(path_to_load);
-    if (loaded_p.has_parent_path()) {
+    if (mode == SymbolLoadMode::FullDebug && loaded_p.has_parent_path()) {
         auto dir = loaded_p.parent_path();
         for (const auto& fname : {"vmlinux", "vmlinux.elf", "kernel.elf"}) {
             auto kpath = (dir / fname).string();
             if (kpath != path_to_load && is_valid_elf(kpath)) {
                 std::ifstream kfs(kpath, std::ios::binary);
                 if (kfs.is_open()) {
-                    std::array<char, EI_NIDENT> kident{};
-                    if (kfs.read(kident.data(), EI_NIDENT)) {
-                        const auto k_class = static_cast<uint8_t>(kident[EI_CLASS]);
+                    std::array<uint8_t, kElfIdentSize> kident{};
+                    if (kfs.read(reinterpret_cast<char*>(kident.data()), kident.size())) {
+                        const auto k_class = kident[4];
                         kfs.seekg(0, std::ios::beg);
-                        std::optional<Address> kep;
-                        if (k_class == ELFCLASS32) {
+                        std::optional<simrv::xlen::VirtAddr> kep;
+                        if (k_class == kClass32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                                kfs, symbols_, kep, [](auto info) { return ELF32_ST_TYPE(info); });
-                        } else if (k_class == ELFCLASS64) {
+                                kfs, symbols_, functions_, kep,
+                                [](auto info) { return info & 0x0fU; }, mode);
+                        } else if (k_class == kClass64) {
                             (void)parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                                kfs, symbols_, kep, [](auto info) { return ELF64_ST_TYPE(info); });
+                                kfs, symbols_, functions_, kep,
+                                [](auto info) { return info & 0x0fU; }, mode);
                         }
                     }
                 }
@@ -187,36 +231,72 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     }
 
     if (!symbols_.empty()) {
-        simrv::log::info("Loaded {} symbols from ELF image: {}", symbols_.size(), path_to_load);
+        simrv::log::info("Loaded {} {} from ELF image: {}", symbols_.size(),
+                         mode == SymbolLoadMode::FullDebug ? "debug symbols" : "runtime symbols",
+                         path_to_load);
         return true;
     }
     return false;
 }
 
-auto SymbolTable::lookup(Address addr) const -> std::string {
+auto SymbolTable::lookup_symbol(simrv::xlen::VirtAddr address) const
+    -> std::optional<SymbolLookupResult> {
+    const auto addr = address.raw();
     if (symbols_.empty()) {
-        return "";
+        return std::nullopt;
     }
 
-    auto it = symbols_.upper_bound(addr);
+    auto it = symbols_.upper_bound(address);
     if (it == symbols_.begin()) {
-        return "";
+        return std::nullopt;
     }
     --it;
 
-    Address sym_addr = it->first;
-    const std::string& name = it->second;
-
-    Address offset = addr - sym_addr;
-    if (offset == 0) {
-        return name;
-    } else if (offset < 0x2000) {  // Limit offset to prevent matching distant symbols
-        return std::format("{} + 0x{:x}", name, offset);
+    const auto sym_addr = it->first.raw();
+    const simrv::xlen::Address offset = addr - sym_addr;
+    if (offset >= 0x2000) {  // Limit offset to prevent matching distant symbols
+        return std::nullopt;
     }
-    return "";
+
+    return SymbolLookupResult{
+        .name = it->second,
+        .base_addr = simrv::xlen::VirtAddr{sym_addr},
+        .offset = offset,
+    };
 }
 
-auto SymbolTable::lookup_name(const std::string& name) const -> std::optional<Address> {
+auto SymbolTable::lookup_function(simrv::xlen::VirtAddr address) const
+    -> std::optional<FunctionLookupResult> {
+    const auto addr = address.raw();
+    if (functions_.empty()) return std::nullopt;
+    auto it = functions_.upper_bound(address);
+    if (it == functions_.begin()) return std::nullopt;
+    --it;
+    const simrv::xlen::Address offset = addr - it->first.raw();
+    const auto next = std::next(it);
+    const simrv::xlen::Address next_function_start =
+        next == functions_.end() ? 0 : next->first.raw();
+    if (it->second.size != 0 && offset >= it->second.size) return std::nullopt;
+    if (it->second.size == 0 && (next == functions_.end() || addr >= next_function_start) &&
+        offset != 0)
+        return std::nullopt;
+    if (next != functions_.end() && addr >= next_function_start) return std::nullopt;
+    return FunctionLookupResult{.name = it->second.name, .base_addr = it->first, .offset = offset};
+}
+
+auto SymbolTable::lookup(simrv::xlen::VirtAddr addr) const -> std::string {
+    const auto res = lookup_symbol(addr);
+    if (!res) {
+        return "";
+    }
+    if (res->is_exact()) {
+        return std::string(res->name);
+    }
+    return std::format("{} + 0x{:x}", res->name, res->offset);
+}
+
+auto SymbolTable::lookup_name(const std::string& name) const
+    -> std::optional<simrv::xlen::VirtAddr> {
     for (const auto& [addr, sym_name] : symbols_) {
         if (sym_name == name) {
             return addr;

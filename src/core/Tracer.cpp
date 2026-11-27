@@ -4,244 +4,1774 @@
  */
 #include "simrv/core/Tracer.hpp"
 
+#include <sys/utsname.h>
+
+#include <algorithm>
+#include <array>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
+#include <map>
 #include <ostream>
 #include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
-#include "simrv/Define.hpp"
+#if defined(__unix__) || defined(__APPLE__)
+#include <dlfcn.h>
+#endif
+
+#include "simrv/CompilerHints.hpp"
+#include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Console.hpp"
-#include "simrv/device/Disk.hpp"
-#include "simrv/device/Virtio.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/device/SerialDevice.hpp"
+#include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/Priv.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/MmioRouter.hpp"
+#include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 
 using namespace simrv::isa;
 
-constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(kXLenHexDigits);
-constexpr Counter D_TRACEPC_INTERVAL = 1000;
+class GzipTraceWriter {
+   public:
+    GzipTraceWriter() { buffer_.reserve(kBufferSize); }
+    GzipTraceWriter(const GzipTraceWriter&) = delete;
+    auto operator=(const GzipTraceWriter&) -> GzipTraceWriter& = delete;
+    ~GzipTraceWriter() { close(); }
+
+    auto open(const std::filesystem::path& path) -> bool {
+        close();
+#if defined(__unix__) || defined(__APPLE__)
+        auto& api = gzip_api();
+        if (!api.available()) return false;
+        const auto native_path = path.string();
+        // Level 1 favors throughput for high-volume retirement streams.
+        file_ = api.open(native_path.c_str(), "wb1");
+        return file_ != nullptr;
+#else
+        (void)path;
+        return false;
+#endif
+    }
+
+    auto is_open() const noexcept -> bool { return file_ != nullptr; }
+
+    auto write(std::string_view bytes) -> bool {
+#if defined(__unix__) || defined(__APPLE__)
+        if (file_ == nullptr) return false;
+        buffer_.append(bytes);
+        return buffer_.size() < kBufferSize || write_pending();
+#else
+        (void)bytes;
+        return false;
+#endif
+    }
+
+    auto flush() -> bool {
+#if defined(__unix__) || defined(__APPLE__)
+        // zlib's Z_SYNC_FLUSH value; this keeps normal trace flush points observable.
+        return file_ == nullptr || (write_pending() && gzip_api().flush(file_, 2) == 0);
+#else
+        return false;
+#endif
+    }
+
+    auto close() -> bool {
+#if defined(__unix__) || defined(__APPLE__)
+        if (file_ == nullptr) return true;
+        const bool written = write_pending();
+        auto* file = std::exchange(file_, nullptr);
+        return gzip_api().close(file) == 0 && written;
+#else
+        return true;
+#endif
+    }
+
+   private:
+    static constexpr size_t kBufferSize = 64 * 1024;
+    std::string buffer_;
+#if defined(__unix__) || defined(__APPLE__)
+    struct gzFile_s;
+    using GzFile = gzFile_s*;
+    using GzOpen = GzFile (*)(const char*, const char*);
+    using GzWrite = int (*)(GzFile, const void*, unsigned);
+    using GzFlush = int (*)(GzFile, int);
+    using GzClose = int (*)(GzFile);
+
+    struct Api {
+        void* library = nullptr;
+        GzOpen open = nullptr;
+        GzWrite write = nullptr;
+        GzFlush flush = nullptr;
+        GzClose close = nullptr;
+
+        template <typename Function>
+        static auto load(void* handle, const char* name) -> Function {
+            void* symbol = dlsym(handle, name);
+            Function function{};
+            static_assert(sizeof(function) == sizeof(symbol));
+            std::memcpy(&function, &symbol, sizeof(function));
+            return function;
+        }
+
+        Api() {
+#if defined(__APPLE__)
+            constexpr std::array kLibraryNames = {"libz.dylib", "libz.1.dylib"};
+#else
+            constexpr std::array kLibraryNames = {"libz.so.1", "libz.so"};
+#endif
+            for (const auto* name : kLibraryNames) {
+                library = dlopen(name, RTLD_NOW | RTLD_LOCAL);
+                if (library != nullptr) break;
+            }
+            if (library == nullptr) return;
+            open = load<GzOpen>(library, "gzopen");
+            write = load<GzWrite>(library, "gzwrite");
+            flush = load<GzFlush>(library, "gzflush");
+            close = load<GzClose>(library, "gzclose");
+            if (open == nullptr || write == nullptr || flush == nullptr || close == nullptr) {
+                dlclose(library);
+                library = nullptr;
+            }
+        }
+
+        ~Api() {
+            if (library != nullptr) dlclose(library);
+        }
+
+        [[nodiscard]] auto available() const noexcept -> bool { return library != nullptr; }
+    };
+
+    static auto gzip_api() -> Api& {
+        static Api api;
+        return api;
+    }
+
+    auto write_pending() -> bool {
+        if (buffer_.empty()) return true;
+        auto& api = gzip_api();
+        size_t offset = 0;
+        while (offset < buffer_.size()) {
+            const auto chunk = static_cast<unsigned>(
+                std::min<size_t>(buffer_.size() - offset, std::numeric_limits<unsigned>::max()));
+            const int written = api.write(file_, buffer_.data() + offset, chunk);
+            if (written <= 0) return false;
+            offset += static_cast<size_t>(written);
+        }
+        buffer_.clear();
+        return true;
+    }
+
+    GzFile file_ = nullptr;
+#else
+    void* file_ = nullptr;
+#endif
+};
+
+namespace {
+
+class ConditionalTracerLock {
+   public:
+    ConditionalTracerLock(std::mutex& mutex, bool enabled) : mutex_(mutex), locked_(enabled) {
+        if (simrv::compiler::unlikely(locked_)) mutex_.lock();
+    }
+
+    ConditionalTracerLock(const ConditionalTracerLock&) = delete;
+    auto operator=(const ConditionalTracerLock&) -> ConditionalTracerLock& = delete;
+
+    ~ConditionalTracerLock() {
+        if (simrv::compiler::unlikely(locked_)) mutex_.unlock();
+    }
+
+   private:
+    std::mutex& mutex_;
+    bool locked_;
+};
+
+constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(simrv::xlen::kXLenHexDigits);
+constexpr uint64_t kRetireIndexStride = 256;
+
+class RetirementRecordBuilder {
+   public:
+    void clear() noexcept { size_ = 0; }
+    void append(std::string_view text) noexcept {
+        std::memcpy(buffer_.data() + size_, text.data(), text.size());
+        size_ += text.size();
+    }
+    void push_back(char ch) noexcept { buffer_[size_++] = ch; }
+
+    template <typename Integer>
+    void append_decimal(Integer value) noexcept {
+        const auto [end, error] =
+            std::to_chars(buffer_.data() + size_, buffer_.data() + buffer_.size(), value);
+        if (error == std::errc{}) size_ = static_cast<size_t>(end - buffer_.data());
+    }
+
+    template <typename Integer>
+    void append_hex(Integer value) noexcept {
+        const auto [end, error] =
+            std::to_chars(buffer_.data() + size_, buffer_.data() + buffer_.size(), value, 16);
+        if (error == std::errc{}) size_ = static_cast<size_t>(end - buffer_.data());
+    }
+
+    [[nodiscard]] auto data() const noexcept -> const char* { return buffer_.data(); }
+    [[nodiscard]] auto size() const noexcept -> size_t { return size_; }
+    [[nodiscard]] auto view() const noexcept -> std::string_view { return {data(), size_}; }
+
+   private:
+    std::array<char, 192> buffer_;
+    size_t size_ = 0;
+};
+
+void append_retirement_record(RetirementRecordBuilder& record, const CPU& cpu,
+                              const pipeline::PipelineContext& context, const ArchState& state) {
+    record.clear();
+    record.append("{\"schema_version\":1,\"event\":\"retire\",\"hart\":");
+    record.append_decimal(static_cast<unsigned>(state.mhartid));
+    record.append(",\"cycle\":");
+    record.append_decimal(cpu.clint_mmio.mcycle);
+    record.append(",\"retired\":");
+    record.append_decimal(cpu.e_icount);
+    record.append(",\"pc\":\"0x");
+    record.append_hex(static_cast<uint64_t>(context.cpc.raw()));
+    record.append("\",\"instruction\":\"0x");
+    record.append_hex(static_cast<uint32_t>(context.ir));
+    record.append("\",\"operation\":\"");
+    record.append(pipeline::operation_name(context.op_id));
+    record.append("\",\"next_pc\":\"0x");
+    record.append_hex(static_cast<uint64_t>(state.pc.raw()));
+    record.append("\",\"privilege\":");
+    record.append_decimal(std::to_underlying(state.priv));
+    record.push_back('}');
+}
+
+auto trace_timestamp() -> std::string {
+    const auto now = std::chrono::system_clock::now();
+    const auto millis =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+    gmtime_r(&time, &utc);
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", utc.tm_year + 1900,
+                       utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec,
+                       millis.count());
+}
+
+auto privilege_mode(simrv::xlen::PrivilegeLevel privilege) noexcept -> std::string_view {
+    switch (privilege) {
+        case simrv::xlen::PrivilegeLevel::User:
+            return "U";
+        case simrv::xlen::PrivilegeLevel::Supervisor:
+            return "S";
+        case simrv::xlen::PrivilegeLevel::Machine:
+            return "M";
+    }
+    return "unknown";
+}
+
+auto json_quote(std::string_view value) -> std::string {
+    std::string quoted;
+    quoted.reserve(value.size() + 2);
+    quoted.push_back('"');
+    constexpr char kHex[] = "0123456789abcdef";
+    for (const unsigned char ch : value) {
+        switch (ch) {
+            case '"':
+                quoted += "\\\"";
+                break;
+            case '\\':
+                quoted += "\\\\";
+                break;
+            case '\b':
+                quoted += "\\b";
+                break;
+            case '\f':
+                quoted += "\\f";
+                break;
+            case '\n':
+                quoted += "\\n";
+                break;
+            case '\r':
+                quoted += "\\r";
+                break;
+            case '\t':
+                quoted += "\\t";
+                break;
+            default:
+                if (ch < 0x20) {
+                    quoted += "\\u00";
+                    quoted.push_back(kHex[ch >> 4]);
+                    quoted.push_back(kHex[ch & 0x0f]);
+                } else {
+                    quoted.push_back(static_cast<char>(ch));
+                }
+        }
+    }
+    quoted.push_back('"');
+    return quoted;
+}
+
+auto json_string_array(const std::vector<std::string>& values) -> std::string {
+    std::string json = "[";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) json.push_back(',');
+        json += json_quote(values[i]);
+    }
+    json.push_back(']');
+    return json;
+}
+
+auto event_function_field(const Machine& machine, simrv::xlen::VirtAddr pc) -> std::string {
+    const auto symbol = machine.symbol_table().lookup_function(pc);
+    return symbol ? std::format(",\"function\":{}", json_quote(symbol->name)) : "";
+}
+
+auto trace_effective_address(const CPU& cpu, simrv::xlen::VirtAddr address)
+    -> simrv::xlen::Address {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        return cpu.effective_data_xlen() == 32 ? address.raw() & 0xffffffffULL : address.raw();
+    }
+    return address.raw();
+}
+
+auto categorize_operation(isa::OperationId op) noexcept -> std::string_view {
+    const auto op_info = pipeline::operation::info(op);
+    if (op_info.control == pipeline::operation::ControlFlowKind::Branch) return "Branch";
+    if (op_info.control == pipeline::operation::ControlFlowKind::Jump) return "Jump";
+    if (op_info.memory == pipeline::operation::MemoryAccessKind::Load) return "Load";
+    if (op_info.memory == pipeline::operation::MemoryAccessKind::Store) return "Store";
+    if (op_info.memory == pipeline::operation::MemoryAccessKind::Atomic) return "Atomic";
+    if (op_info.execution_class == pipeline::operation::ExecutionClass::Multiply ||
+        op_info.execution_class == pipeline::operation::ExecutionClass::DivideOrRemainder)
+        return "Mul/Div";
+    if (op_info.execution_class == pipeline::operation::ExecutionClass::FpAlu ||
+        op_info.execution_class == pipeline::operation::ExecutionClass::FpDivideOrSqrt)
+        return "Float";
+    if (op_info.operands.rd == pipeline::operation::RegBank::Vector ||
+        op_info.operands.rs1 == pipeline::operation::RegBank::Vector ||
+        op_info.operands.rs2 == pipeline::operation::RegBank::Vector)
+        return "Vector";
+    if (op_info.side_effects != pipeline::operation::SideEffectFlags::None) return "System/CSR";
+    return "Integer/ALU";
+}
+
+}  // namespace
 
 Tracer::Tracer(Machine& machine) : machine_(machine) {}
 
-void Tracer::ensure_trace_directory(const std::filesystem::path& dir) {
+Tracer::~Tracer() {
+    machine_.dma_engine().set_trace_observer({});
+    write_trace_metadata(true);
+    flush_all();
+    if (gzip_retire_) gzip_retire_->close();
+}
+
+void Tracer::set_command_line(std::vector<std::string> command_line) {
+    trace_command_line_ = std::move(command_line);
+    write_trace_metadata(false);
+}
+
+void Tracer::refresh_runtime_trace_metadata() {
+    if (trace_metadata_path_.empty()) return;
+    // MISA is finalized during machine initialization, after the trace streams
+    // are opened. Replace the constructor's default profile with the effective
+    // guest ISA before publishing runtime metadata.
+    trace_isa_ = simrv::debug::spike_isa_string(machine_.primary_hart().state().misa);
+    trace_vlen_ = machine_.isa_config().vlen;
+    trace_harts_ = machine_.num_harts();
+    trace_enabled_devices_json_ = "[";
+    bool first_device = true;
+    for (const auto* device : machine_.memory().system_bus().router().devices()) {
+        if (device == nullptr) continue;
+        if (!first_device) trace_enabled_devices_json_.push_back(',');
+        first_device = false;
+        trace_enabled_devices_json_ +=
+            std::format("{{\"name\":{},\"base\":\"0x{:x}\",\"size\":\"0x{:x}\"}}",
+                        json_quote(device->name() != nullptr ? device->name() : ""),
+                        static_cast<uint64_t>(device->base_address().raw()),
+                        static_cast<uint64_t>(device->size()));
+    }
+    trace_enabled_devices_json_.push_back(']');
+    trace_configuration_sha256_ = simrv::util::sha256(
+        trace_configuration_sha256_ + "\nregistered_devices=" + trace_enabled_devices_json_);
+    write_trace_metadata(false);
+}
+
+auto Tracer::trace_level_at_least(unsigned level) const noexcept -> bool {
+    return machine_.configuration().debug.trace_level >= level;
+}
+
+auto Tracer::trace_event_selected(std::string_view event) const noexcept -> bool {
+    if (machine_.configuration().debug.trace_events.empty()) return true;
+    return std::ranges::any_of(
+        trace_event_filter_, [event](const std::string& candidate) { return candidate == event; });
+}
+
+auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle,
+                                 std::optional<simrv::xlen::HartId> hart,
+                                 std::optional<simrv::xlen::VirtAddr> pc,
+                                 std::string_view component) const noexcept -> bool {
+    const auto& config = machine_.configuration().debug;
+    if (!config.trace_device.empty() && component != config.trace_device) return false;
+    if (!config.trace_function.empty()) {
+        if (!pc) return false;
+        const auto symbol = machine_.symbol_table().lookup_function(*pc);
+        if (!symbol || symbol->name != config.trace_function) return false;
+    }
+    if (config.trace_hart && (!hart || *config.trace_hart != *hart)) return false;
+    if (config.trace_pc_start || config.trace_pc_end) {
+        if (!config.trace_pc_start || !config.trace_pc_end || !pc || *pc < *config.trace_pc_start ||
+            *pc > *config.trace_pc_end)
+            return false;
+    }
+    if (config.trace_after_cycle && cycle < *config.trace_after_cycle) return false;
+    if (config.trace_before_cycle && cycle > *config.trace_before_cycle) return false;
+    return trace_event_selected(event);
+}
+
+auto Tracer::artifact_path(std::string_view filename) const -> std::filesystem::path {
+    return std::filesystem::path(machine_.configuration().debug.trace_dir) / filename;
+}
+
+void Tracer::ensure_artifact_directory() const {
     std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
+    std::filesystem::create_directories(machine_.configuration().debug.trace_dir, ec);
 }
 
 void Tracer::init_trace(bool trace_enabled) {
     fp_trace.close();
     if (trace_enabled) {
-        ensure_trace_directory("trace");
+        ensure_artifact_directory();
         fp_trace.clear();
-        fp_trace.open("trace/trace.txt");
+        fp_trace.open(artifact_path("trace.txt"));
     }
+}
+
+void Tracer::init_architecture_trace(const std::string& path) {
+    machine_.dma_engine().set_trace_observer({});
+    architecture_trace_enabled_ = false;
+    retirement_context_needed_ = false;
+    if (gzip_retire_) gzip_retire_->close();
+    gzip_retire_.reset();
+    fp_archtrace.close();
+    fp_retire_index_.close();
+    fp_calls.close();
+    fp_devices.close();
+    fp_interrupts.close();
+    fp_bus.close();
+    fp_pipeline_.close();
+    fp_memory.close();
+    fp_registers_.close();
+    trace_metadata_path_.clear();
+    retire_index_path_.clear();
+    retire_record_count_ = 0;
+    trace_started_at_.clear();
+    trace_vlen_ = 0;
+    trace_harts_ = 0;
+    call_depth_.clear();
+    vector_write_before_.clear();
+    trap_frames_.clear();
+    trace_event_filter_.clear();
+    if (path.empty()) return;
+    std::error_code ec;
+    const std::filesystem::path trace_path(path);
+    const bool gzip_retire = trace_path.extension() == ".gz";
+    if (trace_path.extension() == ".zst") {
+        simrv::log::error("zstd retirement trace output is not supported; use a .gz suffix");
+        return;
+    }
+    const auto trace_directory =
+        trace_path.has_parent_path() ? trace_path.parent_path() : std::filesystem::path(".");
+    std::filesystem::create_directories(trace_directory, ec);
+    if (ec) return;
+    trace_metadata_path_ = trace_directory / "metadata.json";
+    trace_started_at_ = trace_timestamp();
+    trace_vlen_ = machine_.isa_config().vlen;
+    trace_harts_ = machine_.num_harts();
+    trace_isa_ = simrv::debug::spike_isa_string(machine_.primary_hart().state().misa);
+    trace_guest_elf_ = machine_.binary_path();
+    trace_guest_elf_sha256_.clear();
+    if (!trace_guest_elf_.empty()) {
+        if (const auto digest = simrv::util::sha256_file(trace_guest_elf_)) {
+            trace_guest_elf_sha256_ = *digest;
+        }
+    }
+    const auto& config = machine_.configuration();
+    std::string_view event_names = config.debug.trace_events;
+    while (!event_names.empty()) {
+        const auto comma = event_names.find(',');
+        auto event = event_names.substr(0, comma);
+        while (!event.empty() && (event.front() == ' ' || event.front() == '\t'))
+            event.remove_prefix(1);
+        while (!event.empty() && (event.back() == ' ' || event.back() == '\t'))
+            event.remove_suffix(1);
+        if (!event.empty()) trace_event_filter_.emplace_back(event);
+        if (comma == std::string_view::npos) break;
+        event_names.remove_prefix(comma + 1);
+    }
+    auto configuration_material = std::format(
+        "{{\"xlen\":{},\"isa\":{},\"misa\":\"0x{:x}\",\"vlen\":{},"
+        "\"harts\":{},\"dram_base\":\"0x{:x}\",\"dram_size\":\"0x{:x}\","
+        "\"appmode\":{},\"engine\":{},\"pipeline\":{},\"platform_profile\":{},"
+        "\"cpu_model_preset\":{},\"branch_predictor\":{},\"smp_quantum\":{},"
+        "\"smp_mode\":{},\"soc\":{},\"soc_cpu_model\":{},"
+        "\"soc_pcie\":{{\"ecam_base\":\"0x{:x}\",\"ecam_size\":\"0x{:x}\","
+        "\"mmio_base\":\"0x{:x}\",\"mmio_size\":\"0x{:x}\","
+        "\"first_bus\":{},\"last_bus\":{}}},\"soc_mmio\":{},"
+        "\"soc_disable_unlisted\":{},"
+        "\"trace_level\":{},\"trace_events\":{},\"trace_function\":{},"
+        "\"trace_device\":{},\"trace_hart\":{},"
+        "\"trace_pc_start\":{},\"trace_pc_end\":{},"
+        "\"trace_after_cycle\":{},\"trace_before_cycle\":{},"
+        "\"checkpoint_every\":{},\"checkpoint_dir\":{},"
+        "\"binary\":{},\"disk\":{},\"disk_enabled\":{},\"virtiofs\":{},"
+        "\"cpuconfig\":{},\"dvtree\":{},\"command_line\":{},\"devices\":[",
+        simrv::xlen::kXLenBits, json_quote(trace_isa_),
+        static_cast<uint64_t>(machine_.primary_hart().state().misa), trace_vlen_, trace_harts_,
+        static_cast<uint64_t>(config.memory.dram_base.raw()),
+        static_cast<uint64_t>(config.memory.dram_size), config.execution.appmode,
+        json_quote(machine_.runtime_profile.execution_name()),
+        json_quote(pipeline::pipeline_type_name(config.execution.pipeline_type)),
+        std::to_underlying(config.platform_profile),
+        config.cpu_model_preset ? std::format("{}", std::to_underlying(*config.cpu_model_preset))
+                                : "null",
+        config.branch_predictor_type
+            ? std::format("{}", std::to_underlying(*config.branch_predictor_type))
+            : "null",
+        config.execution.smp_quantum,
+        json_quote(config.execution.smp_mode.value_or(config.soc.smp.mode) ==
+                           SmpMode::SingleThreaded
+                       ? "single-threaded"
+                       : "multi-threaded"),
+        json_quote(config.soc.name), json_quote(config.soc.cpu_model),
+        static_cast<uint64_t>(config.soc.pcie.ecam_base.raw()),
+        static_cast<uint64_t>(config.soc.pcie.ecam_size),
+        static_cast<uint64_t>(config.soc.pcie.mmio_base.raw()),
+        static_cast<uint64_t>(config.soc.pcie.mmio_size),
+        static_cast<unsigned>(config.soc.pcie.first_bus),
+        static_cast<unsigned>(config.soc.pcie.last_bus), config.soc.enable_pcie,
+        config.soc.enable_mmio, config.soc.disable_unlisted_devices, config.debug.trace_level,
+        json_quote(config.debug.trace_events), json_quote(config.debug.trace_function),
+        json_quote(config.debug.trace_device),
+        config.debug.trace_hart ? std::format("{}", config.debug.trace_hart->raw()) : "null",
+        config.debug.trace_pc_start
+            ? json_quote(
+                  std::format("0x{:x}", static_cast<uint64_t>(config.debug.trace_pc_start->raw())))
+            : "null",
+        config.debug.trace_pc_end
+            ? json_quote(
+                  std::format("0x{:x}", static_cast<uint64_t>(config.debug.trace_pc_end->raw())))
+            : "null",
+        config.debug.trace_after_cycle ? std::format("{}", *config.debug.trace_after_cycle)
+                                       : "null",
+        config.debug.trace_before_cycle ? std::format("{}", *config.debug.trace_before_cycle)
+                                        : "null",
+        config.debug.checkpoint_every, json_quote(config.debug.checkpoint_dir),
+        json_quote(config.files.binary_path), json_quote(config.files.disk_path),
+        config.files.disk_enabled, json_quote(config.files.virtiofs_path),
+        json_quote(config.files.config_path), json_quote(config.files.dvtree_path),
+        json_string_array(trace_command_line_));
+    bool first_device = true;
+    for (const auto& device : config.soc.devices) {
+        if (!first_device) configuration_material.push_back(',');
+        first_device = false;
+        configuration_material += std::format(
+            "{{\"kind\":{},\"name\":{},\"base\":\"0x{:x}\","
+            "\"size\":\"0x{:x}\",\"irq\":{},\"enabled\":{},"
+            "\"pci_bus\":{},\"pci_slot\":{},\"pci_function\":{},"
+            "\"pci_intx_source\":{}}}",
+            json_quote(soc_device_kind_name(device.kind)), json_quote(device.name),
+            static_cast<uint64_t>(device.base.raw()), static_cast<uint64_t>(device.size),
+            device.irq, device.enabled,
+            device.pci_bus ? std::to_string(*device.pci_bus) : std::string("null"),
+            device.pci_slot ? std::to_string(*device.pci_slot) : std::string("null"),
+            device.pci_function ? std::to_string(*device.pci_function) : std::string("null"),
+            device.pci_intx_source ? std::to_string(*device.pci_intx_source) : std::string("null"));
+    }
+    configuration_material += "]}";
+    trace_configuration_sha256_ = simrv::util::sha256(configuration_material);
+    trace_enabled_devices_json_ = "[]";
+    fp_calls.open(trace_directory / "calls.jsonl", std::ios::out | std::ios::trunc);
+    fp_devices.open(trace_directory / "devices.jsonl", std::ios::out | std::ios::trunc);
+    fp_interrupts.open(trace_directory / "interrupts.jsonl", std::ios::out | std::ios::trunc);
+    fp_bus.open(trace_directory / "bus.jsonl", std::ios::out | std::ios::trunc);
+    if (machine_.configuration().debug.trace_level >= 4) {
+        fp_memory.open(trace_directory / "memory.jsonl", std::ios::out | std::ios::trunc);
+        fp_pipeline_.open(trace_directory / "pipeline.jsonl", std::ios::out | std::ios::trunc);
+    }
+    if (config.debug.trace_register_writes) {
+        fp_registers_.open(trace_directory / "registers.jsonl", std::ios::out | std::ios::trunc);
+        vector_write_before_.resize(machine_.num_harts());
+    }
+    if (gzip_retire) {
+        gzip_retire_ = std::make_unique<GzipTraceWriter>();
+        if (!gzip_retire_->open(trace_path)) {
+            simrv::log::error("cannot open compressed retirement trace {}; shared zlib is required",
+                              trace_path.string());
+            gzip_retire_.reset();
+        }
+    } else {
+        fp_archtrace.clear();
+        fp_archtrace.open(trace_path, std::ios::out | std::ios::trunc);
+    }
+    architecture_trace_enabled_ =
+        fp_archtrace.is_open() || (gzip_retire_ && gzip_retire_->is_open());
+    const bool emits_calls = trace_event_selected("call") || trace_event_selected("return");
+    const bool emits_memory = trace_event_selected("memory_read") ||
+                              trace_event_selected("memory_write") ||
+                              trace_event_selected("memory_atomic");
+    retirement_context_needed_ =
+        architecture_trace_enabled_ &&
+        ((trace_level_at_least(3) && trace_event_selected("retire")) ||
+         (trace_level_at_least(2) && fp_calls.is_open() && emits_calls) ||
+         (trace_level_at_least(1) && fp_interrupts.is_open() &&
+          trace_event_selected("interrupt_return")) ||
+         (trace_level_at_least(4) && fp_memory.is_open() && emits_memory) ||
+         (fp_registers_.is_open() && trace_event_selected("register_write")));
+    if (is_architecture_trace_enabled()) {
+        machine_.dma_engine().set_trace_observer(
+            [this](const simrv::memory::DmaTransferTrace& transfer) {
+                log_dma_transfer(transfer);
+            });
+        if (!gzip_retire) {
+            retire_index_path_ = trace_directory / (trace_path.stem().string() + ".index.jsonl");
+            fp_retire_index_.open(retire_index_path_, std::ios::out | std::ios::trunc);
+        }
+        call_depth_.assign(machine_.num_harts(), 0);
+        trap_frames_.resize(machine_.num_harts());
+        const auto header = std::format(
+            "{{\"schema_version\":1,\"event\":\"header\",\"xlen\":{},"
+            "\"vlen\":{},\"harts\":{}}}\n",
+            simrv::xlen::kXLenBits, machine_.isa_config().vlen, machine_.num_harts());
+        if (gzip_retire) {
+            if (!gzip_retire_->write(header)) {
+                simrv::log::error("failed writing compressed retirement trace header");
+                gzip_retire_->close();
+            }
+        } else {
+            fp_archtrace << header;
+        }
+        if (fp_retire_index_.is_open()) {
+            std::println(fp_retire_index_,
+                         "{{\"schema_version\":1,\"kind\":\"trace_index\","
+                         "\"stream\":\"retire\",\"stride\":{},"
+                         "\"offset_units\":\"bytes\"}}",
+                         kRetireIndexStride);
+        }
+    }
+    if (fp_calls.is_open()) {
+        std::println(fp_calls,
+                     "{{\"schema_version\":2,\"event\":\"header\","
+                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+                     "\"mode\":\"M\",\"payload\":{{\"stream\":\"calls\"}}}}",
+                     trace_timestamp());
+    }
+    if (fp_devices.is_open()) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"header\","
+                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+                     "\"mode\":\"M\",\"payload\":{{\"stream\":\"devices\"}}}}",
+                     trace_timestamp());
+    }
+    if (fp_interrupts.is_open()) {
+        std::println(fp_interrupts,
+                     "{{\"schema_version\":2,\"event\":\"header\","
+                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+                     "\"mode\":\"M\",\"payload\":{{\"stream\":\"interrupts\"}}}}",
+                     trace_timestamp());
+    }
+    if (fp_bus.is_open()) {
+        std::println(fp_bus,
+                     "{{\"schema_version\":2,\"event\":\"header\","
+                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+                     "\"mode\":\"M\",\"payload\":{{\"stream\":\"bus\"}}}}",
+                     trace_timestamp());
+    }
+    if (fp_memory.is_open()) {
+        std::println(
+            fp_memory,
+            "{{\"schema_version\":2,\"event\":\"header\","
+            "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+            "\"mode\":\"M\",\"payload\":{{\"stream\":\"memory\","
+            "\"semantics\":\"retired scalar data accesses and precise synchronous faults\"}}}}",
+            trace_timestamp());
+    }
+    write_trace_metadata(false);
 }
 
 void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
     fp_traplog.close();
     if (traplog_mode) {
-        const std::filesystem::path path(fn_traplog);
+        const std::filesystem::path path =
+            fn_traplog.empty() ? artifact_path("traplog.txt") : std::filesystem::path(fn_traplog);
+        std::error_code ec;
         if (path.has_parent_path()) {
-            ensure_trace_directory(path.parent_path());
+            std::filesystem::create_directories(path.parent_path(), ec);
         }
         fp_traplog.clear();
-        fp_traplog.open(fn_traplog, std::ios::out | std::ios::trunc);
+        fp_traplog.open(path, std::ios::out | std::ios::trunc);
     }
 }
 
 void Tracer::init_dlog(bool dlog_mode) {
     fp_dlog.close();
     if (dlog_mode) {
-        ensure_trace_directory("trace");
+        ensure_artifact_directory();
         fp_dlog.clear();
-        fp_dlog.open("init_virtio.txt");
+        fp_dlog.open(artifact_path("dlog.txt"), std::ios::out | std::ios::trunc);
     }
 }
 
-void Tracer::dump_init_artifacts() {
-    auto* cpu = &machine_.cpu;
-    auto* ram = machine_.mmem;
-    auto* console = machine_.console.get();
-    auto* disk = machine_.disk.get();
-    auto* sector = disk->sector;
+void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& context) {
+    if (!fp_registers_.is_open() || !context.traits.writes_vec) return;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    const auto hart = static_cast<size_t>(cpu.state().mhartid);
+    if (hart >= vector_write_before_.size()) vector_write_before_.resize(hart + 1);
+    if (context.trace_sequence == 0) return;
+    auto& bytes = vector_write_before_[hart][context.trace_sequence];
+    bytes.clear();
+    bytes.reserve(32 * (trace_vlen_ / 8));
+    for (unsigned index = 0; index < 32; ++index) {
+        const auto& reg = cpu.state().regs.read_vector(
+            simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
+        bytes.insert(bytes.end(), reg.u8.begin(),
+                     reg.u8.begin() + static_cast<std::ptrdiff_t>(trace_vlen_ / 8));
+    }
+}
 
-    ensure_trace_directory("trace");
+void Tracer::flush_all() {
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    if (fp_trace.is_open()) fp_trace.flush();
+    if (fp_dlog.is_open()) fp_dlog.flush();
+    if (fp_traplog.is_open()) fp_traplog.flush();
+    if (fp_archtrace.is_open()) fp_archtrace.flush();
+    if (gzip_retire_ && gzip_retire_->is_open() && !gzip_retire_->flush())
+        simrv::log::error("failed flushing compressed retirement trace");
+    if (fp_retire_index_.is_open()) fp_retire_index_.flush();
+    if (fp_calls.is_open()) fp_calls.flush();
+    if (fp_devices.is_open()) fp_devices.flush();
+    if (fp_interrupts.is_open()) fp_interrupts.flush();
+    if (fp_bus.is_open()) fp_bus.flush();
+    if (fp_pipeline_.is_open()) fp_pipeline_.flush();
+    if (fp_memory.is_open()) fp_memory.flush();
+    if (fp_registers_.is_open()) fp_registers_.flush();
+    if (fp_bpred_.is_open()) fp_bpred_.flush();
+}
 
-    {
-        std::ofstream out("trace/init_mem.txt");
-        for (Address i = 0; i < simrv::memory::kDramSize; ++i) {
-            out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
+void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
+                                          simrv::xlen::VirtAddr epc,
+                                          simrv::xlen::PrivilegeLevel source_mode,
+                                          simrv::xlen::CsrValue tval) {
+    if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
+    const auto& state = cpu.state();
+    const auto hart = static_cast<size_t>(state.mhartid);
+    const auto cycle = cpu.clint_mmio.mcycle;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    if (hart >= trap_frames_.size()) trap_frames_.resize(hart + 1);
+    auto& frames = trap_frames_[hart];
+    const bool interrupt = trap_is_interrupt(cause);
+    frames.push_back({.cause = cause, .epc = epc, .interrupt = interrupt});
+    if (!interrupt) return;
+    const auto depth =
+        std::ranges::count_if(frames, [](const TrapTraceFrame& frame) { return frame.interrupt; });
+    if (!accepts_trace_event("interrupt_entry", cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(hart)}, state.pc))
+        return;
+    std::println(fp_interrupts,
+                 "{{\"schema_version\":2,\"event\":\"interrupt_entry\","
+                 "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                 "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{"
+                 "\"cause\":{},\"cause_value\":\"0x{:x}\",\"cause_name\":\"{}\","
+                 "\"cause_register\":\"{}\",\"epc_register\":\"{}\","
+                 "\"epc\":\"0x{:x}\",\"tval_register\":\"{}\","
+                 "\"tval\":\"0x{:x}\","
+                 "\"source_mode\":\"{}\",\"nesting_depth\":{}}}}}",
+                 trace_timestamp(), cpu.clint_mmio.mcycle, static_cast<unsigned>(state.mhartid),
+                 static_cast<uint64_t>(state.pc.raw()), event_function_field(machine_, state.pc),
+                 privilege_mode(state.priv), static_cast<uint64_t>(trap_exception_code(cause)),
+                 static_cast<uint64_t>(cause), trap_cause_name(cause),
+                 state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "scause" : "mcause",
+                 state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "sepc" : "mepc",
+                 static_cast<uint64_t>(epc.raw()),
+                 state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "stval" : "mtval",
+                 static_cast<uint64_t>(tval), privilege_mode(source_mode), depth);
+}
+
+void Tracer::log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, bool asserted,
+                                  std::string_view source) {
+    if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
+    const auto& state = cpu.state();
+    const auto event = asserted ? "interrupt_asserted" : "interrupt_deasserted";
+    const auto cycle = cpu.clint_mmio.mcycle;
+    if (!accepts_trace_event(event, cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)},
+                             std::nullopt, source))
+        return;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    std::println(fp_interrupts,
+                 "{{\"schema_version\":2,\"event\":\"interrupt_{}\","
+                 "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                 "\"mode\":\"{}\",\"component\":\"{}\",\"payload\":{{"
+                 "\"cause\":{},\"cause_name\":\"{}\",\"asserted\":{}}}}}",
+                 asserted ? "asserted" : "deasserted", trace_timestamp(), cpu.clint_mmio.mcycle,
+                 static_cast<unsigned>(state.mhartid), privilege_mode(state.priv), source,
+                 static_cast<uint64_t>(trap_exception_code(cause)), trap_cause_name(cause),
+                 asserted ? "true" : "false");
+}
+
+void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
+                      simrv::xlen::PhysAddr addr, uint32_t size, simrv::xlen::Word data,
+                      bool is_write, bool faulted, bool mapped) {
+    if (!fp_dlog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
+    const auto& cpu = machine_.hart(hart);
+    const auto mtime = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+    const auto cycle = cpu.clint_mmio.mcycle;
+    const auto event =
+        std::format("{}_{}", mapped ? "mmio" : "unmapped", is_write ? "write" : "read");
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    if (fp_dlog.is_open() && !faulted) {
+        std::println(fp_dlog, "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
+                     mtime, dev_name, is_write ? "WRITE" : "READ", addr.raw(),
+                     simrv::xlen::kXLenHexDigits, size, data, size * 2);
+    }
+    if (fp_devices.is_open() && trace_level_at_least(1) &&
+        accepts_trace_event(event, cycle, hart, cpu.active_context().cpc, dev_name)) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"{}_{}\","
+                     "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                     "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\","
+                     "\"component\":\"{}\",\"payload\":{{"
+                     "\"address\":\"0x{:x}\",\"value\":\"0x{:x}\","
+                     "\"width\":{},\"access\":\"{}\",\"faulted\":{},"
+                     "\"latency_cycles\":null}}}}",
+                     mapped ? "mmio" : "unmapped", is_write ? "write" : "read", trace_timestamp(),
+                     cycle, static_cast<unsigned>(hart.raw()),
+                     static_cast<uint64_t>(cpu.active_context().cpc.raw()),
+                     event_function_field(machine_, cpu.active_context().cpc),
+                     privilege_mode(cpu.state().priv), dev_name, static_cast<uint64_t>(addr.raw()),
+                     static_cast<uint64_t>(data), size, mapped ? "mmio" : "unmapped",
+                     faulted ? "true" : "false");
+    }
+}
+
+void Tracer::log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::string_view opcode,
+                                 std::uint16_t source, std::uint16_t sink,
+                                 simrv::xlen::PhysAddr address, std::string_view detail,
+                                 const BusTraceContext& context) {
+    if (!fp_bus.is_open() || !trace_level_at_least(4)) return;
+    const auto event_cycle =
+        channel == 'D' && context.completion_cycle ? *context.completion_cycle : cycle;
+    if (!accepts_trace_event("bus_transaction", event_cycle, context.hart, std::nullopt,
+                             context.target))
+        return;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    std::string fields;
+    const auto add_number = [&fields](std::string_view name, const auto& value) {
+        if (value) fields += std::format(",\"{}\":{}", name, static_cast<uint64_t>(*value));
+    };
+    add_number("sequence", context.sequence);
+    add_number("request_cycle", context.request_cycle);
+    add_number("completion_cycle", context.completion_cycle);
+    add_number("latency_cycles", context.latency_cycles);
+    if (context.hart) fields += std::format(",\"hart\":{}", context.hart->raw());
+    add_number("size_log2", context.transfer_size);
+    if (context.transfer_size)
+        fields += std::format(",\"width_bytes\":{}", 1u << *context.transfer_size);
+    add_number("burst_length", context.burst_length);
+    if (context.data) {
+        if (channel == 'D')
+            fields += std::format(",\"response_data\":\"0x{:x}\"", *context.data);
+        else
+            fields += std::format(",\"data\":\"0x{:x}\"", *context.data);
+    }
+    if (context.byte_enable)
+        fields += std::format(",\"byte_enable\":\"0x{:x}\"", *context.byte_enable);
+    if (context.denied) fields += std::format(",\"denied\":{}", *context.denied ? "true" : "false");
+    if (context.corrupt)
+        fields += std::format(",\"corrupt\":{}", *context.corrupt ? "true" : "false");
+    if (!context.master.empty())
+        fields += std::format(",\"master\":{}", json_quote(context.master));
+    if (!context.target.empty())
+        fields += std::format(",\"target\":{}", json_quote(context.target));
+    std::println(fp_bus,
+                 "{{\"schema_version\":2,\"event\":\"bus_transaction\","
+                 "\"cycle\":{},\"payload\":{{\"bus\":\"tilelink-c\","
+                 "\"channel\":\"{}\",\"opcode\":{},\"source_id\":{},"
+                 "\"sink_id\":{},\"address\":\"0x{:x}\",\"detail\":{}{}}}}}",
+                 event_cycle, channel, json_quote(opcode), source, sink,
+                 static_cast<uint64_t>(address.raw()), json_quote(detail), fields);
+}
+
+void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRecord> stalls) {
+    if (!fp_pipeline_.is_open() || !trace_level_at_least(4) || stalls.empty()) return;
+    const auto& state = cpu.state();
+    const auto cycle = cpu.clint_mmio.mcycle;
+    if (!accepts_trace_event("pipeline_stall", cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)},
+                             stalls.front().pc))
+        return;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    std::println(fp_pipeline_,
+                 "{{\"schema_version\":2,\"event\":\"pipeline_stall\","
+                 "\"cycle\":{},\"hart\":{},\"mode\":\"{}\",\"payload\":{{"
+                 "\"stages\":[{}]}}}}",
+                 cycle, static_cast<uint32_t>(state.mhartid), privilege_mode(state.priv),
+                 [&stalls] {
+                     std::string result;
+                     for (const auto& stall : stalls) {
+                         if (!result.empty()) result.push_back(',');
+                         result += std::format(
+                             "{{\"stage\":{},\"pc\":\"0x{:x}\","
+                             "\"remaining_cycles\":{},\"reason\":{}}}",
+                             json_quote(stall.stage), static_cast<uint64_t>(stall.pc.raw()),
+                             stall.remaining_cycles, json_quote(stall.reason));
+                     }
+                     return result;
+                 }());
+}
+
+void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
+    if (!fp_devices.is_open() || !trace_level_at_least(1)) return;
+    const auto event = transfer.cancelled  ? "dma_cancelled"
+                       : transfer.complete ? "dma_complete"
+                                           : "dma_start";
+    const auto cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle;
+    if (!accepts_trace_event(event, cycle, std::nullopt, std::nullopt, transfer.component)) return;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    std::println(fp_devices,
+                 "{{\"schema_version\":2,\"event\":\"{}\",\"timestamp\":\"{}\","
+                 "\"cycle\":{},\"component\":{},\"payload\":{{"
+                 "\"transfer_id\":{},\"byte_count\":{},\"request_cycle\":{},"
+                 "\"start_cycle\":{},\"completion_cycle\":{},\"latency_cycles\":{}}}}}",
+                 event, trace_timestamp(), cycle, json_quote(transfer.component), transfer.id,
+                 transfer.byte_count, transfer.request_cycle, transfer.start_cycle,
+                 transfer.completion_cycle, transfer.completion_cycle - transfer.start_cycle);
+}
+
+void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
+                      simrv::xlen::TrapCause cause, simrv::xlen::VirtAddr trap_pc,
+                      simrv::xlen::PrivilegeLevel priv, const ArchState& state,
+                      simrv::xlen::CsrValue tval, const CPU& cpu) {
+    if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
+    constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    if (fp_traplog.is_open()) {
+        std::println(
+            fp_traplog,
+            "TRAP mtime={} cause={:0{}x} ({}) pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} "
+            "tp={:0{}x} a0={:0{}x} a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} "
+            "sepc={:0{}x} satp={:0{}x} tval={:0{}x}",
+            mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
+            static_cast<uint64_t>(trap_pc.raw()), kLogHexWidth, static_cast<unsigned>(priv),
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Ra)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Sp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Tp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::A0)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::A1)), kLogHexWidth,
+            static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
+            kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
+            static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
+            kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
+    }
+    if (fp_devices.is_open() && trace_level_at_least(1) &&
+        accepts_trace_event("trap", cycle,
+                            simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)}, trap_pc)) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"trap\","
+                     "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                     "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{\"cause\":{},"
+                     "\"cause_name\":\"{}\",\"pc\":\"0x{:x}\","
+                     "\"tval\":\"0x{:x}\",\"privilege\":{}}}}}",
+                     trace_timestamp(), cycle, static_cast<unsigned>(state.mhartid),
+                     static_cast<uint64_t>(trap_pc.raw()), event_function_field(machine_, trap_pc),
+                     privilege_mode(priv), static_cast<uint64_t>(cause), trap_cause_name(cause),
+                     static_cast<uint64_t>(trap_pc.raw()), static_cast<uint64_t>(tval),
+                     std::to_underlying(priv));
+    }
+    const auto& context = cpu.active_context();
+    const bool memory_fault_cause =
+        !trap_is_interrupt(cause) &&
+        (cause == ExceptionCode::MisalignedLoad || cause == ExceptionCode::FaultLoad ||
+         cause == ExceptionCode::MisalignedStore || cause == ExceptionCode::FaultStore ||
+         cause == ExceptionCode::LoadPageFault || cause == ExceptionCode::StorePageFault);
+    const bool memory_write_fault = cause == ExceptionCode::MisalignedStore ||
+                                    cause == ExceptionCode::FaultStore ||
+                                    cause == ExceptionCode::StorePageFault;
+    const auto memory_kind = pipeline::operation::info(context.op_id).memory;
+    const auto opcode = static_cast<Opcode>(context.opcode);
+    const bool scalar_memory_opcode = opcode == Opcode::Load || opcode == Opcode::Store ||
+                                      opcode == Opcode::LoadFp || opcode == Opcode::StoreFp ||
+                                      opcode == Opcode::Amo;
+    if (!fp_memory.is_open() || !trace_level_at_least(4) || !memory_fault_cause ||
+        !scalar_memory_opcode || memory_kind == pipeline::operation::MemoryAccessKind::None)
+        return;
+
+    const simrv::xlen::Address effective_address = trace_effective_address(cpu, context.mem_addr);
+    const auto access_privilege = cpu.effective_data_privilege();
+    std::optional<simrv::xlen::PhysAddr> physical_address;
+    const bool translation_enabled =
+        access_privilege != kPrivMachine &&
+        simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
+    if (!translation_enabled) {
+        physical_address = simrv::xlen::PhysAddr{effective_address};
+    } else {
+        const auto asid =
+            static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
+        const simrv::xlen::Address vpn = effective_address >> simrv::memory::kPageShift;
+        const auto tlb_index = CPU::soft_tlb_index(vpn);
+        const auto& soft_tlb =
+            memory_write_fault ? cpu.soft_tlb_write[tlb_index] : cpu.soft_tlb_read[tlb_index];
+        if (soft_tlb.matches(vpn, asid, access_privilege, cpu.soft_tlb_epoch)) {
+            physical_address = soft_tlb.paddr_base | (effective_address & simrv::memory::kPageMask);
+        } else {
+            const auto* entry = memory_write_fault
+                                    ? cpu.tlb.peek_data_w(simrv::xlen::VirtAddr{effective_address},
+                                                          asid, access_privilege)
+                                    : cpu.tlb.peek_data_r(simrv::xlen::VirtAddr{effective_address},
+                                                          asid, access_privilege);
+            if (entry != nullptr) {
+                physical_address = simrv::xlen::PhysAddr{
+                    entry->p_addr | (effective_address & simrv::memory::kPageMask)};
+            }
         }
-        simrv::log::info("file init_mem.txt was generated after {} cycle",
-                         static_cast<Counter>(cpu->clint_mmio.mtime.load()));
     }
-
-    if (sector != nullptr) {
-        std::ofstream out("trace/init_dsk.txt");
-        for (Word i = 0; i < simrv::virtio::kDiskSize; ++i) {
-            out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(sector[i])) << '\n';
+    const unsigned width = 1u << (std::to_underlying(context.funct3) & 0x3u);
+    std::string_view region = "unresolved";
+    std::string_view component;
+    if (physical_address) {
+        if (machine_.memory_geometry().contains(*physical_address, width)) {
+            region = "ram";
+        } else if (const auto* device =
+                       machine_.memory().system_bus().router().resolve_device(*physical_address);
+                   device != nullptr) {
+            region = "mmio";
+            component = device->name() != nullptr ? device->name() : "";
+        } else {
+            region = "unmapped";
         }
-        simrv::log::info("file init_dsk.txt was generated after {} cycle",
-                         static_cast<Counter>(cpu->clint_mmio.mtime.load()));
+    }
+    if (!accepts_trace_event("memory_fault", cycle,
+                             simrv::xlen::HartId{static_cast<uint32_t>(state.mhartid)}, trap_pc,
+                             component))
+        return;
+    const auto store_value =
+        static_cast<uint64_t>(opcode == Opcode::StoreFp ? context.fp_mem_wdata : context.mem_wdata);
+    const std::string value_json =
+        memory_write_fault ? json_quote(std::format("0x{:x}", store_value)) : "null";
+    std::println(fp_memory,
+                 "{{\"schema_version\":2,\"event\":\"memory_fault\","
+                 "\"cycle\":{},\"hart\":{},\"pc\":\"0x{:x}\"{},\"mode\":\"{}\","
+                 "{}\"payload\":{{\"effective_address\":\"0x{:x}\",{}"
+                 "\"region\":\"{}\",\"direction\":\"{}\",\"operation\":{},"
+                 "\"width\":{},\"value\":{},\"cause\":{},\"cause_name\":{},"
+                 "\"tval\":\"0x{:x}\",\"faulted\":true,\"latency_cycles\":null}}}}",
+                 cycle, static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(trap_pc.raw()),
+                 event_function_field(machine_, trap_pc), privilege_mode(access_privilege),
+                 component.empty() ? "" : std::format("\"component\":{},", json_quote(component)),
+                 static_cast<uint64_t>(effective_address),
+                 physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
+                                                static_cast<uint64_t>(physical_address->raw()))
+                                  : "",
+                 region, memory_write_fault ? "write" : "read",
+                 json_quote(pipeline::operation_name(context.op_id)), width, value_json,
+                 static_cast<uint64_t>(trap_exception_code(cause)),
+                 json_quote(trap_cause_name(cause)), static_cast<uint64_t>(tval));
+}
+
+void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
+                     simrv::xlen::Word ext_id, simrv::xlen::Word func_id, simrv::xlen::Word a0,
+                     simrv::xlen::Word a1, simrv::xlen::VirtAddr pc, simrv::xlen::HartId hart) {
+    if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
+    constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    if (fp_traplog.is_open()) {
+        std::println(fp_traplog,
+                     "__ SBI ecall mtime={} cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} "
+                     "pc={:0{}x}",
+                     mtime, cause, static_cast<uint64_t>(ext_id), kLogHexWidth,
+                     static_cast<uint64_t>(func_id), kLogHexWidth, static_cast<uint64_t>(a0),
+                     kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth,
+                     static_cast<uint64_t>(pc.raw()), kLogHexWidth);
+    }
+    if (fp_devices.is_open() && trace_level_at_least(1) &&
+        accepts_trace_event("sbi", cycle, hart, pc)) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"sbi\","
+                     "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                     "\"pc\":\"0x{:x}\"{},\"mode\":\"M\",\"payload\":{{\"cause\":{},"
+                     "\"extension\":\"0x{:x}\",\"function\":\"0x{:x}\","
+                     "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\","
+                     "\"pc\":\"0x{:x}\"}}}}",
+                     trace_timestamp(), cycle, hart.raw(), static_cast<uint64_t>(pc.raw()),
+                     event_function_field(machine_, pc), cause, static_cast<uint64_t>(ext_id),
+                     static_cast<uint64_t>(func_id), static_cast<uint64_t>(a0),
+                     static_cast<uint64_t>(a1), static_cast<uint64_t>(pc.raw()));
+    }
+}
+
+void Tracer::log_architecture_retirement(const CPU& cpu,
+                                         const pipeline::PipelineContext& retiring_context) {
+    if (!needs_retiring_context()) return;
+    const auto hart_id = simrv::xlen::HartId{static_cast<uint32_t>(cpu.state().mhartid)};
+    const auto cycle = cpu.clint_mmio.mcycle;
+    const auto memory_kind = pipeline::operation::info(retiring_context.op_id).memory;
+    const auto opcode = static_cast<Opcode>(retiring_context.opcode);
+    const bool scalar_memory_opcode = opcode == Opcode::Load || opcode == Opcode::Store ||
+                                      opcode == Opcode::LoadFp || opcode == Opcode::StoreFp ||
+                                      opcode == Opcode::Amo;
+    const auto memory_event =
+        memory_kind == pipeline::operation::MemoryAccessKind::Load     ? "memory_read"
+        : memory_kind == pipeline::operation::MemoryAccessKind::Store  ? "memory_write"
+        : memory_kind == pipeline::operation::MemoryAccessKind::Atomic ? "memory_atomic"
+                                                                       : "";
+    const bool emit_memory = fp_memory.is_open() && scalar_memory_opcode &&
+                             memory_kind != pipeline::operation::MemoryAccessKind::None &&
+                             trace_level_at_least(4) && trace_event_selected(memory_event);
+    const auto funct12 = retiring_context.funct12;
+    const bool interrupt_return_instruction = funct12 == Funct12Priv::Mret ||
+                                              funct12 == Funct12Priv::Sret ||
+                                              funct12 == Funct12Priv::Uret;
+    const auto source_pc = retiring_context.cpc.raw();
+    const auto target_pc = retiring_context.jmp_pc.raw();
+    const auto return_pc = source_pc + (retiring_context.cinsn != 0 ? 2 : 4);
+    const bool is_link_register = retiring_context.rd == simrv::xlen::RegId::Ra ||
+                                  retiring_context.rd == simrv::xlen::RegId::T0;
+    const bool is_return_register = retiring_context.rs1 == simrv::xlen::RegId::Ra ||
+                                    retiring_context.rs1 == simrv::xlen::RegId::T0;
+    const bool is_return = retiring_context.opcode == isa::Opcode::Jalr &&
+                           retiring_context.rd == simrv::xlen::RegId::Zero && is_return_register &&
+                           retiring_context.imm == 0;
+    const bool is_call = retiring_context.tkn &&
+                         (retiring_context.opcode == isa::Opcode::Jal ||
+                          retiring_context.opcode == isa::Opcode::Jalr) &&
+                         is_link_register;
+    const bool emit_retire = trace_level_at_least(3) &&
+                             accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc);
+    const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2) &&
+                            (is_call || is_return) &&
+                            (trace_event_selected("call") || trace_event_selected("return"));
+    const bool emit_interrupts = fp_interrupts.is_open() && trace_level_at_least(1) &&
+                                 interrupt_return_instruction &&
+                                 trace_event_selected("interrupt_return");
+    const bool emit_registers =
+        fp_registers_.is_open() &&
+        accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc);
+    if (!emit_retire && !emit_calls && !emit_interrupts && !emit_memory && !emit_registers) return;
+    const auto& state = cpu.state();
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    if (emit_registers && retiring_context.traits.writes_fp) {
+        const auto index = static_cast<unsigned>(retiring_context.rd);
+        const auto after = state.regs.read_fp(simrv::xlen::to_fp_reg_id(retiring_context.rd));
+        std::println(fp_registers_,
+                     "{{\"schema_version\":1,\"event\":\"register_write\","
+                     "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
+                     "\"instruction\":\"0x{:x}\",\"operation\":{},"
+                     "\"register_file\":\"fpr\",\"index\":{},"
+                     "\"before_bits\":\"0x{:016x}\",\"after_bits\":\"0x{:016x}\","
+                     "\"flen\":64,\"fcsr\":\"0x{:x}\"}}",
+                     hart_id.raw(), cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
+                     static_cast<uint32_t>(retiring_context.ir),
+                     json_quote(pipeline::operation_name(retiring_context.op_id)), index,
+                     static_cast<uint64_t>(retiring_context.fp_old_value),
+                     static_cast<uint64_t>(after), static_cast<uint64_t>(state.fcsr));
+    }
+    if (emit_registers && retiring_context.traits.writes_vec) {
+        const auto hart = static_cast<size_t>(hart_id.raw());
+        const auto sequence = retiring_context.trace_sequence;
+        auto before = std::vector<uint8_t>{};
+        if (hart < vector_write_before_.size()) {
+            auto found = vector_write_before_[hart].find(sequence);
+            if (found != vector_write_before_[hart].end()) {
+                before = std::move(found->second);
+                vector_write_before_[hart].erase(found);
+            }
+        }
+        auto to_hex = [](std::span<const uint8_t> bytes) {
+            std::string value;
+            value.reserve(bytes.size() * 2 + 2);
+            value += "0x";
+            for (auto it = bytes.rbegin(); it != bytes.rend(); ++it)
+                value += std::format("{:02x}", static_cast<unsigned>(*it));
+            return value;
+        };
+        const auto width = trace_vlen_ / 8;
+        for (unsigned index = 0; index < 32; ++index) {
+            const auto& after = state.regs.read_vector(
+                simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
+            const auto after_bits = std::span<const uint8_t>(after.u8.data(), width);
+            const auto start = static_cast<size_t>(index) * width;
+            const auto before_bits = start + width <= before.size()
+                                         ? std::span<const uint8_t>(before.data() + start, width)
+                                         : std::span<const uint8_t>{};
+            if (index != static_cast<unsigned>(retiring_context.rd) &&
+                before_bits.size() == after_bits.size() &&
+                std::equal(before_bits.begin(), before_bits.end(), after_bits.begin()))
+                continue;
+            std::println(fp_registers_,
+                         "{{\"schema_version\":1,\"event\":\"register_write\","
+                         "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
+                         "\"instruction\":\"0x{:x}\",\"operation\":{},"
+                         "\"register_file\":\"vector\",\"index\":{},"
+                         "\"before_bits\":\"{}\",\"after_bits\":\"{}\",\"vlen\":{},"
+                         "\"vl\":{},\"vtype\":\"0x{:x}\"}}",
+                         hart_id.raw(), cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
+                         static_cast<uint32_t>(retiring_context.ir),
+                         json_quote(pipeline::operation_name(retiring_context.op_id)), index,
+                         to_hex(before_bits), to_hex(after_bits), trace_vlen_,
+                         static_cast<uint64_t>(state.vl), static_cast<uint64_t>(state.vtype));
+        }
+    }
+    if (emit_memory) {
+        const simrv::xlen::Address effective_address =
+            trace_effective_address(cpu, retiring_context.mem_addr);
+        const auto access_privilege = cpu.effective_data_privilege();
+        std::optional<simrv::xlen::PhysAddr> physical_address;
+        const bool translation_enabled =
+            access_privilege != kPrivMachine &&
+            simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
+        if (!translation_enabled) {
+            physical_address = simrv::xlen::PhysAddr{effective_address};
+        } else {
+            const auto asid =
+                static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
+            const simrv::xlen::Address vpn = effective_address >> simrv::memory::kPageShift;
+            const auto tlb_index = CPU::soft_tlb_index(vpn);
+            const auto& soft_tlb = memory_kind == pipeline::operation::MemoryAccessKind::Store
+                                       ? cpu.soft_tlb_write[tlb_index]
+                                       : cpu.soft_tlb_read[tlb_index];
+            if (soft_tlb.matches(vpn, asid, access_privilege, cpu.soft_tlb_epoch)) {
+                physical_address =
+                    soft_tlb.paddr_base | (effective_address & simrv::memory::kPageMask);
+            } else {
+                const auto* entry =
+                    memory_kind == pipeline::operation::MemoryAccessKind::Store
+                        ? cpu.tlb.peek_data_w(simrv::xlen::VirtAddr{effective_address}, asid,
+                                              access_privilege)
+                        : cpu.tlb.peek_data_r(simrv::xlen::VirtAddr{effective_address}, asid,
+                                              access_privilege);
+                if (entry != nullptr) {
+                    physical_address = simrv::xlen::PhysAddr{
+                        entry->p_addr | (effective_address & simrv::memory::kPageMask)};
+                }
+            }
+        }
+
+        const unsigned width = pipeline::operation::memory_access_bytes(retiring_context.op_id,
+                                                                        retiring_context.funct3);
+        std::string_view region = "unresolved";
+        std::string_view component;
+        if (physical_address) {
+            if (machine_.memory_geometry().contains(*physical_address, width)) {
+                region = "ram";
+            } else if (const auto* device = machine_.memory().system_bus().router().resolve_device(
+                           *physical_address);
+                       device != nullptr) {
+                region = "mmio";
+                component = device->name() != nullptr ? device->name() : "";
+            } else {
+                region = "unmapped";
+            }
+        }
+        const bool is_load = memory_kind == pipeline::operation::MemoryAccessKind::Load;
+        const bool is_store = memory_kind == pipeline::operation::MemoryAccessKind::Store;
+        const auto read_value = static_cast<uint64_t>(
+            opcode == Opcode::LoadFp ? retiring_context.fp_mem_rdata : retiring_context.mem_rdata);
+        const auto write_value = static_cast<uint64_t>(
+            opcode == Opcode::StoreFp ? retiring_context.fp_mem_wdata : retiring_context.mem_wdata);
+        if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc, component)) {
+            if (memory_kind == pipeline::operation::MemoryAccessKind::Atomic) {
+                std::println(
+                    fp_memory,
+                    "{{\"schema_version\":2,\"event\":\"memory_atomic\","
+                    "\"cycle\":{},\"hart\":{},\"pc\":\"0x{:x}\","
+                    "{},\"mode\":\"{}\",{}\"payload\":{{"
+                    "\"effective_address\":\"0x{:x}\",{}"
+                    "\"region\":\"{}\",\"operation\":{},\"width\":{},"
+                    "\"read_value\":\"0x{:x}\",\"write_value\":\"0x{:x}\","
+                    "\"faulted\":false,\"latency_cycles\":null}}}}",
+                    cycle, hart_id.raw(), static_cast<uint64_t>(retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
+                    privilege_mode(access_privilege),
+                    component.empty() ? ""
+                                      : std::format("\"component\":{},", json_quote(component)),
+                    static_cast<uint64_t>(effective_address),
+                    physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
+                                                   static_cast<uint64_t>(physical_address->raw()))
+                                     : "",
+                    region, json_quote(pipeline::operation_name(retiring_context.op_id)), width,
+                    read_value, write_value);
+            } else {
+                std::println(
+                    fp_memory,
+                    "{{\"schema_version\":2,\"event\":{},\"cycle\":{},"
+                    "\"hart\":{},\"pc\":\"0x{:x}\"{},\"mode\":\"{}\","
+                    "{}\"payload\":{{\"effective_address\":\"0x{:x}\",{}"
+                    "\"region\":\"{}\",\"direction\":\"{}\","
+                    "\"operation\":{},\"width\":{},\"value\":\"0x{:x}\","
+                    "\"faulted\":false,\"latency_cycles\":null}}}}",
+                    json_quote(memory_event), cycle, hart_id.raw(),
+                    static_cast<uint64_t>(retiring_context.cpc.raw()),
+                    event_function_field(machine_, retiring_context.cpc),
+                    privilege_mode(access_privilege),
+                    component.empty() ? ""
+                                      : std::format("\"component\":{},", json_quote(component)),
+                    static_cast<uint64_t>(effective_address),
+                    physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
+                                                   static_cast<uint64_t>(physical_address->raw()))
+                                     : "",
+                    region, is_load ? "read" : (is_store ? "write" : "access"),
+                    json_quote(pipeline::operation_name(retiring_context.op_id)), width,
+                    is_load ? read_value : write_value);
+            }
+        }
+    }
+    if (emit_retire) {
+        if (fp_retire_index_.is_open() && retire_record_count_ % kRetireIndexStride == 0) {
+            const auto record_offset = fp_archtrace.tellp();
+            if (record_offset >= 0) {
+                std::println(fp_retire_index_,
+                             "{{\"schema_version\":1,\"kind\":\"trace_index_entry\","
+                             "\"record\":{},\"byte_offset\":{},\"cycle\":{},"
+                             "\"hart\":{},\"pc\":\"0x{:x}\",\"event\":\"retire\"}}",
+                             retire_record_count_, static_cast<uint64_t>(record_offset), cycle,
+                             hart_id.raw(), static_cast<uint64_t>(retiring_context.cpc.raw()));
+            }
+        }
+        RetirementRecordBuilder record;
+        append_retirement_record(record, cpu, retiring_context, state);
+        record.push_back('\n');
+        if (gzip_retire_ && gzip_retire_->is_open()) {
+            if (!gzip_retire_->write(record.view())) {
+                simrv::log::error("failed writing compressed retirement record");
+                gzip_retire_->close();
+            }
+        } else {
+            fp_archtrace.write(record.data(), static_cast<std::streamsize>(record.size()));
+        }
+        ++retire_record_count_;
     }
 
-    std::ofstream out("trace/init_reg.txt");
-    auto write_xlen = [&out](std::string_view lhs, Word value) -> void {
-        std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value, kXLenHexDigits);
-    };
-    auto write_32 = [&out](std::string_view lhs, Word value) -> void {
-        std::println(out, "{}=32'h{:08x};", lhs, value);
-    };
-    auto write_64 = [&out](std::string_view lhs, Counter value) -> void {
-        std::println(out, "{}=64'h{:016x};", lhs, value);
-    };
-
-    write_xlen("p.pc", cpu->state().pc);
-    for (uint8_t i = 1; i < 32; ++i) {
-        std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, simrv::xlen::kXLenBits,
-                     cpu->state().regs.read(static_cast<RegId>(i)), kXLenHexDigits);
-    }
-    for (uint8_t i = 0; i < 32; ++i) {
-        std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, simrv::xlen::kXLenBits,
-                     cpu->state().regs.read_fp(static_cast<RegId>(i)));
-    }
-    write_xlen("p.fcsr        ", cpu->state().fcsr);
-    write_xlen("p.mstatus     ", cpu->state().mstatus);
-    write_xlen("p.mtvec       ", cpu->state().mtvec);
-    write_xlen("p.mscratch    ", cpu->state().mscratch);
-    write_xlen("p.mepc        ", cpu->state().mepc);
-    write_xlen("p.mcause      ", cpu->state().mcause);
-    write_xlen("p.mtval       ", cpu->state().mtval);
-    write_xlen("p.mhartid     ", cpu->state().mhartid);
-    write_xlen("p.misa        ", cpu->state().misa);
-    write_xlen("p.mie         ", cpu->state().mie);
-    write_xlen("p.mip         ", cpu->state().mip);
-    write_xlen("p.medeleg     ", cpu->state().medeleg);
-    write_xlen("p.mideleg     ", cpu->state().mideleg);
-    write_xlen("p.mcounteren  ", cpu->state().mcounteren);
-    write_xlen("p.stvec       ", cpu->state().stvec);
-    write_xlen("p.sscratch    ", cpu->state().sscratch);
-    write_xlen("p.sepc        ", cpu->state().sepc);
-    write_xlen("p.scause      ", cpu->state().scause);
-    write_xlen("p.stval       ", cpu->state().stval);
-    write_xlen("p.satp        ", cpu->state().satp);
-    write_xlen("p.scounteren  ", cpu->state().scounteren);
-    write_xlen("p.priv        ", std::to_underlying(cpu->state().priv));
-
-    write_64("p.mtime       ", cpu->clint_mmio.mtime);
-    write_64("p.mtimecmp    ", cpu->clint_mmio.mtimecmp);
-
-    write_xlen("p.load_res    ", cpu->state().load_res);
-    std::println(out, "p.reserved    = 1'h{:x};", cpu->state().reserved);
-    write_xlen("p.pending_exception   ",
-               cpu->pipeline_context.pending_exception
-                   ? std::to_underlying(*cpu->pipeline_context.pending_exception)
-                   : simrv::xlen::kWordAllOnes);
-    write_xlen("p.pending_tval", cpu->pipeline_context.pending_tval);
-
-    const size_t kNumSets = simrv::core::Tlb::kNumSets;
-    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
-        const auto& entry = cpu->tlb.inst_r.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
-    }
-    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
-        const auto& entry = cpu->tlb.data_r.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
-    }
-    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
-        const auto& entry = cpu->tlb.data_w.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
+    if (emit_interrupts) {
+        const auto hart_id = static_cast<size_t>(state.mhartid);
+        if (hart_id < trap_frames_.size() && !trap_frames_[hart_id].empty()) {
+            const auto frame = trap_frames_[hart_id].back();
+            trap_frames_[hart_id].pop_back();
+            if (frame.interrupt &&
+                accepts_trace_event("interrupt_return", cycle,
+                                    simrv::xlen::HartId{static_cast<uint32_t>(hart_id)},
+                                    retiring_context.cpc)) {
+                const auto depth = std::ranges::count_if(
+                    trap_frames_[hart_id],
+                    [](const TrapTraceFrame& trap_frame) { return trap_frame.interrupt; });
+                std::println(fp_interrupts,
+                             "{{\"schema_version\":2,\"event\":\"interrupt_return\","
+                             "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                             "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{"
+                             "\"cause\":{},\"epc\":\"0x{:x}\","
+                             "\"target_pc\":\"0x{:x}\",\"nesting_depth\":{}}}}}",
+                             trace_timestamp(), cpu.clint_mmio.mcycle,
+                             static_cast<unsigned>(state.mhartid),
+                             static_cast<uint64_t>(retiring_context.cpc.raw()),
+                             event_function_field(machine_, retiring_context.cpc),
+                             privilege_mode(state.priv),
+                             static_cast<uint64_t>(trap_exception_code(frame.cause)),
+                             static_cast<uint64_t>(frame.epc.raw()),
+                             static_cast<uint64_t>(state.pc.raw()), depth);
+            }
+        }
     }
 
-    write_32("mmu.console.QueueSel       ", console->QueueSel);
-    write_32("mmu.console.QueueNum       ", console->QueueNum);
-    for (Word i = 0; i < simrv::virtio::kConsoleMaxQueueNum; ++i) {
-        std::print(out, "mmu.console.Queue[{}*9+0] =32'h{:08x};\n", i, console->Queue[i].Ready);
-        std::print(out, "mmu.console.Queue[{}*9+1] =32'h{:08x};\n", i, console->Queue[i].Notify);
-        std::print(out, "mmu.console.Queue[{}*9+2] =32'h{:08x};\n", i, console->Queue[i].DescLow);
-        std::print(out, "mmu.console.Queue[{}*9+3] =32'h{:08x};\n", i, console->Queue[i].DescHigh);
-        std::print(out, "mmu.console.Queue[{}*9+4] =32'h{:08x};\n", i, console->Queue[i].AvailLow);
-        std::print(out, "mmu.console.Queue[{}*9+5] =32'h{:08x};\n", i, console->Queue[i].AvailHigh);
-        std::print(out, "mmu.console.Queue[{}*9+6] =32'h{:08x};\n", i, console->Queue[i].UsedLow);
-        std::print(out, "mmu.console.Queue[{}*9+7] =32'h{:08x};\n", i, console->Queue[i].UsedHigh);
-        std::print(out, "mmu.console.Queue[{}*9+8] =32'h{:08x};\n", i,
-                   console->Queue[i].last_avail_idx);
+    const auto hart = static_cast<size_t>(state.mhartid);
+    if (!emit_calls) return;
+    if (hart >= call_depth_.size()) call_depth_.resize(hart + 1);
+    if (is_call) {
+        const auto depth = ++call_depth_[hart];
+        if (fp_calls.is_open() &&
+            accepts_trace_event("call", cycle, hart_id, retiring_context.cpc)) {
+            std::println(fp_calls,
+                         "{{\"schema_version\":2,\"event\":\"call\","
+                         "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                         "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{"
+                         "\"source_pc\":\"0x{:x}\",\"target_pc\":\"0x{:x}\","
+                         "\"return_pc\":\"0x{:x}\",\"call_depth\":{}}}}}",
+                         trace_timestamp(), cpu.clint_mmio.mcycle,
+                         static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(source_pc),
+                         event_function_field(machine_, retiring_context.cpc),
+                         privilege_mode(state.priv), static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), static_cast<uint64_t>(return_pc), depth);
+        }
+    } else if (is_return) {
+        const auto depth = call_depth_[hart] == 0 ? 0 : --call_depth_[hart];
+        if (fp_calls.is_open() &&
+            accepts_trace_event("return", cycle, hart_id, retiring_context.cpc)) {
+            std::println(fp_calls,
+                         "{{\"schema_version\":2,\"event\":\"return\","
+                         "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                         "\"pc\":\"0x{:x}\"{},\"mode\":\"{}\",\"payload\":{{"
+                         "\"source_pc\":\"0x{:x}\",\"target_pc\":\"0x{:x}\","
+                         "\"call_depth\":{}}}}}",
+                         trace_timestamp(), cpu.clint_mmio.mcycle,
+                         static_cast<unsigned>(state.mhartid), static_cast<uint64_t>(source_pc),
+                         event_function_field(machine_, retiring_context.cpc),
+                         privilege_mode(state.priv), static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), depth);
+        }
     }
-    write_32("mmu.console.InterruptStatus", console->InterruptStatus);
-    write_32("mmu.console.Status         ", console->Status);
+}
 
-    write_32("mmu.disk.QueueSel       ", disk->QueueSel);
-    write_32("mmu.disk.QueueNum       ", disk->QueueNum);
-    for (Word i = 0; i < simrv::virtio::kDiskMaxQueueNum; ++i) {
-        std::print(out, "mmu.disk.Queue[{}*9+0] =32'h{:08x};\n", i, disk->Queue[i].Ready);
-        std::print(out, "mmu.disk.Queue[{}*9+1] =32'h{:08x};\n", i, disk->Queue[i].Notify);
-        std::print(out, "mmu.disk.Queue[{}*9+2] =32'h{:08x};\n", i, disk->Queue[i].DescLow);
-        std::print(out, "mmu.disk.Queue[{}*9+3] =32'h{:08x};\n", i, disk->Queue[i].DescHigh);
-        std::print(out, "mmu.disk.Queue[{}*9+4] =32'h{:08x};\n", i, disk->Queue[i].AvailLow);
-        std::print(out, "mmu.disk.Queue[{}*9+5] =32'h{:08x};\n", i, disk->Queue[i].AvailHigh);
-        std::print(out, "mmu.disk.Queue[{}*9+6] =32'h{:08x};\n", i, disk->Queue[i].UsedLow);
-        std::print(out, "mmu.disk.Queue[{}*9+7] =32'h{:08x};\n", i, disk->Queue[i].UsedHigh);
-        std::print(out, "mmu.disk.Queue[{}*9+8] =32'h{:08x};\n", i, disk->Queue[i].last_avail_idx);
-    }
-    write_32("mmu.disk.InterruptStatus", disk->InterruptStatus);
-    write_32("mmu.disk.Status         ", disk->Status);
-
-    simrv::log::info("file init_reg.txt was generated after {} cycle",
-                     static_cast<Counter>(cpu->clint_mmio.mtime.load()));
+void Tracer::write_trace_metadata(bool completed) {
+    if (trace_metadata_path_.empty()) return;
+    std::ofstream out(trace_metadata_path_, std::ios::out | std::ios::trunc);
+    if (!out) return;
+    struct utsname host_info{};
+    const bool has_host_info = uname(&host_info) == 0;
+    const auto host =
+        has_host_info ? std::format("{{\"sysname\":{},\"release\":{},\"machine\":{}}}",
+                                    json_quote(host_info.sysname), json_quote(host_info.release),
+                                    json_quote(host_info.machine))
+                      : "null";
+    std::println(
+        out,
+        "{{\"schema_version\":2,\"simulator_version\":{},"
+        "\"git_commit\":{},\"isa\":{},"
+        "\"xlen\":{},\"vlen\":{},"
+        "\"harts\":{},\"trace_level\":{},\"trace_filters\":{{"
+        "\"events\":{},\"function\":{},\"device\":{},"
+        "\"hart\":{},\"pc_start\":{},\"pc_end\":{},"
+        "\"after_cycle\":{},\"before_cycle\":{}}},\"enabled_devices\":{},"
+        "\"random_seeds\":{{\"virtio_rng\":1337}},\"guest_elf\":{},"
+        "\"guest_elf_sha256\":{},\"configuration_sha256\":{},"
+        "\"command_line\":{},\"host\":{},\"started_at\":{},"
+        "\"completed_at\":{}}}",
+        json_quote(simrv::buildinfo::kVersion), json_quote(simrv::buildinfo::kGitSha),
+        json_quote(trace_isa_), simrv::xlen::kXLenBits, trace_vlen_, trace_harts_,
+        machine_.configuration().debug.trace_level,
+        json_quote(machine_.configuration().debug.trace_events),
+        json_quote(machine_.configuration().debug.trace_function),
+        json_quote(machine_.configuration().debug.trace_device),
+        machine_.configuration().debug.trace_hart
+            ? std::format("{}", machine_.configuration().debug.trace_hart->raw())
+            : "null",
+        machine_.configuration().debug.trace_pc_start
+            ? json_quote(std::format(
+                  "0x{:x}",
+                  static_cast<uint64_t>(machine_.configuration().debug.trace_pc_start->raw())))
+            : "null",
+        machine_.configuration().debug.trace_pc_end
+            ? json_quote(std::format(
+                  "0x{:x}",
+                  static_cast<uint64_t>(machine_.configuration().debug.trace_pc_end->raw())))
+            : "null",
+        machine_.configuration().debug.trace_after_cycle
+            ? std::format("{}", *machine_.configuration().debug.trace_after_cycle)
+            : "null",
+        machine_.configuration().debug.trace_before_cycle
+            ? std::format("{}", *machine_.configuration().debug.trace_before_cycle)
+            : "null",
+        trace_enabled_devices_json_,
+        trace_guest_elf_.empty() ? "null" : json_quote(trace_guest_elf_),
+        trace_guest_elf_sha256_.empty() ? "null" : json_quote(trace_guest_elf_sha256_),
+        json_quote(trace_configuration_sha256_), json_string_array(trace_command_line_), host,
+        json_quote(trace_started_at_), completed ? json_quote(trace_timestamp()) : "null");
 }
 
 void Tracer::write_instruction_mix_report() {
-    ensure_trace_directory("trace");
-    std::ofstream out("trace/instmix.txt");
+    std::error_code ec;
+    ensure_artifact_directory();
+    const auto path = artifact_path("instmix.txt");
+    std::ofstream out(path);
     if (!out.is_open()) {
-        simrv::log::error("cannot open instmix.txt");
+        simrv::log::error("cannot open {}", path.string());
         return;
     }
-    std::println(out, "INSTRUCTION MIX");
-    uint64_t total = 0;
-    for (auto const [i, count] : std::views::enumerate(machine_.cpu.e_instmix)) {
-        std::println(out, "{} : {:10}",
-                     simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(i)), count);
-        total += count;
+
+    struct Entry {
+        std::string_view name;
+        std::string_view category;
+        uint64_t count;
+        uint64_t cycles;
+        uint64_t stalls;
+    };
+
+    struct CategoryStats {
+        uint64_t count{0};
+        uint64_t cycles{0};
+        uint64_t stalls{0};
+    };
+
+    std::vector<Entry> entries;
+    std::map<std::string_view, CategoryStats> category_totals;
+    uint64_t total_count = 0;
+    uint64_t total_cycles = 0;
+
+    const auto& perf = machine_.primary_hart().perf_counters;
+
+    for (auto const [i, count] : std::views::enumerate(machine_.primary_hart().e_instmix)) {
+        if (count == 0) continue;
+        const auto op = static_cast<simrv::isa::OperationId>(i);
+        const auto name = simrv::pipeline::operation_name(op);
+        const auto category = categorize_operation(op);
+        uint64_t cycles = perf.inst_cycles(op);
+        if (cycles == 0) cycles = count;
+        const uint64_t stalls = perf.inst_stalls(op);
+
+        entries.push_back({.name = name,
+                           .category = category,
+                           .count = count,
+                           .cycles = cycles,
+                           .stalls = stalls});
+        category_totals[category].count += count;
+        category_totals[category].cycles += cycles;
+        category_totals[category].stalls += stalls;
+        total_count += count;
+        total_cycles += cycles;
     }
-    std::println(out, "TOTAL      : {:10}", total);
-    simrv::log::info("file instmix.txt was generated after {} cycle",
-                     static_cast<Counter>(machine_.cpu.clint_mmio.mtime.load()));
+
+    std::ranges::sort(entries, [](const auto& a, const auto& b) {
+        if (a.count != b.count) return a.count > b.count;
+        return a.name < b.name;
+    });
+
+    std::println(out,
+                 "================================================================================="
+                 "=======================================");
+    std::println(out, "                                     INSTRUCTION MIX & PERFORMANCE REPORT");
+    std::println(out,
+                 "================================================================================="
+                 "=======================================");
+    std::println(out, " Target: RV{} | Primary hart: {} | Configured harts: {} | Engine: {}",
+                 simrv::xlen::kXLenBits,
+                 static_cast<unsigned>(machine_.primary_hart().state().mhartid),
+                 machine_.num_harts(), machine_.runtime_profile.execution_name());
+    std::println(
+        out, " Counts and cycles below are from the primary hart hardware performance monitor.");
+    std::println(out, "");
+    std::println(out,
+                 "  Rank  Instruction           Category              Count      Share        "
+                 "Cycles     Cycle%  Avg CPI    Stall Cyc");
+    std::println(out,
+                 "---------------------------------------------------------------------------------"
+                 "---------------------------------------");
+
+    for (size_t rank = 0; rank < entries.size(); ++rank) {
+        const auto& e = entries[rank];
+        const double share = total_count == 0 ? 0.0
+                                              : (static_cast<double>(e.count) * 100.0) /
+                                                    static_cast<double>(total_count);
+        const double cycle_share = total_cycles == 0 ? 0.0
+                                                     : (static_cast<double>(e.cycles) * 100.0) /
+                                                           static_cast<double>(total_cycles);
+        const double cpi =
+            e.count == 0 ? 0.0 : static_cast<double>(e.cycles) / static_cast<double>(e.count);
+
+        std::println(
+            out, " {:>5}  {:<20}  {:<16}  {:>12}  {:>6.2f}%  {:>12}  {:>6.2f}%  {:>7.2f}  {:>11}",
+            rank + 1, e.name, e.category, simrv::util::format_with_commas(e.count), share,
+            simrv::util::format_with_commas(e.cycles), cycle_share, cpi,
+            simrv::util::format_with_commas(e.stalls));
+    }
+
+    std::println(out,
+                 "---------------------------------------------------------------------------------"
+                 "---------------------------------------");
+    const double overall_cpi =
+        total_count == 0 ? 0.0
+                         : static_cast<double>(total_cycles) / static_cast<double>(total_count);
+    std::println(
+        out, " Total Instructions Retired: {:>16} | Total Cycles: {:>16} | Overall CPI: {:>6.2f}",
+        simrv::util::format_with_commas(total_count), simrv::util::format_with_commas(total_cycles),
+        overall_cpi);
+    std::println(out,
+                 "================================================================================="
+                 "=======================================\n");
+
+    std::println(out, "--- Category Summary ---");
+    std::println(
+        out,
+        "  Category           :        Count   (  Share) |       Cycles   ( Cycle%) |  Avg CPI");
+    std::println(
+        out,
+        "  --------------------------------------------------------------------------------------");
+    std::vector<std::pair<std::string_view, CategoryStats>> cat_sorted(category_totals.begin(),
+                                                                       category_totals.end());
+    std::ranges::sort(cat_sorted,
+                      [](const auto& a, const auto& b) { return a.second.count > b.second.count; });
+    for (const auto& [cat, stats] : cat_sorted) {
+        const double cat_share = total_count == 0 ? 0.0
+                                                  : (static_cast<double>(stats.count) * 100.0) /
+                                                        static_cast<double>(total_count);
+        const double cat_cycle_share =
+            total_cycles == 0
+                ? 0.0
+                : (static_cast<double>(stats.cycles) * 100.0) / static_cast<double>(total_cycles);
+        const double cat_cpi =
+            stats.count == 0 ? 0.0
+                             : static_cast<double>(stats.cycles) / static_cast<double>(stats.count);
+        std::println(out, "  {:<18} : {:>12}   ({:>6.2f}%) | {:>12}   ({:>6.2f}%) | {:>8.2f}", cat,
+                     simrv::util::format_with_commas(stats.count), cat_share,
+                     simrv::util::format_with_commas(stats.cycles), cat_cycle_share, cat_cpi);
+    }
+
+    const auto& primary = machine_.primary_hart();
+    const auto ic_hits = primary.icache.hit_count();
+    const auto ic_misses = primary.icache.miss_count();
+    const auto ic_total = ic_hits + ic_misses;
+    const double ic_rate =
+        ic_total == 0 ? 100.0
+                      : (static_cast<double>(ic_hits) * 100.0) / static_cast<double>(ic_total);
+
+    const auto dc_hits = primary.dcache.hit_count();
+    const auto dc_misses = primary.dcache.miss_count();
+    const auto dc_total = dc_hits + dc_misses;
+    const double dc_rate =
+        dc_total == 0 ? 100.0
+                      : (static_cast<double>(dc_hits) * 100.0) / static_cast<double>(dc_total);
+
+    const auto& ps = primary.pipeline_sim;
+
+    std::println(out, "\n--- Memory & Cache Subsystem ---");
+    std::println(out, "  L1 Instruction Cache : {:>12} hits | {:>10} misses | {:>6.2f}% hit rate",
+                 simrv::util::format_with_commas(ic_hits),
+                 simrv::util::format_with_commas(ic_misses), ic_rate);
+    std::println(out, "  L1 Data Cache        : {:>12} hits | {:>10} misses | {:>6.2f}% hit rate",
+                 simrv::util::format_with_commas(dc_hits),
+                 simrv::util::format_with_commas(dc_misses), dc_rate);
+    if (machine_.runtime_profile.is_cycle_mode() || ps.stall_cycles() > 0) {
+        std::println(out, "  Pipeline Stalls      : {:>12} icache stalls | {:>10} dcache stalls",
+                     simrv::util::format_with_commas(ps.icache_stalls()),
+                     simrv::util::format_with_commas(ps.dcache_stalls()));
+    }
+
+    simrv::log::info(
+        "file {} was generated after {} cycle(s)", path.string(),
+        static_cast<simrv::xlen::Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
+
+namespace {
+
+auto visual_width(std::string_view s) -> size_t {
+    size_t width = 0;
+    bool in_esc = false;
+    for (size_t i = 0; i < s.length(); ++i) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c == '\033') {
+            in_esc = true;
+        } else if (in_esc) {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
+                in_esc = false;
+            }
+        } else {
+            if ((c & 0x80) == 0) {
+                ++width;
+            } else if ((c & 0xE0) == 0xC0) {
+                ++width;
+                if (i + 1 < s.length()) ++i;
+            } else if ((c & 0xF0) == 0xE0) {
+                ++width;
+                if (i + 2 < s.length())
+                    i += 2;
+                else
+                    i = s.length();
+            } else if ((c & 0xF8) == 0xF0) {
+                ++width;
+                if (i + 3 < s.length())
+                    i += 3;
+                else
+                    i = s.length();
+            }
+        }
+    }
+    return width;
+}
+
+auto format_duration_adaptive(uint64_t microseconds) -> std::string {
+    if (microseconds < 1000) {
+        return std::format("{} µs", microseconds);
+    }
+    if (microseconds < 1000000) {
+        return std::format("{:.2f} ms", static_cast<double>(microseconds) / 1000.0);
+    }
+    return std::format("{:.3f} s", static_cast<double>(microseconds) / 1000000.0);
+}
+
+auto format_speed_value(double mips) -> std::string {
+    if (mips >= 1000.0) {
+        return std::format("{:.3f} GIPS", mips / 1000.0);
+    }
+    if (mips >= 1.0) {
+        return std::format("{:.2f} MIPS", mips);
+    }
+    const auto kips = static_cast<uint64_t>(mips * 1000.0);
+    return std::format("{} KIPS", simrv::util::format_with_commas(kips));
+}
+
+auto render_progress_bar(double percent, bool tty, std::string_view c_fill,
+                         std::string_view c_empty, std::string_view c_reset) -> std::string {
+    const int total_blocks = 10;
+    const int filled = std::clamp(static_cast<int>(std::round(percent / 10.0)), 0, total_blocks);
+    std::string bar = "[";
+    if (tty) {
+        bar += c_fill;
+        for (int i = 0; i < filled; ++i) bar += "█";
+        bar += c_empty;
+        for (int i = filled; i < total_blocks; ++i) bar += "░";
+        bar += c_reset;
+    } else {
+        for (int i = 0; i < filled; ++i) bar += "█";
+        for (int i = filled; i < total_blocks; ++i) bar += "░";
+    }
+    bar += "]";
+    return bar;
+}
+
+}  // namespace
 
 void Tracer::print_summary() {
     using simrv::util::format_scaled;
     using simrv::util::format_with_commas;
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.s_start_time).count();
-    const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
+        std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.start_time()).count();
+    const auto etime = static_cast<simrv::xlen::Counter>(elapsed == 0 ? 1 : elapsed);
 
-    const auto mcycle = machine_.cpu.clint_mmio.mcycle;
-    const auto icount = machine_.cpu.e_icount;
-    const auto ccount = machine_.cpu.e_ccount;
+    const auto mcycle = machine_.primary_hart().clint_mmio.mcycle;
+    simrv::xlen::Counter icount = 0;
+    simrv::xlen::Counter ccount = 0;
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        const auto& h = machine_.hart(hart);
+        // minstret is guest-visible and may be inhibited by Linux. e_icount tracks
+        // every instruction retired by the simulator and matches the JSON report.
+        icount += h.e_icount;
+        ccount += h.e_ccount;
+    }
 
     const double cpi =
         icount == 0 ? 0.0 : static_cast<double>(mcycle) / static_cast<double>(icount);
@@ -249,80 +1779,276 @@ void Tracer::print_summary() {
         mcycle == 0 ? 0.0 : static_cast<double>(icount) / static_cast<double>(mcycle);
     const double comp_ratio =
         icount == 0 ? 0.0 : (static_cast<double>(ccount) * 100.0) / static_cast<double>(icount);
-    const double etime_sec = static_cast<double>(etime) / 1000000.0;
+    FILE* const stream = simrv::log::get_log_to_stderr() ? stderr : stdout;
+    const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
+    const bool tty = simrv::util::terminal_color_enabled(fd);
 
-    simrv::log::info("--------------------------------------------------");
-    simrv::log::info("                Execution Summary                 ");
-    simrv::log::info("--------------------------------------------------");
-    if (machine_.s_cycle_accurate) {
-        simrv::log::info("Simulation Mode          :         Cycle-Accurate");
+    const std::string_view c_border = tty ? "\033[1;36m" : "";
+    const std::string_view c_header = tty ? "\033[1;37m" : "";
+    const std::string_view c_green = tty ? "\033[1;32m" : "";
+    const std::string_view c_red = tty ? "\033[1;31m" : "";
+    const std::string_view c_yellow = tty ? "\033[1;33m" : "";
+    const std::string_view c_cyan = tty ? "\033[36m" : "";
+    const std::string_view c_dim = tty ? "\033[90m" : "";
+    const std::string_view c_reset = tty ? "\033[0m" : "";
+
+    auto row = [&](std::string_view content) {
+        const size_t vw = visual_width(content);
+        const size_t pad = (vw < 66) ? (66 - vw) : 0;
+        std::println(stream, "{}│{} {}{}{} │{}", c_border, c_reset, content, std::string(pad, ' '),
+                     c_border, c_reset);
+    };
+
+    auto empty_row = [&]() { row(""); };
+
+    std::fflush(stdout);
+    if (auto* uart = machine_.uart_device(); uart != nullptr) {
+        uart->flush_tx_buffer();
+    }
+    std::fflush(stdout);
+
+    std::println(stream);
+    std::println(stream,
+                 "{}┌── SimRV Execution Summary ─────────────────────────────────────────┐{}",
+                 c_border, c_reset);
+
+    // Section 1: Simulation Status
+    row(std::format("{}Simulation Status{}", c_header, c_reset));
+    const std::string isa_str =
+        simrv::xlen::resolve_misa_string(machine_.primary_hart().state().misa);
+    const auto profile_str = to_profile_string(machine_.execution_config().profile);
+    std::string arch_desc = isa_str;
+    if (!profile_str.empty() && profile_str != "legacy" &&
+        !(isa_str.starts_with("RV32") && profile_str.ends_with("64"))) {
+        arch_desc += std::format(" ({})", profile_str);
+    }
+    row(std::format("  {:<22}: {} · {} hart(s)", "Target Architecture", arch_desc,
+                    machine_.num_harts()));
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        row(std::format("  {:<22}: {} ({})", "Simulation Engine",
+                        machine_.runtime_profile.execution_name(),
+                        pipeline::pipeline_type_name(machine_.execution_config().pipeline_type)));
     } else {
-        simrv::log::info("Simulation Mode          :         Functional-Only");
+        row(std::format("  {:<22}: {}", "Simulation Engine",
+                        machine_.runtime_profile.execution_name()));
     }
-    simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle),
-                     format_with_commas(mcycle));
-    simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
-                     format_with_commas(icount));
-    simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
-                     format_with_commas(ccount), comp_ratio);
-    simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
-    simrv::log::info("Instrs Per Cycle (IPC)   : {:>12.3f}", ipc);
-
-    if (machine_.s_cycle_accurate) {
-        const auto& ps = machine_.cpu.pipeline_sim;
-        double stall_pct = mcycle == 0 ? 0.0
-                                       : (static_cast<double>(ps.stall_cycles()) * 100.0) /
-                                             static_cast<double>(mcycle);
-        simrv::log::info("Total Stall/Bubble Cycles: {:>12}  [{:.1f}%]",
-                         format_with_commas(ps.stall_cycles()), stall_pct);
-        simrv::log::info(" - Data RAW Stalls       : {:>12}",
-                         format_with_commas(ps.data_hazard_stalls()));
-        simrv::log::info(" - Control Bubbles       : {:>12}",
-                         format_with_commas(ps.control_hazard_bubbles()));
-        simrv::log::info(" - ICache Miss Stalls    : {:>12}",
-                         format_with_commas(ps.icache_stalls()));
-        simrv::log::info(" - DCache Miss Stalls    : {:>12}",
-                         format_with_commas(ps.dcache_stalls()));
-    }
-
-    simrv::log::info("Elapsed time (real)      : {:>12.3f} sec", etime_sec);
-
-    const auto kips = icount * 1000UL / etime;
-    const double mips = static_cast<double>(icount) / static_cast<double>(etime);
-    if (mips >= 1.0) {
-        simrv::log::info("Simulation speed         : {:>12.2f} MIPS ({}/s)", mips,
-                         format_with_commas(kips * 1000));
+    row(std::format("  {:<22}: {}", "Termination Reason",
+                    Machine::stop_reason_name(machine_.stop_reason())));
+    const int exit_code = machine_.exit_code.load();
+    if (exit_code == 0) {
+        row(std::format("  {:<22}: {}0 (Success){}", "Exit Status", c_green, c_reset));
     } else {
-        simrv::log::info("Simulation speed         : {:>12} KIPS", format_with_commas(kips));
+        row(std::format("  {:<22}: {}{} (Failure){}", "Exit Status", c_red, exit_code, c_reset));
     }
-    simrv::log::info("--------------------------------------------------");
 
-    if (machine_.s_use_mix) {
+    // Section 2: Performance & Throughput
+    empty_row();
+    row(std::format("{}Performance & Throughput{}", c_header, c_reset));
+    row(std::format("  {:<22}: {}  ({})", "Retired Instructions", format_scaled(icount),
+                    format_with_commas(icount)));
+    row(std::format("  {:<22}: {}  ({})", "Elapsed Cycles", format_scaled(mcycle),
+                    format_with_commas(mcycle)));
+    row(std::format("  {:<22}: {:.3f}  (IPC: {:.3f})", "Cycles Per Inst (CPI)", cpi, ipc));
+    const bool has_c =
+        (machine_.primary_hart().state().misa & (1ULL << ('c' - 'a'))) != 0 || ccount > 0;
+    if (has_c) {
+        const auto bar = render_progress_bar(comp_ratio, tty, c_cyan, c_dim, c_reset);
+        row(std::format("  {:<22}: {:>5.1f}%  {}  ({} insns)", "Compressed RVC Share", comp_ratio,
+                        bar, format_with_commas(ccount)));
+    }
+    row(std::format("  {:<22}: {}0x{:016x}{}", "Final Primary PC", c_yellow,
+                    machine_.primary_hart().state().pc.raw(), c_reset));
+    row(std::format("  {:<22}: {}", "Host Wall Time", format_duration_adaptive(etime)));
+
+    machine_.sample_throughput();
+    const double avg_mips =
+        (etime == 0) ? 0.0 : static_cast<double>(icount) / static_cast<double>(etime);
+    const double peak_mips = std::max(machine_.peak_mips(), avg_mips);
+    const std::string avg_str = format_speed_value(avg_mips);
+    const std::string peak_str = format_speed_value(peak_mips);
+    row(std::format("  {:<22}: {}{} avg{}  ({} peak)", "Simulation Speed", c_green, avg_str,
+                    c_reset, peak_str));
+
+    // Section 3: Multi-Hart Breakdown
+    if (machine_.num_harts() > 1) {
+        empty_row();
+        row(std::format("{}Multi-Hart Core Breakdown{}", c_header, c_reset));
+        for (size_t i = 0; i < machine_.num_harts(); ++i) {
+            const auto& h = machine_.hart(i);
+            const char* priv_str = (h.state().priv == simrv::xlen::PrivilegeLevel::Machine) ? "M"
+                                   : (h.state().priv == simrv::xlen::PrivilegeLevel::Supervisor)
+                                       ? "S"
+                                       : "U";
+            const double share = icount == 0 ? 0.0
+                                             : (static_cast<double>(h.e_icount) * 100.0) /
+                                                   static_cast<double>(icount);
+            row(std::format("  Hart {:<2} [{}-mode]  PC: {}0x{:016x}{}  {:>10} insns ({:4.1f}%)", i,
+                            priv_str, c_yellow, h.state().pc.raw(), c_reset,
+                            format_scaled(h.e_icount), share));
+        }
+    }
+
+    // Section 4: Microarchitecture & Pipeline / Memory (if cycle mode)
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        empty_row();
+        row(std::format("{}Microarchitecture & Pipeline{}", c_header, c_reset));
+        const auto& ps = machine_.primary_hart().pipeline_sim;
+        const double stall_pct = mcycle == 0 ? 0.0
+                                             : (static_cast<double>(ps.stall_cycles()) * 100.0) /
+                                                   static_cast<double>(mcycle);
+        row(std::format("  {:<22}: {}  ({:.1f}% of cycles)", "Total Stall Cycles",
+                        format_with_commas(ps.stall_cycles()), stall_pct));
+        row(std::format("    · {:<20}: {}", "Data RAW Stalls",
+                        format_with_commas(ps.data_hazard_stalls())));
+        row(std::format("    · {:<20}: {}", "Control Bubbles",
+                        format_with_commas(ps.control_hazard_bubbles())));
+        row(std::format("    · {:<20}: {}", "I-Cache Miss",
+                        format_with_commas(ps.icache_stalls())));
+        row(std::format("    · {:<20}: {}", "D-Cache Miss",
+                        format_with_commas(ps.dcache_stalls())));
+        row(std::format("    · {:<20}: {}", "Page-Walk Stalls",
+                        format_with_commas(ps.tlb_stalls())));
+
+        empty_row();
+        row(std::format("{}Memory & Cache Subsystem{}", c_header, c_reset));
+        const auto ic_hits = machine_.primary_hart().icache.hit_count();
+        const auto ic_miss = machine_.primary_hart().icache.miss_count();
+        const auto ic_total = ic_hits + ic_miss;
+        const double ic_rate =
+            ic_total == 0 ? 0.0 : (static_cast<double>(ic_hits) * 100.0) / ic_total;
+        if (ic_total > 0) {
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% hit rate)",
+                            "L1 Instruction Cache", format_with_commas(ic_hits),
+                            format_with_commas(ic_miss), ic_rate));
+        } else {
+            row(std::format("  {:<22}: 0 hits / 0 misses", "L1 Instruction Cache"));
+        }
+
+        const auto dc_hits = machine_.primary_hart().dcache.hit_count();
+        const auto dc_miss = machine_.primary_hart().dcache.miss_count();
+        const auto dc_total = dc_hits + dc_miss;
+        const double dc_rate =
+            dc_total == 0 ? 0.0 : (static_cast<double>(dc_hits) * 100.0) / dc_total;
+        if (dc_total > 0) {
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% hit rate)", "L1 Data Cache",
+                            format_with_commas(dc_hits), format_with_commas(dc_miss), dc_rate));
+        } else {
+            row(std::format("  {:<22}: 0 hits / 0 misses", "L1 Data Cache"));
+        }
+
+        const auto& bp_stats = machine_.primary_hart().branch_predictor.stats();
+        if (bp_stats.direction_predictions > 0) {
+            const double bp_rate = (static_cast<double>(bp_stats.direction_hits) * 100.0) /
+                                   bp_stats.direction_predictions;
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% accuracy)", "Branch Predictor",
+                            format_with_commas(bp_stats.direction_hits),
+                            format_with_commas(bp_stats.direction_misses), bp_rate));
+        }
+
+        const auto& bus = machine_.memory().system_bus();
+        row(std::format("  {:<22}: {} reads / {} writes", "System Bus Activity",
+                        format_with_commas(bus.read_count()),
+                        format_with_commas(bus.write_count())));
+        if (bus.pending_requests() > 0 || bus.pending_responses() > 0) {
+            row(std::format("  {:<22}: {} req / {} resp", "Bus Pending",
+                            format_with_commas(bus.pending_requests()),
+                            format_with_commas(bus.pending_responses())));
+        }
+    }
+
+    std::println(stream,
+                 "{}└────────────────────────────────────────────────────────────────────┘{}",
+                 c_border, c_reset);
+    std::fflush(stream);
+
+    if (machine_.instruction_mix_enabled()) {
         write_instruction_mix_report();
     }
+    flush_all();
 }
 
-void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
-    if ((mtime % D_TRACEPC_INTERVAL) == 0) {
-        if (!tracepc_opened_) {
-            tracepc_opened_ = true;
-            ensure_trace_directory("trace");
-            fp_tracepc_.open("trace/tracepc.txt");
-            simrv::log::info("generate trace file: tracepc.txt\n");
-        }
-        std::println(fp_tracepc_, "{:08} {:0{}x}", static_cast<int>(mtime / D_TRACEPC_INTERVAL),
-                     cpc, D_TRACE_HEX_WIDTH);
-        fp_tracepc_.flush();
+auto Tracer::write_summary_json(const std::string& path) -> bool {
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) return false;
+
+    simrv::xlen::Counter retired = 0;
+    simrv::xlen::Counter compressed = 0;
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        retired += machine_.hart(hart).e_icount;
+        compressed += machine_.hart(hart).e_ccount;
     }
+    const auto cycles = machine_.primary_hart().clint_mmio.mcycle;
+    const auto pc = machine_.primary_hart().state().pc.raw();
+    const auto& cpu = machine_.primary_hart();
+    const auto& bp = cpu.branch_predictor.stats();
+    const auto& bus = machine_.memory().system_bus();
+    const double cpi = retired == 0 ? 0.0 : static_cast<double>(cycles) / retired;
+    const double ipc = cycles == 0 ? 0.0 : static_cast<double>(retired) / cycles;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now() - machine_.start_time())
+                             .count();
+    const double json_avg_mips =
+        elapsed == 0 ? 0.0 : static_cast<double>(retired) / static_cast<double>(elapsed);
+    const double json_peak_mips = std::max(machine_.peak_mips(), json_avg_mips);
+
+    out << "{\n"
+        << "  \"schema_version\": 1,\n"
+        << "  \"simrv_version\": \"" << simrv::buildinfo::kVersion << "\",\n"
+        << "  \"xlen\": " << simrv::xlen::kXLenBits << ",\n"
+        << "  \"harts\": " << machine_.num_harts() << ",\n"
+        << "  \"engine\": \"" << machine_.runtime_profile.execution_name() << "\",\n"
+        << "  \"stop_reason\": \"" << Machine::stop_reason_name(machine_.stop_reason()) << "\",\n"
+        << "  \"exit_status\": " << machine_.exit_code.load() << ",\n"
+        << "  \"retired_instructions\": " << retired << ",\n"
+        << "  \"cycles\": " << cycles << ",\n"
+        << "  \"pc\": " << pc << ",\n"
+        << "  \"compressed_instructions\": " << compressed << ",\n"
+        << "  \"cpi\": " << std::format("{:.9f}", cpi) << ",\n"
+        << "  \"ipc\": " << std::format("{:.9f}", ipc) << ",\n"
+        << "  \"speed_mips_avg\": " << std::format("{:.3f}", json_avg_mips) << ",\n"
+        << "  \"speed_mips_peak\": " << std::format("{:.3f}", json_peak_mips) << ",\n"
+        << "  \"performance\": {\n"
+        << "    \"icache_hits\": " << cpu.icache.hit_count() << ",\n"
+        << "    \"icache_misses\": " << cpu.icache.miss_count() << ",\n"
+        << "    \"dcache_hits\": " << cpu.dcache.hit_count() << ",\n"
+        << "    \"dcache_misses\": " << cpu.dcache.miss_count() << ",\n"
+        << "    \"branch_predictions\": " << bp.direction_predictions << ",\n"
+        << "    \"branch_hits\": " << bp.direction_hits << ",\n"
+        << "    \"branch_misses\": " << bp.direction_misses << ",\n"
+        << "    \"branch_misprediction_cycles\": " << bp.misprediction_penalty_cycles << ",\n"
+        << "    \"bus_reads\": " << bus.read_count() << ",\n"
+        << "    \"bus_writes\": " << bus.write_count() << "\n"
+        << "  },\n"
+        << "  \"hart_stats\": [\n";
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        const auto& cpu = machine_.hart(hart);
+        const auto& hart_bp = cpu.branch_predictor.stats();
+        out << "    {\"hart\": " << hart << ", \"retired_instructions\": " << cpu.e_icount
+            << ", \"compressed_instructions\": " << cpu.e_ccount
+            << ", \"pc\": " << cpu.state().pc.raw() << ", \"cycles\": " << cpu.clint_mmio.mcycle
+            << ", \"performance\": {\"icache_hits\": " << cpu.icache.hit_count()
+            << ", \"icache_misses\": " << cpu.icache.miss_count()
+            << ", \"dcache_hits\": " << cpu.dcache.hit_count()
+            << ", \"dcache_misses\": " << cpu.dcache.miss_count()
+            << ", \"branch_predictions\": " << hart_bp.direction_predictions
+            << ", \"branch_hits\": " << hart_bp.direction_hits
+            << ", \"branch_misses\": " << hart_bp.direction_misses << "}}"
+            << (hart + 1 == machine_.num_harts() ? "\n" : ",\n");
+    }
+    out << "  ]\n}\n";
+    return static_cast<bool>(out);
 }
 
-void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
-                                          Opcode r_opcode, bool r_tkn) {
+void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::VirtAddr cpc,
+                                          simrv::xlen::VirtAddr jmp_pc, Opcode r_opcode,
+                                          bool r_tkn) {
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (!bpred_opened_) {
         bpred_opened_ = true;
-        ensure_trace_directory("trace");
-        fp_bpred_.open("trace/bpred.txt");
-        simrv::log::info("generate trace file: bpred.txt\n");
+        ensure_artifact_directory();
+        const auto path = artifact_path("bpred.txt");
+        fp_bpred_.open(path);
+        simrv::log::info("generate trace file: {}", path.string());
     }
 
     const auto opcode = r_opcode;
@@ -331,78 +2057,46 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
     const int ir_branch = static_cast<int>(opcode == Opcode::Branch);
 
-    const Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
-    std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
+    const simrv::xlen::Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc.raw() : 0;
+    std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc.raw(),
                  D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn),
                  ir_jump, ir_branch);
-    fp_bpred_.flush();
 }
 
 void Tracer::write_trace_snapshot() {
     if (!fp_trace.is_open()) {
         return;
     }
-    const auto& cpu = machine_.cpu;
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
+    const auto& cpu = machine_.primary_hart();
     const auto& st = cpu.state();
-
-    std::print(fp_trace, "{:08} {:0{}x} {:08x}", static_cast<Counter>(cpu.clint_mmio.mtime.load()),
-               cpu.pipeline_context.cpc, D_TRACE_HEX_WIDTH,
-               static_cast<uint32_t>(cpu.pipeline_context.ir));
+    const auto& context = cpu.pipeline_context;
+    const auto operation = pipeline::operation_name(context.op_id);
+    std::println(fp_trace,
+                 "cycle {:>10} | hart {:>2} | pc 0x{:0{}x} | ir 0x{:08x} | {:<12} | next 0x{:0{}x}",
+                 static_cast<simrv::xlen::Counter>(cpu.clint_mmio.mtime),
+                 static_cast<unsigned>(st.mhartid), static_cast<uint64_t>(context.cpc.raw()),
+                 D_TRACE_HEX_WIDTH, static_cast<uint32_t>(context.ir), operation,
+                 static_cast<uint64_t>(st.pc.raw()), D_TRACE_HEX_WIDTH);
+    for (unsigned row = 0; row < 8; ++row) {
+        std::print(fp_trace, "  ");
+        for (unsigned column = 0; column < 4; ++column) {
+            const unsigned index = row * 4 + column;
+            std::print(fp_trace, "x{:>2}=0x{:0{}x}{}", index,
+                       static_cast<uint64_t>(st.regs.read(static_cast<simrv::xlen::RegId>(index))),
+                       D_TRACE_HEX_WIDTH, column == 3 ? "\n" : "  ");
+        }
+    }
+    std::println(fp_trace, "  mstatus=0x{:0{}x}  mepc=0x{:0{}x}  mcause=0x{:0{}x}  satp=0x{:0{}x}",
+                 static_cast<uint64_t>(st.mstatus), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.mepc), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.mcause), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.satp), D_TRACE_HEX_WIDTH);
+    std::println(fp_trace, "  vstart=0x{:0{}x}  vl=0x{:0{}x}  vtype=0x{:0{}x}  privilege={}",
+                 static_cast<uint64_t>(st.vstart), D_TRACE_HEX_WIDTH, static_cast<uint64_t>(st.vl),
+                 D_TRACE_HEX_WIDTH, static_cast<uint64_t>(st.vtype), D_TRACE_HEX_WIDTH,
+                 std::to_underlying(st.priv));
     std::println(fp_trace, "");
-
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            std::print(fp_trace, "{:0{}x}{}", st.regs.read(static_cast<RegId>((i * 8) + j)),
-                       D_TRACE_HEX_WIDTH, (j != 7 ? " " : "\n"));
-        }
-    }
-
-    if (!machine_.s_appmode) {
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x}",
-                     st.mstatus, D_TRACE_HEX_WIDTH, st.mtvec, D_TRACE_HEX_WIDTH, st.mscratch,
-                     D_TRACE_HEX_WIDTH, st.mepc, D_TRACE_HEX_WIDTH, st.mcause, D_TRACE_HEX_WIDTH,
-                     st.mtval, D_TRACE_HEX_WIDTH, st.mhartid, D_TRACE_HEX_WIDTH, st.misa,
-                     D_TRACE_HEX_WIDTH);
-
-        std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.mie, D_TRACE_HEX_WIDTH,
-                   st.mip, D_TRACE_HEX_WIDTH, st.medeleg, D_TRACE_HEX_WIDTH, st.mideleg,
-                   D_TRACE_HEX_WIDTH, st.mcounteren, D_TRACE_HEX_WIDTH);
-
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", st.stvec, D_TRACE_HEX_WIDTH, st.sscratch,
-                     D_TRACE_HEX_WIDTH, st.sepc, D_TRACE_HEX_WIDTH);
-
-        std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.scause,
-                   D_TRACE_HEX_WIDTH, st.stval, D_TRACE_HEX_WIDTH, st.satp, D_TRACE_HEX_WIDTH,
-                   st.scounteren, D_TRACE_HEX_WIDTH, st.load_res, D_TRACE_HEX_WIDTH);
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}",
-                     cpu.pipeline_context.pending_exception
-                         ? std::to_underlying(*cpu.pipeline_context.pending_exception)
-                         : simrv::xlen::kWordAllOnes,
-                     D_TRACE_HEX_WIDTH, cpu.pipeline_context.pending_tval, D_TRACE_HEX_WIDTH,
-                     std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
-
-        for (int i = 0; i < 4; i++) {
-            std::print(
-                fp_trace, "{:0{}x} {:0{}x} ",
-                cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
-                cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
-        }
-        std::println(fp_trace, "");
-        for (int i = 0; i < 4; i++) {
-            std::print(
-                fp_trace, "{:0{}x} {:0{}x} ",
-                cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
-                cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
-        }
-        std::println(fp_trace, "");
-        for (int i = 0; i < 4; i++) {
-            std::print(
-                fp_trace, "{:0{}x} {:0{}x} ",
-                cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
-                cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
-        }
-        std::println(fp_trace, "");
-    }
 }
 
 }  // namespace simrv::core

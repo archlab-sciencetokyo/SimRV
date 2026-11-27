@@ -5,8 +5,14 @@
 #include <string_view>
 #include <utility>
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/isa/Amo.hpp"
+#include "simrv/isa/InstructionFields.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/pipeline/DecodedInstruction.hpp"
+#include "simrv/pipeline/Decompressor.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 
@@ -14,10 +20,10 @@ using Opcode = simrv::isa::Opcode;
 
 class Decoder {
    public:
-    explicit constexpr Decoder(uint32_t inst) : inst_(inst) {}
+    explicit constexpr Decoder(simrv::xlen::Instruction inst) : inst_(inst) {}
 
     /// Get raw instruction word
-    [[nodiscard]] constexpr auto raw() const -> uint32_t { return inst_; }
+    [[nodiscard]] constexpr auto raw() const -> simrv::xlen::Instruction { return inst_; }
 
     /// Check if the instruction is compressed (16-bit)
     [[nodiscard]] constexpr auto is_compressed() const -> bool { return (inst_ & 0x3) != 0x3; }
@@ -33,8 +39,8 @@ class Decoder {
     // =========================================================================
 
     /// Extract destination register specifier (rd)
-    [[nodiscard]] constexpr auto rd() const -> RegId {
-        return static_cast<RegId>((inst_ >> 7) & 0x1F);
+    [[nodiscard]] constexpr auto rd() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>((inst_ >> 7) & 0x1F);
     }
 
     /// Extract 3-bit function field (funct3)
@@ -43,21 +49,23 @@ class Decoder {
     }
 
     /// Extract first source register specifier (rs1)
-    [[nodiscard]] constexpr auto rs1() const -> RegId {
-        return static_cast<RegId>((inst_ >> 15) & 0x1F);
+    [[nodiscard]] constexpr auto rs1() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>((inst_ >> 15) & 0x1F);
     }
 
     /// Extract second source register specifier (rs2)
-    [[nodiscard]] constexpr auto rs2() const -> RegId {
-        return static_cast<RegId>((inst_ >> 20) & 0x1F);
+    [[nodiscard]] constexpr auto rs2() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>((inst_ >> 20) & 0x1F);
     }
 
     /// Extract 7-bit function field (funct7)
-    [[nodiscard]] constexpr auto funct7() const -> uint32_t { return (inst_ >> 25) & 0x7F; }
+    [[nodiscard]] constexpr auto funct7() const -> simrv::xlen::Funct7 {
+        return static_cast<simrv::xlen::Funct7>((inst_ >> 25) & 0x7F);
+    }
 
     /// Extract third source register specifier (rs3, used for floating-point FMA)
-    [[nodiscard]] constexpr auto rs3() const -> RegId {
-        return static_cast<RegId>((inst_ >> 27) & 0x1F);
+    [[nodiscard]] constexpr auto rs3() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>((inst_ >> 27) & 0x1F);
     }
 
     // =========================================================================
@@ -98,53 +106,111 @@ class Decoder {
     // =========================================================================
 
     /// Extract 12-bit CSR address field
-    [[nodiscard]] constexpr auto csr() const -> uint32_t { return (inst_ >> 20) & 0xFFF; }
+    [[nodiscard]] constexpr auto csr() const -> simrv::xlen::CsrNumber {
+        return simrv::xlen::CsrNumber{static_cast<uint16_t>((inst_ >> 20) & 0xFFF)};
+    }
 
     /// Extract zero-extended 5-bit immediate field stored in rs1 for CSR imm instructions
-    [[nodiscard]] constexpr auto zimm() const -> uint32_t { return std::to_underlying(rs1()); }
+    [[nodiscard]] constexpr auto zimm() const -> simrv::xlen::CsrImm {
+        return static_cast<simrv::xlen::CsrImm>(std::to_underlying(rs1()));
+    }
 
     // =========================================================================
     // Compressed Instruction Decoding Base Hooks (C Extension)
     // =========================================================================
 
     /// Extract compressed instruction opcode / funct3 field (bits 15-13)
-    [[nodiscard]] constexpr auto c_op() const -> uint32_t { return (inst_ >> 13) & 0x7; }
+    [[nodiscard]] constexpr auto c_op() const -> uint8_t {
+        return static_cast<uint8_t>((inst_ >> 13) & 0x7);
+    }
 
     /// Extract compressed instruction 4-bit funct field (bits 15-12)
-    [[nodiscard]] constexpr auto c_funct4() const -> uint32_t { return (inst_ >> 12) & 0xF; }
+    [[nodiscard]] constexpr auto c_funct4() const -> uint8_t {
+        return static_cast<uint8_t>((inst_ >> 12) & 0xF);
+    }
 
     /// Standard C register mapping for rs1 / rd (bits 11-7)
-    [[nodiscard]] constexpr auto c_rs1_rd() const -> RegId {
-        return static_cast<RegId>((inst_ >> 7) & 0x1F);
+    [[nodiscard]] constexpr auto c_rs1_rd() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>((inst_ >> 7) & 0x1F);
     }
 
     /// Standard C register mapping for rs2 (bits 6-2)
-    [[nodiscard]] constexpr auto c_rs2() const -> RegId {
-        return static_cast<RegId>((inst_ >> 2) & 0x1F);
+    [[nodiscard]] constexpr auto c_rs2() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>((inst_ >> 2) & 0x1F);
     }
 
     /// Compressed prime register mapping for rs1 / rd (maps to x8-x15)
-    [[nodiscard]] constexpr auto c_rs1_rd_p() const -> RegId {
-        return static_cast<RegId>(8 + ((inst_ >> 7) & 0x7));
+    [[nodiscard]] constexpr auto c_rs1_rd_p() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>(8 + ((inst_ >> 7) & 0x7));
     }
 
+    /// Compressed prime register mapping for rs1 (maps to x8-x15, identical to c_rs1_rd_p)
+    [[nodiscard]] constexpr auto c_rs1_p() const -> simrv::xlen::RegId { return c_rs1_rd_p(); }
+
     /// Compressed prime register mapping for rs2 (maps to x8-x15)
-    [[nodiscard]] constexpr auto c_rs2_p() const -> RegId {
-        return static_cast<RegId>(8 + ((inst_ >> 2) & 0x7));
+    [[nodiscard]] constexpr auto c_rs2_p() const -> simrv::xlen::RegId {
+        return static_cast<simrv::xlen::RegId>(8 + ((inst_ >> 2) & 0x7));
     }
 
    private:
-    uint32_t inst_;
+    simrv::xlen::Instruction inst_;
 };
 
 /// Decode instruction word to internal OperationId enum
-auto decoder(Instruction ir) -> isa::OperationId;
-
-/// Expand 16-bit C-extension instructions to canonical 32-bit forms
-auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction;
+auto decoder(simrv::xlen::Instruction ir) -> isa::OperationId;
 
 /// String mapping for instruction mix profiling
 extern const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)>
     OPERATION_NAME;
+
+/// Return a stable mnemonic for an operation, including invalid enum values.
+[[nodiscard]] auto operation_name(isa::OperationId operation) noexcept -> std::string_view;
+
+namespace operation {
+
+/**
+ * @brief Unpack raw instruction fields, immediates, and dependency traits into a
+ * DecodedInstruction context.
+ */
+inline void unpack_instruction(DecodedInstruction& ctx, simrv::xlen::Instruction ir,
+                               isa::OperationId op_id) noexcept {
+    const Decoder dec(ir);
+    const auto op = dec.opcode();
+
+    ctx.ir = ir;
+    ctx.op_id = op_id;
+    ctx.opcode = static_cast<isa::Opcode>(op);
+    ctx.rd = dec.rd();
+    ctx.rs1 = dec.rs1();
+    ctx.rs2 = dec.rs2();
+    ctx.funct3 = static_cast<isa::Funct3>(dec.funct3());
+    ctx.funct5 = static_cast<isa::Funct5Amo>((ir >> 27) & 0x1F);
+    ctx.funct7 = dec.funct7();
+    ctx.funct12 = (ir >> 20);
+
+    switch (op) {
+        case isa::Opcode::Lui:
+        case isa::Opcode::Auipc:
+            ctx.imm = dec.imm_u();
+            break;
+        case isa::Opcode::Jal:
+            ctx.imm = dec.imm_j();
+            break;
+        case isa::Opcode::Branch:
+            ctx.imm = dec.imm_b();
+            break;
+        case isa::Opcode::Store:
+        case isa::Opcode::StoreFp:
+            ctx.imm = dec.imm_s();
+            break;
+        default:
+            ctx.imm = dec.imm_i();
+            break;
+    }
+
+    ctx.traits = make_dependency_traits(op_id, ctx.opcode, ctx.rd, ctx.funct5);
+}
+
+}  // namespace operation
 
 }  // namespace simrv::pipeline

@@ -1,0 +1,167 @@
+/**
+ * @file TrapController.hpp
+ * @brief Handles RISC-V architectural trap vectoring, exception escalation, and privilege
+ * management.
+ */
+#pragma once
+
+#include <optional>
+#include <string>
+
+#include "simrv/core/TrapDescriptor.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::core {
+
+class CPU;
+struct ArchState;
+
+/**
+ * @brief Architectural state transitions produced by an MRET or SRET instruction.
+ */
+struct TrapReturnState {
+    simrv::xlen::VirtAddr target_pc{};
+    simrv::xlen::PrivilegeLevel target_priv{simrv::xlen::PrivilegeLevel::Machine};
+    bool target_virtualization{false};
+    simrv::xlen::CsrValue next_mstatus{0};
+    simrv::xlen::CsrValue next_vsstatus{0};
+    simrv::xlen::CsrValue next_hstatus{0};
+};
+
+/**
+ * @brief Return human-readable name of a RISC-V trap cause (interrupt or exception).
+ */
+[[nodiscard]] auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string;
+
+/**
+ * @class TrapController
+ * @brief Handles trap entry/return sequencing, exception delegation, and privilege verification.
+ */
+class TrapController {
+   public:
+    /**
+     * @brief Computes the side-effect-free target PC, privilege, virtualization mode, and status
+     * CSR updates for a Machine-mode trap return (MRET).
+     */
+    [[nodiscard]] static auto predict_mret(const ArchState& state) noexcept -> TrapReturnState;
+
+    /**
+     * @brief Computes the side-effect-free target PC, privilege, virtualization mode, and status
+     * CSR updates for a Supervisor-mode trap return (SRET).
+     */
+    [[nodiscard]] static auto predict_sret(const ArchState& state) noexcept -> TrapReturnState;
+
+    /**
+     * @brief Executes Machine-mode trap return (MRET).
+     *
+     * Restores privilege level from MPP, re-enables interrupt enabling bit MIE from MPIE,
+     * resets MPIE to 1, sets MPP to U-mode when implemented or M-mode otherwise, and updates
+     * program counter from MEPC.
+     *
+     * @param state Reference to architectural state.
+     */
+    static void mret(ArchState& state);
+
+    /**
+     * @brief Executes Supervisor-mode trap return (SRET).
+     *
+     * Restores privilege level from SPP, re-enables SIE from SPIE, resets SPIE to 1,
+     * clears SPP, clears MPRV, and updates program counter from SEPC.
+     *
+     * @param state Reference to architectural state.
+     */
+    static void sret(ArchState& state);
+
+    /**
+     * @brief Performs an architectural RNMI return (MNRET) transition on `state`.
+     */
+    static void mnret(ArchState& state);
+
+    /**
+     * @brief Dispatches a structured architectural trap through the formal TrapController pipeline.
+     *
+     * Performs host interception filtering (SBI ecalls), unrecoverable trap and recursive loop
+     * detection, privilege delegation (M/S/VS/HS), context stacking, and vector target computation.
+     *
+     * @param cpu Reference to CPU instance.
+     * @param desc Structured trap descriptor.
+     * @return Final disposition of the trap.
+     */
+    static auto dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> TrapDisposition;
+
+    /**
+     * @brief Traps CPU execution to machine or supervisor handler for an exception or interrupt.
+     *
+     * Evaluates delegation vectors (medeleg/mideleg), populates cause (mcause/scause),
+     * faulting address or payload (mtval/stval), saves return address (mepc/sepc), and updates
+     * privilege level to handler target mode.
+     *
+     * @param cpu Reference to CPU instance.
+     * @param cause Hardware trap cause code (interrupt or exception).
+     * @param tval Auxiliary trap value (e.g. faulting virtual address or instruction encoding).
+     */
+    static void raise_exception(CPU& cpu, simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval);
+
+    /**
+     * @brief Evaluates whether executing a privileged system instruction, hypervisor memory access,
+     * or WRS.NTO raises an IllegalInstruction or VirtualInstruction exception in the given state.
+     */
+    [[nodiscard]] static auto check_privileged_instruction(const ArchState& state,
+                                                           simrv::isa::OperationId op_id,
+                                                           simrv::xlen::Instruction ir) noexcept
+        -> std::optional<simrv::isa::ExceptionCode>;
+
+    /**
+     * @brief Evaluates whether reading or writing a CSR raises an IllegalInstruction or
+     * VirtualInstruction exception under the given architectural state (including privilege,
+     * virtualization, TVM/VTVM, counter enables, FS/VS state enables, Smstateen/Ssstateen, and
+     * Sstc).
+     */
+    [[nodiscard]] static auto check_csr_access(const ArchState& state,
+                                               simrv::xlen::CsrNumber csr_number,
+                                               bool is_write) noexcept
+        -> std::optional<simrv::isa::ExceptionCode>;
+
+    /**
+     * @brief Validates if the current privilege level is sufficient to execute a given privileged
+     * instruction.
+     *
+     * Checks requirements for instruction variants like mret, sret, or sfence.vma based on current
+     * privilege, MISA extensions, and TSR/TVM bits of mstatus.
+     *
+     * @param current_priv The CPU's current privilege level.
+     * @param misa The current machine ISA configuration (MISA).
+     * @param mstatus The current status register (mstatus).
+     * @param funct12 The 12-bit privileged function field of the system instruction.
+     * @param funct7 The 7-bit function field (used for SFENCE.VMA).
+     * @return true if the instruction is allowed under current privilege, false otherwise.
+     */
+    static auto can_execute_privileged_instruction(
+        simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
+        simrv::xlen::CsrValue mstatus, simrv::xlen::Instruction funct12, simrv::xlen::Word funct7,
+        simrv::xlen::CsrValue hstatus = 0, bool virtualization_mode = false,
+        bool supervisor_mode_supported = true) -> bool;
+
+    /**
+     * @brief Validates if the current privilege level has access to a specific CSR.
+     *
+     * Checks if the CPU has the privilege to read/write the requested CSR address,
+     * including read-only restrictions.
+     *
+     * @param current_priv The CPU's current privilege level.
+     * @param misa The current machine ISA register (misa).
+     * @param csr_addr The address of the CSR.
+     * @param is_write True if this is a write or read-write access to the CSR.
+     * @return true if access is permitted, false if it triggers an illegal instruction exception.
+     */
+    static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
+                               simrv::xlen::CsrNumber csr_addr, bool is_write,
+                               bool virtualization_mode = false,
+                               bool supervisor_mode_supported = true,
+                               bool user_mode_supported = true) -> bool;
+};
+
+}  // namespace simrv::core

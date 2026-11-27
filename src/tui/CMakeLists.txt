@@ -1,0 +1,60 @@
+simrv_add_component(simrv-tui-framework
+  LogBuffer.cpp
+  TuiFrameRenderer.cpp
+  TuiTheme.cpp
+  framework/ActionFooter.cpp
+  framework/Color.cpp
+  framework/Components.cpp
+  framework/DirtyDiffEngine.cpp
+  framework/Modal.cpp
+  framework/ScreenBuffer.cpp
+  framework/ScrollView.cpp
+  framework/TabBar.cpp
+  framework/Text.cpp
+  framework/Theme.cpp
+)
+add_library(simrv::tui-framework ALIAS simrv-tui-framework)
+
+simrv_add_component(simrv-tui
+  InspectionReport.cpp
+  Tui.cpp
+  TuiBackend.cpp
+  TuiGuidance.cpp
+  TuiKeybindings.cpp
+  TuiMission.cpp
+  TuiPreferences.cpp
+  TuiModal.cpp
+  modals/AddressModal.cpp
+  modals/BreakpointModal.cpp
+  modals/ConfirmModal.cpp
+  modals/FilePickerModal.cpp
+  modals/GlossaryModal.cpp
+  modals/HartModal.cpp
+  modals/HelpModal.cpp
+  modals/LayoutPresetsModal.cpp
+  modals/LoadModal.cpp
+  modals/LogModal.cpp
+  modals/MemoryModal.cpp
+  modals/MisaModal.cpp
+  modals/MissionObjectiveModal.cpp
+  modals/ModalComponents.cpp
+  modals/NoticeModal.cpp
+  modals/SettingsModal.cpp
+  modals/SystemConfigModal.cpp
+  modals/StepModal.cpp
+  modals/ToolPickerModal.cpp
+  panels/InspectorPane.cpp
+  panels/InspectorPaneRegs.cpp
+  panels/InspectorPanePipeline.cpp
+  panels/InspectorPaneCache.cpp
+  panels/InspectorPaneTlb.cpp
+  panels/InspectorPaneBp.cpp
+  panels/InspectorPaneHazard.cpp
+  panels/InspectorPaneIo.cpp
+  panels/InspectorPaneStats.cpp
+  panels/InspectorPaneExplain.cpp
+  panels/InspectorPaneStack.cpp
+  panels/TerminalPane.cpp
+  panels/StatusBar.cpp
+)
+add_library(simrv::tui ALIAS simrv-tui)

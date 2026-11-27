@@ -1,28 +1,35 @@
-if(NOT DEFINED CMAKE_SOURCE_DIR OR NOT EXISTS "${CMAKE_SOURCE_DIR}/LICENSE")
-  get_filename_component(CMAKE_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.."
-                         ABSOLUTE)
+if(NOT DEFINED SIMRV_SOURCE_DIR OR "${SIMRV_SOURCE_DIR}" STREQUAL "")
+  get_filename_component(SIMRV_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
-
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/LICENSE")
+if(NOT EXISTS "${SIMRV_SOURCE_DIR}/LICENSE")
   message(FATAL_ERROR "MIT audit: missing root LICENSE")
 endif()
-file(READ "${CMAKE_SOURCE_DIR}/LICENSE" license_text)
+file(READ "${SIMRV_SOURCE_DIR}/LICENSE" license_text)
 if(NOT license_text MATCHES "MIT License")
   message(FATAL_ERROR "MIT audit: root LICENSE is not MIT")
 endif()
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md")
+set(notices_file "${SIMRV_SOURCE_DIR}/THIRD_PARTY_NOTICES.md")
+if(NOT EXISTS "${notices_file}")
   message(FATAL_ERROR "MIT audit: missing THIRD_PARTY_NOTICES.md")
 endif()
-file(
-  GLOB_RECURSE vendored
-  RELATIVE "${CMAKE_SOURCE_DIR}"
-  "${CMAKE_SOURCE_DIR}/third_party/*" "${CMAKE_SOURCE_DIR}/vendor/*"
-  "${CMAKE_SOURCE_DIR}/external/*")
-if(vendored)
-  message(
-    FATAL_ERROR
-      "MIT audit: vendored content requires an explicit notice inventory: ${vendored}"
-  )
+
+file(READ "${notices_file}" notices_text)
+file(GLOB_RECURSE source_files LIST_DIRECTORIES false RELATIVE "${SIMRV_SOURCE_DIR}"
+     "${SIMRV_SOURCE_DIR}/*")
+set(unlisted_vendored)
+foreach(source_file IN LISTS source_files)
+  if(source_file MATCHES "(^|/)(third_party|vendor|external)/")
+    if(source_file MATCHES "(^|/)(\\.git|build[^/]*|\\.venv|node_modules)/")
+      continue()
+    endif()
+    string(FIND "${notices_text}" "${source_file}" notice_index)
+    if(notice_index EQUAL -1)
+      list(APPEND unlisted_vendored "${source_file}")
+    endif()
+  endif()
+endforeach()
+if(unlisted_vendored)
+  message(FATAL_ERROR
+          "MIT audit: bundled third-party files are missing from THIRD_PARTY_NOTICES.md: ${unlisted_vendored}")
 endif()
-message(
-  STATUS "MIT audit passed: no vendored source or fetched build dependencies")
+message(STATUS "MIT audit passed: bundled third-party files are listed in THIRD_PARTY_NOTICES.md")

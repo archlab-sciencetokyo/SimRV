@@ -4,88 +4,1650 @@
  */
 #include "simrv/core/Machine.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <limits>
 #include <print>
+#include <ranges>
+#include <span>
+#include <string_view>
+#include <thread>
+#include <type_traits>
+#include <variant>
 
+#include "MachineRuntime.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Logger.hpp"
-#include "simrv/device/InputDevice.hpp"
+#include "simrv/core/PlatformTiming.hpp"
+#include "simrv/core/TelemetrySink.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/device/AIA.hpp"
+#include "simrv/device/Aclint.hpp"
+#include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/Power.hpp"
+#include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/tui/Tui.hpp"
-#include "simrv/xlen/Types.hpp"
-
-namespace simrv::memory {
-bool g_appmode = true;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-Address g_dram_base =
-    kDramBaseAddress;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-}  // namespace simrv::memory
+#include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/MmioRouter.hpp"
+#include "simrv/util/BenchmarkEvent.hpp"
+#include "simrv/util/Sha256.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
-Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
+
+namespace {
+
+struct CheckpointHeader {
+    char magic[8] = {'S', 'I', 'M', 'R', 'V', 'C', 'P', 0};
+    uint32_t version = 2;
+    uint32_t endian_marker = 0x01020304;
+    uint32_t header_size = 0;
+    uint32_t arch_state_size = 0;
+    uint32_t counter_size = 0;
+    uint32_t xlen = 0;
+    uint32_t vlen = 0;
+    uint32_t harts = 0;
+    uint64_t ram_base = 0;
+    uint64_t ram_size = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<CheckpointHeader>);
+static_assert(std::is_trivially_copyable_v<ArchState>);
+
+struct CheckpointHart {
+    ArchState state{};
+    simrv::xlen::Counter instruction_count{};
+    simrv::xlen::Counter cycle_count{};
+    simrv::xlen::Counter mcycle{};
+};
+
+static_assert(std::is_trivially_copyable_v<CheckpointHart>);
+
+thread_local bool g_primary_runner_active = false;
+thread_local bool g_secondary_runner_active = false;
+
+void wait_for_worker_quiescence(std::atomic<uint32_t>& workers_in_cycle) {
+    const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
+    auto active = workers_in_cycle.load(std::memory_order_acquire);
+    while (active > caller_activity) {
+        workers_in_cycle.wait(active, std::memory_order_relaxed);
+        active = workers_in_cycle.load(std::memory_order_acquire);
+    }
+}
+
+class RunnerActivityGuard {
+   public:
+    explicit RunnerActivityGuard(std::atomic<uint32_t>& runner_in_cycle) noexcept
+        : runner_in_cycle_(runner_in_cycle) {
+        runner_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    ~RunnerActivityGuard() {
+        runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+        runner_in_cycle_.notify_all();
+    }
+
+    RunnerActivityGuard(const RunnerActivityGuard&) = delete;
+    auto operator=(const RunnerActivityGuard&) -> RunnerActivityGuard& = delete;
+
+   private:
+    std::atomic<uint32_t>& runner_in_cycle_;
+};
+
+}  // namespace
+
+RunnerBase::~RunnerBase() { stop_threads(); }
+
+void RunnerBase::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
+
+void RunnerBase::stop_threads() {
+    workers_running_.store(false, std::memory_order_release);
+    cycle_generation_.fetch_add(1, std::memory_order_release);
+    cycle_completed_.fetch_add(1, std::memory_order_release);
+    cycle_generation_.notify_all();
+    cycle_completed_.notify_all();
+    if (machine_ != nullptr) machine_->notify_control_event();
+    const auto self_id = std::this_thread::get_id();
+    for (auto& thread : worker_threads_) {
+        if (thread.joinable()) {
+            thread.request_stop();
+            if (thread.get_id() != self_id) {
+                thread.join();
+            } else {
+                thread.detach();
+            }
+        }
+    }
+    worker_threads_.clear();
+}
+
+void RunnerBase::synchronize_multithreaded_workers(Machine& machine) {
+    if (!machine.runtime_profile.is_cycle_mode() || !machine.is_smp_enabled() ||
+        worker_threads_.empty()) {
+        return;
+    }
+    if (simrv::compiler::unlikely(machine.runtime_->secondary_hart_count !=
+                                  machine.runtime_->secondary_harts.size())) {
+        machine.runtime_->refresh_secondary_hart_ptrs();
+    }
+    const auto target = machine.runtime_->secondary_hart_count;
+    cycle_completed_.store(0, std::memory_order_relaxed);
+    cycle_generation_.fetch_add(1, std::memory_order_release);
+    cycle_generation_.notify_all();
+
+    constexpr uint32_t kSpinLimit = 1000;
+    for (uint32_t spin = 0; spin < kSpinLimit; ++spin) {
+        if (cycle_completed_.load(std::memory_order_acquire) >= target) {
+            return;
+        }
+        simrv::compiler::cpu_relax();
+    }
+
+    while (workers_running_.load(std::memory_order_acquire)) {
+        const auto completed = cycle_completed_.load(std::memory_order_acquire);
+        if (completed >= target) return;
+        cycle_completed_.wait(completed, std::memory_order_acquire);
+    }
+}
+
+Machine::Runtime::Runtime(Machine& machine, bool appmode)
+    : axi_bridge(std::make_unique<simrv::memory::Axi4Bridge>(&machine)),
+      tracer(machine),
+      memory(machine),
+      runner(std::in_place_type<BaremetalRunner>) {
+    memory.system_bus().router().set_tracer(&tracer);
+    if (!appmode) {
+        runner.emplace<OsRunner>();
+    }
+}
+
+Machine::Machine(MachineConfig machine_config)
+    : runtime_(std::make_unique<Runtime>(*this, machine_config.execution.appmode)),
+      tracer_raw_(&runtime_->tracer),
+      breakpoint_manager_raw_(&runtime_->breakpoints),
+      device_registry_(std::make_unique<simrv::device::PlatformDeviceRegistry>()),
+      memory_(runtime_->memory) {
+    runtime_->primary_cpu.machine_ = this;
+    dma_engine().set_event_observer([this](const simrv::memory::DmaTransferTrace& transfer) {
+        publish_machine_event(MachineEvent{
+            .kind = transfer.cancelled  ? MachineEventKind::DmaCancelled
+                    : transfer.complete ? MachineEventKind::DmaCompleted
+                                        : MachineEventKind::DmaStarted,
+            .cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle,
+            .hart = std::nullopt,
+            .transfer_id = transfer.id,
+            .byte_count = transfer.byte_count,
+            .request_cycle = transfer.request_cycle,
+            .start_cycle = transfer.start_cycle,
+            .completion_cycle = transfer.completion_cycle,
+            .component = transfer.component,
+        });
+    });
+    device_registry().register_mmio_device(
+        SoCDeviceKind::ResetControl, [](Machine& machine, const SoCDeviceConfig& device) {
+            return std::make_unique<simrv::device::ResetControlMmio>(machine, device.base,
+                                                                     device.size, device.name);
+        });
+    apply_configuration(std::move(machine_config));
+}
+
+auto Machine::device_registry() noexcept -> simrv::device::PlatformDeviceRegistry& {
+    return *device_registry_;
+}
+
+void Machine::apply_configuration(MachineConfig machine_config) {
+    config = std::move(machine_config);
+    if (runtime_->axi_bridge != nullptr) {
+        runtime_->axi_bridge->tracer().set_path(
+            (std::filesystem::path(config.debug.trace_dir) / "axi.txt").string());
+    }
+    resolved_start_pc_ = config.execution.start_pc;
+    resolved_isatest_tohost_ = config.isa.isatest_tohost;
+    framebuffer_geometry_ = config.framebuffer;
+    is_smp_enabled_ =
+        config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::MultiThreaded;
+    memory_.system_bus().set_smp_enabled(is_smp_enabled_);
+    clock_divider_ = simrv::core::timing::DeterministicClockDivider(config.execution.cpu_clock_hz,
+                                                                    config.execution.timebase_hz);
+    if (tui_enabled() || debugger_enabled()) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    }
+}
+
+void Machine::set_resolved_boot_state(simrv::xlen::VirtAddr start_pc,
+                                      std::optional<simrv::xlen::Address> tohost_address) noexcept {
+    resolved_start_pc_ = start_pc;
+    if (tohost_address.has_value()) resolved_isatest_tohost_ = *tohost_address;
+}
+
+auto Machine::stage_reconfiguration(MachineConfig machine_config)
+    -> std::expected<void, std::string> {
+    if (const auto valid = machine_config.validate(); !valid) return std::unexpected(valid.error());
+    {
+        const std::scoped_lock lock(staged_configuration_mutex_);
+        staged_configuration_ = std::move(machine_config);
+    }
+    request_reboot();
+    return {};
+}
+
+auto Machine::take_staged_reconfiguration() -> std::optional<MachineConfig> {
+    const std::scoped_lock lock(staged_configuration_mutex_);
+    return std::exchange(staged_configuration_, std::nullopt);
+}
+
+auto Machine::allocate_ram(size_t bytes) -> bool { return runtime_->ram.allocate(bytes); }
+
+void Machine::release_ram() noexcept { runtime_->ram.reset(); }
+
+void Machine::set_ram_for_testing(simrv::xlen::Byte* ram, size_t size) noexcept {
+    runtime_->ram.reset();
+    runtime_->ram.mutable_data_ref() = ram;
+    config.memory.dram_size = static_cast<simrv::xlen::Address>(size);
+}
+
+auto Machine::mutable_ram_data_for_testing() noexcept -> simrv::xlen::Byte*& {
+    return runtime_->ram.mutable_data_ref();
+}
+
+void Machine::add_hart_for_testing(std::unique_ptr<CPU> hart) {
+    hart->machine_ = this;
+    runtime_->secondary_harts.push_back(std::move(hart));
+    runtime_->refresh_secondary_hart_ptrs();
+}
+
+auto Machine::test_secondary_harts() noexcept -> std::vector<std::unique_ptr<simrv::core::CPU>>& {
+    return runtime_->secondary_harts;
+}
+
+auto Machine::mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::SerialDevice>& {
+    return runtime_->uart;
+}
+
+void Machine::install_debugger_for_testing(std::unique_ptr<simrv::debug::GdbStub> debugger) {
+    runtime_->gdb_stub = std::move(debugger);
+}
+
+auto Machine::hart(size_t index) -> CPU& {
+    return index == 0 ? runtime_->primary_cpu : *runtime_->secondary_harts.at(index - 1);
+}
+
+auto Machine::hart(size_t index) const -> const CPU& {
+    return index == 0 ? runtime_->primary_cpu : *runtime_->secondary_harts.at(index - 1);
+}
+
+auto Machine::num_harts() const -> size_t { return 1 + runtime_->secondary_harts.size(); }
+
+auto Machine::primary_hart() noexcept -> CPU& { return runtime_->primary_cpu; }
+
+auto Machine::primary_hart() const noexcept -> const CPU& { return runtime_->primary_cpu; }
+
+auto Machine::ram_data() noexcept -> simrv::xlen::Byte* { return runtime_->ram.data(); }
+
+auto Machine::ram_data() const noexcept -> const simrv::xlen::Byte* { return runtime_->ram.data(); }
+
+auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
+    return {runtime_->ram.data(), simrv::xlen::PhysAddr{config.memory.dram_base},
+            config.memory.dram_size};
+}
+
+auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
+    if (runtime_ && runtime_->framebuffer) {
+        const auto data = runtime_->framebuffer->framebuffer_data();
+        const auto geom = runtime_->framebuffer->framebuffer_geometry();
+        const uint64_t row_bytes = uint64_t{geom.width} * geom.bpp;
+        const uint64_t stride = geom.stride != 0 ? geom.stride : row_bytes;
+        if (geom.width == 0 || geom.height == 0 ||
+            geom.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+            geom.height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+            !((geom.bpp == 2 && geom.format == FramebufferFormat::R5G6B5) ||
+              (geom.bpp == 4 && geom.format == FramebufferFormat::A8R8G8B8)) ||
+            stride < row_bytes || stride * geom.height > data.size() ||
+            data.size() > std::numeric_limits<simrv::xlen::Address>::max())
+            return {};
+        return {
+            const_cast<simrv::xlen::Byte*>(reinterpret_cast<const simrv::xlen::Byte*>(data.data())),
+            simrv::xlen::PhysAddr{geom.base}, static_cast<simrv::xlen::Address>(data.size())};
+    }
+    const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
+    const auto base = framebuffer_geometry_.base;
+    const auto ram = ram_view();
+    const simrv::xlen::PhysAddr physical_base{base};
+    if (!ram.contains(physical_base, static_cast<std::size_t>(size))) return {};
+    return {ram.unchecked_ptr(physical_base), physical_base, size};
+}
+
+auto Machine::framebuffer_geometry() const noexcept -> FramebufferConfig {
+    if (runtime_ && runtime_->framebuffer) {
+        return runtime_->framebuffer->framebuffer_geometry();
+    }
+    return framebuffer_geometry_;
+}
+
+auto Machine::framebuffer_width() const noexcept -> uint32_t {
+    return framebuffer_geometry().width;
+}
+
+auto Machine::framebuffer_height() const noexcept -> uint32_t {
+    return framebuffer_geometry().height;
+}
+
+auto Machine::dump_signature(const std::string& filepath) const -> bool {
+    if (filepath.empty()) {
+        return false;
+    }
+    const auto& syms = symbol_table();
+    const auto begin_opt = syms.lookup_name("begin_signature").or_else([&] {
+        return syms.lookup_name("rvtest_sig_begin");
+    });
+    const auto end_opt = syms.lookup_name("end_signature").or_else([&] {
+        return syms.lookup_name("rvtest_sig_end");
+    });
+    if (!begin_opt || !end_opt) {
+        simrv::log::warn(
+            "Signature dumping requested but begin_signature/end_signature symbols not found");
+        return false;
+    }
+    if (*begin_opt >= *end_opt) {
+        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}",
+                         begin_opt->raw(), end_opt->raw());
+        return false;
+    }
+
+    std::ofstream out(filepath, std::ios::trunc);
+    if (!out) {
+        simrv::log::error("Cannot open signature output file: {}", filepath);
+        return false;
+    }
+
+    const auto len = static_cast<size_t>(end_opt->raw() - begin_opt->raw());
+    std::vector<uint8_t> buffer(len, 0);
+    auto& mem = const_cast<Machine*>(this)->memory();
+    if (!mem.dma_read(simrv::xlen::PhysAddr{begin_opt->raw()}, buffer.data(), len)) {
+        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}",
+                          begin_opt->raw(), end_opt->raw());
+        return false;
+    }
+
+    for (size_t i = 0; i < len; i += 4) {
+        uint32_t word = 0;
+        for (size_t b = 0; b < 4 && (i + b) < len; ++b) {
+            word |= static_cast<uint32_t>(buffer[i + b]) << (b * 8);
+        }
+        std::print(out, "{:08x}\n", word);
+    }
+    out.flush();
+    simrv::log::info("Wrote architectural test signature to {} ({} words)", filepath,
+                     (len + 3) / 4);
+    return true;
+}
+
+auto Machine::save_checkpoint(const std::string& filepath) const
+    -> std::expected<void, std::string> {
+    const auto ram = ram_view();
+    if (ram.data() == nullptr || ram.size() == 0) {
+        return std::unexpected("cannot save checkpoint without allocated RAM");
+    }
+    std::ofstream out(filepath, std::ios::binary | std::ios::trunc);
+    if (!out) return std::unexpected("cannot open checkpoint for writing: " + filepath);
+
+    const CheckpointHeader header{.header_size = sizeof(CheckpointHeader),
+                                  .arch_state_size = sizeof(ArchState),
+                                  .counter_size = sizeof(simrv::xlen::Counter),
+                                  .xlen = simrv::xlen::kXLenBits,
+                                  .vlen = config.isa.vlen,
+                                  .harts = static_cast<uint32_t>(num_harts()),
+                                  .ram_base = config.memory.dram_base.raw(),
+                                  .ram_size = config.memory.dram_size};
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    for (size_t i = 0; i < num_harts(); ++i) {
+        const auto& cpu = hart(i);
+        const CheckpointHart hart_state{.state = cpu.state(),
+                                        .instruction_count = cpu.e_icount,
+                                        .cycle_count = cpu.e_ccount,
+                                        .mcycle = cpu.clint_mmio.mcycle};
+        out.write(reinterpret_cast<const char*>(&hart_state), sizeof(hart_state));
+    }
+    out.write(reinterpret_cast<const char*>(ram.data()), static_cast<std::streamsize>(ram.size()));
+    if (!out) return std::unexpected("failed while writing checkpoint: " + filepath);
+    return {};
+}
+
+auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void, std::string> {
+    std::ifstream in(filepath, std::ios::binary);
+    if (!in) return std::unexpected("cannot open checkpoint for reading: " + filepath);
+
+    CheckpointHeader header{};
+    in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    const CheckpointHeader expected{};
+    if (!in || std::memcmp(header.magic, expected.magic, sizeof(header.magic)) != 0 ||
+        header.version != 2 || header.endian_marker != 0x01020304 ||
+        header.header_size != sizeof(CheckpointHeader) ||
+        header.arch_state_size != sizeof(ArchState) ||
+        header.counter_size != sizeof(simrv::xlen::Counter)) {
+        return std::unexpected("unsupported or corrupt checkpoint header");
+    }
+    if (header.xlen != simrv::xlen::kXLenBits || header.vlen != config.isa.vlen ||
+        header.harts != num_harts() || header.ram_base != config.memory.dram_base ||
+        header.ram_size != config.memory.dram_size) {
+        return std::unexpected("checkpoint configuration does not match this machine");
+    }
+    std::vector<CheckpointHart> hart_states(num_harts());
+    for (auto& hart_state : hart_states) {
+        in.read(reinterpret_cast<char*>(&hart_state), sizeof(hart_state));
+        if (!in) return std::unexpected("truncated checkpoint architectural state");
+    }
+    const auto ram = ram_view();
+    if (ram.data() == nullptr || ram.size() == 0) {
+        return std::unexpected("cannot load checkpoint without allocated RAM");
+    }
+    std::vector<simrv::xlen::Byte> ram_image(ram.size());
+    in.read(reinterpret_cast<char*>(ram_image.data()),
+            static_cast<std::streamsize>(ram_image.size()));
+    if (!in) return std::unexpected("truncated checkpoint RAM image");
+    for (size_t i = 0; i < num_harts(); ++i) {
+        auto& cpu = hart(i);
+        auto& hart_state = hart_states[i];
+        cpu.state() = hart_state.state;
+        cpu.e_icount = hart_state.instruction_count;
+        cpu.e_ccount = hart_state.cycle_count;
+        cpu.clint_mmio.mcycle = hart_state.mcycle;
+        cpu.dcache.flush();
+        cpu.TLB_flush();
+    }
+    std::memcpy(ram.data(), ram_image.data(), ram_image.size());
+    memory().system_bus().coherence_hub().clear();
+    return {};
+}
+
+void Machine::maybe_save_periodic_checkpoint() {
+    const auto interval = config.debug.checkpoint_every;
+    if (interval == 0 || config.debug.checkpoint_dir.empty()) return;
+    const auto cycle = primary_hart().clint_mmio.mcycle;
+    if (cycle < next_checkpoint_cycle_) return;
+
+    // Stop worker harts at a cycle boundary while serializing shared machine state.
+    const auto prior_state = execution_state();
+    if (prior_state == ExecutionState::Running) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+        execution_state_.notify_all();
+        for (auto& secondary : runtime_->secondary_harts) secondary->hart_status.notify_all();
+        wait_for_runner_quiescence();
+    }
+
+    std::error_code fs_error;
+    const std::filesystem::path directory(config.debug.checkpoint_dir);
+    std::filesystem::create_directories(directory, fs_error);
+    if (fs_error) {
+        simrv::log::error("Cannot create checkpoint directory '{}': {}", directory.string(),
+                          fs_error.message());
+    } else {
+        const auto stem = std::format("checkpoint-{}", cycle);
+        auto checkpoint_path = directory / (stem + ".ckpt");
+        for (uint32_t suffix = 1; std::filesystem::exists(checkpoint_path, fs_error); ++suffix) {
+            checkpoint_path = directory / std::format("{}-{}.ckpt", stem, suffix);
+            if (suffix == std::numeric_limits<uint32_t>::max()) break;
+        }
+        const auto saved = save_checkpoint(checkpoint_path.string());
+        if (!saved) {
+            simrv::log::error("Periodic checkpoint failed: {}", saved.error());
+        } else {
+            const auto metadata_path = checkpoint_path.string() + ".json";
+            std::ofstream metadata(metadata_path, std::ios::trunc);
+            const auto digest = simrv::util::sha256_file(checkpoint_path);
+            const auto ram = ram_view();
+            const auto ram_digest = simrv::util::sha256(std::string_view(
+                reinterpret_cast<const char*>(ram.data()), static_cast<size_t>(ram.size())));
+            metadata << std::format(
+                "{{\"schema_version\":1,\"kind\":\"simrv_architectural_checkpoint\","
+                "\"cycle\":{},\"checkpoint_file\":\"{}\",\"checkpoint_sha256\":{},"
+                "\"ram_sha256\":\"{}\",\"xlen\":{},\"harts\":[",
+                cycle, checkpoint_path.filename().string(),
+                digest ? std::format("\"{}\"", *digest) : "null", ram_digest,
+                simrv::xlen::kXLenBits);
+            for (size_t h = 0; h < num_harts(); ++h) {
+                if (h != 0) metadata << ',';
+                metadata << std::format(
+                    "{{\"hart\":{},\"pc\":\"0x{:x}\","
+                    "\"privilege\":\"{}\",\"pending_interrupts\":\"0x{:x}\"}}",
+                    h, static_cast<uint64_t>(hart(h).state().pc.raw()),
+                    hart(h).state().priv == simrv::xlen::PrivilegeLevel::User         ? "U"
+                    : hart(h).state().priv == simrv::xlen::PrivilegeLevel::Supervisor ? "S"
+                                                                                      : "M",
+                    static_cast<uint64_t>(hart(h).state().mip));
+            }
+            metadata << "],\"device_state_included\":false,\"trace_sequence\":null,"
+                        "\"replay_complete\":false}\n";
+            if (!metadata) {
+                simrv::log::error("Failed to write checkpoint metadata '{}': {}", metadata_path,
+                                  "stream write error");
+            } else {
+                simrv::log::info("Periodic checkpoint saved at cycle {}: {}", cycle,
+                                 checkpoint_path.string());
+            }
+        }
+    }
+
+    do {
+        if (next_checkpoint_cycle_ > std::numeric_limits<simrv::xlen::Counter>::max() - interval) {
+            next_checkpoint_cycle_ = std::numeric_limits<simrv::xlen::Counter>::max();
+            break;
+        }
+        next_checkpoint_cycle_ += interval;
+    } while (next_checkpoint_cycle_ <= cycle);
+    if (prior_state == ExecutionState::Running) {
+        execution_state_.store(ExecutionState::Running, std::memory_order_release);
+        execution_state_.notify_all();
+        notify_control_event();
+    }
+}
+
+void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
+    if (!runtime_) {
+        return;
+    }
+    runtime_->primary_cpu.plic_set_irq(irq, asserted);
+    bool changed = false;
+    {
+        std::scoped_lock lock(platform_irq_state_mutex_);
+        auto& previous = platform_irq_state_[irq];
+        changed = previous != asserted;
+        previous = asserted;
+    }
+    if (changed) {
+        publish_machine_event(MachineEvent{
+            .kind = asserted ? MachineEventKind::InterruptAsserted
+                             : MachineEventKind::InterruptDeasserted,
+            .cycle = runtime_->primary_cpu.clint_mmio.mcycle,
+            .hart = std::nullopt,
+            .interrupt_source = irq,
+            .component = "platform_irq",
+        });
+    }
+}
+
+void Machine::set_hart_irq(simrv::xlen::HartId hart_id, InterruptType type,
+                           simrv::xlen::PrivilegeLevel priv, bool asserted) {
+    if (hart_id.raw() >= num_harts()) {
+        return;
+    }
+    MipBit pending_bit = MipBit::Msip;
+    if (type == InterruptType::Software) {
+        pending_bit = priv == simrv::xlen::PrivilegeLevel::Supervisor ? MipBit::Ssip : MipBit::Msip;
+    } else if (type == InterruptType::Timer) {
+        pending_bit = priv == simrv::xlen::PrivilegeLevel::Supervisor ? MipBit::Stip : MipBit::Mtip;
+    } else if (type == InterruptType::External) {
+        pending_bit = priv == simrv::xlen::PrivilegeLevel::Supervisor ? MipBit::Seip : MipBit::Meip;
+    }
+    auto& target_hart = hart(hart_id);
+    target_hart.queue_interrupt_line(pending_bit, asserted);
+    if (CPU::current_execution_cpu() == &target_hart) {
+        target_hart.apply_pending_interrupt_lines(*this);
+    }
+}
+
+auto Machine::platform_time() const noexcept -> uint64_t {
+    return runtime_->primary_cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+}
+
+auto Machine::rtc_device() noexcept -> simrv::Rtc* { return runtime_->rtc.get(); }
+
+auto Machine::rtc_device() const noexcept -> const simrv::Rtc* { return runtime_->rtc.get(); }
+
+auto Machine::uart_device() noexcept -> simrv::device::SerialDevice* {
+    return runtime_->uart.get();
+}
+
+auto Machine::uart_device() const noexcept -> const simrv::device::SerialDevice* {
+    return runtime_->uart.get();
+}
+
+void Machine::advance_device_cycles(uint64_t cycles) {
+    if (cycles == 0 || runtime_ == nullptr) return;
+    if (auto* uart = runtime_->uart.get(); uart != nullptr) {
+        uart->advance_cycles(cycles);
+    }
+    for (auto* dev : runtime_->ticked_extension_mmios) {
+        dev->advance_cycles(cycles);
+    }
+}
+
+auto Machine::framebuffer_device() noexcept -> simrv::device::FramebufferDevice* {
+    return runtime_->framebuffer;
+}
+
+auto Machine::framebuffer_device() const noexcept -> const simrv::device::FramebufferDevice* {
+    return runtime_->framebuffer;
+}
+
+auto Machine::dma_controller() noexcept -> simrv::device::DmaController* {
+    return runtime_ ? runtime_->dma_controller.get() : nullptr;
+}
+
+auto Machine::dma_controller() const noexcept -> const simrv::device::DmaController* {
+    return runtime_ ? runtime_->dma_controller.get() : nullptr;
+}
+
+auto Machine::axi_bridge() noexcept -> simrv::memory::Axi4Bridge* {
+    return runtime_ ? runtime_->axi_bridge.get() : nullptr;
+}
+
+auto Machine::axi_bridge() const noexcept -> const simrv::memory::Axi4Bridge* {
+    return runtime_ ? runtime_->axi_bridge.get() : nullptr;
+}
+
+void Machine::send_input_key(uint16_t code, bool pressed) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back(
+        {.type = PendingInputEvent::Type::Key, .code = code, .pressed = pressed});
+    has_pending_input_.store(true, std::memory_order_release);
+}
+
+void Machine::send_input_mouse_motion(int32_t x, int32_t y) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back({.type = PendingInputEvent::Type::MouseMotion, .x = x, .y = y});
+    has_pending_input_.store(true, std::memory_order_release);
+}
+
+void Machine::send_input_mouse_button(uint16_t button, bool pressed) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back(
+        {.type = PendingInputEvent::Type::MouseButton, .code = button, .pressed = pressed});
+    has_pending_input_.store(true, std::memory_order_release);
+}
+
+void Machine::send_input_mouse_wheel(int32_t delta) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back({.type = PendingInputEvent::Type::MouseWheel, .x = delta});
+    has_pending_input_.store(true, std::memory_order_release);
+}
+
+auto Machine::pcie_root() noexcept -> simrv::device::PcieRootComplex* {
+    return runtime_->pcie.get();
+}
+
+auto Machine::pcie_root() const noexcept -> const simrv::device::PcieRootComplex* {
+    return runtime_->pcie.get();
+}
+
+auto Machine::debugger() noexcept -> simrv::debug::GdbStub* { return runtime_->gdb_stub.get(); }
+
+auto Machine::debugger() const noexcept -> const simrv::debug::GdbStub* {
+    return runtime_->gdb_stub.get();
+}
+
+auto Machine::lockstep() noexcept -> simrv::debug::SpikeLockstep* {
+    return runtime_->spike_lockstep.get();
+}
+
+auto Machine::lockstep() const noexcept -> const simrv::debug::SpikeLockstep* {
+    return runtime_->spike_lockstep.get();
+}
+
+auto Machine::breakpoint_manager() noexcept -> simrv::debug::BreakpointManager& {
+    return *breakpoint_manager_raw_;
+}
+
+auto Machine::breakpoint_manager() const noexcept -> const simrv::debug::BreakpointManager& {
+    return *breakpoint_manager_raw_;
+}
+
+auto Machine::trace() noexcept -> Tracer& { return *tracer_raw_; }
+
+auto Machine::trace() const noexcept -> const Tracer& { return *tracer_raw_; }
+
+auto Machine::symbol_table() noexcept -> simrv::debug::SymbolTable& { return runtime_->symbols; }
+
+auto Machine::symbol_table() const noexcept -> const simrv::debug::SymbolTable& {
+    return runtime_->symbols;
+}
+
+void Machine::start_runner() {
+    if (runner_started_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    std::visit([this](auto& runner) { runner.start(*this); }, runtime_->runner);
+}
+
+void Machine::stop_runner() {
+    if (!runner_started_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+    if (auto* baremetal = std::get_if<BaremetalRunner>(&runtime_->runner)) {
+        baremetal->stop(*this);
+    } else if (auto* os = std::get_if<OsRunner>(&runtime_->runner)) {
+        os->stop(*this);
+    }
+}
+
+void Machine::wait_for_runner_quiescence() {
+    if (!g_primary_runner_active) {
+        auto active = runner_in_cycle_.load(std::memory_order_acquire);
+        while (active != 0) {
+            runner_in_cycle_.wait(active, std::memory_order_relaxed);
+            active = runner_in_cycle_.load(std::memory_order_acquire);
+        }
+    }
+    std::visit([](auto& runner) { runner.wait_for_quiescence(); }, runtime_->runner);
+}
+
+void Machine::prepare_runner_cycle() {
+    std::visit([this](auto& runner) { runner.prepare(*this); }, runtime_->runner);
+}
+
+void Machine::service_pending_input() {
+    if (!has_pending_input_.load(std::memory_order_relaxed)) {
+        return;
+    }
+    std::deque<PendingInputEvent> events;
+    {
+        const std::scoped_lock lock(input_mutex_);
+        events.swap(pending_input_events_);
+        has_pending_input_.store(false, std::memory_order_release);
+    }
+
+    for (const auto& event : events) {
+        if (runtime_->mmio_input) {
+            switch (event.type) {
+                case PendingInputEvent::Type::Key:
+                    runtime_->mmio_input->push_key_event(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseMotion:
+                    runtime_->mmio_input->push_mouse_motion(event.x, event.y);
+                    break;
+                case PendingInputEvent::Type::MouseButton:
+                    runtime_->mmio_input->push_mouse_button(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseWheel:
+                    runtime_->mmio_input->push_mouse_wheel(event.x);
+                    break;
+            }
+        } else if (runtime_->pci_input) {
+            switch (event.type) {
+                case PendingInputEvent::Type::Key:
+                    runtime_->pci_input->push_key_event(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseMotion:
+                    runtime_->pci_input->push_mouse_motion(event.x, event.y);
+                    break;
+                case PendingInputEvent::Type::MouseButton:
+                    runtime_->pci_input->push_mouse_button(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseWheel:
+                    runtime_->pci_input->push_mouse_wheel(event.x);
+                    break;
+            }
+        }
+        if (event.type == PendingInputEvent::Type::Key) {
+            for (auto* input : runtime_->input_devices) {
+                input->send_key(event.code, event.pressed);
+            }
+        }
+    }
+}
+
+void Machine::update_network_devices_status() noexcept {
+    has_network_devices_ =
+        runtime_ && (runtime_->pci_net != nullptr || runtime_->mmio_net != nullptr ||
+                     runtime_->ring_buffer_ethernet != nullptr);
+}
+
+void Machine::service_network() {
+    if (!has_network_devices_) return;
+    if (runtime_->pci_net) runtime_->pci_net->poll_backend();
+    if (runtime_->mmio_net) runtime_->mmio_net->poll_backend();
+    if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->poll_backend();
+}
+
+void Machine::execute_runner_cycle() {
+    RunnerActivityGuard runner_activity(runner_in_cycle_);
+    const auto state = execution_state();
+    if (state != ExecutionState::Running && state != ExecutionState::Stepping) {
+        return;
+    }
+    g_primary_runner_active = true;
+    std::visit([this](auto& runner) { runner.execute(*this); }, runtime_->runner);
+    publish_requested_tui_sample(0);
+    if (!is_smp_enabled()) {
+        for (size_t h = 1; h < num_harts(); ++h) publish_requested_tui_sample(h);
+    }
+    if (is_stepping()) publish_tui_execution_snapshot();
+    g_primary_runner_active = false;
+}
+
+auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
+    RunnerActivityGuard runner_activity(runner_in_cycle_);
+    if (execution_state() != ExecutionState::Running) {
+        return false;
+    }
+    g_primary_runner_active = true;
+    const bool executed = std::visit(
+        [this, batch_size](auto& runner) { return runner.execute_fast_batch(*this, batch_size); },
+        runtime_->runner);
+    if (executed) {
+        publish_requested_tui_sample(0);
+        if (!is_smp_enabled()) {
+            for (size_t h = 1; h < num_harts(); ++h) publish_requested_tui_sample(h);
+        }
+    }
+    g_primary_runner_active = false;
+    return executed;
+}
+
+void Machine::publish_tui_execution_snapshot() noexcept {
+    publish_tui_execution_snapshot_for_hart(0);
+    if (!is_smp_enabled() || execution_state() != ExecutionState::Running) {
+        for (size_t hart = 1; hart < num_harts(); ++hart) {
+            publish_tui_execution_snapshot_for_hart(hart);
+        }
+    }
+}
+
+void Machine::sample_throughput() noexcept {
+    const auto current_instructions = retired_instruction_count();
+    if (simrv::compiler::likely(current_instructions - last_sample_instructions_ < 1'000'000)) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_sample_time_).count();
+    if (elapsed_ns >= 1'000'000 && current_instructions > last_sample_instructions_) {
+        const auto d_inst = current_instructions - last_sample_instructions_;
+        const double mips =
+            (static_cast<double>(d_inst) * 1000.0) / static_cast<double>(elapsed_ns);
+        if (mips > peak_mips_) {
+            peak_mips_ = mips;
+        }
+        last_sample_time_ = now;
+        last_sample_instructions_ = current_instructions;
+    }
+}
+
+void Machine::publish_requested_tui_sample(size_t hart_index) noexcept {
+    const auto requested = tui_sample_requested_.load(std::memory_order_acquire);
+    if (hart_index >= num_harts() || hart_index >= tui_sample_published_.size() ||
+        tui_sample_published_[hart_index] == requested)
+        return;
+    publish_tui_execution_snapshot_for_hart(hart_index);
+    tui_sample_published_[hart_index] = requested;
+}
+
+void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcept {
+    if (hart_index >= num_harts() || hart_index >= tui_snapshots_.size()) return;
+    const auto& source = hart(hart_index);
+    auto snapshot = std::make_shared<TuiExecutionSnapshot>();
+    snapshot->hart = hart_index;
+    snapshot->pc = source.state().pc;
+    snapshot->cycle_count = source.clint_mmio.mcycle;
+    snapshot->instruction_count =
+        source.state().minstret != 0 ? source.state().minstret : source.e_icount;
+    snapshot->timer_ticks = primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
+    snapshot->privilege = source.state().priv;
+    snapshot->ca_stats = source.pipeline_sim.get_stats();
+    snapshot->icache_hits = source.icache.hit_count();
+    snapshot->icache_misses = source.icache.miss_count();
+    snapshot->dcache_hits = source.dcache.hit_count();
+    snapshot->dcache_misses = source.dcache.miss_count();
+    snapshot->execution_state = execution_state();
+    if (runtime_profile.is_cycle_mode()) {
+        snapshot->scoreboard.sync_from_pipeline(source.ca_pipeline, /*include_decode=*/true);
+    }
+    tui_snapshots_[hart_index].store(std::move(snapshot), std::memory_order_release);
+}
+
+auto Machine::tui_execution_snapshot(size_t hart_index) const noexcept -> TuiExecutionSnapshot {
+    if (hart_index < tui_snapshots_.size()) {
+        if (auto snapshot = tui_snapshots_[hart_index].load(std::memory_order_acquire))
+            return *snapshot;
+    }
+    return TuiExecutionSnapshot{.hart = hart_index};
+}
+
+void Machine::post_control(std::function<void(Machine&)> command) {
+    {
+        std::scoped_lock lock(control_mutex_);
+        control_commands_.push_back(std::move(command));
+        controls_pending_.store(true, std::memory_order_release);
+    }
+    notify_control_event();
+}
+
+void Machine::service_control_commands() {
+    std::deque<std::function<void(Machine&)>> commands;
+    {
+        std::scoped_lock lock(control_mutex_);
+        commands.swap(control_commands_);
+        controls_pending_.store(false, std::memory_order_release);
+    }
+    for (auto& command : commands) command(*this);
+}
+
+bool Machine::sampled_instruction_execution() const {
+    return runtime_profile.allows_fast_batch() && !is_stepping() && !lockstep_enabled() &&
+           !debugger_enabled() && !branch_trace_enabled() &&
+           config.execution.trace_begin == std::numeric_limits<simrv::xlen::Counter>::max() &&
+           !breakpoint_manager().has_any() &&
+           (!telemetry_sink_ || (!telemetry_sink_->captures_execution_detail() &&
+                                 telemetry_sink_->step_delay_us() == 0));
+}
+
+void Machine::finalize_runner_cycle() {
+    std::visit([this](auto& runner) { runner.finalize(*this); }, runtime_->runner);
+}
+
+auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
+    // Ticking extension devices must observe each instruction boundary. The bare-metal
+    // batch engine only advances the built-in UART, so use the general runner for them.
+    if (!runtime_profile.allows_fast_batch() || !runtime_->ticked_extension_mmios.empty() ||
+        (runtime_->uart && runtime_->uart->requires_instruction_ticks()) || is_stepping() ||
+        lockstep_enabled() || branch_trace_enabled() || breakpoint_manager().has_any() ||
+        is_smp_enabled() || primary_hart().state().has_active_triggers ||
+        primary_hart().cpu_model_config.mmio_console_redirect) {
+        return std::nullopt;
+    }
+    for (const auto& hart : runtime_->secondary_harts) {
+        if (hart->state().has_active_triggers || hart->cpu_model_config.mmio_console_redirect)
+            return std::nullopt;
+    }
+    if (tui_enabled() && (!telemetry_sink_ || telemetry_sink_->is_trace_active() ||
+                          telemetry_sink_->step_delay_us() != 0)) {
+        return std::nullopt;
+    }
+    const bool captures_execution_detail =
+        tui_enabled() && telemetry_sink_ && telemetry_sink_->captures_execution_detail();
+    return FastBatchPolicy{
+        .copy_pipeline_context = captures_execution_detail,
+        .collect_instruction_mix = instruction_mix_enabled() || captures_execution_detail,
+        .poll_pause = true,
+        .has_instruction_limit =
+            config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max(),
+    };
+}
+
+auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
+    if (!runtime_profile.is_cycle_mode() || is_smp_enabled() || is_stepping() ||
+        debugger_enabled() || lockstep_enabled() || branch_trace_enabled() ||
+        config.execution.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max() ||
+        breakpoint_manager().has_any()) {
+        return 1;
+    }
+    if (tui_enabled() && telemetry_sink_ &&
+        (telemetry_sink_->is_trace_active() || telemetry_sink_->step_delay_us() != 0)) {
+        return 1;
+    }
+    auto quantum = config.execution.smp_quantum;
+    if (config.debug.checkpoint_every != 0 &&
+        primary_hart().clint_mmio.mcycle < next_checkpoint_cycle_) {
+        const auto cycles_remaining = next_checkpoint_cycle_ - primary_hart().clint_mmio.mcycle;
+        quantum = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(quantum, cycles_remaining));
+    }
+    return quantum;
+}
+
+void RunnerBase::start_threads(Machine& machine, bool baremetal) {
+    if (!machine.is_smp_enabled() || machine.runtime_->secondary_harts.empty()) {
+        return;
+    }
+    stop_threads();
+    machine_ = &machine;
+    cycle_generation_.store(0, std::memory_order_relaxed);
+    cycle_completed_.store(0, std::memory_order_relaxed);
+    workers_running_.store(true, std::memory_order_release);
+    const bool poll_debug_pause = machine.debugger_enabled() || machine.tui_enabled();
+    for (size_t i = 0; i < machine.runtime_->secondary_harts.size(); ++i) {
+        worker_threads_.emplace_back([&machine, this, i, baremetal,
+                                      poll_debug_pause](const std::stop_token& stop_token) {
+            auto& hart = *machine.runtime_->secondary_harts[i];
+            uint32_t observed_cycle_generation = 0;
+            const uint32_t worker_batch = std::max(1U, machine.config.execution.smp_quantum);
+            while (!stop_token.stop_requested() && machine.is_running() &&
+                   workers_running_.load(std::memory_order_relaxed)) {
+                const auto should_park = [&] {
+                    // Cycle-mode workers must always wait for the next generation: a cycle
+                    // already in flight still needs an acknowledgement after pause or stop.
+                    return !machine.runtime_profile.is_cycle_mode() &&
+                           (hart.hart_status.load(std::memory_order_relaxed) !=
+                                HartStatus::Started ||
+                            machine.execution_state() != ExecutionState::Running ||
+                            machine.breakpoint_manager().has_any() ||
+                            machine.debug_pause_requested());
+                };
+                if (should_park()) {
+                    const auto generation =
+                        machine.control_event_generation_.load(std::memory_order_acquire);
+                    if (!workers_running_.load(std::memory_order_acquire) ||
+                        stop_token.stop_requested() || !machine.is_running())
+                        break;
+                    if (should_park()) {
+                        machine.control_event_generation_.wait(generation,
+                                                               std::memory_order_relaxed);
+                    }
+                    continue;
+                }
+                if (machine.runtime_profile.is_cycle_mode()) {
+                    auto generation = cycle_generation_.load(std::memory_order_acquire);
+                    if (generation == observed_cycle_generation) {
+                        constexpr uint32_t kWorkerSpinLimit = 800;
+                        for (uint32_t spin = 0; spin < kWorkerSpinLimit; ++spin) {
+                            simrv::compiler::cpu_relax();
+                            generation = cycle_generation_.load(std::memory_order_acquire);
+                            if (generation != observed_cycle_generation) break;
+                        }
+                    }
+                    if (generation == observed_cycle_generation) {
+                        while (generation == observed_cycle_generation &&
+                               workers_running_.load(std::memory_order_acquire) &&
+                               !stop_token.stop_requested()) {
+                            cycle_generation_.wait(generation, std::memory_order_acquire);
+                            generation = cycle_generation_.load(std::memory_order_acquire);
+                        }
+                    }
+                    if (!workers_running_.load(std::memory_order_acquire) ||
+                        stop_token.stop_requested()) {
+                        break;
+                    }
+                    observed_cycle_generation = generation;
+
+                    g_secondary_runner_active = true;
+                    if (hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                        hart.pipeline_context.pending_exception = std::nullopt;
+                        hart.pipeline_context.pending_tval = 0;
+                        hart.evaluate_timer_interrupt();
+                        hart.advance_ca_cycle(machine);
+                    }
+                    machine.publish_requested_tui_sample(i + 1);
+                    g_secondary_runner_active = false;
+
+                    const auto prev = cycle_completed_.fetch_add(1, std::memory_order_release);
+                    if (prev + 1 >= machine.runtime_->secondary_hart_count) {
+                        cycle_completed_.notify_one();
+                    }
+                    continue;
+                }
+                for (uint32_t step = 0;
+                     step < worker_batch && machine.is_running() &&
+                     machine.execution_state() == ExecutionState::Running &&
+                     !machine.breakpoint_manager().has_any() &&
+                     (!poll_debug_pause || !machine.debug_pause_requested()) &&
+                     hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
+                     ++step) {
+                    workers_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+                    if (machine.execution_state() != ExecutionState::Running) {
+                        workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+                        workers_in_cycle_.notify_all();
+                        break;
+                    }
+                    g_secondary_runner_active = true;
+                    hart.pipeline_context.pending_exception = std::nullopt;
+                    hart.pipeline_context.pending_tval = 0;
+                    if (machine.runtime_profile.is_cycle_mode()) {
+                        hart.evaluate_timer_interrupt();
+                        hart.advance_ca_cycle(machine);
+                    } else if (baremetal) {
+                        hart.run_cycle_baremetal(machine);
+                    } else {
+                        hart.run_cycle(machine);
+                    }
+                    if (step + 1 == worker_batch ||
+                        hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
+                        machine.publish_requested_tui_sample(i + 1);
+                    }
+                    g_secondary_runner_active = false;
+                    workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+                    workers_in_cycle_.notify_all();
+                }
+            }
+        });
+    }
+}
+
+void BaremetalRunner::start(Machine& machine) { start_threads(machine, true); }
+
+void RunnerBase::stop(Machine& machine) {
+    workers_running_.store(false, std::memory_order_release);
+    for (auto& hart : machine.runtime_->secondary_harts) hart->hart_status.notify_all();
+    machine.execution_state_.notify_all();
+    stop_threads();
+}
+
+void RunnerBase::reset_runner_transients(Machine& machine) {
+    if (!machine.is_smp_enabled() || machine.breakpoint_manager().has_any()) {
+        for (auto& hart : machine.runtime_->secondary_harts) {
+            hart->pipeline_context.pending_exception = std::nullopt;
+            hart->pipeline_context.pending_tval = 0;
+        }
+    }
+    machine.primary_hart().pipeline_context.pending_exception = std::nullopt;
+    machine.primary_hart().pipeline_context.pending_tval = 0;
+}
+
+void RunnerBase::execute_ca_batch(Machine& machine) {
+    if (machine.is_smp_enabled() && !machine.is_stepping() &&
+        !machine.breakpoint_manager().has_any()) {
+        auto quantum = std::max(1U, machine.config.execution.smp_quantum);
+        if (machine.debugger_enabled() || machine.lockstep_enabled() ||
+            machine.branch_trace_enabled() ||
+            machine.config.execution.trace_begin !=
+                std::numeric_limits<simrv::xlen::Counter>::max() ||
+            (machine.tui_enabled() && machine.telemetry_sink_ &&
+             (machine.telemetry_sink_->is_trace_active() ||
+              machine.telemetry_sink_->step_delay_us() != 0))) {
+            quantum = 1;
+        }
+        if (machine.config.debug.checkpoint_every != 0 &&
+            machine.primary_hart().clint_mmio.mcycle < machine.next_checkpoint_cycle_) {
+            const auto cycles_remaining =
+                machine.next_checkpoint_cycle_ - machine.primary_hart().clint_mmio.mcycle;
+            quantum = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+                quantum, std::max<simrv::xlen::Counter>(1, cycles_remaining)));
+        }
+        const auto fincnt = machine.config.execution.fincnt;
+        for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
+            machine.advance_ca_primary_cycle();
+            if (simrv::compiler::unlikely(
+                    machine.execution_state() != ExecutionState::Running ||
+                    (machine.tohost != 0 && !machine.tohost_low_word_pending()) ||
+                    (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
+                     machine.retired_instruction_count() >= fincnt))) {
+                break;
+            }
+        }
+        return;
+    }
+    const uint32_t quantum = machine.ca_batch_quantum();
+    const auto fincnt = machine.config.execution.fincnt;
+    for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
+        if (simrv::compiler::unlikely(cycle != 0 &&
+                                      machine.execution_state() != ExecutionState::Running)) {
+            break;
+        }
+        machine.advance_ca_global_cycle();
+        if (simrv::compiler::unlikely((machine.tohost != 0 && !machine.tohost_low_word_pending()) ||
+                                      (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
+                                       machine.retired_instruction_count() >= fincnt))) {
+            break;
+        }
+    }
+}
+
+void RunnerBase::execute_instruction_smp(Machine& machine, bool baremetal) {
+    const auto run_hart = [&](CPU& hart) {
+        if (baremetal) {
+            hart.run_cycle_baremetal(machine);
+        } else {
+            hart.run_cycle(machine);
+        }
+    };
+    if (machine.is_smp_enabled() && !machine.is_stepping() &&
+        !machine.breakpoint_manager().has_any()) {
+        run_hart(machine.primary_hart());
+        return;
+    }
+    const uint32_t quantum = (machine.is_stepping() || machine.debugger_enabled() ||
+                              machine.breakpoint_manager().has_any())
+                                 ? 1
+                                 : machine.config.execution.smp_quantum;
+    const auto run_round = [&] {
+        run_hart(machine.primary_hart());
+        for (auto& hart : machine.runtime_->secondary_harts) {
+            if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                run_hart(*hart);
+            }
+        }
+    };
+    if (machine.runtime_->secondary_harts.empty() || quantum <= 1) {
+        run_round();
+        return;
+    }
+    for (uint32_t q = 0; q < quantum && machine.is_running(); ++q) {
+        run_round();
+        if (machine.retired_instruction_count() >= machine.config.execution.fincnt) break;
+    }
+}
+
+void BaremetalRunner::prepare(Machine& machine) { reset_runner_transients(machine); }
+
+void BaremetalRunner::execute(Machine& machine) {
+    if (machine.runtime_profile.is_cycle_mode()) {
+        execute_ca_batch(machine);
+    } else if (machine.lockstep() && machine.lockstep()->is_running()) {
+        machine.primary_hart().run_cycle(machine);
+    } else {
+        execute_instruction_smp(machine, true);
+    }
+}
+
+auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
+    const auto opt_policy = machine.fast_batch_policy();
+    if (!opt_policy.has_value()) return false;
+    const auto& policy = *opt_policy;
+    if (policy.has_instruction_limit) {
+        if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
+            machine.stop(Machine::StopReason::InstructionLimit);
+            return true;
+        }
+        batch_size = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+            batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
+    }
+    const uint32_t quantum =
+        machine.runtime_->secondary_harts.empty()
+            ? batch_size
+            : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
+    machine.primary_hart().run_fast_baremetal_batch(machine, quantum, policy);
+    for (auto& sec : machine.runtime_->secondary_harts) {
+        if (!machine.is_running()) break;
+        if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+            uint32_t sec_batch = quantum;
+            if (policy.has_instruction_limit) {
+                if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
+                    machine.stop(Machine::StopReason::InstructionLimit);
+                    break;
+                }
+                sec_batch = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+                    sec_batch,
+                    machine.config.execution.fincnt - machine.retired_instruction_count()));
+            }
+            sec->run_fast_baremetal_batch(machine, sec_batch, policy);
+        }
+    }
+    return true;
+}
+
+void BaremetalRunner::finalize(Machine& machine) {
+    auto& cpu = machine.primary_hart();
+    const bool trace_window = cpu.clint_mmio.mtime >= machine.config.execution.trace_begin &&
+                              cpu.clint_mmio.mtime <= machine.config.execution.trace_end;
+    if (simrv::compiler::unlikely(machine.trace().fp_trace.is_open() && trace_window)) {
+        machine.trace().write_trace_snapshot();
+    }
+    if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
+    if (simrv::compiler::unlikely(
+            machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
+            machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
+        machine.stop(Machine::StopReason::InstructionLimit);
+    }
+    if (auto* uart = machine.uart_device(); uart) {
+        if (machine.tui_enabled() ||
+            (!uart->is_input_thread_running() &&
+             simrv::compiler::unlikely((machine.primary_hart().clint_mmio.mtime & 8191) == 0))) {
+            uart->service_interrupts();
+        }
+    }
+}
+
+void OsRunner::start(Machine& machine) { start_threads(machine, false); }
+
+void OsRunner::prepare(Machine& machine) { reset_runner_transients(machine); }
+
+void OsRunner::execute(Machine& machine) {
+    if (machine.runtime_profile.is_cycle_mode()) {
+        execute_ca_batch(machine);
+        return;
+    }
+    execute_instruction_smp(machine, false);
+}
+
+auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
+    const auto policy = machine.fast_batch_policy();
+    // Sampled TUI execution is safe for a single Linux hart: architectural execution remains
+    // instruction-by-instruction, while presentation and runner work move to the batch boundary.
+    // Keep every SMP configuration on the detailed scheduler until its ordering contract has an
+    // equally explicit parallel batch design.
+    if (!policy.has_value() || machine.is_smp_enabled() ||
+        !machine.runtime_->secondary_harts.empty()) {
+        return false;
+    }
+    auto& cpu = machine.primary_hart();
+    if (policy->has_instruction_limit) {
+        if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
+            machine.stop(Machine::StopReason::InstructionLimit);
+            return true;
+        }
+        batch_size = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+            batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
+    }
+    const uint32_t quantum =
+        machine.runtime_->secondary_harts.empty()
+            ? batch_size
+            : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
+    cpu.run_fast_os_batch(machine, quantum, *policy);
+    // Surface pending UART RX at the batch boundary.
+    if (auto* uart = machine.uart_device(); uart) {
+        uart->service_interrupts();
+        uart->flush_tx_buffer();
+    }
+    return true;
+}
+
+void OsRunner::finalize(Machine& machine) {
+    auto& cpu = machine.primary_hart();
+    const bool trace_window = cpu.clint_mmio.mtime >= machine.config.execution.trace_begin &&
+                              cpu.clint_mmio.mtime <= machine.config.execution.trace_end;
+    if (simrv::compiler::likely(
+            machine.runtime_profile.is_instruction_fast() &&
+            (!machine.tui_enabled() || machine.config.execution.ui_worker_threaded) &&
+            !trace_window && !machine.branch_trace_enabled())) {
+        if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
+    } else {
+        if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
+        if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
+            machine.trace().emit_branch_prediction_trace(
+                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
+                cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
+        machine.finalize_cycle_tohost();
+    }
+    if (simrv::compiler::unlikely(
+            machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
+            machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
+        machine.stop(Machine::StopReason::InstructionLimit);
+    }
+    if (auto* uart = machine.uart_device();
+        uart && (machine.tui_enabled() ||
+                 (!uart->is_input_thread_running() &&
+                  simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)))) {
+        uart->service_interrupts();
+    }
+}
 
 void Machine::reset_state() {
+    dma_engine_.clear();
+    auto& bus = memory().system_bus();
+    for (size_t hart = 0; hart < num_harts(); ++hart) {
+        const auto hart_id = this->hart(hart).hart_id();
+        bus.cancel_source(
+            simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Instruction));
+        bus.cancel_source(simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Data));
+        if (hart == 0) continue;
+        auto& cpu = this->hart(hart);
+        cpu.ca_pipeline.reset();
+        cpu.ca_state.reset_instruction();
+        cpu.dcache.flush();
+        cpu.TLB_flush();
+    }
+    std::vector<uint32_t> asserted_platform_irqs;
+    {
+        std::scoped_lock lock(platform_irq_state_mutex_);
+        for (const auto& [irq, asserted] : platform_irq_state_) {
+            if (asserted) asserted_platform_irqs.push_back(irq);
+        }
+        platform_irq_state_.clear();
+    }
+    for (const auto irq : asserted_platform_irqs) {
+        publish_machine_event(MachineEvent{
+            .kind = MachineEventKind::InterruptDeasserted,
+            .cycle = primary_hart().clint_mmio.mcycle,
+            .hart = std::nullopt,
+            .interrupt_source = irq,
+            .component = "platform_irq",
+        });
+    }
     tohost = 0;
+    tohost_low_word_pending_.store(false, std::memory_order_relaxed);
+    tohost_low_word_fallback_cycles_.store(0, std::memory_order_relaxed);
     reboot_requested = false;
     exit_code = 0;
     is_shutdown_ = false;
     is_running_ = true;
+    stop_reason_ = StopReason::Running;
+    retired_instruction_count_.store(0, std::memory_order_relaxed);
     last_tui_check_cycles_ = 0;
     last_tui_update_ = {};
-    execution_state_.store(ExecutionState::Running, std::memory_order_release);
+    reset_realtime_anchor();
+    execution_state_.store(
+        tui_enabled() || debugger_enabled() ? ExecutionState::Paused : ExecutionState::Running,
+        std::memory_order_release);
     execution_state_.notify_all();
-    cpu.reset();
+    primary_hart().reset();
+    bus.coherence_hub().clear();
+    if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->reset();
+    for (const auto& ext : runtime_->extension_mmios) {
+        if (ext) ext->reset();
+    }
+    if (runtime_->dma_controller) runtime_->dma_controller->reset();
+    if (runtime_->pflash0) runtime_->pflash0->reset();
+    if (runtime_->pflash1) runtime_->pflash1->reset();
+    if (config.bram_prewarm) {
+        prewarm_bram_caches();
+    }
 }
 
-void Machine::set_pending_reboot(const std::string& binary_path, std::optional<bool> appmode,
-                                 std::optional<std::string> disk_path) {
-    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
-    pending_binary_path_ = binary_path;
-    pending_appmode_ = appmode;
-    pending_disk_path_ = disk_path;
+void Machine::switch_execution_engine(ExecutionEngine engine) {
+    if (runtime_profile.engine == engine) return;
+    if (runner_started_.load(std::memory_order_acquire) && is_running()) {
+        post_control([engine](Machine& m) { m.switch_execution_engine_sync(engine); });
+    } else {
+        switch_execution_engine_sync(engine);
+    }
 }
 
-auto Machine::get_pending_reboot() const -> PendingRebootState {
-    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
-    return PendingRebootState{
-        .binary_path = pending_binary_path_,
-        .appmode = pending_appmode_,
-        .disk_path = pending_disk_path_,
+void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
+    if (runtime_profile.engine == engine) return;
+
+    // Workers can be waiting on different synchronization primitives in each engine.
+    // Stop them before resetting per-hart state, then start them with the new policy.
+    const bool restart_runner = runner_started_.load(std::memory_order_acquire);
+    if (restart_runner) stop_runner();
+
+    const bool to_cycle = is_cycle_engine(engine);
+    for (size_t i = 0; i < num_harts(); ++i) {
+        auto& cpu = hart(i);
+        const auto hart_id = cpu.hart_id();
+        memory().system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Instruction));
+        memory().system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Data));
+        cpu.ca_pipeline.reset();
+        cpu.ca_state.reset_instruction();
+        if (to_cycle) {
+            cpu.icache.flush(true);
+            cpu.dcache.flush(true);
+            cpu.instruction_cache_timing.flush();
+            cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
+            cpu.branch_predictor.reset();
+            cpu.pipeline_sim.config.record_snapshots =
+                is_observable_engine(engine) ||
+                (engine == ExecutionEngine::CycleFast && runtime_profile.gdb);
+        } else {
+            cpu.pipeline_sim.config.record_snapshots = false;
+            cpu.decode_cache.flush();
+            cpu.block_cache.flush();
+        }
+    }
+
+    if (to_cycle) {
+        memory().system_bus().coherence_hub().clear();
+        if (config.bram_prewarm) {
+            prewarm_bram_caches();
+        }
+    }
+
+    runtime_profile.engine = engine;
+    publish_tui_execution_snapshot();
+    if (restart_runner) start_runner();
+
+    simrv::log::info("Switched execution mode to {}", runtime_profile.execution_name());
+}
+
+void Machine::prewarm_bram_caches() {
+    auto ram = ram_view();
+    if (ram.data() == nullptr || ram.size() == 0) return;
+
+    for (size_t h = 0; h < num_harts(); ++h) {
+        auto& cpu = hart(h);
+        const auto prewarm = [&]<typename Cache>(Cache& cache, simrv::xlen::PhysAddr address,
+                                                 size_t size, bool align_segment,
+                                                 simrv::memory::MesiState initial_state) {
+            constexpr simrv::xlen::Address kLineBytes = Cache::kLineBytes;
+            const simrv::xlen::Address start =
+                align_segment ? address.raw() & ~(kLineBytes - 1u) : address.raw();
+            const size_t capacity = cache.capacity_bytes();
+            const size_t offset = align_segment ? address.raw() - start : 0;
+            const size_t bytes = !align_segment || offset >= capacity || size >= capacity - offset
+                                     ? capacity
+                                     : offset + size;
+            const size_t lines = bytes / kLineBytes + (bytes % kLineBytes != 0);
+            auto addr = start;
+            for (size_t line = 0; line < lines; ++line) {
+                const simrv::xlen::PhysAddr physical{addr};
+                if (ram.contains(physical, kLineBytes)) {
+                    cache.insert(physical, ram.unchecked_ptr(physical), initial_state);
+                    memory().system_bus().coherence_hub().register_preloaded_line(
+                        physical, cpu.hart_id(), initial_state);
+                }
+                if (addr > std::numeric_limits<simrv::xlen::Address>::max() - kLineBytes) break;
+                addr += kLineBytes;
+            }
+        };
+
+        if (!loaded_segments_.empty()) {
+            for (const auto& seg : loaded_segments_) {
+                if (seg.is_executable) {
+                    prewarm(cpu.icache, seg.paddr, seg.size, true,
+                            simrv::memory::MesiState::Shared);
+                } else {
+                    const auto state = num_harts() == 1 ? simrv::memory::MesiState::Exclusive
+                                                        : simrv::memory::MesiState::Shared;
+                    prewarm(cpu.dcache, seg.paddr, seg.size, true, state);
+                }
+            }
+        } else {
+            // Fallback: pre-warm IMEM range into ICache and DMEM range into DCache
+            prewarm(cpu.icache, simrv::xlen::PhysAddr{ram.base()}, 0, false,
+                    simrv::memory::MesiState::Shared);
+            const auto state = num_harts() == 1 ? simrv::memory::MesiState::Exclusive
+                                                : simrv::memory::MesiState::Shared;
+            prewarm(cpu.dcache, simrv::xlen::PhysAddr{ram.base()}, 0, false, state);
+        }
+    }
+}
+
+auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId {
+    std::scoped_lock lock(lifecycle_observer_mutex_);
+    const auto id = next_lifecycle_observer_id_++;
+    lifecycle_observers_.emplace_back(id, std::move(observer));
+    return id;
+}
+
+void Machine::remove_lifecycle_observer(LifecycleObserverId observer_id) {
+    std::scoped_lock lock(lifecycle_observer_mutex_);
+    std::erase_if(lifecycle_observers_,
+                  [observer_id](const auto& entry) { return entry.first == observer_id; });
+}
+
+void Machine::publish_lifecycle_event(LifecycleEventKind kind, int exit_status) {
+    std::vector<LifecycleObserver> observers;
+    {
+        std::scoped_lock lock(lifecycle_observer_mutex_);
+        observers.reserve(lifecycle_observers_.size());
+        for (const auto& [_, observer] : lifecycle_observers_) {
+            observers.push_back(observer);
+        }
+    }
+    const LifecycleEvent event{
+        .kind = kind,
+        .instruction_count = primary_hart().e_icount,
+        .exit_status = exit_status,
+        .stop_reason = static_cast<uint8_t>(stop_reason()),
     };
+    for (const auto& observer : observers) {
+        observer(event);
+    }
 }
 
-void Machine::clear_pending_reboot() {
-    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
-    pending_binary_path_.clear();
-    pending_appmode_.reset();
-    pending_disk_path_.reset();
+auto Machine::add_event_observer(MachineEventObserver observer) -> MachineEventObserverId {
+    std::scoped_lock lock(event_observer_mutex_);
+    const auto id = next_event_observer_id_++;
+    event_observers_.emplace_back(id, std::move(observer));
+    return id;
+}
+
+void Machine::remove_event_observer(MachineEventObserverId observer_id) {
+    std::scoped_lock lock(event_observer_mutex_);
+    std::erase_if(event_observers_,
+                  [observer_id](const auto& entry) { return entry.first == observer_id; });
+}
+
+void Machine::publish_machine_event(const MachineEvent& event) {
+    std::vector<MachineEventObserver> observers;
+    {
+        std::scoped_lock lock(event_observer_mutex_);
+        observers.reserve(event_observers_.size());
+        for (const auto& [_, observer] : event_observers_) observers.push_back(observer);
+    }
+    for (const auto& observer : observers) observer(event);
+}
+
+void Machine::notify_interrupt_transition(simrv::xlen::HartId hart_id, uint32_t cause,
+                                          bool asserted, std::string_view source, uint64_t cycle) {
+    publish_machine_event(MachineEvent{
+        .kind =
+            asserted ? MachineEventKind::InterruptAsserted : MachineEventKind::InterruptDeasserted,
+        .cycle = cycle,
+        .hart = hart_id,
+        .interrupt_cause = cause,
+        .component = std::string(source),
+    });
 }
 
 auto Machine::is_paused() const -> bool {
     return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused ||
-           (s_tuimode && tui && tui->is_paused());
+           (tui_enabled() && telemetry_sink_ && telemetry_sink_->is_paused());
+}
+
+void Machine::notify_control_event() noexcept {
+    control_event_generation_.fetch_add(1, std::memory_order_release);
+    control_event_generation_.notify_all();
+}
+
+auto Machine::debug_pause_requested() const noexcept -> bool {
+    return debug_halt_pending_.load(std::memory_order_acquire) ||
+           (runtime_->gdb_stub && runtime_->gdb_stub->pause_requested());
+}
+
+void Machine::acknowledge_step() {
+    {
+        const std::scoped_lock lock(step_mutex_);
+        ++step_ack_count_;
+    }
+    step_cv_.notify_all();
 }
 
 void Machine::pause() {
     execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     execution_state_.notify_all();
-    if (s_tuimode && tui) {
-        tui->pause_loop();
+    for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
+    notify_control_event();
+    wait_for_runner_quiescence();
+    if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
+    if (telemetry_sink_) {
+        telemetry_sink_->pause_loop();
     }
+    acknowledge_step();
 }
 
 void Machine::resume() {
     if (is_shutdown_) {
         return;
     }
+    reset_realtime_anchor();
+    debug_step_hart_.reset();
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
-    if (s_tuimode && tui) {
-        tui->unpause_loop();
+    for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
+    notify_control_event();
+    publish_lifecycle_event(LifecycleEventKind::Running);
+    if (telemetry_sink_) {
+        telemetry_sink_->unpause_loop();
     }
+    simrv::util::benchmark_event("resumed", retired_instruction_count());
 }
 
 void Machine::step() {
@@ -94,45 +1656,206 @@ void Machine::step() {
     }
     execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
+    notify_control_event();
 }
 
-void Machine::stop() {
+auto Machine::begin_debug_step(simrv::xlen::HartId hart) -> bool {
+    if (is_shutdown_ || hart.raw() >= num_harts()) return false;
+    if (this->hart(hart).hart_status.load(std::memory_order_acquire) != HartStatus::Started) {
+        return false;
+    }
+    debug_step_hart_ = hart;
+    debug_step_target_ = this->hart(hart).e_icount + 1;
+    execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
+    execution_state_.notify_all();
+    notify_control_event();
+    return true;
+}
+
+void Machine::enqueue_debug_halt(PendingDebugHalt halt) {
+    {
+        const std::scoped_lock lock(debug_halt_mutex_);
+        if (!pending_debug_halt_) pending_debug_halt_ = std::move(halt);
+        debug_halt_pending_.store(true, std::memory_order_release);
+    }
+    notify_control_event();
+}
+
+void Machine::debug_halt(simrv::xlen::HartId hart, GdbSignal signal, std::string reason) {
+    if ((!runtime_->gdb_stub || !runtime_->gdb_stub->is_connected()) && !tui_enabled()) return;
+    enqueue_debug_halt(
+        {.hart = hart, .signal = signal, .reason = std::move(reason), .description = {}});
+}
+
+void Machine::debug_watch_hit(simrv::xlen::HartId hart, GdbSignal signal, std::string reason,
+                              std::string description) {
+    enqueue_debug_halt({.hart = hart,
+                        .signal = signal,
+                        .reason = std::move(reason),
+                        .description = std::move(description),
+                        .waits_for_memory = true,
+                        .retirement_target = this->hart(hart).e_icount + 1});
+}
+
+void Machine::service_debug_halt() {
+    if (!debug_halt_pending_.load(std::memory_order_acquire)) return;
+
+    PendingDebugHalt halt;
+    {
+        const std::scoped_lock lock(debug_halt_mutex_);
+        if (!pending_debug_halt_.has_value()) return;
+        auto& pending = *pending_debug_halt_;
+        if (pending.waits_for_memory) {
+            auto& target = hart(pending.hart);
+            if (target.e_icount < pending.retirement_target) return;
+            if (target.active_context().pending_exception.has_value()) {
+                pending_debug_halt_.reset();
+                debug_halt_pending_.store(false, std::memory_order_release);
+                return;
+            }
+        }
+        halt = std::move(pending);
+        pending_debug_halt_.reset();
+    }
+
+    if (telemetry_sink_ && !halt.description.empty()) {
+        telemetry_sink_->set_status_override(halt.description);
+    }
+    pause();
+    {
+        const std::scoped_lock lock(debug_halt_mutex_);
+        debug_halt_pending_.store(pending_debug_halt_.has_value(), std::memory_order_release);
+    }
+    if (runtime_->gdb_stub && runtime_->gdb_stub->is_connected()) {
+        runtime_->gdb_stub->notify_stop(halt.hart, halt.signal, std::move(halt.reason));
+    }
+}
+
+void Machine::step_sync(std::chrono::milliseconds timeout) {
+    if (is_shutdown_) {
+        return;
+    }
+    std::unique_lock lock(step_mutex_);
+    const auto target_ack = step_ack_count_ + 1;
+    step();
+    step_cv_.wait_for(lock, timeout, [&] {
+        return step_ack_count_ >= target_ack || !is_running() || is_stopped();
+    });
+}
+
+auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
+    switch (reason) {
+        case StopReason::Running:
+            return "running";
+        case StopReason::InstructionLimit:
+            return "instruction limit reached";
+        case StopReason::TohostPass:
+            return "guest tohost pass";
+        case StopReason::TohostFail:
+            return "guest tohost failure";
+        case StopReason::GuestPoweroff:
+            return "guest poweroff";
+        case StopReason::GuestCrash:
+            return "guest crash";
+        case StopReason::GuestReboot:
+            return "guest reboot";
+        case StopReason::GuestExit:
+            return "guest exit";
+        case StopReason::LockstepDivergence:
+            return "lockstep divergence";
+        case StopReason::UnhandledTrap:
+            return "unhandled trap";
+        case StopReason::TrapLoop:
+            return "trap loop";
+        case StopReason::ExternalStop:
+            return "external/user stop";
+    }
+    return "unknown";
+}
+
+void Machine::stop(StopReason reason) {
+    stop_reason_ = reason;
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
-    if (!s_tuimode && !s_gui_mode) {
+    for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
+    notify_control_event();
+    stop_runner();
+    if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
+    if (!tui_enabled()) {
         is_running_ = false;
     }
-    if (s_tuimode && tui) {
-        tui->pause_loop();
+    if (telemetry_sink_) {
+        telemetry_sink_->pause_loop();
     }
+    acknowledge_step();
+    publish_lifecycle_event(LifecycleEventKind::Stopped);
 }
 
 void Machine::request_reboot() {
+    stop_reason_ = StopReason::GuestReboot;
     reboot_requested = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
+    notify_control_event();
+    stop_runner();
+    acknowledge_step();
+    publish_lifecycle_event(LifecycleEventKind::RebootRequested);
 }
 
 void Machine::request_exit(int status) {
+    stop_reason_ = StopReason::GuestExit;
     exit_code = status;
     is_shutdown_ = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
+    notify_control_event();
+    stop_runner();
+    acknowledge_step();
+    publish_lifecycle_event(LifecycleEventKind::ExitRequested, status);
 }
 
 void Machine::run() {
-    cpu.evaluate_timer_interrupt();
+    if (config.debug.checkpoint_every != 0) {
+        const auto cycle = primary_hart().clint_mmio.mcycle;
+        next_checkpoint_cycle_ =
+            cycle > std::numeric_limits<simrv::xlen::Counter>::max() - config.debug.checkpoint_every
+                ? std::numeric_limits<simrv::xlen::Counter>::max()
+                : cycle + config.debug.checkpoint_every;
+    }
+    if (platform_time() == 0 && runtime_->rtc) {
+        runtime_->rtc->sync_with_system_time();
+    }
+    publish_lifecycle_event(LifecycleEventKind::Started);
+    primary_hart().evaluate_timer_interrupt();
+
+    // Start the selected composed execution policy.
+    start_runner();
+    if (execution_state() == ExecutionState::Running) {
+        publish_lifecycle_event(LifecycleEventKind::Running);
+    }
+
+    if (tui_enabled() && execution_state() != ExecutionState::Stepping) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    }
+
+    // Start background TUI rendering and input thread if in TUI mode
+    if (telemetry_sink_ && !telemetry_sink_->is_ui_thread_running()) {
+        telemetry_sink_->start_ui_thread();
+    }
 
     // Start background stdin input thread for non-TUI mode
-    if (uart && !s_tuimode) {
+    if (auto* uart = uart_device(); uart && !tui_enabled()) {
         uart->start_input_thread();
     }
 
     // In TUI mode expose the UART through a PTY for optional external terminals.
-    if (uart && s_tuimode) {
+    if (auto* uart = uart_device(); uart && tui_enabled()) {
         if (uart->start_pty()) {
             simrv::log::info("[UART] PTY slave: {}", uart->pty_slave_path());
         } else {
@@ -140,103 +1863,216 @@ void Machine::run() {
         }
     }
 
-    constexpr uint32_t kBatchSize = 65536;
-
+    simrv::util::benchmark_event("ready", retired_instruction_count());
+    if (!is_paused()) simrv::util::benchmark_event("resumed", retired_instruction_count());
+    reset_realtime_anchor();
+    set_start_time(std::chrono::steady_clock::now());
+    bool was_paused = false;
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-        if (s_tuimode && tui && tui->is_tui_paused()) {
-            tui->set_sim_thread_sleeping(true);
-            execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
-            if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        service_control_commands();
+        if (!is_running()) break;
+        if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
+        service_debug_halt();
+        if (runtime_->gdb_stub && runtime_->gdb_stub->pause_requested() &&
+            execution_state() == ExecutionState::Running)
+            pause();
+
+        if (is_paused() && !is_stepping()) {
+            was_paused = true;
+            if (execution_state() != ExecutionState::Paused) {
+                execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+            }
+            if (telemetry_sink_) telemetry_sink_->set_sim_thread_sleeping(true);
+            if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
+            if (execution_state() != ExecutionState::Paused) continue;
+
+            const auto generation = control_event_generation_.load(std::memory_order_acquire);
+            if (execution_state() == ExecutionState::Paused && !has_control_commands() &&
+                (!runtime_->gdb_stub || !runtime_->gdb_stub->has_pending_commands())) {
+                control_event_generation_.wait(generation, std::memory_order_relaxed);
             }
             continue;
         }
-        if (s_tuimode && tui) {
-            tui->set_sim_thread_sleeping(false);
+        if (was_paused) {
+            was_paused = false;
+            reset_realtime_anchor();
+        }
+        if (telemetry_sink_) {
+            telemetry_sink_->set_sim_thread_sleeping(false);
         }
 
-        if (execute_fast_batch(kBatchSize)) {
-            if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
-                tracer.write_trace_snapshot();
+        service_network();
+        service_pending_input();
+
+        auto batch_quantum = runtime_profile.fast_batch_quantum();
+        if (config.debug.checkpoint_every != 0 &&
+            primary_hart().clint_mmio.mcycle < next_checkpoint_cycle_) {
+            const auto cycles_remaining = next_checkpoint_cycle_ - primary_hart().clint_mmio.mcycle;
+            batch_quantum = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+                batch_quantum, std::max<simrv::xlen::Counter>(1, cycles_remaining)));
+        }
+        if (execute_runner_fast_batch(batch_quantum)) {
+            if (simrv::compiler::unlikely(trace().fp_trace.is_open())) {
+                trace().write_trace_snapshot();
             }
             if (simrv::compiler::unlikely(tohost != 0)) {
                 finalize_cycle_tohost();
             }
-            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
-                                          cpu.e_icount >= s_fincnt)) {
-                simrv::log::info("finished by -e option");
+            maybe_save_periodic_checkpoint();
+            if (simrv::compiler::unlikely(config.execution.fincnt !=
+                                              std::numeric_limits<simrv::xlen::Counter>::max() &&
+                                          retired_instruction_count() >= config.execution.fincnt)) {
+                stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
             }
-            if (s_tuimode && tui) {
-                if (simrv::tui::g_resized) {
-                    tui->render();
-                }
-                auto now = std::chrono::steady_clock::now();
-                if (now - last_tui_update_ >= std::chrono::milliseconds(33)) {
-                    tui->update();
-                    tui->update_cache();
-                    tui->render();
-                    last_tui_update_ = now;
-                }
-            } else if (uart && !uart->is_input_thread_running()) {
-                uart->non_tui_poll_input();
+            if (auto* uart = uart_device(); !tui_enabled() && uart) {
+                uart->service_interrupts();
             }
+            if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
+            sample_throughput();
+            pace_realtime();
             continue;
         }
 
-        prepare_cycle();
-        execute_cycle();
-        finalize_cycle();
-
-        if (s_tuimode && tui) {
-            tui->on_cycle_completed();
+        prepare_runner_cycle();
+        execute_runner_cycle();
+        finalize_runner_cycle();
+        if ((primary_hart().clint_mmio.mcycle & 0x3FF) == 0) {
+            sample_throughput();
         }
 
-        if (is_stepping()) {
+        if (simrv::compiler::unlikely(tohost != 0)) {
+            finalize_cycle_tohost();
+        }
+        maybe_save_periodic_checkpoint();
+        if (simrv::compiler::unlikely(config.execution.fincnt !=
+                                          std::numeric_limits<simrv::xlen::Counter>::max() &&
+                                      retired_instruction_count() >= config.execution.fincnt)) {
+            stop_reason_ = StopReason::InstructionLimit;
+            is_running_ = false;
+        }
+
+        if (telemetry_sink_) {
+            telemetry_sink_->on_cycle_completed();
+        }
+
+        service_debug_halt();
+
+        bool step_complete = is_stepping();
+        simrv::xlen::HartId completed_hart{0};
+        if (step_complete && debug_step_hart_.has_value()) {
+            completed_hart = *debug_step_hart_;
+            step_complete = hart(completed_hart).e_icount >= debug_step_target_;
+        }
+        if (step_complete) {
             execution_state_.store(ExecutionState::Paused, std::memory_order_release);
-            if (s_tuimode && tui) {
-                tui->set_paused(true);
+            execution_state_.notify_all();
+            notify_control_event();
+            if (telemetry_sink_) {
+                telemetry_sink_->set_paused(true);
+            }
+            if (debug_step_hart_.has_value() && runtime_->gdb_stub) {
+                debug_step_hart_.reset();
+                runtime_->gdb_stub->notify_stop(completed_hart, GdbSignal::SigTrap);
+            }
+            wait_for_runner_quiescence();
+            if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
+            acknowledge_step();
+            if (step_completion_) {
+                auto completed = std::move(step_completion_);
+                completed(*this);
             }
         }
 
-        if (gdb_stub && gdb_stub->is_connected()) {
-            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
-                                    (cpu.pipeline_context.funct12 ==
-                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak)) &&
-                                    !cpu.pipeline_context.pending_exception.has_value();
-            if (gdb_stub->single_step() || hit_ebreak) {
-                gdb_stub->notify_breakpoint(*this);
-            } else {
-                gdb_stub->poll(*this);
-            }
-        }
+        if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
 
-        if (!s_appmode && spike_lockstep && spike_lockstep->is_running()) {
-            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
-            if (spike_lockstep->should_halt()) {
+        if (runtime_->spike_lockstep && runtime_->spike_lockstep->is_running()) {
+            runtime_->spike_lockstep->compare_and_report(primary_hart().state(),
+                                                         primary_hart().pipeline_context.cpc,
+                                                         primary_hart().e_icount);
+            if (runtime_->spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
-                stop();
+                stop(StopReason::LockstepDivergence);
             }
         }
+        pace_realtime();
+    }
 
-        if (s_tuimode && tui) {
-            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
-                                    (cpu.pipeline_context.funct12 ==
-                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak));
-            if (simrv::compiler::unlikely(hit_ebreak)) {
-                tui->pause_loop();
-            }
-        }
+    stop_runner();
+    if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
+    simrv::util::benchmark_event("stopped", retired_instruction_count());
+
+    // Stop background TUI thread
+    if (telemetry_sink_) {
+        telemetry_sink_->stop_ui_thread();
     }
 
     // Clean up background input thread
-    if (uart && !s_tuimode) {
+    if (auto* uart = uart_device(); uart && !tui_enabled()) {
         uart->stop_input_thread();
     }
     // Clean up PTY
-    if (uart && s_tuimode) {
+    if (auto* uart = uart_device(); uart && tui_enabled()) {
         uart->stop_pty();
+    }
+    if (runtime_->gdb_stub) runtime_->gdb_stub->stop();
+    publish_lifecycle_event(LifecycleEventKind::Completed);
+}
+
+void Machine::reset_realtime_anchor() noexcept {
+    realtime_anchor_host_ = std::chrono::steady_clock::now();
+    realtime_anchor_mtime_ = platform_time();
+    last_pace_check_mtime_ = realtime_anchor_mtime_;
+}
+
+void Machine::set_realtime_pacing_enabled(bool enabled) noexcept {
+    config.execution.realtime_pacing = enabled;
+    reset_realtime_anchor();
+}
+
+void Machine::pace_realtime() noexcept {
+    if (!config.execution.realtime_pacing || is_stepping()) {
+        return;
+    }
+    const uint64_t cur_mtime = platform_time();
+    if (cur_mtime < realtime_anchor_mtime_) {
+        reset_realtime_anchor();
+        return;
+    }
+    // Check pacing every millisecond of architectural virtual time.
+    constexpr uint64_t kPaceIntervalTicks = timing::kTimebaseHz / 1'000;
+    if (cur_mtime < last_pace_check_mtime_ + kPaceIntervalTicks) {
+        return;
+    }
+    last_pace_check_mtime_ = cur_mtime;
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto sim_elapsed_ns = static_cast<int64_t>((cur_mtime - realtime_anchor_mtime_) *
+                                                     timing::kNanosecondsPerTimebaseTick);
+    const auto host_elapsed_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - realtime_anchor_host_).count();
+
+    const int64_t lead_ns = sim_elapsed_ns - host_elapsed_ns;
+
+    if (lead_ns >= 1'000'000) {  // Simulation is ahead of host time by >= 1 ms
+        // Sleep to throttle down to host wall-clock time; cap each sleep slice at 20 ms
+        // so external events (quit, pause, terminal input) remain immediately responsive.
+        const auto sleep_ns = std::min<int64_t>(lead_ns, 20'000'000);
+        std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
+    } else if (lead_ns < -50'000'000) {  // Lagging behind host time by > 50 ms
+        // Re-anchor baseline so simulation does not burst-speed catch up.
+        realtime_anchor_host_ = now;
+        realtime_anchor_mtime_ = cur_mtime;
+    }
+}
+
+void Machine::console_write(char ch) {
+    if (console_sink_) {
+        console_sink_->handle_char_write(ch);
+    } else {
+        std::print("{}", ch);
+        fflush(stdout);
     }
 }
 
@@ -245,98 +2081,112 @@ void Machine::finalize_cycle_tohost() {
         return;
     }
 
-    // Standard 64-bit HTIF handling
+    if (tohost_low_word_pending_.load(std::memory_order_acquire)) {
+        const auto remaining = tohost_low_word_fallback_cycles_.load(std::memory_order_acquire);
+        if (remaining != 0) {
+            tohost_low_word_fallback_cycles_.fetch_sub(1, std::memory_order_acq_rel);
+            return;  // Give a paired upper-word SW time to complete.
+        }
+        tohost_low_word_pending_.store(false, std::memory_order_release);
+    }
+
+    const bool is_guest_xlen32 = (primary_hart().state().regs.xlen == 32);
     const auto dev = static_cast<uint8_t>(tohost >> 56);
     const auto cmd = static_cast<uint8_t>(tohost >> 48);
-    const uint64_t payload = tohost & 0x0000FFFFFFFFFFFFULL;
+    const uint64_t payload =
+        is_guest_xlen32 ? (tohost & 0xFFFFFFFFULL) : (tohost & 0x0000FFFFFFFFFFFFULL);
 
     if (dev == 1 && cmd == 1) {
         // HTIF Console Print
-        if (s_tuimode && tui) {
-            tui->handle_char_write(static_cast<char>(payload & 0xff));
-        } else {
-            std::print("{}", static_cast<char>(payload & 0xff));
-            fflush(stdout);
-        }
+        console_write(static_cast<char>(payload & 0xff));
         tohost = 0;
         return;
     }
 
-    // Compatibility for older 32-bit SimRV HTIF protocol:
-    // writes of ((CMD_PRINT_CHAR << 16) | c) or (CMD_POWER_OFF << 16)
+    // Retained guest compatibility: older 32-bit SimRV images use this custom HTIF command
+    // encoding for console output and shutdown. The syscall-block handling below belongs to the
+    // same protocol; standard 64-bit HTIF handling remains above.
     if (dev == 0 && cmd == 0) {
         const auto old_cmd = static_cast<uint16_t>(tohost >> 16);
         const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);
         if (old_cmd == 1) {  // CMD_PRINT_CHAR
             const char ch = static_cast<char>(old_payload & 0xff);
-            if (s_tuimode && tui) {
-                tui->handle_char_write(ch);
-            } else {
-                std::print("{}", ch);
-                fflush(stdout);
-            }
+            console_write(ch);
             tohost = 0;
             return;
         } else if (old_cmd == 2) {  // CMD_POWER_OFF
             simrv::log::info(
                 "[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
             exit_code = 0;
-            stop();
+            stop(StopReason::GuestPoweroff);
             tohost = 0;
             return;
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
-            if (simrv::memory::is_dram_addr(payload)) {
-                const Address masked_payload = payload & simrv::memory::kDramMask;
+            const auto ram = ram_view();
+            if (payload > std::numeric_limits<simrv::xlen::Address>::max()) {
+                simrv::log::warn("HTIF syscall block address exceeds the guest address width");
+                tohost = 0;
+                return;
+            }
+            const simrv::xlen::PhysAddr syscall_address{static_cast<simrv::xlen::Address>(payload)};
+            if (ram.contains(syscall_address, 4 * sizeof(uint64_t))) {
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;
                 uint64_t arg1 = 0;
                 uint64_t arg2 = 0;
 
-                std::memcpy(&syscall_num, mmem + masked_payload + 0, 8);
-                std::memcpy(&arg0, mmem + masked_payload + 8, 8);
-                std::memcpy(&arg1, mmem + masked_payload + 16, 8);
-                std::memcpy(&arg2, mmem + masked_payload + 24, 8);
+                const auto* syscall_block = ram.unchecked_ptr(syscall_address);
+                std::memcpy(&syscall_num, syscall_block + 0, sizeof(syscall_num));
+                std::memcpy(&arg0, syscall_block + 8, sizeof(arg0));
+                std::memcpy(&arg1, syscall_block + 16, sizeof(arg1));
+                std::memcpy(&arg2, syscall_block + 24, sizeof(arg2));
 
                 if (syscall_num == 64) {  // SYS_write
-                    const Address buf_masked = arg1 & simrv::memory::kDramMask;
-                    for (uint64_t i = 0; i < arg2; ++i) {
-                        char ch = static_cast<char>(mmem[buf_masked + i]);
-                        if (s_tuimode && tui) {
-                            tui->handle_char_write(ch);
-                        } else {
-                            std::print("{}", ch);
-                        }
+                    const simrv::xlen::Address fromhost_addr =
+                        (isa_test_tohost() != 0 ? isa_test_tohost() : 0x80001000) + 8;
+                    const uint64_t raw_buf_addr = is_guest_xlen32 ? (arg1 & 0xFFFFFFFFULL) : arg1;
+                    if (raw_buf_addr > std::numeric_limits<simrv::xlen::Address>::max()) {
+                        simrv::log::warn("HTIF SYS_write buffer address exceeds the guest width");
+                        tohost = 0;
+                        return;
                     }
-                    if (!s_tuimode) {
-                        std::fflush(stdout);
+                    const simrv::xlen::PhysAddr buf_addr{
+                        static_cast<simrv::xlen::Address>(raw_buf_addr)};
+                    if (!ram.contains(buf_addr, static_cast<size_t>(arg2)) ||
+                        !ram.contains(simrv::xlen::PhysAddr{fromhost_addr}, sizeof(uint64_t))) {
+                        simrv::log::warn(
+                            "HTIF SYS_write references RAM outside the configured DRAM");
+                        tohost = 0;
+                        return;
+                    }
+                    const std::span<const simrv::xlen::Byte> bytes(ram.unchecked_ptr(buf_addr),
+                                                                   static_cast<size_t>(arg2));
+                    for (const simrv::xlen::Byte byte : bytes) {
+                        console_write(static_cast<char>(byte));
                     }
 
                     // Write success response (bytes written) to fromhost
-                    const Address fromhost_addr =
-                        (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
-                    const Address fromhost_masked = fromhost_addr & simrv::memory::kDramMask;
                     uint64_t resp = arg2;
-                    std::memcpy(mmem + fromhost_masked, &resp, 8);
+                    std::memcpy(ram.unchecked_ptr(simrv::xlen::PhysAddr{fromhost_addr}), &resp,
+                                sizeof(resp));
+                    for (size_t i = 0; i < num_harts(); ++i) {
+                        hart(i).dcache.probe_line(simrv::xlen::PhysAddr{fromhost_addr},
+                                                  simrv::memory::MesiState::Invalid);
+                    }
+                    memory_.system_bus().coherence_hub().invalidate_line_external(
+                        simrv::xlen::PhysAddr{fromhost_addr});
                     tohost = 0;
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit
                     const int code = static_cast<int>(arg0);
-                    if (s_appmode) {
-                        if (code == 0) {
-                            simrv::log::info("ISA TEST PASS");
-                        } else {
-                            simrv::log::error("ISA TEST FAIL code={}", code);
-                        }
+                    if (code == 0) {
+                        simrv::log::info("Program Halted (SUCCESS / PASS)");
                     } else {
-                        if (code == 0) {
-                            simrv::log::info("Program Halted (SUCCESS / PASS)");
-                        } else {
-                            simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
-                        }
+                        simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
                     }
                     exit_code = code;
-                    stop();
+                    stop(code == 0 ? StopReason::TohostPass : StopReason::TohostFail);
                     tohost = 0;
                     return;
                 }
@@ -348,29 +2198,116 @@ void Machine::finalize_cycle_tohost() {
 
     // Universal tohost halting check (e.g. exit code via tohost)
     if (tohost == 1) {
-        if (s_appmode) {
-            simrv::log::info("ISA TEST PASS");
-        } else {
-            simrv::log::info("Program Halted (SUCCESS / PASS)");
-        }
+        simrv::log::info("Program Halted (SUCCESS / PASS)");
         exit_code = 0;
-        stop();
+        stop(StopReason::TohostPass);
         tohost = 0;
         return;
     } else if ((tohost & 1) != 0u) {
         const int code = static_cast<int>(tohost >> 1);
-        if (s_appmode) {
-            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost.load());
-        } else {
-            simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
-        }
+        simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         exit_code = code == 0 ? 1 : code;
-        stop();
+        stop(StopReason::TohostFail);
         tohost = 0;
         return;
     }
 }
 
-Machine::~Machine() = default;
+void Machine::publish_tohost_write(uint64_t value, TohostWriteKind kind,
+                                   uint32_t low_word_fallback_cycles) noexcept {
+    tohost.store(value, std::memory_order_relaxed);
+    switch (kind) {
+        case TohostWriteKind::LowWord:
+            tohost_low_word_pending_.store(true, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(
+                static_cast<uint8_t>(std::min<uint32_t>(low_word_fallback_cycles, 255)),
+                std::memory_order_release);
+            break;
+        case TohostWriteKind::HighWord:
+        case TohostWriteKind::Full:
+            tohost_low_word_pending_.store(false, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(0, std::memory_order_release);
+            break;
+    }
+    if (kind != TohostWriteKind::LowWord && is_running()) {
+        finalize_cycle_tohost();
+    }
+}
+
+Machine::~Machine() {
+    if (runtime_ && runtime_->gdb_stub) {
+        try {
+            runtime_->gdb_stub->stop();
+        } catch (...) {  // NOLINT(bugprone-empty-catch)
+        }
+    }
+    stop_runner();
+    // The UI sink can own mission breakpoints and refers back to this Machine. Release both
+    // sink references while BreakpointManager and the rest of the runtime are still alive.
+    telemetry_sink_.reset();
+    console_sink_.reset();
+    // Destroy callbacks and runner objects while their Machine wake state is still alive.
+    runtime_.reset();
+}
+
+void Machine::advance_ca_global_cycle() {
+    primary_hart().run_ca_cycle_fast(*this);
+    if (simrv::compiler::unlikely(runtime_->secondary_hart_count !=
+                                  runtime_->secondary_harts.size())) {
+        runtime_->refresh_secondary_hart_ptrs();
+    }
+    for (size_t i = 0; i < runtime_->secondary_hart_count; ++i) {
+        auto* secondary = runtime_->secondary_hart_ptrs[i];
+        if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+            secondary->run_ca_cycle_fast(*this);
+        }
+    }
+
+    advance_ca_platform_cycle(true);
+}
+
+void Machine::advance_ca_primary_cycle() {
+    primary_hart().run_ca_cycle_fast(*this);
+    if (simrv::compiler::unlikely(is_smp_enabled_)) {
+        std::visit([this](auto& runner) { runner.synchronize_multithreaded_workers(*this); },
+                   runtime_->runner);
+    }
+    advance_ca_platform_cycle(false);
+}
+
+void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
+    // Shared requests become visible after the scheduler's current hart transition(s). In
+    // best-effort MT mode hart 0 owns this clock while secondary pipelines progress
+    // independently. The timer transition follows the interconnect transition and is
+    // sampled by hart pipelines at a retirement boundary in the next global cycle.
+    auto& cpu = primary_hart();
+    memory_.system_bus().advance_cycle();
+    dma_engine_.advance_cycle(memory_.system_bus().cycle());
+    if (clock_divider_.advance_ca_cycle(cpu.clint_mmio.rtc_divider, cpu.clint_mmio.mtime)) {
+        cpu.evaluate_timer_interrupt();
+        if (synchronize_secondary_harts) {
+            if (simrv::compiler::unlikely(runtime_->secondary_hart_count !=
+                                          runtime_->secondary_harts.size())) {
+                runtime_->refresh_secondary_hart_ptrs();
+            }
+            if (runtime_->secondary_hart_count != 0) {
+                const auto global_time = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+                for (size_t i = 0; i < runtime_->secondary_hart_count; ++i) {
+                    auto* secondary = runtime_->secondary_hart_ptrs[i];
+                    secondary->clint_mmio.mtime.store(global_time, std::memory_order_relaxed);
+                    secondary->evaluate_timer_interrupt();
+                }
+            }
+        }
+    }
+}
+
+auto Machine::execution_controller() noexcept -> IExecutionController* {
+    return telemetry_sink_.get();
+}
+
+auto Machine::execution_controller() const noexcept -> const IExecutionController* {
+    return telemetry_sink_.get();
+}
 
 }  // namespace simrv::core

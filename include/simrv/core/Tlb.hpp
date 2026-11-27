@@ -3,12 +3,15 @@
  * @brief Translation Lookaside Buffer (TLB) encapsulation.
  */
 #pragma once
-
 #include <array>
+#include <optional>
 #include <utility>
 
+#include "simrv/CompilerHints.hpp"
+#include "simrv/core/TlbTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/memory/PageTableWalker.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
@@ -16,15 +19,30 @@ namespace simrv::core {
  * @struct TLBEntry
  * @brief Represents a single 2-way set-associative TLB entry.
  *
- * Cache-line aligned to 32 bytes with explicit padding for zero-cost offset calculations.
+ * Cache-line aligned to 32 bytes for zero-cost offset calculations.
  */
 struct alignas(32) TLBEntry {
-    Address v_addr{};                            ///< Virtual page address (8 bytes)
-    Address p_addr{};                            ///< Physical page address (8 bytes)
-    Word asid{};                                 ///< Address Space Identifier (8 bytes)
-    PrivilegeLevel priv = PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
-    bool valid{false};                           ///< Entry validity flag (1 byte)
-    std::array<uint8_t, 6> padding{};            ///< 6-byte padding (32 bytes total size)
+    simrv::xlen::VirtAddr v_addr{};  ///< Virtual page address
+    simrv::xlen::PhysAddr p_addr{};  ///< Physical page address
+    uint32_t epoch{0};               ///< TLB generation epoch (4 bytes)
+    Asid asid{};                     ///< Address Space Identifier (2 bytes)
+    simrv::xlen::PrivilegeLevel priv =
+        simrv::xlen::PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
+    simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;  ///< Translated memory type
+    bool valid{false};                                          ///< Entry validity flag (1 byte)
+    bool global{false};  ///< Global page mapping flag (1 byte)
+};
+
+/**
+ * @struct TlbFlushFilter
+ * @brief Specifies selective flush criteria, replacing boolean-flag parameters.
+ *
+ * If vaddr is nullopt, all virtual addresses match (global flush).
+ * If asid is nullopt, all ASIDs match.
+ */
+struct TlbFlushFilter {
+    std::optional<simrv::xlen::VirtAddr> vaddr;
+    std::optional<Asid> asid;
 };
 
 /**
@@ -50,14 +68,18 @@ class Tlb {
     alignas(64) std::array<uint8_t, kNumSets> inst_r_lru{};  ///< LRU bit per set for inst_r
     alignas(64) std::array<uint8_t, kNumSets> data_r_lru{};  ///< LRU bit per set for data_r
     alignas(64) std::array<uint8_t, kNumSets> data_w_lru{};  ///< LRU bit per set for data_w
+    uint32_t inst_epoch_{1};
+    uint32_t data_epoch_{1};
 
     /**
-     * @brief Compute the TLB set index for a given virtual address.
+     * @brief Compute the TLB set index for a given virtual address with bit-mixed hashing.
      * @param vaddr Virtual address.
      * @return Set index in range [0, kNumSets - 1].
      */
-    [[nodiscard]] static constexpr inline auto calc_set(Address vaddr) noexcept -> size_t {
-        return (vaddr >> 12) & (kNumSets - 1);
+    [[nodiscard]] static constexpr inline auto calc_set(simrv::xlen::VirtAddr vaddr) noexcept
+        -> TlbSetIndex {
+        const simrv::xlen::Address vpn = vaddr.raw() >> 12;
+        return static_cast<TlbSetIndex>((vpn ^ (vpn >> 8)) & (kNumSets - 1));
     }
 
     /**
@@ -65,7 +87,8 @@ class Tlb {
      * @param vaddr Virtual address.
      * @return Aligned page base address.
      */
-    [[nodiscard]] static constexpr inline auto calc_vpage(Address vaddr) noexcept -> Address {
+    [[nodiscard]] static constexpr inline auto calc_vpage(simrv::xlen::VirtAddr vaddr) noexcept
+        -> simrv::xlen::VirtAddr {
         return vaddr & ~simrv::memory::kPageMask;
     }
 
@@ -75,142 +98,234 @@ class Tlb {
     void flush();
 
     /**
-     * @brief Selectively invalidate entries matching specified virtual address and ASID
-     * constraints.
-     * @param match_all_vaddr If true, ignores vaddr match requirement.
-     * @param vaddr Target virtual address.
-     * @param match_all_asid If true, ignores ASID match requirement.
-     * @param asid Target ASID.
+     * @brief Invalidate all entries in data read and write TLBs, preserving instruction TLB.
      */
-    void flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
+    void flush_data();
 
     /**
-     * @brief Lookup instruction fetch TLB entry for virtual address, ASID, and privilege level.
+     * @brief Selectively invalidate entries matching the filter criteria.
+     * @param filter Flush filter specifying optional vaddr and ASID constraints.
+     */
+    void flush_selective(const TlbFlushFilter& filter);
+
+    /**
+     * @brief Fast templated TLB lookup by access kind.
+     * @tparam Kind Access kind (Instruction, DataRead, DataWrite).
      * @param vaddr Virtual address.
      * @param asid Address Space Identifier.
      * @param priv Privilege level.
      * @return Pointer to matching TLBEntry if hit, or nullptr on miss.
      */
-    [[nodiscard]] inline auto lookup_inst_r(Address vaddr, Word asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        const size_t set = calc_set(vaddr);
-        const Address vpage = calc_vpage(vaddr);
-        for (int i = 0; i < 2; i++) {
-            auto& entry = inst_r[set][i];
-            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
-                inst_r_lru[set] = 1 - i;
+    template <TlbAccessKind Kind>
+    [[nodiscard]] inline auto lookup(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                     simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
+        auto& table = select_table_static<Kind>();
+        auto& lru = select_lru_static<Kind>();
+        const uint32_t cur_epoch = select_epoch<Kind>();
+        const auto set = calc_set(vaddr);
+        const simrv::xlen::VirtAddr vpage = calc_vpage(vaddr);
+        auto& set_entries = table[set];
+        if (simrv::compiler::likely(set_entries[0].v_addr == vpage && set_entries[0].valid &&
+                                    set_entries[0].epoch == cur_epoch &&
+                                    (set_entries[0].global || set_entries[0].asid == asid) &&
+                                    set_entries[0].priv == priv)) {
+            lru[set] = 1;
+            return &set_entries[0];
+        }
+        if (set_entries[1].v_addr == vpage && set_entries[1].valid &&
+            set_entries[1].epoch == cur_epoch &&
+            (set_entries[1].global || set_entries[1].asid == asid) && set_entries[1].priv == priv) {
+            lru[set] = 0;
+            return &set_entries[1];
+        }
+        return nullptr;
+    }
+
+    /**
+     * @brief Fast templated TLB insert by access kind using LRU replacement.
+     * @tparam Kind Access kind (Instruction, DataRead, DataWrite).
+     * @param vaddr Virtual address.
+     * @param paddr Physical address.
+     * @param asid Address Space Identifier.
+     * @param priv Privilege level.
+     * @param global Global page flag.
+     * @return Pointer to newly inserted TLBEntry.
+     */
+    template <TlbAccessKind Kind>
+    inline auto insert(simrv::xlen::VirtAddr vaddr, simrv::xlen::PhysAddr paddr, Asid asid,
+                       simrv::xlen::PrivilegeLevel priv, bool global = false,
+                       simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma) -> TLBEntry* {
+        auto& table = select_table_static<Kind>();
+        auto& lru = select_lru_static<Kind>();
+        const uint32_t cur_epoch = select_epoch<Kind>();
+        const auto set = calc_set(vaddr);
+        const simrv::xlen::VirtAddr vpage = calc_vpage(vaddr);
+        const simrv::xlen::PhysAddr ppage{paddr.raw() & ~simrv::memory::kPageMask};
+        auto& set_entries = table[set];
+
+        if (set_entries[0].epoch != cur_epoch) {
+            set_entries[0].valid = false;
+        }
+        if (set_entries[1].epoch != cur_epoch) {
+            set_entries[1].valid = false;
+        }
+
+        if (set_entries[0].v_addr == vpage && set_entries[0].valid &&
+            (global ? set_entries[0].global
+                    : (!set_entries[0].global && set_entries[0].asid == asid)) &&
+            set_entries[0].priv == priv) {
+            set_entries[0].p_addr = ppage;
+            set_entries[0].global = global;
+            set_entries[0].pbmt = pbmt;
+            set_entries[0].epoch = cur_epoch;
+            lru[set] = 1;
+            return &set_entries[0];
+        }
+        if (set_entries[1].v_addr == vpage && set_entries[1].valid &&
+            (global ? set_entries[1].global
+                    : (!set_entries[1].global && set_entries[1].asid == asid)) &&
+            set_entries[1].priv == priv) {
+            set_entries[1].p_addr = ppage;
+            set_entries[1].global = global;
+            set_entries[1].pbmt = pbmt;
+            set_entries[1].epoch = cur_epoch;
+            lru[set] = 0;
+            return &set_entries[1];
+        }
+
+        const int way = !set_entries[0].valid ? 0 : (!set_entries[1].valid ? 1 : lru[set]);
+        auto& entry = set_entries[way];
+        entry.v_addr = vpage;
+        entry.p_addr = ppage;
+        entry.epoch = cur_epoch;
+        entry.asid = asid;
+        entry.priv = priv;
+        entry.global = global;
+        entry.pbmt = pbmt;
+        entry.valid = true;
+        lru[set] = 1 - way;
+        return &entry;
+    }
+
+    /// Inspect a translation without updating replacement state or hit counters.
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto peek(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                      simrv::xlen::PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        const auto& table = select_table_static<Kind>();
+        const uint32_t cur_epoch = select_epoch<Kind>();
+        const auto set = calc_set(vaddr);
+        const simrv::xlen::VirtAddr vpage = calc_vpage(vaddr);
+        for (const auto& entry : table[set]) {
+            if (entry.v_addr == vpage && entry.valid && entry.epoch == cur_epoch &&
+                (entry.global || entry.asid == asid) && entry.priv == priv) {
                 return &entry;
             }
         }
         return nullptr;
     }
 
-    /**
-     * @brief Insert entry into instruction fetch TLB using LRU replacement.
-     * @param vaddr Virtual address.
-     * @param paddr Physical address.
-     * @param asid Address Space Identifier.
-     * @param priv Privilege level.
-     * @return Pointer to newly inserted TLBEntry.
-     */
-    inline auto insert_inst_r(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        const size_t set = calc_set(vaddr);
-        const int way = inst_r_lru[set];
-        auto& entry = inst_r[set][way];
-        entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = calc_vpage(paddr);
-        entry.asid = asid;
-        entry.priv = priv;
-        entry.valid = true;
-        inst_r_lru[set] = 1 - way;
-        return &entry;
+    /// Inspect an instruction translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_inst_r(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                             simrv::xlen::PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        return peek<TlbAccessKind::Instruction>(vaddr, asid, priv);
     }
 
-    /**
-     * @brief Lookup data read TLB entry for virtual address, ASID, and privilege level.
-     * @param vaddr Virtual address.
-     * @param asid Address Space Identifier.
-     * @param priv Privilege level.
-     * @return Pointer to matching TLBEntry if hit, or nullptr on miss.
-     */
-    [[nodiscard]] inline auto lookup_data_r(Address vaddr, Word asid, PrivilegeLevel priv)
+    /// Inspect a data read translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_data_r(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                             simrv::xlen::PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        return peek<TlbAccessKind::DataRead>(vaddr, asid, priv);
+    }
+
+    /// Inspect a data write translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_data_w(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                             simrv::xlen::PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        return peek<TlbAccessKind::DataWrite>(vaddr, asid, priv);
+    }
+
+    // --- Direct forwarding wrappers (templated, zero-cost) ---
+
+    [[nodiscard]] inline auto lookup_inst_r(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                            simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
+        return lookup<TlbAccessKind::Instruction>(vaddr, asid, priv);
+    }
+
+    inline auto insert_inst_r(simrv::xlen::VirtAddr vaddr, simrv::xlen::PhysAddr paddr, Asid asid,
+                              simrv::xlen::PrivilegeLevel priv, bool global = false,
+                              simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma)
         -> TLBEntry* {
-        const size_t set = calc_set(vaddr);
-        const Address vpage = calc_vpage(vaddr);
-        for (int i = 0; i < 2; i++) {
-            auto& entry = data_r[set][i];
-            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
-                data_r_lru[set] = 1 - i;
-                return &entry;
-            }
+        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global, pbmt);
+    }
+
+    [[nodiscard]] inline auto lookup_data_r(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                            simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
+        return lookup<TlbAccessKind::DataRead>(vaddr, asid, priv);
+    }
+
+    inline auto insert_data_r(simrv::xlen::VirtAddr vaddr, simrv::xlen::PhysAddr paddr, Asid asid,
+                              simrv::xlen::PrivilegeLevel priv, bool global = false,
+                              simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma)
+        -> TLBEntry* {
+        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global, pbmt);
+    }
+
+    [[nodiscard]] inline auto lookup_data_w(simrv::xlen::VirtAddr vaddr, Asid asid,
+                                            simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
+        return lookup<TlbAccessKind::DataWrite>(vaddr, asid, priv);
+    }
+
+    inline auto insert_data_w(simrv::xlen::VirtAddr vaddr, simrv::xlen::PhysAddr paddr, Asid asid,
+                              simrv::xlen::PrivilegeLevel priv, bool global = false,
+                              simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma)
+        -> TLBEntry* {
+        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global, pbmt);
+    }
+
+   private:
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_table_static() noexcept -> std::array<TLBSet, kNumSets>& {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_r;
+        } else if constexpr (Kind == TlbAccessKind::DataRead) {
+            return data_r;
+        } else {
+            return data_w;
         }
-        return nullptr;
     }
 
-    /**
-     * @brief Insert entry into data read TLB using LRU replacement.
-     * @param vaddr Virtual address.
-     * @param paddr Physical address.
-     * @param asid Address Space Identifier.
-     * @param priv Privilege level.
-     * @return Pointer to newly inserted TLBEntry.
-     */
-    inline auto insert_data_r(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        const size_t set = calc_set(vaddr);
-        const int way = data_r_lru[set];
-        auto& entry = data_r[set][way];
-        entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = calc_vpage(paddr);
-        entry.asid = asid;
-        entry.priv = priv;
-        entry.valid = true;
-        data_r_lru[set] = 1 - way;
-        return &entry;
-    }
-
-    /**
-     * @brief Lookup data write TLB entry for virtual address, ASID, and privilege level.
-     * @param vaddr Virtual address.
-     * @param asid Address Space Identifier.
-     * @param priv Privilege level.
-     * @return Pointer to matching TLBEntry if hit, or nullptr on miss.
-     */
-    [[nodiscard]] inline auto lookup_data_w(Address vaddr, Word asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        const size_t set = calc_set(vaddr);
-        const Address vpage = calc_vpage(vaddr);
-        for (int i = 0; i < 2; i++) {
-            auto& entry = data_w[set][i];
-            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
-                data_w_lru[set] = 1 - i;
-                return &entry;
-            }
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_table_static() const noexcept
+        -> const std::array<TLBSet, kNumSets>& {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_r;
+        } else if constexpr (Kind == TlbAccessKind::DataRead) {
+            return data_r;
+        } else {
+            return data_w;
         }
-        return nullptr;
     }
 
-    /**
-     * @brief Insert entry into data write TLB using LRU replacement.
-     * @param vaddr Virtual address.
-     * @param paddr Physical address.
-     * @param asid Address Space Identifier.
-     * @param priv Privilege level.
-     * @return Pointer to newly inserted TLBEntry.
-     */
-    inline auto insert_data_w(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        const size_t set = calc_set(vaddr);
-        const int way = data_w_lru[set];
-        auto& entry = data_w[set][way];
-        entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = calc_vpage(paddr);
-        entry.asid = asid;
-        entry.priv = priv;
-        entry.valid = true;
-        data_w_lru[set] = 1 - way;
-        return &entry;
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_lru_static() noexcept -> std::array<uint8_t, kNumSets>& {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_r_lru;
+        } else if constexpr (Kind == TlbAccessKind::DataRead) {
+            return data_r_lru;
+        } else {
+            return data_w_lru;
+        }
+    }
+
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_epoch() const noexcept -> uint32_t {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_epoch_;
+        } else {
+            return data_epoch_;
+        }
     }
 };
 

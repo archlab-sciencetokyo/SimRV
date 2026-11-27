@@ -1,0 +1,115 @@
+site_name: SimRV
+site_description: An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with interactive TUI, cycle-accurate modeling, hardware RTL parity, and full-system Linux emulation.
+site_author: SimRV Contributors
+site_url: !ENV [SIMRV_DOCS_SITE_URL, 'https://archlab-sciencetokyo.github.io/SimRV/']
+site_dir: !ENV [SIMRV_DOCS_SITE_DIR, 'site']
+repo_name: archlab-sciencetokyo/SimRV
+repo_url: https://github.com/archlab-sciencetokyo/SimRV
+edit_uri: !ENV [SIMRV_DOCS_EDIT_URI, 'edit/dev/docs/']
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.path
+    - navigation.top
+    - navigation.indexes
+    - navigation.expand
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - navigation.instant.progress
+    - toc.follow
+    - content.code.copy
+    - content.code.select
+    - content.code.annotate
+    - content.footnote.tooltips
+    - content.tooltips
+    - content.tabs.link
+  palette:
+    # Follow the browser/OS preference by default.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+extra:
+  docs_channel: !ENV [SIMRV_DOCS_CHANNEL, 'development']
+  version:
+    provider: mike
+
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - tables
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - def_list
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - overrides/assets/stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Installation: user/install.md
+      - Quickstart & CLI: user/index.md
+      - Interactive TUI Workbench: user/tui.md
+      - Bare-Metal & Embedded: user/baremetal.md
+      - Full-System Linux & SMP: user/linux.md
+      - Student Reference Guide: user/classroom.md
+      - Release Validation: user/ga-workflow.md
+      - Migrating from 2.x to 3.0: development/migration.md
+  - Architecture:
+      - System & Pipeline Overview: architecture/overview.md
+      - Memory & TileLink-C Coherence: architecture/tilelink.md
+      - ISA Compliance & Boundaries: architecture/compliance.md
+  - Models & Extensions:
+      - Microarchitectural Models & Tuning: hardware/models.md
+      - HPM Counters & Telemetry Events: hardware/hpm.md
+      - Custom Extensions & CFU Plugins: hardware/extensions.md
+      - Extending CPU Presets & MMIO Platforms: hardware/extending-platforms.md
+      - RTL Parity Verification: hardware/rtl_parity.md

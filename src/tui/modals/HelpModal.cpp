@@ -4,6 +4,7 @@
  */
 #include "simrv/tui/modals/HelpModal.hpp"
 
+#include <algorithm>
 #include <format>
 #include <string>
 #include <utility>
@@ -12,7 +13,8 @@
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/tui/framework/Text.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui::modals {
 
@@ -20,20 +22,39 @@ namespace {
 
 using Shortcut = std::pair<std::string, std::string>;
 
-[[nodiscard]] auto help_shortcuts() -> std::vector<Shortcut> {
+struct ShortcutGroup {
+    ActionCategory category;
+    std::string_view title;
     std::vector<Shortcut> shortcuts;
-    const auto bindings = Keybindings::all();
-    shortcuts.reserve(bindings.size() + 6);
-    for (const auto& binding : bindings) {
-        shortcuts.emplace_back(binding.key_display, binding.help_label);
+};
+
+[[nodiscard]] auto help_shortcuts() -> std::vector<ShortcutGroup> {
+    std::vector<ShortcutGroup> groups;
+    for (const auto& category : Keybindings::categories()) {
+        groups.push_back({.category = category.category, .title = category.title, .shortcuts = {}});
     }
-    shortcuts.emplace_back("[u/d] / [PgUp/Dn]", "Scroll terminal or logs");
-    shortcuts.emplace_back("[Alt-w/s]", "Scroll inspection pane");
-    shortcuts.emplace_back("[ [ / ] ]", "Resize split panes");
-    shortcuts.emplace_back("[Alt-h]", "Toggle High Contrast");
-    shortcuts.emplace_back("[Alt-t]", "Toggle Sakura Pastel");
-    shortcuts.emplace_back("[Esc]", "Close active dialog");
-    return shortcuts;
+    const auto bindings = Keybindings::all();
+    for (const auto& binding : bindings) {
+        const auto group = std::ranges::find(groups, binding.category, &ShortcutGroup::category);
+        if (group != groups.end()) {
+            group->shortcuts.emplace_back(binding.key_display, binding.help_label);
+        }
+    }
+    const auto group_for = [&](ActionCategory category) -> ShortcutGroup& {
+        return *std::ranges::find(groups, category, &ShortcutGroup::category);
+    };
+    auto& navigation = group_for(ActionCategory::Navigate).shortcuts;
+    navigation.emplace_back("[u/d] / [PgUp/Dn]", "Scroll terminal or logs");
+    navigation.emplace_back("[Alt-w/s]", "Scroll inspection pane");
+    navigation.emplace_back("[ [ / ] ]", "Resize split panes");
+    auto& configuration = group_for(ActionCategory::Configure).shortcuts;
+    configuration.emplace_back("[Alt-h]", "Toggle High Contrast");
+    configuration.emplace_back("[Alt-t]", "Toggle Sakura Pastel");
+    group_for(ActionCategory::Help).shortcuts.emplace_back("[Esc]", "Close active dialog");
+    for (auto& group : groups) {
+        std::ranges::sort(group.shortcuts, {}, &Shortcut::second);
+    }
+    return groups;
 }
 
 [[nodiscard]] auto format_shortcut(const Shortcut& shortcut, int key_width, int total_width = 0)
@@ -46,38 +67,66 @@ using Shortcut = std::pair<std::string, std::string>;
 
 }  // namespace
 
+void HelpModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    render(content_rows, add_row, height, width);
+}
+
+auto HelpModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
+        key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::F1) {
+        return framework::ModalAction::Close;
+    }
+    if (byte == 'j' || byte == 'J' || key == simrv::tui::TuiKey::Tab) {
+        scroll_ = std::max(0, scroll_ + 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'k' || byte == 'K' || key == simrv::tui::TuiKey::BackTab) {
+        scroll_ = std::max(0, scroll_ - 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        scroll_ = std::max(0, scroll_ + 5);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto HelpModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    (void)content_row;
+    (void)action_index;
+    return framework::ModalAction::Close;
+}
+
+auto HelpModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
+
 void HelpModal::render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb, int term_height,
                        int box_w) {
     (void)content_rows;
-    add_row_cb(
+    (void)term_height;
+    const int inner_width = std::max(1, box_w - 2);
+    auto add_wrapped = [&](std::string_view row, int continuation_indent = 0) {
+        for (const auto& wrapped : framework::wrap_text(row, inner_width, continuation_indent)) {
+            add_row_cb(wrapped);
+        }
+    };
+
+    add_wrapped(
         std::format(" \033[1mSimRV Version:\033[0m \033[1;36m{}\033[0m  \033[90m(RV{})\033[0m",
                     simrv::buildinfo::kVersion, simrv::xlen::kXLenBits));
-    add_row_cb("");
+    add_wrapped("");
 
-    const std::vector<Shortcut> shortcuts = help_shortcuts();
-    if (term_height < 32 && box_w >= 70) {
-        constexpr int kKeyWidth = 18;
-        constexpr int kColumnSeparatorWidth = 3;
-        const int inner_width = box_w - 2;
-        const int left_width = (inner_width - kColumnSeparatorWidth) / 2;
-        const int right_width = inner_width - kColumnSeparatorWidth - left_width;
-        const std::size_t half = (shortcuts.size() + 1) / 2;
-        for (std::size_t i = 0; i < half; ++i) {
-            std::string row = format_shortcut(shortcuts[i], kKeyWidth, left_width);
-            if (i + half < shortcuts.size()) {
-                row += " │ " + format_shortcut(shortcuts[i + half], kKeyWidth, right_width);
-            } else {
-                row +=
-                    std::string(static_cast<std::size_t>(kColumnSeparatorWidth + right_width), ' ');
-            }
-            add_row_cb(row);
+    for (const auto& group : help_shortcuts()) {
+        add_wrapped(std::format(" {}{}\033[0m", kThemeMint, group.title));
+        for (const auto& shortcut : group.shortcuts) {
+            add_wrapped(" " + format_shortcut(shortcut, 24), 2);
         }
-        return;
-    }
-
-    for (const auto& shortcut : shortcuts) {
-        add_row_cb(" " + format_shortcut(shortcut, 24));
+        add_wrapped("");
     }
 }
 

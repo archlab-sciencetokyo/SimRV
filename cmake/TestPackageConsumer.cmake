@@ -1,0 +1,140 @@
+if(NOT DEFINED SIMRV_BINARY_DIR OR NOT DEFINED SIMRV_SOURCE_DIR)
+  message(FATAL_ERROR "SIMRV_BINARY_DIR and SIMRV_SOURCE_DIR are required")
+endif()
+
+set(consumer_source "${SIMRV_SOURCE_DIR}/tests/package-consumer")
+set(consumer_root "${SIMRV_BINARY_DIR}/package-consumer-check")
+set(install_root "${consumer_root}/install")
+
+set(extra_consumer_args)
+if(DEFINED CMAKE_CXX_COMPILER AND NOT "${CMAKE_CXX_COMPILER}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
+endif()
+if(DEFINED CMAKE_CXX_FLAGS AND NOT "${CMAKE_CXX_FLAGS}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
+endif()
+if(DEFINED CMAKE_EXE_LINKER_FLAGS AND NOT "${CMAKE_EXE_LINKER_FLAGS}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}")
+endif()
+
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1 "${CMAKE_COMMAND}" -S "${consumer_source}" -B
+          "${consumer_root}/build-tree" -D "SimRV_DIR=${SIMRV_BINARY_DIR}" ${extra_consumer_args}
+  RESULT_VARIABLE build_tree_configure_result)
+if(NOT build_tree_configure_result EQUAL 0)
+  message(
+    FATAL_ERROR
+      "Build-tree package consumer configure failed: ${build_tree_configure_result}"
+  )
+endif()
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1 "${CMAKE_COMMAND}" --build
+          "${consumer_root}/build-tree" RESULT_VARIABLE build_tree_build_result)
+if(NOT build_tree_build_result EQUAL 0)
+  message(
+    FATAL_ERROR
+      "Build-tree package consumer build failed: ${build_tree_build_result}")
+endif()
+execute_process(
+  COMMAND "${consumer_root}/build-tree/simrv-package-consumer"
+  RESULT_VARIABLE build_tree_run_result)
+if(NOT build_tree_run_result EQUAL 0)
+  message(FATAL_ERROR "Build-tree package consumer failed: ${build_tree_run_result}")
+endif()
+
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" --install "${SIMRV_BINARY_DIR}" --prefix
+          "${install_root}" RESULT_VARIABLE install_result)
+if(NOT install_result EQUAL 0)
+  message(FATAL_ERROR "SimRV install step failed: ${install_result}")
+endif()
+
+if(NOT EXISTS "${install_root}/bin/simrv")
+  message(FATAL_ERROR "Expected installed simulator ${install_root}/bin/simrv")
+endif()
+if(NOT EXISTS "${install_root}/share/SimRV/SimRVBuildMetadata.json")
+  message(FATAL_ERROR "Expected installed SimRV build metadata manifest")
+endif()
+foreach(shell IN ITEMS bash zsh fish)
+  execute_process(
+    COMMAND "${install_root}/bin/simrv-tools" completion ${shell}
+    RESULT_VARIABLE completion_result
+    OUTPUT_VARIABLE completion_output)
+  if(NOT completion_result EQUAL 0 OR completion_output STREQUAL "")
+    message(FATAL_ERROR "Installed simrv completion ${shell} failed: ${completion_result}")
+  endif()
+endforeach()
+execute_process(
+  COMMAND "${install_root}/bin/simrv" --version
+  RESULT_VARIABLE simulator_version_result
+  OUTPUT_QUIET ERROR_QUIET)
+if(NOT simulator_version_result EQUAL 0)
+  message(FATAL_ERROR "Installed simrv --version failed: ${simulator_version_result}")
+endif()
+
+foreach(tool IN ITEMS simrv-config-wizard simrv-tools simrv-parity simrv-benchmark simrv-act simrv-vector)
+  if(NOT EXISTS "${install_root}/bin/${tool}")
+    message(
+      FATAL_ERROR "Expected installed tool ${tool} in ${install_root}/bin")
+  endif()
+endforeach()
+
+foreach(tool IN ITEMS simrv-config-wizard simrv-tools simrv-parity simrv-benchmark simrv-act simrv-vector)
+  execute_process(
+    COMMAND "${install_root}/bin/${tool}" --help
+    RESULT_VARIABLE tool_help_result
+    OUTPUT_QUIET ERROR_QUIET)
+  if(NOT tool_help_result EQUAL 0)
+    message(FATAL_ERROR "Installed tool ${tool} --help failed: ${tool_help_result}")
+  endif()
+endforeach()
+
+execute_process(
+  COMMAND "${install_root}/bin/simrv-parity" --list-targets
+  RESULT_VARIABLE parity_check_result)
+if(NOT parity_check_result EQUAL 0)
+  message(FATAL_ERROR "Installed generic parity runner failed: ${parity_check_result}")
+endif()
+
+if(NOT EXISTS "${install_root}/share/man/man1/simrv.1")
+  message(
+    FATAL_ERROR
+      "Expected installed man page at ${install_root}/share/man/man1/simrv.1")
+endif()
+
+file(GLOB installed_guides "${install_root}/share/doc/*/USER_GUIDE.md")
+if(NOT installed_guides)
+  message(
+    FATAL_ERROR "Expected installed USER_GUIDE.md in ${install_root}/share/doc")
+endif()
+
+file(GLOB package_dirs "${install_root}/share/cmake/SimRV")
+list(LENGTH package_dirs package_dir_count)
+if(NOT package_dir_count EQUAL 1)
+  message(
+    FATAL_ERROR
+      "Expected one installed SimRV package directory, found: ${package_dirs}")
+endif()
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${consumer_root}/build"
+          -D "CMAKE_PREFIX_PATH=${install_root}" ${extra_consumer_args}
+  RESULT_VARIABLE configure_result)
+if(NOT configure_result EQUAL 0)
+  message(
+    FATAL_ERROR
+      "Installed-package consumer configure failed: ${configure_result}")
+endif()
+
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1 "${CMAKE_COMMAND}" --build
+          "${consumer_root}/build" RESULT_VARIABLE build_result)
+if(NOT build_result EQUAL 0)
+  message(
+    FATAL_ERROR "Installed-package consumer build failed: ${build_result}")
+endif()
+execute_process(
+  COMMAND "${consumer_root}/build/simrv-package-consumer"
+  RESULT_VARIABLE consumer_run_result)
+if(NOT consumer_run_result EQUAL 0)
+  message(FATAL_ERROR "Installed-package consumer failed: ${consumer_run_result}")
+endif()

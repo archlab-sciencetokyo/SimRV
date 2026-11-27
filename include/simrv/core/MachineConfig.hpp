@@ -1,0 +1,390 @@
+/**
+ * @file MachineConfig.hpp
+ * @brief Value configuration shared by machine, platform, and memory setup.
+ */
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <limits>
+#include <optional>
+#include <string>
+#include <utility>
+
+#include "simrv/core/PlatformTiming.hpp"
+#include "simrv/core/PlatformTopology.hpp"
+#include "simrv/core/SoCConfig.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
+#include "simrv/isa/IsaConfig.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+
+namespace simrv::core {
+
+enum class PlatformProfile : uint8_t {
+    Pcie = 0,
+    Mmio = 1,
+    None = 2,
+};
+
+struct MemoryGeometry {
+    simrv::xlen::PhysAddr dram_base = memory::kDramBaseAddress;
+    simrv::xlen::Address dram_size = memory::kDramSize;
+
+    [[nodiscard]] constexpr auto contains(simrv::xlen::PhysAddr address, size_t size = 1) const
+        -> bool {
+        return memory::address_range_contains(dram_base, dram_size, address, size);
+    }
+};
+
+struct ExecutionConfig {
+    // ACLINT and AIA allocate one interrupt file per simulated hart.
+    static constexpr uint32_t kMaxHarts = topology::kMaxSimulatedHarts;
+
+    bool appmode = true;
+    /// Enables ACT's test-only simple interrupt generator at its documented MMIO window.
+    bool act_test_hooks = false;
+    bool ui_worker_threaded = false;
+    uint32_t num_harts = 1;
+    uint32_t smp_quantum = 100;
+    std::optional<SmpMode> smp_mode{};
+    simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
+    simrv::xlen::VirtAddr start_pc{};
+    simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter enabletimer = std::numeric_limits<simrv::xlen::Counter>::max();
+    bool realtime_pacing = false;
+    uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz;
+    uint64_t timebase_hz = simrv::core::timing::kTimebaseHz;
+    uint32_t max_consecutive_traps = 3;  ///< Maximum recursive traps before halting as a trap loop
+    simrv::isa::ArchitectureProfile profile = simrv::isa::kDefaultArchitectureProfile;
+};
+
+struct TuiConfig {
+    bool enabled = false;
+    bool high_contrast = false;
+    /// Optional external classroom mission path. Missions are local guidance only.
+    std::string mission = {};
+    std::string inspection_output = {};
+};
+
+struct DebugConfig {
+    bool gdb_enabled = false;
+    uint16_t gdb_port = 1234;
+    bool lockstep_enabled = false;
+    std::string spike_bin = "spike";
+    std::string spike_elf;
+    bool dlog_mode = false;
+    bool traplog_mode = false;
+    bool bp_trace = false;
+    bool use_mix = false;
+    /// Root directory for simulator-generated trace artifacts.
+    std::string trace_dir = "trace";
+    std::string architecture_trace_path;
+    /// Architectural trace detail level: 0=lifecycle, 1=devices, 2=calls, 3=retire, 4=detail.
+    uint8_t trace_level = 3;
+    bool trace_register_writes = false;
+    std::string trace_events;
+    std::string trace_function;
+    std::string trace_device;
+    std::optional<simrv::xlen::HartId> trace_hart;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_start;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_end;
+    std::optional<simrv::xlen::Counter> trace_after_cycle;
+    std::optional<simrv::xlen::Counter> trace_before_cycle;
+    simrv::xlen::Counter checkpoint_every = 0;
+    std::string checkpoint_dir;
+};
+
+struct IsaConfig {
+    simrv::xlen::Address isatest_tohost = 0x80001000;
+    simrv::xlen::CsrValue isa_preset = isa::kMisaDefault;
+    isa::ExtensionSet enabled_extensions{};
+    bool misa_override = false;
+    unsigned int misa_xlen = 0;
+    unsigned int vlen = 0;
+};
+
+struct FilesConfig {
+    std::string binary_path;
+    std::string disk_path;
+    std::string virtiofs_path;
+    bool disk_enabled = false;
+    std::string dvtree_path;
+    std::string config_path;
+    std::string cfu_plugin_path;
+    std::vector<std::string> device_plugins;
+    std::string uefi_code_path;
+    std::string uefi_vars_path;
+    bool uefi_enabled = false;
+    bool auto_fdt = false;
+    std::string bootargs;
+};
+
+struct NetworkConfig {
+    std::string mode = "user";
+};
+
+enum class FramebufferFormat : uint8_t {
+    A8R8G8B8 = 0,
+    R5G6B5 = 1,
+};
+
+struct FramebufferConfig {
+    uint32_t width = 800;
+    uint32_t height = 600;
+    simrv::xlen::PhysAddr base{0x84000000ULL};
+    uint32_t stride = 0;
+    uint32_t bpp = 4;
+    FramebufferFormat format = FramebufferFormat::A8R8G8B8;
+
+    [[nodiscard]] constexpr auto size_bytes() const noexcept -> size_t {
+        return static_cast<size_t>(width) * height * (bpp != 0 ? bpp : 4);
+    }
+    [[nodiscard]] constexpr auto stride_bytes() const noexcept -> size_t {
+        return stride != 0 ? stride : (static_cast<size_t>(width) * (bpp != 0 ? bpp : 4));
+    }
+};
+
+struct MachineConfig {
+    MemoryGeometry memory{};
+    ExecutionConfig execution{};
+    TuiConfig tui{};
+    DebugConfig debug{};
+    IsaConfig isa{};
+    FilesConfig files{};
+    NetworkConfig network{};
+    FramebufferConfig framebuffer{};
+    std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset{};
+    /// Runtime-only CPU model override staged by the TUI for the next simulator restart.
+    std::optional<simrv::pipeline::CpuModelConfig> cpu_model_config_override{};
+    std::optional<simrv::pipeline::BranchPredictorType> branch_predictor_type{};
+    uint32_t bht_entries = 0;
+    uint32_t btb_entries = 0;
+    uint32_t ras_entries = 0;
+    bool bram_prewarm = false;
+    bool mmio_console_redirect = false;
+    PlatformProfile platform_profile = PlatformProfile::Pcie;
+    SoCConfig soc = SoCConfig::virt_pcie();
+
+    [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (cpu_model_config_override) {
+            if (auto model_result = cpu_model_config_override->validate(); !model_result)
+                return std::unexpected(
+                    std::format("invalid staged CPU model: {}", model_result.error()));
+        }
+        if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
+            return std::unexpected("DRAM size must be a non-zero power of two");
+        }
+        if (memory.dram_base.raw() > ~simrv::xlen::Address{0} - memory.dram_size) {
+            return std::unexpected("DRAM address range overflows address space");
+        }
+        for (const auto& dev : SoCDeviceRegistry::resolve(soc)) {
+            if (!dev.enabled) continue;
+            if (memory.dram_base < dev.base + dev.size &&
+                dev.base < memory.dram_base + memory.dram_size) {
+                return std::unexpected("DRAM range overlaps SoC device '" + dev.name + "'");
+            }
+            for (const auto& extra : dev.regions) {
+                if (memory.dram_base < extra.base + extra.size &&
+                    extra.base < memory.dram_base + memory.dram_size) {
+                    return std::unexpected("DRAM range overlaps SoC device '" + dev.name +
+                                           "' region '" + extra.name + "'");
+                }
+            }
+        }
+        if (execution.num_harts == 0 || execution.num_harts > ExecutionConfig::kMaxHarts) {
+            return std::unexpected("hart count must be between 1 and " +
+                                   std::to_string(ExecutionConfig::kMaxHarts));
+        }
+        if (execution.smp_quantum == 0) {
+            return std::unexpected("SMP quantum must be non-zero");
+        }
+        if (debug.checkpoint_every != 0 && debug.checkpoint_dir.empty()) {
+            return std::unexpected("a checkpoint directory is required with periodic checkpoints");
+        }
+        if (isa.misa_xlen != 0 && isa.misa_xlen != 32 && isa.misa_xlen != 64) {
+            return std::unexpected("MISA XLEN must be 32, 64, or unspecified");
+        }
+        if (const auto* profile = simrv::isa::profile_info(execution.profile);
+            profile != nullptr && profile->xlen > simrv::xlen::kXLenBits) {
+            return std::unexpected("selected architecture profile exceeds the simulator XLEN");
+        }
+        if (isa.vlen != 0 &&
+            (isa.vlen < 128 || isa.vlen > 1024 || (isa.vlen & (isa.vlen - 1U)) != 0)) {
+            return std::unexpected("VLEN must be a power of two between 128 and 1024");
+        }
+        if (files.disk_enabled && files.disk_path.empty()) {
+            return std::unexpected("a disk path is required when disk support is enabled");
+        }
+        if (!files.virtiofs_path.empty()) {
+            std::error_code fs_error;
+            if (!std::filesystem::is_directory(files.virtiofs_path, fs_error) || fs_error) {
+                return std::unexpected("VirtIO-FS share path must be an existing directory");
+            }
+            if (platform_profile == PlatformProfile::None) {
+                return std::unexpected("VirtIO-FS requires a PCIe or VirtIO-MMIO platform");
+            }
+            if (soc.disable_unlisted_devices) {
+                const auto* fs = soc.find(SoCDeviceKind::VirtioMmioFs);
+                if (fs == nullptr || !fs->enabled) {
+                    return std::unexpected(
+                        "VirtIO-FS is not enabled by the selected SoC device configuration");
+                }
+            }
+        }
+        if (tui.enabled && debug.gdb_enabled) {
+            return std::unexpected("GDB remote debugging and the TUI are mutually exclusive");
+        }
+        if (debug.gdb_enabled && debug.lockstep_enabled) {
+            return std::unexpected(
+                "GDB remote debugging and Spike lockstep are mutually exclusive");
+        }
+        if (auto soc_result = soc.validate(); !soc_result.has_value()) {
+            return std::unexpected(soc_result.error());
+        }
+        if (!soc.smp.clusters.empty() && soc.smp.hart_count != execution.num_harts) {
+            return std::unexpected("SoC SMP hart count must match the resolved machine hart count");
+        }
+        if (framebuffer.width == 0 || framebuffer.height == 0) {
+            return std::unexpected("framebuffer dimensions must be non-zero");
+        }
+        if (execution.cpu_clock_hz == 0) {
+            return std::unexpected("CPU clock frequency must be non-zero");
+        }
+        if (execution.timebase_hz == 0) {
+            return std::unexpected("timebase frequency must be non-zero");
+        }
+        if (execution.timebase_hz > execution.cpu_clock_hz) {
+            return std::unexpected("timebase frequency cannot exceed CPU clock frequency");
+        }
+        if (execution.timebase_hz > std::numeric_limits<uint32_t>::max()) {
+            return std::unexpected(
+                "timebase frequency must fit the FDT 32-bit timebase-frequency property");
+        }
+        if (execution.cpu_clock_hz > std::numeric_limits<uint32_t>::max()) {
+            return std::unexpected(
+                "CPU clock frequency must fit the FDT 32-bit clock-frequency property");
+        }
+        return {};
+    }
+
+    template <typename Self>
+    constexpr auto&& with_clock_hz(this Self&& self, uint64_t cpu_clk,
+                                   uint64_t timebase = simrv::core::timing::kTimebaseHz) noexcept {
+        self.execution.cpu_clock_hz = cpu_clk;
+        self.execution.timebase_hz = timebase;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_framebuffer(this Self&& self, uint32_t width, uint32_t height,
+                                      simrv::xlen::PhysAddr base = simrv::xlen::PhysAddr{
+                                          0x84000000ULL}) noexcept {
+        self.framebuffer.width = width;
+        self.framebuffer.height = height;
+        self.framebuffer.base = base;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_dram_base(this Self&& self, simrv::xlen::PhysAddr base) noexcept {
+        self.memory.dram_base = base;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_dram_size(this Self&& self, simrv::xlen::Address size) noexcept {
+        self.memory.dram_size = size;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_harts(this Self&& self, uint32_t count) noexcept {
+        self.execution.num_harts = count;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_appmode(this Self&& self, bool mode) noexcept {
+        self.execution.appmode = mode;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_smp_quantum(this Self&& self, uint32_t quantum) noexcept {
+        self.execution.smp_quantum = quantum;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_pipeline(this Self&& self, simrv::pipeline::PipelineType type) noexcept {
+        self.execution.pipeline_type = type;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_start_pc(this Self&& self, simrv::xlen::VirtAddr pc) noexcept {
+        self.execution.start_pc = pc;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_tui(this Self&& self, bool enabled) noexcept {
+        self.tui.enabled = enabled;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_gdb(this Self&& self, bool enabled, uint16_t port = 1234) noexcept {
+        self.debug.gdb_enabled = enabled;
+        self.debug.gdb_port = port;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_misa_xlen(this Self&& self, unsigned int xlen) noexcept {
+        self.isa.misa_xlen = xlen;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_vlen(this Self&& self, unsigned int vlen) noexcept {
+        self.isa.vlen = vlen;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_binary(this Self&& self, std::string path) {
+        self.files.binary_path = std::move(path);
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_disk(this Self&& self, std::string path) {
+        self.files.disk_path = std::move(path);
+        self.files.disk_enabled = !self.files.disk_path.empty();
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_platform_profile(this Self&& self, PlatformProfile profile) noexcept {
+        self.platform_profile = profile;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_realtime_pacing(this Self&& self, bool enabled) noexcept {
+        self.execution.realtime_pacing = enabled;
+        return std::forward<Self>(self);
+    }
+};
+
+}  // namespace simrv::core

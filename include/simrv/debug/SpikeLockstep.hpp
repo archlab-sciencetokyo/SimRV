@@ -13,22 +13,20 @@
  *   SpikeLockstep lockstep("spike", mem_img, disk_img, dtb);
  *   lockstep.start();
  *   // after each committed instruction:
- *   lockstep.compare_and_report(cpu.state(), cpu.e_icount);
+ *   lockstep.compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
  */
 #pragma once
+
+#include <sys/types.h>
 
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
-#if defined(__linux__)
-#include <sys/types.h>
-#endif
-
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 struct ArchState;
@@ -47,9 +45,9 @@ namespace simrv::debug {
  *              extension bits 0-25 are used).
  * @return      Lowercase ISA string suitable for Spike's --isa= flag.
  */
-[[nodiscard]] inline auto spike_isa_string(CSRValue misa) -> std::string {
+[[nodiscard]] inline auto spike_isa_string(simrv::xlen::CsrValue misa) -> std::string {
     unsigned xlen = 32;
-    if constexpr (kIsXLen64) {
+    if constexpr (simrv::xlen::kIsXLen64) {
         const unsigned mxl = (misa >> 62) & 3;
         xlen = (mxl == 1) ? 32 : 64;
     }
@@ -57,27 +55,19 @@ namespace simrv::debug {
 
     // Check IMAFD bits for the 'G' shorthand
     const auto bit = [&](char c) -> bool {
-        return (misa & (static_cast<CSRValue>(1) << (c - 'a'))) != 0;
+        return (misa & (static_cast<simrv::xlen::CsrValue>(1) << (c - 'a'))) != 0;
     };
     const bool is_g = bit('i') && bit('m') && bit('a') && bit('f') && bit('d');
 
     if (is_g) {
         s += 'g';
-        // Append any extension beyond IMAFD
-        for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<CSRValue>(1) << i)) == 0) continue;
-            const char c = static_cast<char>('a' + i);
-            if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd') continue;
-            if (c == 's' || c == 'u') continue;
-            s += c;
+        // Follow Spike's canonical single-letter ordering (not ASCII order).
+        for (const char c : std::string_view("qlcbkjtpvnh")) {
+            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << (c - 'a'))) != 0) s += c;
         }
     } else {
-        for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
-                const char c = static_cast<char>('a' + i);
-                if (c == 's' || c == 'u') continue;
-                s += c;
-            }
+        for (const char c : std::string_view("iemafdqlcbkjtpvnh")) {
+            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << (c - 'a'))) != 0) s += c;
         }
     }
     return s;
@@ -88,9 +78,9 @@ namespace simrv::debug {
  * @brief One instruction's committed effect as reported by Spike --log-commits.
  */
 struct SpikeCommitRecord {
-    Address pc{};                      ///< PC of retired instruction
-    std::array<Register, 32> gpr{};    ///< Full GPR snapshot after retire
-    std::array<bool, 32> gpr_valid{};  ///< True for registers written this insn
+    simrv::xlen::VirtAddr pc{};                   ///< PC of retired instruction
+    std::array<simrv::xlen::Register, 32> gpr{};  ///< Full GPR snapshot after retire
+    std::array<bool, 32> gpr_valid{};             ///< True for registers written this insn
 };
 
 /**
@@ -152,8 +142,10 @@ class SpikeLockstep {
      * @param icount     Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
-    auto compare_and_report(const simrv::core::ArchState& state, Address current_pc,
+    auto compare_and_report(const simrv::core::ArchState& state, simrv::xlen::VirtAddr current_pc,
                             uint64_t icount) -> bool;
+    auto compare_and_report(const simrv::core::ArchState&, simrv::xlen::Address, uint64_t)
+        -> bool = delete;
 
     /** @return True if a divergence has been detected and simulation should halt. */
     [[nodiscard]] bool should_halt() const { return should_halt_; }
@@ -190,8 +182,8 @@ class SpikeLockstep {
         -> std::optional<SpikeCommitRecord>;
 
     /** Print a coloured divergence report. */
-    void print_divergence(uint64_t icount, Address simrv_pc, Address spike_pc,
-                          const simrv::core::ArchState& simrv_state,
+    void print_divergence(uint64_t icount, simrv::xlen::VirtAddr simrv_pc,
+                          simrv::xlen::VirtAddr spike_pc, const simrv::core::ArchState& simrv_state,
                           const SpikeCommitRecord& spike_rec);
 };
 

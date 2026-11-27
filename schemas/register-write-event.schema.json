@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.org/schemas/register-write-event.schema.json",
+  "title": "SimRV architectural register-write event",
+  "type": "object",
+  "required": ["schema_version", "event", "hart", "cycle", "pc", "instruction", "operation", "register_file", "index", "before_bits", "after_bits"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event": { "const": "register_write" },
+    "hart": { "type": "integer", "minimum": 0 },
+    "cycle": { "type": "integer", "minimum": 0 },
+    "pc": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "instruction": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "operation": { "type": "string" },
+    "register_file": { "enum": ["fpr", "vector"] },
+    "index": { "type": "integer", "minimum": 0, "maximum": 31 },
+    "before_bits": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "after_bits": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "flen": { "const": 64 },
+    "fcsr": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "vlen": { "type": "integer", "minimum": 128 },
+    "vl": { "type": "integer", "minimum": 0 },
+    "vtype": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "register_file": { "const": "fpr" } } },
+      "then": { "required": ["flen", "fcsr"] }
+    },
+    {
+      "if": { "properties": { "register_file": { "const": "vector" } } },
+      "then": { "required": ["vlen", "vl", "vtype"] }
+    }
+  ],
+  "additionalProperties": false
+}

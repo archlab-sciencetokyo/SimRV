@@ -1,0 +1,166 @@
+include(CheckCXXCompilerFlag)
+
+add_library(simrv-project-options INTERFACE)
+target_compile_features(simrv-project-options INTERFACE cxx_std_23)
+target_compile_definitions(
+  simrv-project-options
+  INTERFACE SIMRV_XLEN=${SIMRV_XLEN} SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB})
+target_compile_options(
+  simrv-project-options
+  INTERFACE
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wlogical-op;-Wduplicated-branches;-Wduplicated-cond>
+)
+
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(
+    simrv-project-options
+    INTERFACE $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Werror>)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+    set(CMAKE_LINK_WARNING_AS_ERROR ON)
+  endif()
+endif()
+
+if(SIMRV_USE_LIBCXX)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+    target_compile_options(simrv-project-options INTERFACE -stdlib=libc++)
+    target_link_options(simrv-project-options INTERFACE -stdlib=libc++)
+  else()
+    message(FATAL_ERROR "SIMRV_USE_LIBCXX is only supported when compiling with Clang")
+  endif()
+endif()
+
+if(SIMRV_ENABLE_ASAN
+   OR SIMRV_ENABLE_UBSAN
+   OR SIMRV_ENABLE_TSAN)
+  set(_simrv_sanitizers)
+  if(SIMRV_ENABLE_ASAN)
+    list(APPEND _simrv_sanitizers address)
+  endif()
+  if(SIMRV_ENABLE_UBSAN)
+    list(APPEND _simrv_sanitizers undefined)
+  endif()
+  if(SIMRV_ENABLE_TSAN)
+    list(APPEND _simrv_sanitizers thread)
+  endif()
+  string(JOIN "," _simrv_sanitizer_flags ${_simrv_sanitizers})
+  target_compile_options(
+    simrv-project-options INTERFACE -fsanitize=${_simrv_sanitizer_flags}
+                                    -fno-omit-frame-pointer)
+  target_link_options(simrv-project-options INTERFACE
+                      -fsanitize=${_simrv_sanitizer_flags})
+endif()
+
+if(SIMRV_ENABLE_CXX_PROFILES)
+  if(SIMRV_USE_LIBCXX)
+    target_compile_definitions(
+      simrv-project-options
+      INTERFACE _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST)
+  else()
+    target_compile_definitions(simrv-project-options
+                               INTERFACE _GLIBCXX_ASSERTIONS)
+  endif()
+  check_cxx_compiler_flag("-ftrivial-auto-var-init=zero"
+                          SIMRV_SUPPORTS_TRIVIAL_AUTO_VAR_INIT)
+  if(SIMRV_SUPPORTS_TRIVIAL_AUTO_VAR_INIT)
+    target_compile_options(
+      simrv-project-options
+      INTERFACE
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-ftrivial-auto-var-init=zero>)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+    foreach(_profile_flag IN ITEMS "-Wlifetime-safety" "-Wdangling"
+                                   "-Wdangling-gsl" "-Wreturn-stack-address")
+      string(MAKE_C_IDENTIFIER "SIMRV_SUPPORTS${_profile_flag}" _flag_var)
+      check_cxx_compiler_flag("${_profile_flag}" ${_flag_var})
+      if(${_flag_var})
+        target_compile_options(
+          simrv-project-options
+          INTERFACE $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:${_profile_flag}>)
+      endif()
+    endforeach()
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    foreach(_profile_flag IN ITEMS "-Wdangling-pointer" "-Wdangling-reference")
+      string(MAKE_C_IDENTIFIER "SIMRV_SUPPORTS${_profile_flag}" _flag_var)
+      check_cxx_compiler_flag("${_profile_flag}" ${_flag_var})
+      if(${_flag_var})
+        target_compile_options(
+          simrv-project-options
+          INTERFACE $<$<COMPILE_LANG_AND_ID:CXX,GNU>:${_profile_flag}>)
+      endif()
+    endforeach()
+  endif()
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
+   AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang"
+   AND CMAKE_BUILD_TYPE STREQUAL "Release"
+   AND SIMRV_X86_64_V3_BASELINE
+   AND NOT SIMRV_NATIVE_HOST_OPTIMIZATIONS)
+  check_cxx_compiler_flag("-march=x86-64-v3" SIMRV_SUPPORTS_X86_64_V3)
+  if(SIMRV_SUPPORTS_X86_64_V3)
+    target_compile_options(simrv-project-options INTERFACE -march=x86-64-v3)
+  else()
+    message(
+      FATAL_ERROR
+        "SIMRV_X86_64_V3_BASELINE is ON but the compiler rejects -march=x86-64-v3"
+    )
+  endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$"
+       AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang"
+       AND CMAKE_BUILD_TYPE STREQUAL "Release"
+       AND NOT SIMRV_NATIVE_HOST_OPTIMIZATIONS)
+  check_cxx_compiler_flag("-march=armv8-a" SIMRV_SUPPORTS_ARMV8_A)
+  if(SIMRV_SUPPORTS_ARMV8_A)
+    target_compile_options(simrv-project-options INTERFACE -march=armv8-a)
+  endif()
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_NATIVE_HOST_OPTIMIZATIONS)
+  check_cxx_compiler_flag("-march=native" SIMRV_SUPPORTS_MARCH_NATIVE)
+  check_cxx_compiler_flag("-mtune=native" SIMRV_SUPPORTS_MTUNE_NATIVE)
+  if(SIMRV_SUPPORTS_MARCH_NATIVE)
+    target_compile_options(simrv-project-options INTERFACE -march=native)
+  endif()
+  if(SIMRV_SUPPORTS_MTUNE_NATIVE)
+    target_compile_options(simrv-project-options INTERFACE -mtune=native)
+  endif()
+endif()
+
+option(SIMRV_STATIC_BINARIES "Link libgcc and libstdc++ statically" OFF)
+if(SIMRV_STATIC_BINARIES)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(simrv-project-options INTERFACE -static-libgcc -static-libstdc++)
+  endif()
+endif()
+
+find_package(Boost 1.83 COMPONENTS headers REQUIRED)
+target_compile_definitions(simrv-project-options INTERFACE SIMRV_HAS_BOOST=1)
+target_link_libraries(simrv-project-options INTERFACE Boost::headers)
+
+function(simrv_apply_options target)
+  target_link_libraries(${target} PRIVATE simrv-project-options)
+  if(SIMRV_ENABLE_CLANG_TIDY)
+    set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY "clang-tidy")
+  endif()
+endfunction()
+
+function(simrv_configure_native_test target)
+  simrv_apply_options(${target})
+  target_include_directories(
+    ${target} PRIVATE "${PROJECT_SOURCE_DIR}/include"
+                      "${PROJECT_SOURCE_DIR}/tests/third_party"
+                      "${PROJECT_BINARY_DIR}/generated")
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.2")
+    set_property(TARGET ${target} PROPERTY SKIP_LINTING ON)
+  endif()
+  set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
+endfunction()
+
+function(simrv_add_component target)
+  add_library(${target} OBJECT ${ARGN})
+  target_include_directories(${target} PUBLIC "${PROJECT_SOURCE_DIR}/include"
+                                              "${PROJECT_BINARY_DIR}/generated")
+  set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  simrv_apply_options(${target})
+endfunction()

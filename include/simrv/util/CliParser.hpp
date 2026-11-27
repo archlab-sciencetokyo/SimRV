@@ -2,42 +2,96 @@
 
 #include <expected>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
+#include "simrv/core/ExitCode.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/memory/BusProtocolSpec.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::util {
 
-enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion, ExplainInstruction };
+enum class CliAction : uint8_t {
+    Run,
+    ShowHelp,
+    ShowVersion,
+    ShowLicense,
+    ShowIsaInfo,
+    Doctor,
+    ExplainQuery,
+    DumpCpuModel,
+    ExportSoCManifest,
+    ShowThirdPartyNotices,
+};
+enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
+enum class ExplainQueryType : uint8_t { Auto, Instruction, Profile, Extension };
 
 struct RuntimeOptions {
     std::string fn_memimg;
     std::string fn_dskimg;
+    std::string fn_virtiofs;
     std::string fn_dvtree;
+    std::string fn_uefi;
+    std::string fn_uefi_vars;
+    bool uefi_enabled = false;
+    bool auto_fdt = false;
+    std::string bootargs;
     std::string fn_traplog;
+    std::string fn_log;
+    std::string fn_summary;
+    std::string fn_events;
+    std::string fn_uart_transcript;
+    std::string fn_signature;
+    std::string fn_archtrace;
+    std::string trace_dir = "trace";
+    uint8_t trace_level = 3;
+    bool trace_register_writes = false;
+    std::string trace_events;
+    std::string trace_function;
+    std::string trace_device;
+    std::optional<simrv::xlen::HartId> trace_hart;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_start;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_end;
+    std::optional<simrv::xlen::Counter> trace_after_cycle;
+    std::optional<simrv::xlen::Counter> trace_before_cycle;
+    std::string fn_save_checkpoint;
+    std::string fn_load_checkpoint;
+    simrv::xlen::Counter checkpoint_every = 0;
+    std::string checkpoint_dir;
+    std::string inspection_output;
 
-    Address start_pc = simrv::boot::kStartPc;
-    Counter fincnt = std::numeric_limits<Counter>::max();
-    Counter memimg = std::numeric_limits<Counter>::max();
-    Counter strace = 0;
-    Counter trace_begin = std::numeric_limits<Counter>::max();
-    Counter trace_end = std::numeric_limits<Counter>::max();
-    Counter enabletimer = 0UL;
-    Address isatest_tohost = 0x80001000;
-    isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
+    simrv::xlen::VirtAddr start_pc{simrv::boot::kStartPc};
+    simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter enabletimer = 0UL;
+    simrv::xlen::Address isatest_tohost = 0x80001000;
+    isa::IsaSpec isa_spec = isa::parse_isa_spec("gcv").value_or(isa::IsaSpec{});
+    isa::ArchitectureProfile profile = isa::kDefaultArchitectureProfile;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 
     bool appmode = true;
+    bool explicit_appmode = false;
     bool tuimode = false;
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;
-    bool gui_mode = false;
-    bool debugmode = false;
+    bool realtime_pacing = false;
+    bool explicit_realtime_mode = false;
+    std::optional<uint64_t> cpu_clock_hz;
+    std::optional<uint64_t> timebase_hz;
+    bool verbose = false;
+    bool quiet = false;
+    std::optional<simrv::log::Level> log_level;
+    simrv::log::Format log_format = simrv::log::Format::Text;
+    bool log_stderr = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool use_disk = false;
@@ -45,14 +99,20 @@ struct RuntimeOptions {
     bool bp_trace = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
-    bool cycle_accurate = false;
-    bool high_performance = true;
+    bool no_sbi = false;
+    bool act_test_hooks = false;
+    RequestedExecutionMode execution_mode = RequestedExecutionMode::Fast;
+    bool execution_mode_explicit = false;
     bool high_contrast = false;
+    std::string mission;
+    std::string pipeline_type = "5stage";
+    std::optional<simrv::memory::BusProtocol> bus_protocol;
     bool disable_forwarding = false;
-    std::string bp_type = "2bit";
-    uint32_t btb_size = 128;
-    bool disable_ex_forwarding = false;
-    bool disable_mem_forwarding = false;
+    bool divider_early_out = false;
+    std::string bpred_type;
+    uint32_t bht_size = 0;
+    uint32_t btb_size = 0;
+    uint32_t ras_size = 0;
 
     // Debug / co-simulation options
     bool gdb_mode = false;
@@ -61,13 +121,27 @@ struct RuntimeOptions {
     std::string spike_bin = "spike";
     std::string spike_elf;
 
-    std::string fn_cpuconfig;
-    bool debug_mode = false;
-    bool rollback = false;
+    std::string fn_config;
+    std::string dump_cpu_model_target;
+    std::string dump_cpu_model_output;
+    std::string soc_manifest_preset;
+    std::string soc_manifest_output;
+    std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset;
+    std::string fn_cfu_plugin;
+    std::vector<std::string> device_plugins;
+    std::optional<bool> bram_prewarm;
     uint64_t step_delay_us = 0;
-    uint32_t explain_inst_val = 0;
-    double mouse_sensitivity = 1.0;
+    std::string explain_query;
+    ExplainQueryType explain_query_type = ExplainQueryType::Auto;
     unsigned int vlen = 0;
+    uint32_t num_harts = 1;
+    bool explicit_num_harts = false;
+    uint64_t dram_size = 0;
+    simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
+    std::string config_target = "virt-pcie";
+    std::string net_mode = "user";
+
+    [[nodiscard]] auto to_machine_config() const -> simrv::core::MachineConfig;
 };
 
 struct ParseResult {
@@ -75,11 +149,20 @@ struct ParseResult {
     RuntimeOptions options{};
 };
 
+[[nodiscard]] auto resolve_runtime_profile(const RuntimeOptions& options)
+    -> simrv::core::RuntimeProfile;
+
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string>;
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
     -> std::expected<void, std::string>;
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void;
-[[noreturn]] auto option_error(std::string_view msg, int status = 1) -> void;
+[[noreturn]] auto usage(std::string_view prog_name,
+                        simrv::core::HostExitCode status = simrv::core::HostExitCode::Success)
+    -> void;
+[[noreturn]] auto option_error(std::string_view msg, int status) -> void;
+[[noreturn]] auto option_error(
+    std::string_view msg, simrv::core::HostExitCode status = simrv::core::HostExitCode::UsageError)
+    -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
 
 }  // namespace simrv::util

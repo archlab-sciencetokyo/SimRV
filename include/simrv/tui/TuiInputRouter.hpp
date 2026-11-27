@@ -24,9 +24,9 @@ struct InputContext {
 };
 
 [[nodiscard]] constexpr auto route_input(uint8_t byte, InputContext context) -> InputRoute {
-    if (byte == 0x11) return InputRoute::Quit;             // Ctrl-Q
-    if (byte == 0x12) return InputRoute::Reboot;           // Ctrl-R
-    if (byte == 0x1B) return InputRoute::ControlSequence;  // Escape / ANSI sequence
+    if (byte == 0x11 || byte == 0x03) return InputRoute::Quit;  // Ctrl-Q or Ctrl-C
+    if (byte == 0x12) return InputRoute::Reboot;                // Ctrl-R
+    if (byte == 0x1B) return InputRoute::ControlSequence;       // Escape / ANSI sequence
     if (context.modal_active) return InputRoute::Modal;
     if (context.paused) return InputRoute::Navigation;
     if (byte == 0x10) return InputRoute::Pause;  // Ctrl-P

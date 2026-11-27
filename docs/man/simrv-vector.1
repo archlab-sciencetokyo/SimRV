@@ -1,0 +1,40 @@
+.TH SIMRV-VECTOR 1 "November 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv-vector \- generate and run RISC-V vector tests
+.SH SYNOPSIS
+.B simrv-vector
+.RI [ options ]
+.SH DESCRIPTION
+.B simrv-vector
+uses a RISC-V vector test generator and cross-toolchain to create and run vector
+instruction tests with SimRV.
+.SH OPTIONS
+.TP
+.B \-\-simrv \fIPATH\fR
+Path to the SimRV executable. Required.
+.TP
+.B \-\-xlen \fI32|64\fR
+Select the guest register width. Required.
+.TP
+.B \-\-gcc \fIPATH\fR, \-\-objcopy \fIPATH\fR, \-\-nm \fIPATH\fR
+Select the RISC-V compiler and binary utilities. Required.
+.TP
+.B \-\-work-dir \fIPATH\fR, \-\-vector-tests-dir \fIPATH\fR
+Set the artifact directory and vector test source directory. Required.
+.TP
+.B \-\-vlen \fIBITS\fR
+Set the vector register length. The default is 256 bits.
+.TP
+.B \-\-jobs, \-j \fIN\fR
+Set the number of parallel test jobs.
+.TP
+.B \-\-pattern \fIREGEX\fR
+Filter generated instruction names.
+.TP
+.B \-\-generator \fIPATH\fR, \-\-configs-dir \fIPATH\fR
+Select a prebuilt generator or its configuration directory.
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.SH SEE ALSO
+.BR simrv (1)

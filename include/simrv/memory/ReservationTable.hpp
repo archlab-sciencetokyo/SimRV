@@ -1,0 +1,286 @@
+/**
+ * @file ReservationTable.hpp
+ * @brief Thread-safe LR/SC reservation tracking for multi-hart RISC-V systems.
+ */
+#pragma once
+#include <atomic>
+#include <boost/container/flat_map.hpp>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <mutex>
+#include <optional>
+#include <utility>
+
+#include "simrv/CompilerHints.hpp"
+#include "simrv/xlen/Hash.hpp"
+
+namespace simrv::memory {
+
+/**
+ * @class ReservationTable
+ * @brief Manages Load-Reserved / Store-Conditional reservations across simulated Harts.
+ *
+ * Implements standard RISC-V LR/SC semantics where reservations are registered at a
+ * cacheline / granule boundary and invalidated upon any store from another Hart.
+ */
+class ReservationTable {
+   public:
+    /// SimRV uses the minimum naturally aligned reservation set (eight bytes on RV64).
+    static constexpr simrv::xlen::Address kReservationGranule = 8;
+    static constexpr simrv::xlen::Address kReservationGranuleMask = ~(kReservationGranule - 1);
+
+    ReservationTable() = default;
+    ~ReservationTable() = default;
+
+    ReservationTable(const ReservationTable&) = delete;
+    auto operator=(const ReservationTable&) -> ReservationTable& = delete;
+    ReservationTable(ReservationTable&&) = delete;
+    auto operator=(ReservationTable&&) -> ReservationTable& = delete;
+
+    /**
+     * @brief Register a reservation for a given Hart.
+     * @param hart Hart ID making the reservation.
+     * @param addr Physical address loaded via LR.
+     */
+    void set_reservation(simrv::xlen::HartId hart, simrv::xlen::PhysAddr addr) {
+        const std::scoped_lock lock(mutex_);
+        reservations_[hart] = ReservationEntry{
+            .address = addr.raw() & kReservationGranuleMask,
+            .valid = true,
+        };
+        may_have_reservations_.store(true, std::memory_order_release);
+    }
+
+    /**
+     * @brief Check if a Hart holds a valid reservation matching the target address.
+     * @param hart Hart ID performing the SC check.
+     * @param addr Physical address targeted by SC.
+     * @return True if valid and matching, false otherwise.
+     */
+    [[nodiscard]] auto check_reservation(simrv::xlen::HartId hart, simrv::xlen::PhysAddr addr) const
+        -> bool {
+        const std::scoped_lock lock(mutex_);
+        auto it = reservations_.find(hart);
+        if (it == reservations_.end() || !it->second.valid) {
+            return false;
+        }
+        return it->second.address == (addr.raw() & kReservationGranuleMask);
+    }
+
+    /**
+     * @brief Atomically check and clear a reservation for SC execution.
+     * @param hart Hart ID executing SC.
+     * @param addr Target physical address of SC.
+     * @return True if reservation was valid and cleared successfully, false otherwise.
+     */
+    auto check_and_clear_reservation(simrv::xlen::HartId hart, simrv::xlen::PhysAddr addr) -> bool {
+        const std::scoped_lock lock(mutex_);
+        auto it = reservations_.find(hart);
+        if (it == reservations_.end() || !it->second.valid) {
+            return false;
+        }
+        const bool success = it->second.address == (addr.raw() & kReservationGranuleMask);
+        // Every SC attempt consumes the hart's reservation, including a failed
+        // attempt whose address does not match the reserved set.
+        it->second.valid = false;
+        bool any_valid = false;
+        for (const auto& [h, ent] : reservations_) {
+            if (ent.valid) {
+                any_valid = true;
+                break;
+            }
+        }
+        if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
+        return success;
+    }
+
+    /// Track a bus master's exclusive transaction independently of hart LR/SC reservations.
+    void set_external_reservation(uint32_t id, simrv::xlen::PhysAddr address, size_t size) {
+        const std::scoped_lock lock(mutex_);
+        if (size == 0 ||
+            std::cmp_greater(size - 1,
+                             std::numeric_limits<simrv::xlen::Address>::max() - address.raw())) {
+            external_reservations_.erase(id);
+            may_have_external_reservations_.store(!external_reservations_.empty(),
+                                                  std::memory_order_release);
+            return;
+        }
+        external_reservations_[id] = ExternalReservation{address.raw(), size};
+        may_have_external_reservations_.store(true, std::memory_order_release);
+    }
+
+    /// Consume an exclusive monitor whether its address and size match or not.
+    auto check_and_clear_external_reservation(uint32_t id, simrv::xlen::PhysAddr address,
+                                              size_t size) -> bool {
+        const std::scoped_lock lock(mutex_);
+        const auto it = external_reservations_.find(id);
+        if (it == external_reservations_.end()) return false;
+        const bool matches = it->second.address == address.raw() && it->second.size == size;
+        external_reservations_.erase(it);
+        may_have_external_reservations_.store(!external_reservations_.empty(),
+                                              std::memory_order_release);
+        return matches;
+    }
+
+    void clear_external_reservations() {
+        const std::scoped_lock lock(mutex_);
+        external_reservations_.clear();
+        may_have_external_reservations_.store(false, std::memory_order_release);
+    }
+
+    /**
+     * @brief Invalidate all reservations that overlap the specified address granule.
+     * @param addr Physical address written by a store, AMO, or DMA.
+     * @param store_origin Optional Hart ID initiating the store. If provided,
+     *                     reservations belonging to other Harts are invalidated.
+     */
+    void invalidate_matching(simrv::xlen::PhysAddr addr,
+                             std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
+        if (!may_have_reservations()) return;
+        const std::scoped_lock lock(mutex_);
+        const simrv::xlen::Address granule_addr = addr.raw() & kReservationGranuleMask;
+        bool any_valid = false;
+        for (auto& [hart, entry] : reservations_) {
+            if (store_origin.has_value() && hart == *store_origin) {
+                if (entry.valid) any_valid = true;
+                continue;  // Store originating from this Hart does not invalidate its own before SC
+            }
+            if (entry.valid) {
+                if (entry.address == granule_addr) {
+                    entry.valid = false;
+                } else {
+                    any_valid = true;
+                }
+            }
+        }
+        if (!any_valid) {
+            may_have_reservations_.store(false, std::memory_order_release);
+        }
+        invalidate_external_locked(granule_addr, granule_addr + kReservationGranule - 1);
+    }
+
+    /**
+     * @brief Invalidate reservations overlapping a physical byte range.
+     * @param addr First physical byte written.
+     * @param size Number of bytes written.
+     * @param store_origin Optional Hart ID whose reservation remains valid.
+     */
+    void invalidate_range(simrv::xlen::PhysAddr address, size_t size,
+                          std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
+        if (size == 0 || !may_have_reservations()) return;
+        const auto addr = address.raw();
+        const simrv::xlen::Address first_granule = addr & kReservationGranuleMask;
+        const simrv::xlen::Address last_byte =
+            std::cmp_greater(size - 1, std::numeric_limits<simrv::xlen::Address>::max() - addr)
+                ? std::numeric_limits<simrv::xlen::Address>::max()
+                : addr + static_cast<simrv::xlen::Address>(size - 1);
+        const simrv::xlen::Address last_granule = last_byte & kReservationGranuleMask;
+        const std::scoped_lock lock(mutex_);
+        bool any_valid = false;
+        for (auto& [hart, entry] : reservations_) {
+            if (!entry.valid) continue;
+            if (store_origin.has_value() && hart == *store_origin) {
+                any_valid = true;
+                continue;
+            }
+            if (entry.address >= first_granule && entry.address <= last_granule) {
+                entry.valid = false;
+            } else {
+                any_valid = true;
+            }
+        }
+        if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
+        invalidate_external_locked(addr, last_byte);
+    }
+
+    template <std::integral I>
+    void invalidate_range(I, size_t, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
+
+    template <std::integral I>
+    void set_reservation(simrv::xlen::HartId, I) = delete;
+    template <std::integral I>
+    auto check_reservation(simrv::xlen::HartId, I) const -> bool = delete;
+    template <std::integral I>
+    auto check_and_clear_reservation(simrv::xlen::HartId, I) -> bool = delete;
+    template <std::integral I>
+    void invalidate_matching(I, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
+
+    /**
+     * @brief Clear active reservation for a specific Hart.
+     * @param hart Hart ID whose reservation to invalidate.
+     */
+    void clear_reservation(simrv::xlen::HartId hart) {
+        const std::scoped_lock lock(mutex_);
+        auto it = reservations_.find(hart);
+        if (it != reservations_.end()) {
+            it->second.valid = false;
+        }
+        bool any_valid = false;
+        for (const auto& [h, ent] : reservations_) {
+            if (ent.valid) {
+                any_valid = true;
+                break;
+            }
+        }
+        if (!any_valid) {
+            may_have_reservations_.store(false, std::memory_order_release);
+        }
+    }
+
+    /**
+     * @brief Invalidate all reservations across all Harts (e.g. on context switch/reset).
+     */
+    void clear_all() {
+        const std::scoped_lock lock(mutex_);
+        reservations_.clear();
+        external_reservations_.clear();
+        may_have_reservations_.store(false, std::memory_order_release);
+        may_have_external_reservations_.store(false, std::memory_order_release);
+    }
+
+    /// False guarantees that an ordinary store has no LR/SC reservation to invalidate. True is
+    /// conservative; updates may clear it when the last valid reservation is removed.
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto may_have_reservations() const noexcept -> bool {
+        return may_have_reservations_.load(std::memory_order_acquire) ||
+               may_have_external_reservations_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto may_have_external_reservations() const noexcept -> bool {
+        return may_have_external_reservations_.load(std::memory_order_acquire);
+    }
+
+   private:
+    struct ReservationEntry {
+        simrv::xlen::Address address{};
+        bool valid{false};
+    };
+
+    struct ExternalReservation {
+        simrv::xlen::Address address{};
+        size_t size{};
+    };
+
+    void invalidate_external_locked(simrv::xlen::Address first, simrv::xlen::Address last) {
+        for (auto it = external_reservations_.begin(); it != external_reservations_.end();) {
+            const auto end =
+                it->second.address + static_cast<simrv::xlen::Address>(it->second.size - 1);
+            if (it->second.address <= last && end >= first) {
+                it = external_reservations_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        may_have_external_reservations_.store(!external_reservations_.empty(),
+                                              std::memory_order_release);
+    }
+
+    mutable std::mutex mutex_;
+    boost::container::flat_map<simrv::xlen::HartId, ReservationEntry> reservations_;
+    boost::container::flat_map<uint32_t, ExternalReservation> external_reservations_;
+    std::atomic<bool> may_have_reservations_{false};
+    std::atomic<bool> may_have_external_reservations_{false};
+};
+
+}  // namespace simrv::memory

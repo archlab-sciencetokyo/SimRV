@@ -1,20 +1,20 @@
-name: Architectural correctness discrepancy
-description: Report behavior that differs from a RISC-V specification or reference model
+name: RISC-V behavior mismatch
+description: Report a result that may not match the RISC-V specification
 title: "[correctness]: "
 labels: ["correctness"]
 body:
   - type: textarea
     attributes:
-      label: Observed and expected behavior
-      description: Cite the relevant specification section or reference-model result.
+      label: What happened, and what did you expect?
+      description: If you can, name the RISC-V rule or section that seems relevant.
     validations: {required: true}
   - type: textarea
     attributes:
-      label: Minimal reproducer
-      description: Include the guest, command line, instruction trace, and exit status.
+      label: Example that shows the problem
+      description: Share a small program or input, the command you ran, and the result. Include a trace if you have one.
     validations: {required: true}
   - type: textarea
     attributes:
-      label: Configuration
-      description: Include SimRV revision, host/compiler, XLEN, MISA, VLEN, privilege mode, and evidence report.
-    validations: {required: true}
+      label: Setup details
+      description: SimRV version, host/compiler, RV32 or RV64, enabled extensions, vector length, privilege mode, or report. Include what you know.
+    validations: {required: false}

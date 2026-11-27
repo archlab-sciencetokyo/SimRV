@@ -6,64 +6,56 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "simrv/core/Logger.hpp"
+#include "simrv/core/MachineConfig.hpp"
+#include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/TuiTypes.hpp"
+#include "simrv/tui/framework/Modal.hpp"
+#include "simrv/tui/framework/Types.hpp"
+#include "simrv/tui/modals/ToolPickerModal.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
-}
+enum class PlatformProfile : uint8_t;
+}  // namespace simrv::core
 
 namespace simrv::tui {
 
-class LeftPane;
-enum class TuiRegPage : uint8_t;
+namespace modals {
+class FilePickerModal;
+class MissionObjectiveModal;
+}  // namespace modals
 
-enum class ModalType : uint8_t {
-    None,
-    SetBreakpoint,
-    SetWatchpoint,
-    SetSpeed,
-    InspectAddress,
-    LoadBinary,
-    LoadDiskImage,
-    Help,
-    Settings,
-    ConfigureMisa,
-    ConfigureSystem,
-    ManageBreakpoints,
-    Notice
-};
-
-struct SettingsDraft {
-    bool cycle_accurate = false;
-    bool debug_mode = false;
-    bool rollback_enabled = false;
-    bool high_contrast = false;
-    bool use_mix = false;
-    bool bp_trace = false;
-    bool traplog_mode = false;
-    bool dlog_mode = false;
-    bool high_performance = false;
-    bool lockstep_mode = false;
-    bool gdb_mode = false;
-};
+class InspectorPane;
+class LogBuffer;
+class MissionProgress;
 
 struct SysConfigDraft {
-    uint32_t icache_miss_penalty = 10;
-    uint32_t dcache_miss_penalty = 15;
-    uint32_t tlb_miss_penalty = 30;
-    uint32_t mul_latency = 3;
-    uint32_t div_latency = 20;
-    uint32_t branch_mispredict_penalty = 2;
+    uint8_t preset = 1;         // tiny, balanced, performance, custom
+    uint8_t pipeline_type = 0;  // 0: 5-stage, 1: 3-stage
+    uint32_t mul_latency = 2;
+    uint32_t div_latency = 17;
+    uint32_t fp_alu_latency = 3;
+    uint32_t fp_div_latency = 15;
+    uint32_t csr_flush_penalty = 3;
+    uint32_t fence_flush_penalty = 4;
     bool enable_forwarding = true;
-    bool enable_ex_forwarding = true;
-    bool enable_mem_forwarding = true;
-    uint8_t bp_type = 3;  // 0: Static-NT, 1: Static-T, 2: 1-Bit, 3: 2-Bit Bimodal, 4: Gshare
-    uint32_t btb_entries = 128;
+    bool cycle_accurate = false;
+    uint8_t bpred_type = 2;  // 0: Static, 1: Bimodal, 2: GShare, 3: Tournament
+    uint32_t bht_entries = 1024;
+    uint32_t btb_entries = 256;
+    uint32_t ras_entries = 16;
 };
 
 struct MisaDraft {
@@ -78,7 +70,7 @@ struct MisaDraft {
     bool ext_s = true;
     bool ext_u = true;
     bool ext_v = false;
-    unsigned vlen = 256;  // VLEN for V extension (32–1024, power of 2)
+    unsigned vlen = 256;  // VLEN for V extension (128-1024, power of 2)
     [[nodiscard]] auto to_misa_val() const -> uint64_t {
         uint64_t val = 0;
         if (xlen_bits == 32) {
@@ -104,70 +96,255 @@ struct MisaDraft {
     }
 };
 
+struct SettingsDraft {
+    uint8_t active_tab = 0;  // 0: General, 1: MISA Extensions, 2: Microarchitecture
+    int tab_cursor[3] = {0, 0, 0};
+
+    // Tab 0: General / UI
+    bool cycle_accurate = false;
+    bool high_contrast = false;
+    TuiThemeStyle theme_style = TuiThemeStyle::ModernUnicode;
+    framework::DensityMode density_mode = framework::DensityMode::Auto;
+    bool use_mix = false;
+    bool bp_trace = false;
+    bool traplog_mode = false;
+    bool dlog_mode = false;
+    bool lockstep_mode = false;
+    uint32_t num_harts = 1;
+    uint32_t smp_quantum = 1000;
+    bool smp_multi_threaded = false;
+    uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO
+    uint64_t dram_size_mb = 256;
+    std::string net_mode = "user";
+
+    // Tab 1: MISA Extensions
+    MisaDraft misa;
+
+    // Tab 2: System / Microarchitecture
+    SysConfigDraft sys_config;
+};
+
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
+    void set_display_graphics_supported(bool supported) noexcept {
+        display_graphics_supported_ = supported;
+    }
+    void set_density_mode(framework::DensityMode mode) noexcept { density_mode_ = mode; }
+    [[nodiscard]] auto density_mode() const noexcept -> framework::DensityMode {
+        return density_mode_;
+    }
 
-    [[nodiscard]] auto is_active() const -> bool { return active_modal_ != ModalType::None; }
+    [[nodiscard]] auto is_active() const -> bool {
+        return active_modal_ != ModalType::None || active_modal_impl_ != nullptr;
+    }
+    [[nodiscard]] auto active_modal_impl() noexcept -> framework::IModal* {
+        return active_modal_impl_.get();
+    }
+    [[nodiscard]] auto active_modal_impl() const noexcept -> const framework::IModal* {
+        return active_modal_impl_.get();
+    }
+    void open_custom_modal(std::unique_ptr<framework::IModal> modal) {
+        close();
+        active_modal_impl_ = std::move(modal);
+    }
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
     [[nodiscard]] auto get_input() const -> const std::string& { return input_; }
+    void set_input(std::string input) {
+        input_ = std::move(input);
+        path_completion_preview_.clear();
+    }
+    void set_path_completion_preview(std::vector<std::string> preview) {
+        path_completion_preview_ = std::move(preview);
+    }
+    [[nodiscard]] auto path_completion_preview() const -> const std::vector<std::string>& {
+        return path_completion_preview_;
+    }
+    void set_log_buffer(LogBuffer* buf) { log_buffer_ = buf; }
 
-    void open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us);
+    void open(ModalType type, InspectorPane* left_pane, uint64_t step_delay_us);
     void close();
-    auto submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
+    auto submit(InspectorPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 const std::function<void(TuiRegPage)>& set_reg_page_cb,
                 const std::function<void(const std::string&)>& set_status_override_cb,
-                const std::function<void()>& on_speed_changed_cb) -> bool;
+                const std::function<void()>& on_speed_changed_cb,
+                const std::function<void(framework::DensityMode, TuiThemeStyle)>&
+                    on_presentation_changed_cb = {}) -> bool;
 
-    void push_char(char c) { input_.push_back(c); }
+    void push_char(char c) {
+        input_.push_back(c);
+        path_completion_preview_.clear();
+    }
     void pop_char() {
         if (!input_.empty()) input_.pop_back();
+        path_completion_preview_.clear();
     }
-    void toggle_load_mode() { load_appmode_ = !load_appmode_; }
+    void toggle_load_mode() {
+        path_completion_preview_.clear();
+        if (load_buildroot_mode_) {
+            load_buildroot_mode_ = false;
+            load_appmode_ = true;
+        } else if (load_appmode_) {
+            load_appmode_ = false;
+        } else {
+            load_buildroot_mode_ = true;
+        }
+    }
     [[nodiscard]] auto get_load_appmode() const -> bool { return load_appmode_; }
 
     void move_settings_cursor(int delta);
+    void cycle_settings_tab(int delta = 1);
+    void set_settings_tab(uint8_t tab);
+    void adjust_setting_at_cursor(int dir);
     void toggle_setting_at_cursor();
     void toggle_setting_by_index(int index);
-
-    void move_misa_cursor(int delta);
-    void toggle_misa_at_cursor();
-    void toggle_misa_by_index(int index);
-    void apply_misa_profile(int profile_idx);
-
-    void move_sysconfig_cursor(int delta);
-    void adjust_sysconfig_at_cursor(int dir);
-    void toggle_sysconfig_at_cursor();
-    void toggle_sysconfig_by_index(int index);
-    void push_sysconfig_digit(char c);
-    void pop_sysconfig_digit();
+    void push_settings_digit(char c);
+    void pop_settings_digit();
+    void apply_settings_isa_preset(int preset_idx);
 
     void move_bp_cursor(int delta);
     auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb)
         -> bool;
 
+    void move_glossary_topic(int delta);
+    void set_glossary_topic(int topic);
+    void scroll_glossary_content(int delta);
+
+    void scroll_help(int delta);
+    void reset_help_scroll() { help_scroll_ = 0; }
+    void scroll_to_top();
+    void scroll_to_bottom();
+    void handle_wheel(int delta);
+    auto handle_horizontal(int delta) -> bool;
+
+    void move_preset_cursor(int delta) {
+        preset_cursor_ = std::clamp(preset_cursor_ + delta, 0, 3);
+    }
+    void set_preset_cursor(int cursor) { preset_cursor_ = std::clamp(cursor, 0, 3); }
+    [[nodiscard]] auto get_selected_preset() const -> LayoutPreset {
+        return static_cast<LayoutPreset>(preset_cursor_);
+    }
+    [[nodiscard]] auto get_preset_cursor() const -> int { return preset_cursor_; }
+
+    void open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots = 3);
+    void move_tool_picker_cursor(int delta);
+    void set_tool_picker_cursor(int cursor);
+    void set_tool_picker_slot(int slot);
+    void cycle_tool_picker_slot(int num_slots = 0, int direction = 1);
+    [[nodiscard]] auto get_tool_picker_slot() const -> int { return tool_picker_slot_; }
+    [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
+    [[nodiscard]] auto get_tool_picker_num_slots() const -> int { return tool_picker_num_slots_; }
+    [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
+    [[nodiscard]] auto tool_filter() const -> modals::ToolFilter;
+    void set_selected_hart(size_t hart) { selected_hart_ = hart; }
+
+    void open_memory_dump(simrv::xlen::VirtAddr addr = {}, InspectorPane* inspector_pane = nullptr);
+    void open_log_viewer();
+    void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
+    void open_mission_objective();
+    void cycle_mission_hint() noexcept;
+    [[nodiscard]] auto mission_hint_level() const noexcept -> uint8_t {
+        return mission_hint_level_;
+    }
+    void scroll_log_viewer(int delta, int total_lines = 100, int visible_lines = 20);
+    void scroll_log_viewer_page(int pages, int total_lines = 100, int visible_lines = 20);
+    void toggle_log_follow();
+    void cycle_log_level();
+    void set_log_filter_level(std::optional<simrv::log::Level> level);
+    void open_switch_hart(size_t current_hart);
+    void move_memory_cursor(int delta_byte, int delta_row);
+    void scroll_memory_page(int pages);
+    void toggle_memory_mode();
+    void move_hart_cursor(int delta);
+
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
+    void open_platform_confirm(const SettingsDraft& draft);
+    void open_save_cpu_config();
+    void open_load_cpu_config();
+    void open_file_picker();
+    void refresh_file_picker();
+    void accept_file_picker_entry();
+    void move_file_picker_cursor(int delta);
+    void file_picker_input(uint8_t byte, TuiKey key);
+    [[nodiscard]] auto file_picker_active() const -> bool {
+        return active_modal_ == ModalType::LoadFilePicker;
+    }
+    [[nodiscard]] auto get_settings_draft() const -> const SettingsDraft& {
+        return settings_draft_;
+    }
+    [[nodiscard]] auto get_settings_draft() -> SettingsDraft& { return settings_draft_; }
+    [[nodiscard]] auto get_pending_platform_draft() const -> const SettingsDraft& {
+        return pending_platform_draft_;
+    }
+    void open_reconfiguration_confirm(simrv::core::MachineConfig config, std::string summary,
+                                      std::optional<bool> cycle_accurate = std::nullopt);
+    [[nodiscard]] auto apply_pending_reconfiguration() -> std::expected<void, std::string>;
+
+    using ModalClickResult = framework::ModalAction;
+
+    [[nodiscard]] auto handle_click(int x, int y, int term_width, int term_height)
+        -> ModalClickResult;
+    [[nodiscard]] auto is_control_at(int x, int y) const -> bool;
 
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 
    private:
     simrv::core::Machine& machine_;
+    const MissionProgress* mission_ = nullptr;
+    uint8_t mission_hint_level_ = 0;
+    LogBuffer* log_buffer_ = nullptr;
     ModalType active_modal_ = ModalType::None;
+    std::unique_ptr<framework::IModal> active_modal_impl_{};
     std::string input_;
     std::string notice_title_;
     std::string notice_message_;
     bool notice_is_error_ = false;
     int bp_cursor_ = 0;
-    int settings_cursor_ = 0;
     SettingsDraft settings_draft_;
-    int misa_cursor_ = 0;
-    MisaDraft misa_draft_;
-    int sysconfig_cursor_ = 0;
-    SysConfigDraft sysconfig_draft_;
+    framework::DensityMode density_mode_ = framework::DensityMode::Auto;
+    bool display_graphics_supported_ = false;
+    SettingsDraft pending_platform_draft_;
+    std::optional<simrv::core::MachineConfig> pending_reconfiguration_;
+    std::optional<bool> pending_cycle_accurate_;
+    std::string pending_reconfiguration_summary_;
+    int glossary_topic_ = 0;
+    int glossary_scroll_ = 0;
+    mutable int help_scroll_ = 0;
+    int preset_cursor_ = 0;
+    size_t selected_hart_ = 0;
+    int tool_picker_slot_ = 0;
+    int tool_picker_cursor_ = 0;
+    int tool_picker_num_slots_ = 3;
+    TuiRegPage tool_picker_current_page_ = TuiRegPage::GPR;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
+    bool load_buildroot_mode_ = false;
+    std::vector<std::string> path_completion_preview_;
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;
     bool staged_target_appmode_ = false;
+    ModalType file_picker_return_modal_ = ModalType::None;
+    std::string file_picker_return_input_;
+    std::filesystem::path file_picker_directory_;
+    std::string file_picker_filter_;
+    std::vector<std::filesystem::path> file_picker_entries_;
+    int file_picker_cursor_ = 0;
+    bool file_picker_select_directory_ = false;
+    // Rendering resolves content-dependent modal geometry; hit-testing reuses that exact box.
+    mutable int rendered_term_width_ = 0;
+    mutable int rendered_term_height_ = 0;
+    mutable int rendered_box_width_ = 0;
+    mutable int rendered_box_height_ = 0;
+    mutable int rendered_start_x_ = 0;
+    mutable int rendered_start_y_ = 0;
+    struct RenderedControlRow {
+        int relative_y = 0;
+        int content_row = 0;
+        std::vector<framework::ControlSpan> spans;
+    };
+    mutable std::vector<RenderedControlRow> rendered_control_rows_;
+
+    friend class modals::FilePickerModal;
+    friend class modals::MissionObjectiveModal;
 };
 
 }  // namespace simrv::tui

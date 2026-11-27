@@ -5,25 +5,70 @@
 #include <limits>
 #include <type_traits>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 
 namespace simrv::execute::vector {
 
 // Helper to check/get active elements under mask
-inline bool is_element_active(const core::VectorRegister& mask_reg, uint32_t i, bool vm) {
+inline bool is_element_active(const core::VectorRegister& mask_reg,
+                              simrv::xlen::VectorElementIndex i, bool vm) {
     if (vm) return true;
     return (mask_reg.u8[i / 8] & (1u << (i % 8))) !=
            0;  // NOLINT(cppcoreguidelines-pro-type-union-access)
 }
 
-inline bool get_mask_bit(const core::VectorRegister& mask_reg, uint32_t i) {
+template <typename Fn>
+inline auto dispatch_sew(uint32_t sew_bytes, Fn&& fn) -> decltype(auto) {
+    switch (sew_bytes) {
+        case 1:
+            return fn.template operator()<uint8_t>();
+        case 2:
+            return fn.template operator()<uint16_t>();
+        case 4:
+            return fn.template operator()<uint32_t>();
+        default:
+            return fn.template operator()<uint64_t>();
+    }
+}
+
+template <typename Fn>
+inline auto dispatch_sew_signed(uint32_t sew_bytes, Fn&& fn) -> decltype(auto) {
+    switch (sew_bytes) {
+        case 1:
+            return fn.template operator()<int8_t>();
+        case 2:
+            return fn.template operator()<int16_t>();
+        case 4:
+            return fn.template operator()<int32_t>();
+        default:
+            return fn.template operator()<int64_t>();
+    }
+}
+
+template <typename BodyFn>
+inline void for_each_active_element(const core::VectorRegister& mask_reg, uint32_t vstart,
+                                    uint32_t vl, bool vm, BodyFn&& body) {
+    if (vm) {
+        for (uint32_t i = vstart; i < vl; ++i) {
+            body(i);
+        }
+    } else {
+        for (uint32_t i = vstart; i < vl; ++i) {
+            if ((mask_reg.u8[i / 8] & (1u << (i % 8))) !=
+                0) {  // NOLINT(cppcoreguidelines-pro-type-union-access)
+                body(i);
+            }
+        }
+    }
+}
+
+inline bool get_mask_bit(const core::VectorRegister& mask_reg, simrv::xlen::VectorElementIndex i) {
     return (mask_reg.u8[i / 8] & (1u << (i % 8))) !=
            0;  // NOLINT(cppcoreguidelines-pro-type-union-access)
 }
 
 // Helper to write mask bits
-inline void set_mask_bit(core::VectorRegister& dest, uint32_t i, bool val) {
+inline void set_mask_bit(core::VectorRegister& dest, simrv::xlen::VectorElementIndex i, bool val) {
     uint32_t byte_idx = i / 8;
     uint32_t bit_idx = i % 8;
     if (val) {
@@ -35,13 +80,15 @@ inline void set_mask_bit(core::VectorRegister& dest, uint32_t i, bool val) {
 
 // Helper to read group element
 template <typename T>
-inline T get_group_element(const core::RegisterFile& regs, RegId base_reg, uint32_t i) {
+inline T get_group_element(const core::RegisterFile& regs, simrv::xlen::RegId base_reg,
+                           simrv::xlen::VectorElementIndex i) {
     const uint32_t elems_per_reg = regs.vlen_bytes() / sizeof(T);
     const uint32_t shift = std::countr_zero(elems_per_reg);
     uint32_t reg_offset = i >> shift;
     uint32_t elem_idx = i & (elems_per_reg - 1);
-    auto actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
-    const auto& vreg = regs.read_vector(actual_reg);
+    auto actual_reg =
+        static_cast<simrv::xlen::RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
+    const auto& vreg = regs.read_vector(simrv::xlen::to_vec_reg_id(actual_reg));
 
     if constexpr (std::is_same_v<T, float>) {
         return vreg.f32[elem_idx];  // NOLINT(cppcoreguidelines-pro-type-union-access)
@@ -64,13 +111,15 @@ inline T get_group_element(const core::RegisterFile& regs, RegId base_reg, uint3
 
 // Helper to write group element
 template <typename T>
-inline void set_group_element(core::RegisterFile& regs, RegId base_reg, uint32_t i, T val) {
+inline void set_group_element(core::RegisterFile& regs, simrv::xlen::RegId base_reg,
+                              simrv::xlen::VectorElementIndex i, T val) {
     const uint32_t elems_per_reg = regs.vlen_bytes() / sizeof(T);
     const uint32_t shift = std::countr_zero(elems_per_reg);
     uint32_t reg_offset = i >> shift;
     uint32_t elem_idx = i & (elems_per_reg - 1);
-    auto actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
-    auto& vreg = regs.read_vector(actual_reg);
+    auto actual_reg =
+        static_cast<simrv::xlen::RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
+    auto& vreg = regs.read_vector(simrv::xlen::to_vec_reg_id(actual_reg));
 
     if constexpr (std::is_same_v<T, float>) {
         vreg.f32[elem_idx] = val;  // NOLINT(cppcoreguidelines-pro-type-union-access)
@@ -92,12 +141,45 @@ inline void set_group_element(core::RegisterFile& regs, RegId base_reg, uint32_t
 }
 
 // Standard templates for vector ALU operations
-template <typename T, typename Op>
-inline void perform_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
-                       Op op) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+template <typename T>
+constexpr auto integer_scalar(simrv::xlen::Register value) -> T {
+    return static_cast<T>(static_cast<simrv::xlen::SignedWord>(value));
+}
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+template <typename T, typename Op>
+inline void perform_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    if (vm && cpu.state().vstart == 0) {
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t chunk = std::min(remaining, elems_per_reg);
+            const auto d_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_idx) & 0x1F);
+            const auto s1_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs1) + reg_idx) & 0x1F);
+            const auto s2_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs2) + reg_idx) & 0x1F);
+            auto& vd = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(d_reg));
+            const auto& vs1 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s1_reg));
+            const auto& vs2 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s2_reg));
+            auto* dst = reinterpret_cast<T*>(vd.u8.data());
+            const auto* src1 = reinterpret_cast<const T*>(vs1.u8.data());
+            const auto* src2 = reinterpret_cast<const T*>(vs2.u8.data());
+            for (uint32_t j = 0; j < chunk; ++j) {
+                dst[j] = op(src2[j], src1[j]);
+            }
+            remaining -= chunk;
+            ++reg_idx;
+        }
+        return;
+    }
+
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val1 = get_group_element<T>(cpu.state().regs, rs1, i);
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
@@ -106,12 +188,37 @@ inline void perform_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, 
 }
 
 template <typename T, typename Op>
-inline void perform_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl,
-                       Op op) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+inline void perform_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
+                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    if (vm && cpu.state().vstart == 0) {
+        const T val1 = integer_scalar<T>(rs1_val);
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t chunk = std::min(remaining, elems_per_reg);
+            const auto d_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_idx) & 0x1F);
+            const auto s2_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs2) + reg_idx) & 0x1F);
+            auto& vd = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(d_reg));
+            const auto& vs2 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s2_reg));
+            auto* dst = reinterpret_cast<T*>(vd.u8.data());
+            const auto* src2 = reinterpret_cast<const T*>(vs2.u8.data());
+            for (uint32_t j = 0; j < chunk; ++j) {
+                dst[j] = op(src2[j], val1);
+            }
+            remaining -= chunk;
+            ++reg_idx;
+        }
+        return;
+    }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    T val1 = integer_scalar<T>(rs1_val);
+
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, op(val2, val1));
@@ -119,12 +226,37 @@ inline void perform_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bo
 }
 
 template <typename T, typename Op>
-inline void perform_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, bool vm, uint32_t vl,
-                       Op op) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+inline void perform_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv::xlen::RegId rs2,
+                       bool vm, uint32_t vl, Op op) {
+    if (vm && cpu.state().vstart == 0) {
+        const T val1 = static_cast<T>(imm);
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t chunk = std::min(remaining, elems_per_reg);
+            const auto d_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_idx) & 0x1F);
+            const auto s2_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs2) + reg_idx) & 0x1F);
+            auto& vd = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(d_reg));
+            const auto& vs2 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s2_reg));
+            auto* dst = reinterpret_cast<T*>(vd.u8.data());
+            const auto* src2 = reinterpret_cast<const T*>(vs2.u8.data());
+            for (uint32_t j = 0; j < chunk; ++j) {
+                dst[j] = op(src2[j], val1);
+            }
+            remaining -= chunk;
+            ++reg_idx;
+        }
+        return;
+    }
+
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, op(val2, val1));
@@ -133,12 +265,13 @@ inline void perform_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, bool vm
 
 // Vector comparisons
 template <typename T, typename Op>
-inline void perform_compare_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
-                               Op op) {
-    auto& dest = cpu.state().regs.read_vector(rd);
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+inline void perform_compare_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                               simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    auto& dest = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val1 = get_group_element<T>(cpu.state().regs, rs1, i);
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
@@ -148,13 +281,14 @@ inline void perform_compare_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, b
 }
 
 template <typename T, typename Op>
-inline void perform_compare_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
-                               uint32_t vl, Op op) {
-    auto& dest = cpu.state().regs.read_vector(rd);
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+inline void perform_compare_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
+                               simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    auto& dest = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    T val1 = integer_scalar<T>(rs1_val);
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         bool res = op(val2, val1);
@@ -163,13 +297,14 @@ inline void perform_compare_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId
 }
 
 template <typename T, typename Op>
-inline void perform_compare_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, bool vm,
-                               uint32_t vl, Op op) {
-    auto& dest = cpu.state().regs.read_vector(rd);
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+inline void perform_compare_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm,
+                               simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    auto& dest = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         bool res = op(val2, val1);
@@ -215,7 +350,7 @@ inline float fp16_to_fp32(uint16_t h) {
 
 // IEEE 754 float32 to float16 converter
 inline uint16_t fp32_to_fp16(float f) {
-    uint32_t f_bits = std::bit_cast<uint32_t>(f);
+    auto f_bits = std::bit_cast<uint32_t>(f);
     uint32_t f_sign = (f_bits >> 31) & 1;
     uint32_t f_exp = (f_bits >> 23) & 0xFF;
     uint32_t f_mant = f_bits & 0x7FFFFFU;
@@ -324,26 +459,26 @@ template <typename T_dest, typename T_src>
 inline T_dest round_and_clip(T_src v, uint32_t d, uint32_t vxrm, bool& saturated) {
     T_src rounded = v;
     if (d > 0) {
-        T_src mask = (static_cast<T_src>(1) << d) - 1;
-        T_src round_bit = static_cast<T_src>(1) << (d - 1);
-        T_src fractional = v & mask;
+        using Unsigned = std::make_unsigned_t<T_src>;
+        const Unsigned mask = (Unsigned{1} << d) - 1;
+        const Unsigned round_bit = Unsigned{1} << (d - 1);
+        const Unsigned fractional = static_cast<Unsigned>(v) & mask;
+        const T_src shifted = v >> d;
 
         switch (vxrm) {
             case 0:  // rnu
-                rounded = (v + round_bit) >> d;
+                rounded = shifted + static_cast<T_src>(fractional >= round_bit);
                 break;
             case 1:  // rne
-                if (fractional == round_bit) {
-                    rounded = (v >> d) + ((v >> d) & 1);
-                } else {
-                    rounded = (v + round_bit) >> d;
-                }
+                rounded = shifted +
+                          static_cast<T_src>(fractional > round_bit || (fractional == round_bit &&
+                                                                        (shifted & T_src{1}) != 0));
                 break;
             case 2:  // rdown
-                rounded = v >> d;
+                rounded = shifted;
                 break;
             case 3:  // rod
-                rounded = (v >> d) | (fractional != 0 ? 1 : 0);
+                rounded = shifted | static_cast<T_src>(fractional != 0);
                 break;
             default:
                 break;

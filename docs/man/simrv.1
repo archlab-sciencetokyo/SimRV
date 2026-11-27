@@ -1,0 +1,323 @@
+.TH SIMRV 1 "October 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv \- explainable RISC-V architectural simulator and TUI workbench
+.SH SYNOPSIS
+.B simrv
+.RI [ options ]
+.SH DESCRIPTION
+.B simrv
+simulates RV32 and RV64 RISC-V guests.  It provides a high-speed functional engine,
+detailed and cycle-accurate pipeline models, an interactive terminal workbench, a
+GDB Remote Serial Protocol server, and headless automation outputs.
+.PP
+The normal release binary is RV64-capable and can execute both RV64 and RV32 guests.
+Native RV32 builds are intended for strict-width verification.  When standard input
+is a terminal, SimRV starts the TUI unless an explicit headless mode is selected.
+.SH MODES
+.TP
+.B \-c, \-\-cli
+Force headless command-line execution.  This is recommended for scripts, CI, and
+profiling.
+.TP
+.B \-u, \-\-tui
+Force the interactive terminal workbench.
+.TP
+.B \-b, \-\-baremetal
+Load and execute a bare-metal application (the default execution personality).
+.TP
+.B \-\-os
+Boot an operating-system image using the supplied firmware, disk, and device tree.
+.TP
+.B \-\-mode=\fImode\fR
+Select the execution engine: \fBfast\fR, \fBdetailed\fR, or
+\fBcycle-accurate\fR.  Cycle-accurate mode exposes pipeline and timing state.
+.TP
+.B \-R, \-\-realtime
+Throttle execution to host real time.  Use \fB\-\-no-realtime\fR to disable
+real-time pacing explicitly.
+.SH IMAGE AND MEMORY OPTIONS
+.TP
+.B \-m, \-\-image, \-\-memory \fIfile\fR
+Load an ELF or raw binary image into guest memory.
+.TP
+.B \-\-pc, \-\-start-pc \fIaddress\fR
+Set the initial program counter.  The default is \fB0x80000000\fR.
+.TP
+.B \-D, \-\-disk, \-\-rootfs \fIfile\fR
+Attach a VirtIO block disk or root filesystem image. Guest writes are kept in a temporary overlay
+and discarded when SimRV exits; the source image is unchanged.
+.TP
+.B \-\-virtiofs \fIdirectory\fR
+Expose an existing host directory to Linux guests through VirtIO-FS. Guest writes go directly to
+the selected directory and persist after SimRV exits. Host-directory sharing is available on Linux
+hosts only.
+.TP
+.B \-f, \-\-fdt, \-\-dtb \fIfile\fR
+Load the required device tree for Linux boot. If omitted, SimRV reads
+.B SIMRV_LINUX_DTB
+from the environment. SimRV patches the RAM range and CPU status to match configured memory and
+hart count; the blob must contain enough CPU nodes for all configured harts.
+.TP
+.B \-H, \-\-tohost-addr \fIaddress\fR
+Set the guest \fBtohost\fR termination address.
+.TP
+.B \-\-dram-size, \-\-ram-size \fIsize\fR
+Set guest DRAM size.  Numeric values accept \fBk\fR, \fBM\fR, and \fBG\fR
+suffixes; the default is 256 MiB for bare metal and 1 GiB for Linux.
+.SH ARCHITECTURE AND PLATFORM
+.TP
+.B \-j, \-\-harts, \-\-smp \fIn\fR
+Configure one to sixteen simulated harts.
+.TP
+.B \-\-isa=\fIstring\fR
+Select the guest ISA preset: \fBrv32i\fR, \fBrv32imac\fR, \fBrv32g\fR, \fBrv32gc\fR,
+\fBrv32gcv\fR, \fBrv64i\fR, \fBrv64imac\fR, \fBrv64g\fR, \fBrv64gc\fR, or \fBrv64gcv\fR,
+subject to the host build's capabilities. The supported ratified multi-letter extensions
+\fBZicsr\fR, \fBZifencei\fR, and \fBZicntr\fR may be appended with underscores and optional
+2.0 version suffixes. The first multi-letter extension may directly follow the base ISA;
+subsequent multi-letter extensions are separated by underscores. \fBG\fR implies IMAFD,
+\fBZicsr\fR, and \fBZifencei\fR; \fBGC\fR adds compressed instructions. For example,
+\fBrv64g_zicntr2p0\fR.
+.TP
+.B \-\-vlen=\fIbits\fR
+Set the vector register length from 128 through 1024 bits.
+.TP
+.B \-\-config=\fIpreset|file\fR
+Select a complete platform preset (\fBvirt-pcie\fR or \fBvirt-mmio\fR) or load a platform configuration file defining SoC topology and microarchitectural parameters.
+.TP
+.B \-\-net=\fIbackend\fR
+Select user-mode NAT networking through libslirp or disable the VirtIO network with \fBnone\fR.
+.TP
+.B config export-soc \fIPRESET|FILE\fR [\fIOUTPUT\fR]
+Export the resolved SoC registry as JSON. Omit OUTPUT or use \fB-\fR to write to standard output.
+.TP
+.B \-\-dump-cpu-model=\fIMODEL\fR [\fIFILE\fR]
+Export a normalized CPU model configuration. Omit FILE or use \fB-\fR to write to standard output.
+.SH EXECUTION AND PIPELINE
+.TP
+.B \-\-cpu\-clock=\fIhertz\fR, \-\-clock\-hz=\fIhertz\fR
+Set the nominal CPU core clock frequency in Hz (default: 160000000 / 160MHz).
+.TP
+.B \-\-timebase\-hz=\fIhertz\fR
+Set the CLINT/ACLINT/RTC architectural timer timebase frequency in Hz (default: 10000000 / 10MHz).
+.TP
+.B \-s, \-e, \-\-steps \fIn\fR
+Stop after \fIn\fR instructions have retired across all harts.
+.TP
+.B \-t, \-l, \-\-timer \fIn\fR
+Enable a CLINT timer interrupt after \fIn\fR cycles.
+.TP
+.B \-\-pipeline=\fItype\fR
+Select the cycle-accurate pipeline target: \fB2stage\fR, \fB3stage\fR, \fB5stage\fR (default),
+\fB6stage-issue\fR, \fB6stage-fetch\fR, or \fB6stage-mem\fR.
+.TP
+.B \-\-no-forwarding
+Disable operand forwarding in the cycle-accurate pipeline.
+.TP
+.B \-\-bpred=\fItype\fR
+Select the branch predictor: \fBnone\fR, \fBstatic\fR, \fBbimodal\fR,
+\fBgshare\fR, or \fBtournament\fR.
+.TP
+.B \-\-bht-size=\fIn\fR, \-\-btb-size=\fIn\fR, \-\-ras-size=\fIn\fR
+Configure branch-history, branch-target-buffer, and return-address-stack sizes.
+.TP
+.B \-\-cpu-preset=\fIpreset\fR
+Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR).
+.TP
+.B \-\-cfu-plugin=\fIfile.so\fR
+Load a dynamic custom function-unit plugin.
+.TP
+.B \-\-plugin=\fIname|file.so\fR[\fB=\fIargs\fR], \-\-device-plugin=\fI...\fR
+Load a dynamic external MMIO device simulation plugin. Supports logical names (e.g. \fBmmc=disk.img\fR) resolved via standard plugin search paths or explicit shared libraries.
+.SH LOGGING, TRACING, AND PROFILING
+.TP
+.B \-q, \-\-quiet
+Suppress startup logs and use warning-level logging.
+.TP
+.B \-v, \-\-verbose
+Enable debug-level diagnostics.
+.TP
+.B \-\-log-level=\fIlevel\fR
+Set the console log level to \fBtrace\fR, \fBdebug\fR, \fBinfo\fR,
+\fBwarn\fR, \fBerror\fR, or \fBoff\fR.
+.TP
+.B \-\-log-file=\fIfile\fR
+Mirror timestamped console log messages to a file.
+.TP
+.B \-\-summary=\fIfile.json\fR
+Write a machine-readable execution summary when the run exits.
+.TP
+.B \-\-events=\fIfile.jsonl\fR
+Write newline-delimited lifecycle, interrupt, and DMA events while the run progresses.
+.TP
+.B \-\-instmix
+Write an instruction-mix report to \fBtrace/instmix.txt\fR on exit.
+.TP
+.B \-\-arch-trace=\fIfile.jsonl\fR
+Write a JSONL architectural retirement trace. Defaults to detailed execution unless an execution
+mode was explicitly selected (for example, \fB--mode=cycle-accurate\fR).
+.TP
+.B \-\-trace-level=\fI0\-4\fR
+Limit architectural event detail: level 1 devices and traps, level 2 calls and returns, level 3
+retirement, and level 4 detailed state.
+.TP
+.B \-\-trace
+Write an aligned architectural trace to \fBtrace/trace.txt\fR.
+.TP
+.B \-r, \-\-trace-range \fIbegin end\fR
+Capture text trace snapshots within an inclusive \fBmtime\fR range.
+.TP
+.B \-\-trace-pc-range=\fIstart-end\fR
+Filter architectural trace events by an inclusive program-counter range.
+.TP
+.B \-\-trace-bpred
+Record branch-prediction decisions.
+.TP
+.B \-\-log-mmio
+Record MMIO transactions in \fBtrace/dlog.txt\fR.
+.TP
+.B \-\-trap-log=\fIfile\fR
+Write architectural trap and SBI events to a file.
+.SH DEBUGGING AND CHECKPOINTS
+.TP
+.B \-\-gdb
+Start the GDB Remote Serial Protocol server in CLI mode.  The target starts
+paused and accepts connections from a RISC-V GDB client.
+.TP
+.B \-\-gdb-port=\fIport\fR
+Listen on the specified TCP port.  Port 1234 is the default; port 0 selects
+an ephemeral port and reports the selected port on standard output.
+.TP
+.B \-\-save-checkpoint=\fIfile\fR
+Save architectural state when the run exits.
+.TP
+.B \-\-load-checkpoint=\fIfile\fR
+Resume from an architectural checkpoint.
+.TP
+.B \-\-lockstep
+Enable Spike lockstep verification.  GDB and lockstep are mutually exclusive.
+.TP
+.B \-\-spike-bin=\fIfile\fR
+Select the Spike executable used for lockstep verification.
+.TP
+.B \-\-spike-elf=\fIfile\fR
+Select the Spike-side ELF image used for lockstep verification.
+.SH TUI WORKBENCH
+.TP
+.B Space
+Pause or resume execution.  While running, input is routed to the guest terminal.
+.TP
+.B n, F3
+Step one machine cycle across all harts.
+.TP
+.B r
+Run continuously.
+.TP
+.B Tab
+Cycle the active inspector page.
+.TP
+.B q
+Quit the simulator.
+.PP
+The TUI provides register, cache, TLB, pipeline, hazard, bus, I/O, performance,
+trace, and instruction-explanation views.  Press \fB?\fR for in-application
+keybinding and glossary help.
+.SH INFORMATION AND DIAGNOSTICS
+.TP
+.B \-\-version
+Print the simulator version and target architecture.
+.TP
+.B \-\-isa-info
+Print the qualified ISA and frontend capabilities.
+.TP
+.B \-\-doctor
+Diagnose terminal, runtime, and release-environment issues.
+.TP
+.B simrv explain \fIQUERY\fR
+Explain an instruction word, instruction mnemonic, registered profile, or ISA extension. Use
+\fBinstruction\fR, \fBprofile\fR, or \fBextension\fR after \fBexplain\fR to disambiguate a
+name when needed.
+.TP
+.B \-\-license
+Display the MIT license and copyright notice.
+.TP
+.B \-h, \-\-help
+Print the complete command-line help.
+.SH EXAMPLES
+.TP
+.B Bare-metal ELF
+.EX
+simrv --cli --baremetal -m hello.elf --isa rv64gc
+.EE
+.TP
+.B Bounded profiling
+.EX
+simrv --cli -m hello.elf --steps 1000000 \\
+  --summary run/summary.json --events run/events.jsonl --instmix
+.EE
+.TP
+.B Cycle-accurate pipeline
+.EX
+simrv --cli -m hello.elf --mode cycle-accurate --pipeline 5stage
+.EE
+.TP
+.B GDB debugging
+.EX
+simrv --gdb --gdb-port 1234 -m hello.elf --isa rv64gc
+riscv64-unknown-elf-gdb hello.elf -ex 'target remote :1234'
+.EE
+.TP
+.B Linux boot
+.EX
+simrv --cli --os -m opensbi-linux-payload.elf -D rootfs.img -f devicetree.dtb
+.EE
+.SH OUTPUT FILES
+.TP
+.B trace/
+Default directory for architectural, PC, branch-prediction, MMIO, and
+instruction-mix reports.
+.TP
+.B \-\-summary and \-\-events outputs
+Explicit paths supplied by the caller.  Standard output remains available for
+guest UART output; these options reject \fB-\fR as a destination.
+.TP
+.B /usr/share/SimRV/SimRVBuildMetadata.json
+Installed build provenance containing the version, Git revision, target XLEN,
+compiler, generator, and host information.
+.SH EXIT STATUS
+.TP
+.B 0
+The guest completed normally or an informational command succeeded.
+.TP
+.B non-zero
+Argument parsing, image loading, simulation, guest termination, or output
+generation failed.
+.SH FILES
+.TP
+.I /usr/bin/simrv
+The installed simulator executable.
+.TP
+.I /usr/share/man/man1/simrv.1
+This manual page.
+.TP
+.I /usr/share/doc/SimRV/USER_GUIDE.md
+The complete user guide.
+.TP
+.I /usr/share/SimRV/SimRVBuildMetadata.json
+Installed build provenance manifest.
+.SH SHELL COMPLETIONS
+The Tools package can generate completion scripts for Bash, Zsh, and Fish with
+\fBsimrv-tools completion\fR.
+.SH SEE ALSO
+.BR simrv\-config\-wizard (1),
+.BR simrv\-tools (1),
+.BR simrv\-parity (1),
+.BR simrv\-benchmark (1)
+.PP
+Full documentation is available in \fB/usr/share/doc/SimRV/USER_GUIDE.md\fR and online at
+.UR https://github.com/archlab-sciencetokyo/SimRV
+.UE
+.SH AUTHORS
+Developed by the ArchLab team at Science Tokyo (formerly Tokyo Institute of Technology).
+.SH COPYRIGHT
+Copyright \(co 2024\-2026 Lennart Trunk and ArchLab @ ScienceTokyo.  Released under the MIT License.

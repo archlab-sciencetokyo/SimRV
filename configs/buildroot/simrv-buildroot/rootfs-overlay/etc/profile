@@ -1,0 +1,2 @@
+export PATH=/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+export PS1='\u@\h:\w\$ '

@@ -27,8 +27,13 @@ SimRV
 
 # Build system outputs
 build*
+!configs/buildroot/
+!.github/workflows/build-and-test.yml
+!examples/**/build-*/
+!examples/**/build-*/*
 linux-build
 linux-images/
+/images/
 CMakeUserPresets.json
 compile_commands.json
 
@@ -37,19 +42,27 @@ bpred.txt
 init_virtio.txt
 trace.txt
 tracepc.txt
+*.img
+*.fd
 .simrv/
+.vscode/
 
 # Benchmark and profiling outputs
 benchmark_logs/
 perf*.data*
 
 # Generated benchmark/test outputs
+tests/act4/output/
 .bench_tmp/
 .cache/
+.venv/
 .isa_tmp/
 isa_logs/
 regression_logs/
 release-report.json
+benchmark-modes.json
+benchmark-*.json
+benchmark-*.md
 Testing/
 Makefrag
 
@@ -59,9 +72,10 @@ site/
 docs/NOTEBOOKLM_SUMMARY.md
 docs/ORIGINALITY.md
 docs/simrv_performance_optimizations.md
+docs/PAPER_COMPANION.md
 trace/
 log/
-.clangd
+.clangd/
 
 # Framebuffer screenshots
 screenshot.ppm
@@ -75,3 +89,20 @@ share/soundfonts/
 
 .agents
 GEMINI.md
+
+# Syncthing
+.stignore
+.stfolder
+*.sync-conflict-*
+
+# Standalone paper repository guard
+/paper/
+
+# Local tools directory
+/tools/
+
+# Editor and OS artifacts
+*.swp
+*.swo
+*~
+.DS_Store

@@ -1,0 +1,192 @@
+/** @file PlatformBuilder.cpp */
+#include "simrv/core/PlatformBuilder.hpp"
+
+#include <memory>
+#include <utility>
+
+#include "MachineRuntime.hpp"
+#include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
+#include "simrv/device/RingBufferEthernetMmio.hpp"
+#include "simrv/device/mmio/VirtioMmioBlock.hpp"
+#include "simrv/device/mmio/VirtioMmioConsole.hpp"
+#include "simrv/device/mmio/VirtioMmioFs.hpp"
+#include "simrv/device/mmio/VirtioMmioGpu.hpp"
+#include "simrv/device/mmio/VirtioMmioInput.hpp"
+#include "simrv/device/mmio/VirtioMmioNet.hpp"
+#include "simrv/device/mmio/VirtioMmioRng.hpp"
+#include "simrv/device/mmio/VirtioMmioSound.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/device/pci/VirtioPciBlock.hpp"
+#include "simrv/device/pci/VirtioPciConsole.hpp"
+#include "simrv/device/pci/VirtioPciFs.hpp"
+#include "simrv/device/pci/VirtioPciGpu.hpp"
+#include "simrv/device/pci/VirtioPciInput.hpp"
+#include "simrv/device/pci/VirtioPciNet.hpp"
+#include "simrv/device/pci/VirtioPciRng.hpp"
+#include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/device/pflash/PFlash.hpp"
+
+namespace simrv::core {
+
+void PlatformBuilder::compose(Machine& machine) {
+    const auto composition = platform_composition(machine.config.platform_profile);
+    const auto& disk_path = machine.config.files.disk_path;
+    const auto network_mode = [&]() {
+        using Mode = simrv::device::virtio::NetBackend::Mode;
+        if (machine.config.network.mode == "none") return Mode::None;
+        return Mode::User;
+    }();
+
+    if (const auto device =
+            SoCDeviceRegistry::descriptor(machine.config.soc, SoCDeviceKind::RingBufferEthernet)) {
+        const auto default_dev = soc_device_default(SoCDeviceKind::RingBufferEthernet);
+        const auto* rx_region = device->find_region("rxbuf");
+        if (rx_region == nullptr) rx_region = default_dev.find_region("rxbuf");
+        const auto* tx_region = device->find_region("txbuf");
+        if (tx_region == nullptr) tx_region = default_dev.find_region("txbuf");
+        if (rx_region != nullptr && tx_region != nullptr) {
+            machine.runtime_->ring_buffer_ethernet =
+                std::make_unique<simrv::device::RingBufferEthernetMmio>(
+                    machine, device->name, device->base, device->size, device->irq, rx_region->base,
+                    rx_region->size, tx_region->base, tx_region->size, device->mac_address,
+                    network_mode);
+        }
+    }
+
+    if (composition.pcie) {
+        const bool pflash_enabled =
+            machine.config.files.uefi_enabled ||
+            SoCDeviceRegistry::enabled(machine.config.soc, SoCDeviceKind::PFlash);
+        if (pflash_enabled) {
+            const auto flash =
+                SoCDeviceRegistry::descriptor(machine.config.soc, SoCDeviceKind::PFlash)
+                    .value_or(soc_device_default(SoCDeviceKind::PFlash));
+            const auto default_flash = soc_device_default(SoCDeviceKind::PFlash);
+            const auto& flash1 =
+                flash.regions.empty() ? default_flash.regions.front() : flash.regions.front();
+            machine.runtime_->pflash0 = std::make_unique<simrv::device::PFlash>(
+                machine, flash.base, flash.size, 128 * 1024, /*read_only=*/true, flash.name);
+
+            machine.runtime_->pflash1 = std::make_unique<simrv::device::PFlash>(
+                machine, flash1.base, flash1.size, 128 * 1024, /*read_only=*/false, flash1.name);
+        }
+
+        machine.runtime_->pcie = std::make_unique<simrv::device::PcieRootComplex>(
+            &machine, machine.runtime_->aplic_s.get(), machine.runtime_->imsic_s.get(),
+            machine.config.soc.pcie);
+        const auto enabled = [&](SoCDeviceKind kind) {
+            return SoCDeviceRegistry::enabled(machine.config.soc, kind);
+        };
+        if (enabled(SoCDeviceKind::VirtioMmioBlock)) {
+            machine.runtime_->pci_disk = std::make_shared<simrv::device::VirtioPciBlock>(disk_path);
+        }
+        if (enabled(SoCDeviceKind::VirtioMmioConsole)) {
+            machine.runtime_->pci_console = std::make_shared<simrv::device::VirtioPciConsole>();
+        }
+        if (enabled(SoCDeviceKind::VirtioMmioRng)) {
+            machine.runtime_->pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
+        }
+        if (enabled(SoCDeviceKind::VirtioMmioGpu)) {
+            machine.runtime_->pci_gpu = std::make_shared<simrv::device::VirtioPciGpu>();
+        }
+        if (enabled(SoCDeviceKind::VirtioMmioInput)) {
+            machine.runtime_->pci_input = std::make_shared<simrv::device::VirtioPciInput>();
+        }
+        if (enabled(SoCDeviceKind::VirtioMmioSound)) {
+            machine.runtime_->pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
+        }
+        if (enabled(SoCDeviceKind::VirtioMmioNet)) {
+            machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>(network_mode);
+        }
+        if (!machine.config.files.virtiofs_path.empty() && enabled(SoCDeviceKind::VirtioMmioFs)) {
+            auto pci_fs =
+                std::make_shared<simrv::device::VirtioPciFs>(machine.config.files.virtiofs_path);
+            if (pci_fs->is_ready()) {
+                machine.runtime_->pci_fs = std::move(pci_fs);
+            } else {
+#if defined(__linux__)
+                simrv::log::error("cannot open VirtIO-FS share directory '{}'",
+                                  machine.config.files.virtiofs_path);
+#else
+                simrv::log::warn(
+                    "VirtIO-FS host shares are unavailable on this platform; device omitted");
+#endif
+            }
+        }
+        constexpr std::array pci_kinds = {
+            SoCDeviceKind::VirtioMmioBlock, SoCDeviceKind::VirtioMmioConsole,
+            SoCDeviceKind::VirtioMmioRng,   SoCDeviceKind::VirtioMmioGpu,
+            SoCDeviceKind::VirtioMmioInput, SoCDeviceKind::VirtioMmioSound,
+            SoCDeviceKind::VirtioMmioNet,   SoCDeviceKind::VirtioMmioFs};
+        const std::array<std::shared_ptr<simrv::device::PciDevice>, 8> pci_devices = {
+            machine.runtime_->pci_disk, machine.runtime_->pci_console, machine.runtime_->pci_rng,
+            machine.runtime_->pci_gpu,  machine.runtime_->pci_input,   machine.runtime_->pci_sound,
+            machine.runtime_->pci_net,  machine.runtime_->pci_fs,
+        };
+        for (size_t i = 0; i < pci_devices.size(); ++i) {
+            if (!pci_devices[i]) continue;
+            const auto descriptor = SoCDeviceRegistry::descriptor(machine.config.soc, pci_kinds[i]);
+            if (!descriptor) continue;
+            machine.runtime_->pcie->attach_device(
+                {simrv::device::PciBusNumber{descriptor->pci_bus.value_or(0)},
+                 simrv::device::PciDeviceNumber{descriptor->pci_slot.value_or(0)},
+                 simrv::device::PciFunctionNumber{descriptor->pci_function.value_or(0)}},
+                pci_devices[i], descriptor->pci_intx_source.value_or(0));
+        }
+    }
+    if (composition.mmio) {
+        const auto descriptor = [&](SoCDeviceKind kind) {
+            return SoCDeviceRegistry::descriptor(machine.config.soc, kind);
+        };
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioBlock)) {
+            machine.runtime_->mmio_disk = std::make_shared<simrv::device::VirtioMmioBlock>(
+                device->base, device->irq, &machine, disk_path);
+        }
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioConsole)) {
+            machine.runtime_->mmio_console = std::make_shared<simrv::device::VirtioMmioConsole>(
+                device->base, device->irq, &machine);
+        }
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioRng)) {
+            machine.runtime_->mmio_rng =
+                std::make_shared<simrv::device::VirtioMmioRng>(device->base, device->irq, &machine);
+        }
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioGpu)) {
+            machine.runtime_->mmio_gpu =
+                std::make_shared<simrv::device::VirtioMmioGpu>(device->base, device->irq, &machine);
+        }
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioInput)) {
+            machine.runtime_->mmio_input = std::make_shared<simrv::device::VirtioMmioInput>(
+                device->base, device->irq, &machine);
+        }
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioSound)) {
+            machine.runtime_->mmio_sound = std::make_shared<simrv::device::VirtioMmioSound>(
+                device->base, device->irq, &machine);
+        }
+        if (const auto device = descriptor(SoCDeviceKind::VirtioMmioNet)) {
+            machine.runtime_->mmio_net = std::make_shared<simrv::device::VirtioMmioNet>(
+                device->base, device->irq, &machine, network_mode);
+        }
+        if (!machine.config.files.virtiofs_path.empty()) {
+            if (const auto device = descriptor(SoCDeviceKind::VirtioMmioFs)) {
+                auto mmio_fs = std::make_shared<simrv::device::VirtioMmioFs>(
+                    device->base, device->irq, &machine, machine.config.files.virtiofs_path);
+                if (mmio_fs->is_ready()) {
+                    machine.runtime_->mmio_fs = std::move(mmio_fs);
+                } else {
+#if defined(__linux__)
+                    simrv::log::error("cannot open VirtIO-FS share directory '{}'",
+                                      machine.config.files.virtiofs_path);
+#else
+                    simrv::log::warn(
+                        "VirtIO-FS host shares are unavailable on this platform; device omitted");
+#endif
+                }
+            }
+        }
+    }
+    machine.update_network_devices_status();
+}
+
+}  // namespace simrv::core

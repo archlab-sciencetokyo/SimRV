@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.dev/schemas/v3/result.schema.json",
+  "title": "SimRV 3 Run Result",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "stop_reason", "instruction_count", "exit_code"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "stop_reason": { "type": "string" },
+    "instruction_count": { "type": "integer", "minimum": 0 },
+    "exit_code": { "type": "integer" },
+    "manifest_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "plugins": { "type": "array", "items": { "type": "object" } }
+  }
+}

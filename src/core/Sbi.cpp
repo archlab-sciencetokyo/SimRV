@@ -6,34 +6,29 @@
 
 #include <unistd.h>
 
+#include <bit>
 #include <cstdint>
 #include <format>
+#include <optional>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/SbiTypes.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::sbi {
 
+using core::HartStatus;
 using core::MipBit;
 
 namespace {
 
-enum class ExtId : std::uint32_t {
-    LegacySetTimer = 0x00,
-    LegacyConsolePutchar = 0x01,
-    LegacyConsoleGetchar = 0x02,
-    LegacyShutdown = 0x08,
-    Base = 0x10,
-    Time = 0x54494D45,
-    Rfence = 0x52464E43,
-    Ipi = 0x735049,
-    SystemReset = 0x53525354,
-};
+using ExtId = SbiExtId;
 
 enum class BaseFid : std::uint8_t {
     GetSpecVersion = 0x0,
@@ -43,6 +38,13 @@ enum class BaseFid : std::uint8_t {
     GetMvendorId = 0x4,
     GetMarchId = 0x5,
     GetMimpId = 0x6,
+};
+
+enum class HsmFid : std::uint8_t {
+    HartStart = 0x0,
+    HartStop = 0x1,
+    HartGetStatus = 0x2,
+    HartSuspend = 0x3,
 };
 
 enum class TimeFid : std::uint8_t {
@@ -56,209 +58,616 @@ enum class RfenceFid : std::uint8_t {
     RemoteHfenceGvmaVmid = 0x3,
     RemoteHfenceGvma = 0x4,
     RemoteHfenceVvmaAsid = 0x5,
+    RemoteHfenceVvma = 0x6,
 };
 
-enum class SbiError : std::int8_t {
-    Success = 0,
-    Failed = -1,
-    NotSupported = -2,
-    InvalidParam = -3,
-    Denied = -4,
-    InvalidAddress = -5,
-    AlreadyAvailable = -6,
-    AlreadyStarted = -7,
-    AlreadyStopped = -8,
-};
-
-constexpr Word kSpecVersion_0_3 = 0x00000003U;
+constexpr simrv::xlen::Word kSpecVersion_3_0 = kSbiSpecVersion_3_0;
 // Project-specific ID (ASCII "SIM"). ID 1 is reserved for OpenSBI and must not be reported by
 // SimRV's direct execution environment. An official SBI implementation ID has not been assigned.
-constexpr Word kImplId_SimRV = 0x53494DU;
-constexpr Word kImplVersion = 0x1U;
+constexpr simrv::xlen::Word kImplId_SimRV = 0x53494DU;
+constexpr simrv::xlen::Word kImplVersion = 0x1U;
 constexpr unsigned kWord32Shift = 32u;
-constexpr auto kLogHexWidth = static_cast<int>(kXLenHexDigits);
 
 }  // namespace
 
 Sbi::Sbi(core::CPU& cpu) : cpu_(cpu) {}
 
-auto Sbi::timer_value() const -> Counter {
-    const auto a0 = RegId::A0;
-    const auto a1 = RegId::A1;
+auto Sbi::timer_value() const -> simrv::xlen::Counter {
+    const auto a0 = simrv::xlen::RegId::A0;
+    const auto a1 = simrv::xlen::RegId::A1;
     if constexpr (xlen::kIsXLen64) {
-        return static_cast<Counter>(cpu_.state().regs.read(a0));
+        return static_cast<simrv::xlen::Counter>(cpu_.state().regs.read(a0));
     } else {
-        return static_cast<Counter>(cpu_.state().regs.read(a0)) |
-               (static_cast<Counter>(cpu_.state().regs.read(a1)) << kWord32Shift);
+        return static_cast<simrv::xlen::Counter>(cpu_.state().regs.read(a0)) |
+               (static_cast<simrv::xlen::Counter>(cpu_.state().regs.read(a1)) << kWord32Shift);
     }
 }
 
-void Sbi::sbi_return(SignedWord error, Word value) {
-    const auto a0 = RegId::A0;
-    const auto a1 = RegId::A1;
-    cpu_.state().regs.write(a0, static_cast<Word>(error));
+void Sbi::sbi_return(simrv::xlen::SignedWord error, simrv::xlen::Word value) {
+    const auto a0 = simrv::xlen::RegId::A0;
+    const auto a1 = simrv::xlen::RegId::A1;
+    cpu_.state().regs.write(a0, static_cast<simrv::xlen::Word>(error));
     cpu_.state().regs.write(a1, value);
     cpu_.state().pc += 4;
 }
 
-auto Sbi::handle_base(Word func_id) -> bool {
+auto Sbi::handle_base(simrv::xlen::Word func_id) -> bool {
     switch (static_cast<BaseFid>(func_id)) {
         case BaseFid::GetSpecVersion:
-            sbi_return(static_cast<SignedWord>(SbiError::Success), kSpecVersion_0_3);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), kSpecVersion_3_0);
             return true;
         case BaseFid::GetImplId:
-            sbi_return(static_cast<SignedWord>(SbiError::Success), kImplId_SimRV);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), kImplId_SimRV);
             return true;
         case BaseFid::GetImplVersion:
-            sbi_return(static_cast<SignedWord>(SbiError::Success), kImplVersion);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), kImplVersion);
             return true;
         case BaseFid::ProbeExtension: {
-            const Word probed = cpu_.state().regs.read(RegId::A0);
-            const bool supported =
-                (probed == enum_mask(ExtId::Base)) || (probed == enum_mask(ExtId::Time)) ||
-                (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Ipi)) ||
-                (probed == enum_mask(ExtId::SystemReset));
-            sbi_return(static_cast<SignedWord>(SbiError::Success), supported ? 1U : 0U);
+            const simrv::xlen::Word probed = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+            const bool supported = (probed == ExtId::Base) || (probed == ExtId::Time) ||
+                                   (probed == ExtId::Rfence) || (probed == ExtId::Ipi) ||
+                                   (probed == ExtId::Hsm) || (probed == ExtId::SystemReset) ||
+                                   (probed == ExtId::Pmu) || (probed == ExtId::DebugConsole) ||
+                                   (probed == ExtId::Susp) || (probed == ExtId::Cppc);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success),
+                       supported ? 1U : 0U);
             return true;
         }
         case BaseFid::GetMvendorId:
         case BaseFid::GetMarchId:
         case BaseFid::GetMimpId:
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
             return true;
         default:
-            sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
             return true;
     }
 }
 
-auto Sbi::handle_time(Word func_id) -> bool {
+auto Sbi::handle_time(simrv::xlen::Word func_id) -> bool {
     if (static_cast<TimeFid>(func_id) == TimeFid::SetTimer) {
         cpu_.clint_mmio.supervisor_timer.store(true, std::memory_order_release);
         cpu_.clint_mmio.mtimecmp = timer_value();
-        cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        cpu_.state().mip &= ~MipBit::Mtip;
         cpu_.state().stip_timer = false;
         cpu_.state().refresh_supervisor_pending();
         cpu_.evaluate_timer_interrupt();
-        sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
     } else {
-        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
     }
     return true;
 }
 
-auto Sbi::handle_rfence(Word func_id) -> bool {
-    const auto selection = detail::select_local_hart(
-        cpu_.state().regs.read(RegId::A0), cpu_.state().regs.read(RegId::A1), cpu_.state().mhartid);
-    if (selection == detail::HartMaskSelection::Invalid) {
-        sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
+auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
+    const simrv::xlen::Word hart_mask = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+    const simrv::xlen::Word hart_mask_base = cpu_.state().regs.read(simrv::xlen::RegId::A1);
+
+    const auto fid = static_cast<RfenceFid>(func_id);
+    if (fid != RfenceFid::RemoteFenceI && fid != RfenceFid::RemoteSfenceVma &&
+        fid != RfenceFid::RemoteSfenceVmaAsid && fid != RfenceFid::RemoteHfenceGvmaVmid &&
+        fid != RfenceFid::RemoteHfenceGvma && fid != RfenceFid::RemoteHfenceVvmaAsid &&
+        fid != RfenceFid::RemoteHfenceVvma) {
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
         return true;
     }
 
-    switch (static_cast<RfenceFid>(func_id)) {
-        case RfenceFid::RemoteFenceI:
-            if (selection == detail::HartMaskSelection::Local) {
-                cpu_.icache.flush();
-                cpu_.dcache.flush();
-                cpu_.decode_cache.flush();
+    const auto apply_rfence_to_cpu = [&](core::CPU& target_cpu) {
+        if (fid == RfenceFid::RemoteFenceI) {
+            target_cpu.icache.flush();
+            target_cpu.decode_cache.flush();
+            target_cpu.block_cache.flush();
+        } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
+            simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
+            simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (cpu_.state().regs.xlen == 32) {
+                    start_addr &= 0xFFFFFFFFULL;
+                    size &= 0xFFFFFFFFULL;
+                }
             }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        case RfenceFid::RemoteSfenceVma:
-        case RfenceFid::RemoteSfenceVmaAsid:
-            if (selection == detail::HartMaskSelection::Local) {
-                cpu_.TLB_flush();
-                cpu_.dcache.flush();
+            const std::optional<Asid> filter_asid =
+                (fid == RfenceFid::RemoteSfenceVmaAsid)
+                    ? std::make_optional(
+                          static_cast<Asid>(cpu_.state().regs.read(simrv::xlen::RegId::A4)))
+                    : std::nullopt;
+
+            constexpr simrv::xlen::Address kAllMask = ~static_cast<simrv::xlen::Address>(0);
+            const bool is_all_mask =
+                (size == kAllMask) || (cpu_.state().regs.xlen == 32 &&
+                                       size == static_cast<simrv::xlen::Address>(0xFFFFFFFFULL));
+            if ((start_addr == 0 && size == 0) || is_all_mask || size > (16 * 4096) ||
+                (start_addr + size < start_addr)) {
+                target_cpu.TLB_flush(
+                    core::TlbFlushFilter{.vaddr = std::nullopt, .asid = filter_asid});
+            } else {
+                for (simrv::xlen::Address addr = start_addr; addr < start_addr + size;
+                     addr += 4096) {
+                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{addr},
+                                                              .asid = filter_asid});
+                }
             }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        default:
-            sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
-            return true;
+        }
+    };
+
+    if (cpu_.machine_ != nullptr) {
+        const size_t n_harts = cpu_.machine_->num_harts();
+        for (size_t h = 0; h < n_harts; ++h) {
+            if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
+                apply_rfence_to_cpu(cpu_.machine_->hart(h));
+            }
+        }
+    } else {
+        if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
+            apply_rfence_to_cpu(cpu_);
+        }
     }
+    sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+    return true;
 }
 
-auto Sbi::handle_ipi(Word func_id) -> bool {
+auto Sbi::handle_ipi(simrv::xlen::Word func_id) -> bool {
     if (func_id == 0) {  // send_ipi
-        const Word hart_mask = cpu_.state().regs.read(RegId::A0);
-        const Word hart_mask_base = cpu_.state().regs.read(RegId::A1);
-        const auto selection =
-            detail::select_local_hart(hart_mask, hart_mask_base, cpu_.state().mhartid);
-        if (selection == detail::HartMaskSelection::Invalid) {
-            sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
-            return true;
+        const simrv::xlen::Word hart_mask = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+        const simrv::xlen::Word hart_mask_base = cpu_.state().regs.read(simrv::xlen::RegId::A1);
+        if (cpu_.machine_ != nullptr) {
+            const size_t n_harts = cpu_.machine_->num_harts();
+            for (size_t h = 0; h < n_harts; ++h) {
+                if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
+                    auto& target_cpu = cpu_.machine_->hart(h);
+                    target_cpu.state().mip |= MipBit::Ssip;
+                    target_cpu.hart_status.notify_all();
+                }
+            }
+        } else {
+            if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
+                cpu_.state().mip |= MipBit::Ssip;
+                cpu_.hart_status.notify_all();
+            }
         }
-        if (selection == detail::HartMaskSelection::Local) {
-            cpu_.state().mip |= enum_mask(MipBit::Ssip);
-        }
-        sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
     } else {
-        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
     }
     return true;
 }
 
-auto Sbi::handle_system_reset(Word func_id) -> bool {
+auto Sbi::handle_hsm(simrv::xlen::Word func_id) -> bool {
+    if (cpu_.machine_ == nullptr) {
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Failed), 0);
+        return true;
+    }
+
+    const simrv::xlen::Word target_hart = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+
+    switch (static_cast<HsmFid>(func_id)) {
+        case HsmFid::HartStart: {
+            const simrv::xlen::Word start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A1);
+            const simrv::xlen::Word opaque = cpu_.state().regs.read(simrv::xlen::RegId::A2);
+
+            if (target_hart >= cpu_.machine_->num_harts()) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::InvalidParam), 0);
+                return true;
+            }
+            auto& target_cpu = cpu_.machine_->hart(target_hart);
+            auto cur_status = target_cpu.hart_status.load(std::memory_order_relaxed);
+            if (cur_status == HartStatus::Started) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::AlreadyStarted), 0);
+                return true;
+            }
+            target_cpu.state().pc = simrv::xlen::VirtAddr{start_addr};
+            if (target_cpu.state().regs.xlen == 32) {
+                target_cpu.state().canonicalize_pc();
+            }
+            target_cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+            target_cpu.state().regs.write(simrv::xlen::RegId::A0, target_hart);
+            target_cpu.state().regs.write(simrv::xlen::RegId::A1, opaque);
+            target_cpu.hart_status.store(HartStatus::Started, std::memory_order_release);
+            target_cpu.wake_from_wfi();
+            target_cpu.hart_status.notify_all();
+            cpu_.machine_->notify_control_event();
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        case HsmFid::HartStop: {
+            cpu_.hart_status.store(HartStatus::StopPending, std::memory_order_release);
+            cpu_.machine_->notify_control_event();
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        case HsmFid::HartGetStatus: {
+            if (target_hart >= cpu_.machine_->num_harts()) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::InvalidParam), 0);
+                return true;
+            }
+            auto& target_cpu = cpu_.machine_->hart(target_hart);
+            auto status = target_cpu.hart_status.load(std::memory_order_relaxed);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success),
+                       static_cast<simrv::xlen::Word>(std::to_underlying(status)));
+            return true;
+        }
+        case HsmFid::HartSuspend: {
+            cpu_.hart_status.store(HartStatus::SuspendPending, std::memory_order_release);
+            cpu_.machine_->notify_control_event();
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        default:
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
+            return true;
+    }
+}
+
+auto Sbi::handle_system_reset(simrv::xlen::Word func_id) -> bool {
     if (func_id == 0) {  // sbi_system_reset
-        const Word reset_type = cpu_.state().regs.read(RegId::A0);
-        const Word reset_reason = cpu_.state().regs.read(RegId::A1);
+        const simrv::xlen::Word reset_type = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+        const simrv::xlen::Word reset_reason = cpu_.state().regs.read(simrv::xlen::RegId::A1);
 
         if (reset_type == 0) {
             simrv::log::info("[SBI] System Reset: Shutdown requested (reason: 0x{:x}).",
                              reset_reason);
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->exit_code = static_cast<int>(reset_reason);
-                cpu_.machine_->stop();
+                cpu_.machine_->stop(core::Machine::StopReason::GuestPoweroff);
             }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
         } else if (reset_type == 1 || reset_type == 2) {
             simrv::log::info("[SBI] System Reset: Reboot requested (reason: 0x{:x}).",
                              reset_reason);
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->request_reboot();
             }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
         } else {
-            sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::InvalidParam), 0);
         }
     } else {
-        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
     }
     return true;
 }
 
-auto Sbi::handle_ecall(TrapCause cause) -> bool {
+auto Sbi::handle_dbcn(simrv::xlen::Word func_id) -> bool {
+    switch (func_id) {
+        case 0: {  // sbi_debug_console_write
+            const auto num_bytes =
+                static_cast<size_t>(cpu_.state().regs.read(simrv::xlen::RegId::A0));
+            const auto base_addr_lo = cpu_.state().regs.read(simrv::xlen::RegId::A1);
+            const auto base_addr_hi = cpu_.state().regs.read(simrv::xlen::RegId::A2);
+            const uint64_t raw_paddr =
+                (static_cast<uint64_t>(base_addr_hi) << 32) | static_cast<uint64_t>(base_addr_lo);
+            if (raw_paddr > std::numeric_limits<simrv::xlen::Address>::max()) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::InvalidParam), 0);
+                return true;
+            }
+            const simrv::xlen::PhysAddr paddr{static_cast<simrv::xlen::Address>(raw_paddr)};
+
+            size_t written = 0;
+            for (size_t i = 0; i < num_bytes; ++i) {
+                const simrv::xlen::PhysAddr byte_addr = paddr + i;
+                if (cpu_.machine_ != nullptr &&
+                    cpu_.machine_->memory_geometry().contains(byte_addr)) {
+                    const auto geometry = cpu_.machine_->memory_geometry();
+                    const auto ch = static_cast<char>(
+                        cpu_.machine_->ram_data()[byte_addr.raw() - geometry.dram_base.raw()]);
+                    cpu_.machine_->console_write(ch);
+                    written++;
+                }
+            }
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success),
+                       static_cast<simrv::xlen::Word>(written));
+            return true;
+        }
+        case 1: {  // sbi_debug_console_read
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        case 2: {  // sbi_debug_console_write_byte
+            const auto ch = static_cast<char>(cpu_.state().regs.read(simrv::xlen::RegId::A0));
+            if (cpu_.machine_) {
+                cpu_.machine_->console_write(ch);
+            } else {
+                (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+            }
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        default:
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
+            return true;
+    }
+}
+
+auto Sbi::handle_pmu(simrv::xlen::Word func_id) -> bool {
+    using Word = simrv::xlen::Word;
+    const auto read = [this](simrv::xlen::RegId reg) { return cpu_.state().regs.read(reg); };
+    const auto read_u64 = [this](simrv::xlen::RegId low, simrv::xlen::RegId high) -> uint64_t {
+        const auto lo = cpu_.state().regs.read(low);
+        if constexpr (simrv::xlen::kIsXLen64) return lo;
+        return static_cast<uint32_t>(lo) |
+               (static_cast<uint64_t>(static_cast<uint32_t>(cpu_.state().regs.read(high))) << 32);
+    };
+    const auto valid_counter_set = [](Word base, Word mask) {
+        if (base >= 32 || mask == 0) return false;
+        for (size_t bit = 0; bit < simrv::xlen::kXLenBits; ++bit) {
+            if (((mask >> bit) & 1U) == 0) continue;
+            const auto index = static_cast<size_t>(base) + bit;
+            if (index >= 32 || index == 1) return false;
+        }
+        return true;
+    };
+    const auto selected_index = [](Word base, Word mask) -> std::optional<size_t> {
+        if (base >= 32) return std::nullopt;
+        for (size_t i = static_cast<size_t>(base); i < 32; ++i) {
+            const size_t bit = i - static_cast<size_t>(base);
+            if (bit < simrv::xlen::kXLenBits && ((mask >> bit) & 1U) != 0) return i;
+        }
+        return std::nullopt;
+    };
+    const auto fail = [this](SbiError error) {
+        sbi_return(static_cast<simrv::xlen::SignedWord>(error), 0);
+        return true;
+    };
+    switch (func_id) {
+        case 0:  // sbi_pmu_num_counters
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 32);
+            return true;
+        case 1: {  // sbi_pmu_counter_get_info
+            const Word counter_idx = read(simrv::xlen::RegId::A0);
+            if (counter_idx >= 32) {
+                return fail(SbiError::InvalidParam);
+            }
+            if (counter_idx == 1) return fail(SbiError::InvalidParam);
+            // The CSR field names the machine counter CSR; the width field encodes width - 1.
+            const Word info = (0xC00U + counter_idx) | (63U << 12U);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), info);
+            return true;
+        }
+        case 2: {  // sbi_pmu_counter_config_matching
+            const Word base = read(simrv::xlen::RegId::A0);
+            const Word mask = read(simrv::xlen::RegId::A1);
+            const Word flags = read(simrv::xlen::RegId::A2);
+            const Word event = read(simrv::xlen::RegId::A3);
+            const Word type = (event >> 16U) & 0xfU;
+            Word code = event & 0xffffU;
+            if (!valid_counter_set(base, mask) || (flags & ~Word{0xff}) != 0)
+                return fail(SbiError::InvalidParam);
+            size_t target = 32;
+            uint64_t selector = 0;
+            if (type == 0 && (code == 1 || code == 2)) {
+                if (read_u64(simrv::xlen::RegId::A4, simrv::xlen::RegId::A5) != 0)
+                    return fail(SbiError::InvalidParam);
+                target = code == 1 ? 0 : 2;
+                if (target < base || target - base >= simrv::xlen::kXLenBits ||
+                    ((mask >> (target - base)) & 1U) == 0)
+                    return fail(SbiError::NotSupported);
+            } else if (type == 0 && code == 6) {
+                if (read_u64(simrv::xlen::RegId::A4, simrv::xlen::RegId::A5) != 0)
+                    return fail(SbiError::InvalidParam);
+                auto idx = selected_index(base, mask);
+                if (!idx || *idx < 3 || cpu_.sbi_pmu_started[*idx])
+                    return fail(SbiError::NotSupported);
+                target = *idx;
+                selector = static_cast<uint64_t>(core::HpmEvent::BranchMispredict);
+            } else if ((type == 3 || type == 2) && code == 0) {
+                selector = read_u64(simrv::xlen::RegId::A4, simrv::xlen::RegId::A5);
+                if ((type == 2 && (selector >> 48U) != 0) ||
+                    (type == 3 && (selector >> 56U) != 0) || selector < 1 ||
+                    selector >= static_cast<uint64_t>(core::HpmEvent::Count))
+                    return fail(SbiError::NotSupported);
+                if ((flags & 1U) != 0) {
+                    auto idx = selected_index(base, mask);
+                    if (!idx || *idx < 3 || cpu_.sbi_pmu_started[*idx])
+                        return fail(SbiError::NotSupported);
+                    target = *idx;
+                } else {
+                    auto idx = selected_index(base, mask);
+                    if (!idx || *idx < 3 || cpu_.sbi_pmu_started[*idx])
+                        return fail(SbiError::NotSupported);
+                    target = *idx;
+                }
+            } else {
+                return fail(SbiError::NotSupported);
+            }
+            if (target >= 3) {
+                selector |= ((flags & (1U << 7U)) != 0 ? uint64_t{1} << 62U : 0) |
+                            ((flags & (1U << 6U)) != 0 ? uint64_t{1} << 61U : 0) |
+                            ((flags & (1U << 5U)) != 0 ? uint64_t{1} << 60U : 0);
+                cpu_.sbi_pmu_selector[target] = selector;
+            }
+            cpu_.sbi_pmu_configured[target] = true;
+            cpu_.sbi_pmu_started[target] = false;
+            if (target >= 3) cpu_.perf_counters.write_hpmevent(target, 0);
+            if ((flags & (1U << 1U)) != 0) {
+                if (target == 0)
+                    cpu_.clint_mmio.mcycle = 0;
+                else if (target == 2)
+                    cpu_.state().minstret = 0;
+                else
+                    cpu_.perf_counters.write_hpmcounter(target, 0);
+            }
+            if ((flags & (1U << 2U)) != 0) {
+                cpu_.sbi_pmu_started[target] = true;
+                if (target == 0)
+                    cpu_.state().mcountinhibit &= ~simrv::xlen::CsrValue{1};
+                else if (target == 2)
+                    cpu_.state().mcountinhibit &= ~simrv::xlen::CsrValue{4};
+                else
+                    cpu_.perf_counters.write_hpmevent(target, cpu_.sbi_pmu_selector[target]);
+            }
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), target);
+            return true;
+        }
+        case 3: {  // sbi_pmu_counter_start
+            const Word base = read(simrv::xlen::RegId::A0);
+            const Word mask = read(simrv::xlen::RegId::A1);
+            const Word flags = read(simrv::xlen::RegId::A2);
+            if (!valid_counter_set(base, mask) || (flags & ~Word{3}) != 0)
+                return fail(SbiError::InvalidParam);
+            if ((flags & 2U) != 0) return fail(SbiError::NoShmem);
+            if ((flags & 1U) != 0 && std::popcount(mask) != 1) return fail(SbiError::InvalidParam);
+            for (size_t i = 0; i < 32; ++i) {
+                if (i < base || i - base >= simrv::xlen::kXLenBits ||
+                    ((mask >> (i - base)) & 1U) == 0)
+                    continue;
+                if (i == 1) return fail(SbiError::InvalidParam);
+                if (!cpu_.sbi_pmu_configured[i]) return fail(SbiError::InvalidParam);
+                if (cpu_.sbi_pmu_started[i]) return fail(SbiError::AlreadyStarted);
+                if ((flags & 1U) != 0) {
+                    const auto initial = read_u64(simrv::xlen::RegId::A3, simrv::xlen::RegId::A4);
+                    if (i == 0)
+                        cpu_.clint_mmio.mcycle = initial;
+                    else if (i == 2)
+                        cpu_.state().minstret = initial;
+                    else
+                        cpu_.perf_counters.write_hpmcounter(i, initial);
+                }
+                cpu_.sbi_pmu_started[i] = true;
+                if (i == 0)
+                    cpu_.state().mcountinhibit &= ~simrv::xlen::CsrValue{1};
+                else if (i == 2)
+                    cpu_.state().mcountinhibit &= ~simrv::xlen::CsrValue{4};
+                else
+                    cpu_.perf_counters.write_hpmevent(i, cpu_.sbi_pmu_selector[i]);
+            }
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        case 4: {  // sbi_pmu_counter_stop
+            const Word idx = read(simrv::xlen::RegId::A0);
+            const Word mask = read(simrv::xlen::RegId::A1);
+            const Word flags = read(simrv::xlen::RegId::A2);
+            if (!valid_counter_set(idx, mask) || (flags & ~Word{3}) != 0)
+                return fail(SbiError::InvalidParam);
+            if ((flags & 2U) != 0) return fail(SbiError::NoShmem);
+            for (size_t i = 0; i < 32; ++i) {
+                if (i < idx || i - idx >= simrv::xlen::kXLenBits || ((mask >> (i - idx)) & 1U) == 0)
+                    continue;
+                if (!cpu_.sbi_pmu_configured[i]) return fail(SbiError::InvalidParam);
+                if (!cpu_.sbi_pmu_started[i]) return fail(SbiError::AlreadyStopped);
+                cpu_.sbi_pmu_started[i] = false;
+                if (i == 0)
+                    cpu_.state().mcountinhibit |= 1U;
+                else if (i == 2)
+                    cpu_.state().mcountinhibit |= 4U;
+                else
+                    cpu_.perf_counters.write_hpmevent(i, 0);
+                if ((flags & 1U) != 0) {
+                    cpu_.sbi_pmu_configured[i] = false;
+                    cpu_.sbi_pmu_selector[i] = 0;
+                }
+            }
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        }
+        case 5: {  // sbi_pmu_counter_fw_read
+            return fail(SbiError::InvalidParam);
+        }
+        case 6:
+            return fail(SbiError::InvalidParam);
+        case 7:  // sbi_pmu_snapshot_set_shmem
+            return fail(SbiError::NotSupported);
+        case 8:
+            return fail(SbiError::NotSupported);
+        default:
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
+            return true;
+    }
+}
+
+auto Sbi::handle_cppc(simrv::xlen::Word func_id) -> bool {
+    switch (func_id) {
+        case 0: {  // sbi_cppc_probe
+            const simrv::xlen::Word reg_id = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+            if (reg_id <= 0x12) {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success),
+                           32);  // 32-bit register width
+            } else {
+                sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
+            }
+            return true;
+        }
+        case 1: {  // sbi_cppc_read
+            const simrv::xlen::Word reg_id = cpu_.state().regs.read(simrv::xlen::RegId::A0);
+            simrv::xlen::Word val = 0;
+            switch (reg_id) {
+                case 0x00:  // HIGHEST_PERF
+                    val = 1000;
+                    break;
+                case 0x01:  // NOMINAL_PERF
+                    val = 100;
+                    break;
+                case 0x02:  // LOW_NON_LINEAR_PERF
+                    val = 50;
+                    break;
+                case 0x03:  // LOWEST_PERF
+                    val = 10;
+                    break;
+                case 0x04:  // GUARANTEED_PERF
+                case 0x12:  // REFERENCE_PERF
+                    val = 100;
+                    break;
+                default:
+                    val = 0;
+                    break;
+            }
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), val);
+            return true;
+        }
+        case 2:  // sbi_cppc_write
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+            return true;
+        default:
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
+            return true;
+    }
+}
+
+auto Sbi::handle_susp(simrv::xlen::Word func_id) -> bool {
+    if (func_id == 0) {  // sbi_system_suspend
+        sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
+        return true;
+    }
+    sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
+    return true;
+}
+
+auto Sbi::handle_ecall(simrv::xlen::TrapCause cause) -> bool {
     if (cpu_.use_opensbi) {
         return false;
     }
 
-    if (!detail::is_direct_sbi_ecall(cause)) {
+    const bool is_uefi_m_ecall =
+        (cause == ExceptionCode::MachineEcall) &&
+        (cpu_.machine_ != nullptr && cpu_.machine_->files_config().uefi_enabled);
+
+    if (!detail::is_direct_sbi_ecall(cause) && !is_uefi_m_ecall) {
         return false;
     }
 
-    const auto a6 = RegId::A6;
-    const auto a7 = RegId::A7;
-    const Word ext_id = cpu_.state().regs.read(a7);
-    const Word func_id = cpu_.state().regs.read(a6);
+    const auto a6 = simrv::xlen::RegId::A6;
+    const auto a7 = simrv::xlen::RegId::A7;
+    const simrv::xlen::Word ext_id = cpu_.state().regs.read(a7);
+    const simrv::xlen::Word func_id = cpu_.state().regs.read(a6);
 
-    if (cpu_.trap_log_stream != nullptr && cpu_.trap_log_stream->is_open()) {
-        *cpu_.trap_log_stream << std::format(
-            "__ SBI ecall cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} pc={:0{}x}\n",
-            static_cast<unsigned>(cause), static_cast<uint64_t>(ext_id), kLogHexWidth,
-            static_cast<uint64_t>(func_id), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().regs.read(RegId::A0)), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().regs.read(RegId::A1)), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().pc), kLogHexWidth);
-        cpu_.trap_log_stream->flush();
+    if (cpu_.machine_ != nullptr &&
+        simrv::compiler::unlikely(cpu_.machine_->trace().is_trap_log_enabled() ||
+                                  cpu_.machine_->trace().is_architecture_trace_enabled())) {
+        cpu_.machine_->trace().log_sbi(cpu_.clint_mmio.mtime.load(std::memory_order_relaxed),
+                                       cpu_.clint_mmio.mcycle, static_cast<unsigned>(cause), ext_id,
+                                       func_id, cpu_.state().regs.read(simrv::xlen::RegId::A0),
+                                       cpu_.state().regs.read(simrv::xlen::RegId::A1),
+                                       cpu_.pipeline_context.cpc, cpu_.hart_id());
     }
 
     switch (static_cast<ExtId>(ext_id)) {
+        // Retained SBI legacy extension IDs for guest firmware that still uses the v0.1 calls.
         case ExtId::LegacySetTimer:
             return handle_time(0);
         case ExtId::LegacyConsolePutchar: {
-            const auto ch = static_cast<char>(cpu_.state().regs.read(RegId::A0));
-            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui) {
-                cpu_.machine_->tui->handle_char_write(ch);
+            const auto ch = static_cast<char>(cpu_.state().regs.read(simrv::xlen::RegId::A0));
+            if (cpu_.machine_) {
+                cpu_.machine_->console_write(ch);
             } else {
                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
             }
@@ -266,15 +675,15 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             return true;
         }
         case ExtId::LegacyConsoleGetchar:
-            sbi_return(static_cast<SignedWord>(-1), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(-1), 0);
             return true;
         case ExtId::LegacyShutdown:
             simrv::log::info("[SBI] Legacy Shutdown requested (ext 0x08).");
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->exit_code = 0;
-                cpu_.machine_->stop();
+                cpu_.machine_->stop(core::Machine::StopReason::GuestPoweroff);
             }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
             return true;
         case ExtId::Base:
             return handle_base(func_id);
@@ -284,10 +693,20 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             return handle_rfence(func_id);
         case ExtId::Ipi:
             return handle_ipi(func_id);
+        case ExtId::Hsm:
+            return handle_hsm(func_id);
         case ExtId::SystemReset:
             return handle_system_reset(func_id);
+        case ExtId::DebugConsole:
+            return handle_dbcn(func_id);
+        case ExtId::Pmu:
+            return handle_pmu(func_id);
+        case ExtId::Cppc:
+            return handle_cppc(func_id);
+        case ExtId::Susp:
+            return handle_susp(func_id);
         default:
-            sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
             return true;
     }
 }

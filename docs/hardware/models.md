@@ -1,0 +1,302 @@
+# CPU Model Configuration Guide
+
+SimRV provides a microarchitectural CPU modeling framework that enables cycle-accurate (CA) simulation calibrated to real hardware, FPGA soft cores, and SystemVerilog RTL designs. Microarchitectural definitions are decoupled from the simulator binary and managed via human-readable, sectioned `.cfg` files.
+
+## Platform clock contract
+
+SimRV's virtual platform models a nominal CPU core clock and a deterministic `mtime` architectural timer timebase. By default, the simulator uses a **160 MHz CPU clock** and a **10 MHz `mtime` timebase**, advancing the timer at exactly one tick per 16 cycle-accurate model cycles (100 ns per tick).
+
+Both clock frequencies are configurable at runtime via command-line options:
+- `--cpu-clock <FREQ>, --clock-hz <FREQ>`: Sets the CPU core clock frequency in Hz (e.g. `160000000`, `100MHz`, `50MHz`).
+- `--timebase-hz <FREQ>`: Sets the CLINT/ACLINT/RTC timer timebase in Hz (default: `10000000` / 10 MHz).
+
+### Deterministic Clock Division Math
+
+Timer progression is driven cycle-accurately by `DeterministicClockDivider` (`include/simrv/core/PlatformTiming.hpp`), maintaining zero-drift alignment between physical simulation cycles and architectural timer state:
+1. **Exact Integer Dividers** ($\text{CPU\_HZ} \pmod{\text{TIMEBASE\_HZ}} = 0$): When the CPU clock is an exact integer multiple of the timebase (such as 160 MHz / 10 MHz = 16 cycles/tick), the divider operates as a single-cycle integer modulo accumulator with zero fractional rounding or drift.
+2. **Fractional Phase Accumulators** ($\text{fractional} \neq 0$): For arbitrary or asymmetric clock pairings (e.g. 100 MHz CPU with 10 MHz timer, or 50 MHz CPU with 32.768 kHz RTC), SimRV employs a cycle-exact 64-bit fixed-point phase accumulator (`phase += fractional`). Accumulated fractional phase carries into integer timer ticks deterministically, ensuring that guest wall-clock time remains drift-free over billions of cycles.
+
+### Dynamic Device Tree (FDT) Propagation
+
+When simulated Linux or OpenSBI boots, SimRV's dynamic device tree patcher (`simrv::util::patch_device_tree_frequencies`) updates the active FDT blob prior to kernel jump:
+- `/cpus/timebase-frequency`: dynamically patched to the active `--timebase-hz`.
+- `/cpus/cpu@*/clock-frequency`: dynamically patched to the active `--cpu-clock`.
+
+These FDT properties are 32-bit values. Configuration rejects CPU or timebase frequencies above
+`UINT32_MAX` rather than allowing the guest-visible value to wrap.
+
+This allows guest operating systems (Linux, Zephyr, FreeRTOS) to automatically calculate accurate BogoMIPS, delay loops (`udelay`), and timer interrupt deadlines matching the simulated hardware. Pipeline, cache, interconnect, and host-interface latency settings remain expressed in CPU clock cycles; absolute execution time is `cycles / cpu_clock_hz`, while guest timer delays are `mtime_ticks / timebase_hz`.
+
+This physical conversion is hardware-meaningful only in `--mode cycle-accurate`, and only to the extent that the selected model's cycle latencies match the target RTL or processor. Fast and detailed modes use one virtual cycle per instruction step to keep counters and guest timers deterministic; their reported virtual time must not be treated as a hardware performance prediction. `minstret` remains a retired-instruction count in all modes.
+
+---
+
+## 1. Quick Start
+
+For an end-to-end walkthrough of authoring a CPU model file or adding a new emulated MMIO device,
+see [Extending CPU Presets and MMIO Platforms](extending-platforms.md).
+
+### Using a Built-In Preset or Model File
+
+SimRV automatically resolves CPU models by preset name or direct file path:
+
+```bash
+# Run with canonical pre-installed model preset
+simrv --ca --cpu-preset balanced -m program.elf
+
+# Run with an explicit custom configuration file
+simrv --ca --config configs/models/my_core.cfg -m program.elf
+```
+
+Use `--config` to select a complete platform preset or custom configuration file. Combined CPU/SoC model files use `[soc]` for
+platform metadata and `[device.<kind>]` for device entries, including `[device.uart]`. A preset
+with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
+that policy retain their existing implicit platform devices.
+
+`[device.uart] clock_hz` sets the UART input clock. It defaults to 3,686,400 Hz. The UART resets
+to 115200 8N1 with a divisor derived from that clock, and generated guest device trees report both
+`clock-frequency` and the resulting `current-speed`. Serial frames complete at deterministic
+simulated CPU-cycle boundaries; individual wire bits are not modeled. With the reset-disabled
+single-byte FIFO, guest examples poll THRE before each transmit write and TEMT before signaling
+completion, allowing output to drain within the modeled cycle stream.
+
+### SMP and shared cache topology
+
+The modeled per-hart interrupt controllers support at most 16 harts. This fixed implementation
+capacity is shared by machine validation, CLINT, ACLINT, AIA, and PLIC storage. The PLIC allocates
+machine and supervisor contexts for each supported hart.
+
+SoC profiles can describe homogeneous hart groups and their shared cache hierarchy. For example:
+
+```ini
+[smp]
+hart_count = 4
+mode = "cycle-accurate" # or "cycle-oriented"
+synchronization_quantum = 64
+
+[smp.cluster.0]
+harts = 0, 1
+l2_enabled = true
+l2_capacity_bytes = 65536
+l2_associativity = 4
+l2_line_bytes = 64
+l2_hit_latency = 8
+l2_miss_latency = 12
+
+[smp.cluster.1]
+harts = 2, 3
+l2_enabled = true
+l2_capacity_bytes = 65536
+l2_associativity = 4
+
+[smp.l3]
+enabled = true
+capacity_bytes = 524288
+associativity = 16
+line_bytes = 64
+hit_latency = 1
+miss_latency = 1
+```
+
+Each hart has a private instruction and data L1. L2 is optional and shared by harts in the same
+cluster; L3 is an optional global shared cache. Cache geometry uses 64-byte coherent lines and
+power-of-two set and way counts. The current model uses one CPU model across all harts.
+
+The `single-threaded` mode advances harts and shared devices in deterministic global-cycle order.
+`multi-threaded` executes each global cycle on hart worker threads and synchronizes at the cycle
+boundary before advancing shared devices. Shared requests are resolved by logical cycle, hart ID,
+and per-hart issue order. The synchronization quantum groups global cycles into host-side runner
+turns; it does not let one hart advance simulated time ahead of another. Cross-hart interrupts and
+hart lifecycle changes take effect at the destination hart's next execution boundary. Active hart
+count can be overridden via `--harts`.
+
+### PCIe host and endpoint topology
+
+PCIe host windows and endpoint topology can be configured separately from each endpoint's MMIO
+descriptor. The following section relocates ECAM and the BAR aperture, exposes buses 0 through 4,
+and moves the block endpoint to `00:09.2` with PLIC source 30:
+
+```ini
+[pcie]
+ecam_base = 0x34000000
+ecam_size = 5M
+mmio_base = 0x44000000
+mmio_size = 16M
+first_bus = 0
+last_bus = 4
+
+[device.virtio-block]
+pci_bus = 0
+pci_slot = 9
+pci_function = 2
+pci_intx_source = 30
+```
+
+The default `virt-pcie` map keeps ECAM at `0x30000000`, the BAR aperture at `0x40000000`, buses
+0–255, and VirtIO endpoints in slots 1–8. PCI MMIO uses identity translation between PCI and CPU
+addresses. The PLIC implements source IDs 1–31 (source 0 is reserved); generated device trees
+report that same source count, and configured PLIC IRQs and PCIe INTx sources must fit the range.
+Configured PCIe BDFs must be unique.
+
+Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
+`rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,
+`virtio-sound`, and `virtio-net`; each can override `name`, `base`, `size`, and `irq`. The same
+normalized map controls runtime MMIO registration and generated Linux device trees. The plain
+`[dma]` section remains reserved for CPU timing configuration, so it is not a hardware device
+declaration.
+
+To export the resolved registry for tooling or HDL-generation scripts:
+
+```bash
+simrv config export-soc virt-mmio build/virt-mmio-soc.json
+```
+
+The output follows `schemas/soc-manifest.schema.json` and contains the effective platform, memory,
+boot, transport, address, and interrupt metadata after preset-file overrides are applied.
+
+### Generating a New Model Configuration
+
+#### Option A: Interactive CLI Wizard
+
+SimRV includes an interactive questionnaire tool that guides you through tailoring latencies, predictors, and caches:
+
+```bash
+# Interactive wizard
+simrv-config-wizard --name custom_riscv
+
+# Scaffold non-interactively from an existing template
+simrv-config-wizard --template balanced --name my_core --output configs/models/my_core.cfg --non-interactive
+```
+
+#### Option B: `simrv-tools scaffold` Command
+
+Generate an annotated `.cfg` configuration with the standalone tooling executable:
+
+```bash
+# Dump an existing preset to stdout or a file
+simrv --dump-cpu-model balanced configs/models/balanced_copy.cfg
+
+# Scaffold a default balanced template
+simrv-tools scaffold cpu balanced configs/models/new_core.cfg
+```
+
+#### Option C: In the Interactive TUI
+
+1. Launch SimRV in cycle-accurate mode (`simrv --ca -m program.elf`).
+2. Press `F12` or open Settings (`[3]` Microarchitecture tab).
+3. Adjust pipeline latencies, predictor capacities, or forwarding rules with arrows or number keys.
+4. Press `[S]` or select **Save configuration** to open the **Save CPU Model Configuration** modal.
+5. Enter your preferred filename/path (e.g. `configs/models/my_experiment.cfg`) and press `Enter`.
+
+---
+
+## 2. Configuration Folder Convention & Lookup Hierarchy
+
+SimRV looks for CPU model configuration files in the canonical `configs/models/` directory. When `--cpu-preset <TARGET>` is supplied:
+
+1. **Direct Path**: If `<TARGET>` is a valid file path, it is loaded immediately.
+2. **Path with Extension**: If `<TARGET>.cfg` exists, it is loaded.
+3. **Canonical Project Folder**: SimRV checks `./configs/models/<TARGET>.cfg`.
+4. **Environment Variable**: SimRV checks `$SIMRV_CONFIG_DIR/models/<TARGET>.cfg` or `$SIMRV_CONFIG_DIR/<TARGET>.cfg`.
+5. **Built-In Fallback**: If no file is found, SimRV falls back to minimal compiled generic defaults (`tiny`, `balanced`, `performance`).
+
+---
+
+## 3. Configuration Format Reference (`.cfg`)
+
+SimRV CPU model configurations follow a clean INI/TOML sectioned format with support for comments (`#` and `;`), unquoted numbers/booleans, and quoted strings.
+
+### Sample Configuration: user-defined model
+
+The wizard creates an editable `.cfg` file from a generic CPU preset. Files may be used directly
+with `--cpu-preset` or combined with `[soc]` and `[device.*]` sections for a complete platform.
+Unknown device names and project-specific timing models are not compiled into SimRV.
+
+## 4. Parameter Dictionary
+
+### `[cpu]` Section
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `preset` | string | `"balanced"` | Built-in CPU model preset: `tiny`, `balanced`, or `performance`. Use a model `name` for custom configurations. |
+| `name` | string | `"custom"` | Identifier for the CPU model or custom configuration. |
+| `description` | string | `""` | Human-readable documentation of the core architecture. |
+| `xlen` | integer | `0` | Supported machine XLEN: `32` (RV32-only), `64` (RV64-only), or `0` (supports both RV32 and RV64 targets). Verified on startup against simulator build. |
+| `isa_preset` | string | `"gcv"` | Target ISA extension preset: `gcv`, `gc`, `imac`, `ima`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
+
+### `[pipeline]` Section
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `type` | string | `"five-stage"` | Pipeline structure: `"five-stage"` or `"three-stage"`. |
+| `enable_forwarding` | bool | `true` | Enables EX-to-EX and MEM-to-EX operand bypass forwarding. |
+| `mul_latency` | uint | `2` | Additional execution stall cycles after issue for integer multiplication (`MUL`, `MULH`, etc.). Zero adds no stall cycles. |
+| `div_latency` | uint | `17` | Additional execution stall cycles after issue for integer division and remainder (`DIV`, `REM`). Zero adds no stall cycles. |
+| `fp_alu_latency` | uint | `3` | Additional execution stall cycles after issue for single/double-precision floating-point additions and multiplications. |
+| `fp_div_latency` | uint | `15` | Additional execution stall cycles after issue for floating-point division and square root operations. |
+| `branch_mispredict_penalty` | uint | `3` | Recovery flush penalty in cycles when a branch is mispredicted. |
+| `cycle_counter_start_delay` | uint | `0` | Delay in clock cycles before the `mcycle` counter starts incrementing after reset deassertion. |
+| `host_interface_latency` | uint | `0` | Completion latency for cycle-mode writes to the HTIF/tohost interface. Zero publishes the write immediately. |
+| `host_interface_phase_period` | uint | `0` | Optional transport phase period. A write issued at phase `p` adds `p` cycles, modeling a phase-aligned host interface. |
+| `csr_flush_penalty` | uint | `3` | Pipeline stall/drain penalty when executing serializing CSR instructions. |
+| `fence_flush_penalty` | uint | `4` | Pipeline stall/drain penalty when executing `FENCE` or `FENCE.I`. |
+
+### `[branch_predictor]` Section
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `type` | string | `"bimodal"` | Prediction algorithm: `"none"`, `"static"`, `"bimodal"`, `"gshare"`, `"tournament"`. |
+| `btb_entries` | uint | `256` | Number of Branch Target Buffer (BTB) cache entries (power of 2). |
+| `bht_entries` | uint | `1024` | Number of 2-bit saturating counters in the Branch History Table (PHT/BHT). |
+| `ras_entries` | uint | `16` | Return Address Stack depth for function call/return acceleration. |
+| `ghr_bits` | uint | `10` | Global History Register bitwidth used in `gshare` hashing. |
+| `pc_shift` | uint | `1` | Shift applied to branch PC before indexing tables (1 for RVC 16-bit instructions, 2 for 32-bit aligned instructions). |
+| `enable_btb` | bool | `true` | Enables branch target caching. |
+| `enable_ras` | bool | `true` | Enables Return Address Stack. |
+| `untagged_btb` | bool | `false` | When true, BTB entries omit tag checks, indexing solely via lower PC bits. |
+| `predict_non_control` | bool | `false` | When true, an untagged BTB may redirect a non-control instruction on an aliased taken entry, matching predictors that access every fetch PC. |
+| `jump_uses_direction_counter` | bool | `false` | Require the BTB direction counter to predict a direct jump taken. Use this for unified BTB/PHT designs that do not special-case `JAL`. |
+| `jump_uses_current_btb` | bool | `false` | Use the current-PC BTB entry for direct jumps even when conditional predictions consume a registered BTB output. |
+| `registered_btb_read` | bool | `false` | Set to true if BTB output takes 1 cycle to latch, inserting a 1-cycle bubble on predicted taken branches. |
+| `bht_initial_state` | uint | `0` | Initial 2-bit counter value: `0` (Strongly Not Taken), `1` (Weakly Not Taken), `2` (Weakly Taken), `3` (Strongly Taken). |
+
+### `[instruction_cache]` and `[data_cache]` Sections
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `capacity_bytes` | uint | `4096` | Total cache capacity in bytes (e.g. `16384` for 16 KiB). |
+| `associativity` | uint | `1` | Cache set associativity (`1` for direct-mapped, `2`, `4`, etc.). |
+| `line_bytes` | uint | `64` | Cache block width in bytes (RVA23 requires 64-byte blocks). |
+| `hit_latency` | uint | `1` | Cache access latency on hit in clock cycles. |
+| `miss_latency` | uint | `10` | Penalty added on cache miss during line fill request. |
+
+An optional `[instruction_front_cache]` section adds a tag-only timing level in
+front of the coherent instruction cache. It accepts `capacity_bytes`,
+`associativity`, `line_bytes`, `hit_latency`, `refill_latency`, and
+`backing_refill_latency`. The underlying timing engine supports ordered inclusive
+levels with independent geometry and latency, while architectural data remains
+owned by the coherent cache. `startup_refill_latencies` may contain a quoted,
+comma-separated latency sequence for simulations that begin with partially warm
+hardware state. `freeze_pipeline_on_refill` models blocking in-order frontends
+whose outstanding fetch prevents every pipeline stage from advancing. This
+permits small L0 lines and frontend-owned request timing without changing the
+coherent fabric's transfer size.
+
+### `[interconnect]` Section
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `request_latency` | uint | `1` | Latency from CPU master issue to crossbar/device request arrival. |
+| `response_latency` | uint | `1` | Latency for slave response/acknowledgment transfer back to CPU. |
+| `data_request_latency` | uint | `0` | Optional data-port request override; zero inherits `request_latency`. |
+| `data_response_latency` | uint | `0` | Optional data-port response override; zero inherits `response_latency`. |
+| `startup_data_response_latency` | uint | `0` | Optional response latency for the first data-port transaction after reset; later responses use `data_response_latency`. |
+
+---
+
+## 5. Generic presets and external model files
+
+The built-in `balanced`, `tiny`, and `performance` CPU presets provide starting points. A custom
+model file can extend a preset and set pipeline, cache, branch-predictor, interconnect, and custom
+function-unit parameters. Model files remain human-editable and can be distributed independently
+from the simulator.

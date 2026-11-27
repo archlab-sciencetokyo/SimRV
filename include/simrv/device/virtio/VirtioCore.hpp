@@ -1,0 +1,379 @@
+/**
+ * @file VirtioCore.hpp
+ * @brief Common OASIS VirtIO 1.2 Specification Definitions, Virtqueues, and Shared Backends.
+ */
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <boost/circular_buffer.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <random>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "simrv/device/virtio/VirtioTypes.hpp"
+#include "simrv/util/UniqueFd.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::device::virtio {
+
+// VirtIO 1.2 Device IDs
+inline constexpr VirtioDeviceId kDevIdNet = 1;
+inline constexpr VirtioDeviceId kDevIdBlock = 2;
+inline constexpr VirtioDeviceId kDevIdConsole = 3;
+inline constexpr VirtioDeviceId kDevIdRng = 4;
+inline constexpr VirtioDeviceId kDevIdBalloon = 5;
+inline constexpr VirtioDeviceId kDevIdGpu = 16;
+inline constexpr VirtioDeviceId kDevIdInput = 18;
+inline constexpr VirtioDeviceId kDevIdSound = 25;
+inline constexpr VirtioDeviceId kDevIdFs = 26;
+
+// VirtIO 1.2 Common Feature Bits
+inline constexpr uint64_t kVirtioFVersion1 = (1ULL << 32);
+inline constexpr uint32_t kVirtioFVersion1FeatureWord =
+    static_cast<uint32_t>(kVirtioFVersion1 >> 32);
+inline constexpr uint64_t kVirtioFAccessPlatform = (1ULL << 33);
+inline constexpr uint64_t kVirtioFRingPacked = (1ULL << 34);
+
+// VirtIO 1.2 Device Status Flags
+inline constexpr uint8_t kVirtioStatusAcknowledge =
+    std::to_underlying(VirtioDeviceStatus::Acknowledge);
+inline constexpr uint8_t kVirtioStatusDriver = std::to_underlying(VirtioDeviceStatus::Driver);
+inline constexpr uint8_t kVirtioStatusDriverOk = std::to_underlying(VirtioDeviceStatus::DriverOk);
+inline constexpr uint8_t kVirtioStatusFeaturesOk =
+    std::to_underlying(VirtioDeviceStatus::FeaturesOk);
+inline constexpr uint8_t kVirtioStatusDeviceNeedsReset =
+    std::to_underlying(VirtioDeviceStatus::DeviceNeedsReset);
+inline constexpr uint8_t kVirtioStatusFailed = std::to_underlying(VirtioDeviceStatus::Failed);
+
+// Virtqueue Split Ring Flags
+inline constexpr uint16_t kVirtqDescFNext = std::to_underlying(VirtqDescFlag::Next);
+inline constexpr uint16_t kVirtqDescFWrite = std::to_underlying(VirtqDescFlag::Write);
+inline constexpr uint16_t kVirtqDescFIndirect = std::to_underlying(VirtqDescFlag::Indirect);
+
+// Split Virtqueue Standard Descriptor (16 bytes)
+#pragma pack(push, 1)
+struct VirtqDesc {
+    uint64_t addr{0};
+    uint32_t len{0};
+    uint16_t flags{0};
+    uint16_t next{0};
+
+    [[nodiscard]] constexpr auto has_flag(VirtqDescFlag f) const noexcept -> bool {
+        return (flags & std::to_underlying(f)) != 0;
+    }
+};
+
+struct VirtqUsedElem {
+    uint32_t id{0};
+    uint32_t len{0};
+};
+#pragma pack(pop)
+
+// Dynamic Virtqueue state tracker
+struct QueueState {
+    VirtioQueueIndex num_max{64};
+    VirtioQueueIndex num{64};
+    uint16_t ready{0};
+    uint64_t desc_addr{0};
+    uint64_t driver_addr{0};
+    uint64_t device_addr{0};
+    VirtioQueueIndex last_avail_idx{0};
+    uint64_t generation{0};
+
+    /// The split-ring metadata must fit in the 64-bit transport address space.
+    [[nodiscard]] constexpr auto usable() const noexcept -> bool {
+        if (ready == 0 || num == 0 || num > num_max || desc_addr == 0 || driver_addr == 0 ||
+            device_addr == 0)
+            return false;
+        const auto fits = [](uint64_t base, uint64_t bytes) {
+            return bytes - 1 <= std::numeric_limits<uint64_t>::max() - base;
+        };
+        return fits(desc_addr, uint64_t{num} * sizeof(VirtqDesc)) &&
+               fits(driver_addr, 4 + uint64_t{num} * sizeof(uint16_t)) &&
+               fits(device_addr, 4 + uint64_t{num} * sizeof(VirtqUsedElem));
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Shared Device Backends
+// -----------------------------------------------------------------------------
+
+class BlockBackend {
+   public:
+    inline static constexpr uint32_t kMaxRangeSectors = 65536;
+
+    explicit BlockBackend(const std::string& path = "");
+
+    auto load_disk(const std::string& path) -> bool;
+
+    [[nodiscard]] auto is_loaded() const -> bool { return base_fd_ && overlay_fd_; }
+    [[nodiscard]] auto capacity_sectors() const -> uint64_t { return size_bytes_ / 512ULL; }
+
+    auto read_sectors(uint64_t sector, std::span<std::byte> dst) -> bool;
+    auto read_sectors(uint64_t sector, std::byte* dst, std::size_t len) -> bool;
+
+    auto write_sectors(uint64_t sector, std::span<const std::byte> src) -> bool;
+    auto write_sectors(uint64_t sector, const std::byte* src, std::size_t len) -> bool;
+
+    auto discard_sectors(uint64_t sector, uint32_t count) -> bool;
+    auto write_zeroes(uint64_t sector, uint32_t count) -> bool;
+
+    auto flush() -> bool;
+
+   private:
+    enum class SectorSource : uint8_t { Base, Overlay, Zero };
+
+    [[nodiscard]] auto sector_source(uint64_t sector) const -> SectorSource;
+    [[nodiscard]] auto valid_range(uint64_t sector, uint32_t count) const -> bool;
+    auto punch_overlay_hole(uint64_t offset, uint64_t bytes) const -> bool;
+    static auto pread_exact(int fd, std::byte* dst, size_t size, uint64_t offset) -> bool;
+    static auto pwrite_exact(int fd, const std::byte* src, size_t size, uint64_t offset) -> bool;
+
+    simrv::util::UniqueFd base_fd_;
+    simrv::util::UniqueFd overlay_fd_;
+    std::vector<uint64_t> dirty_sectors_;
+    std::vector<uint64_t> zero_sectors_;
+    uint64_t size_bytes_{0};
+};
+
+class ConsoleBackend {
+   public:
+    static constexpr std::size_t kMaxTxBufferBytes = 65536;
+
+    ConsoleBackend() = default;
+
+    void push_rx(uint8_t byte) { rx_fifo_.push_back(byte); }
+    [[nodiscard]] auto has_rx() const -> bool { return !rx_fifo_.empty(); }
+    auto pop_rx() -> uint8_t {
+        if (rx_fifo_.empty()) return 0;
+        uint8_t val = rx_fifo_.front();
+        rx_fifo_.pop_front();
+        return val;
+    }
+
+    void write_tx(uint8_t byte) {
+        if (tx_buffer_.size() >= kMaxTxBufferBytes) {
+            tx_buffer_.erase(tx_buffer_.begin(), tx_buffer_.begin() + static_cast<std::ptrdiff_t>(
+                                                                          kMaxTxBufferBytes / 2));
+        }
+        tx_buffer_.push_back(byte);
+    }
+
+    [[nodiscard]] auto get_tx_data() const -> const std::vector<uint8_t>& { return tx_buffer_; }
+
+   private:
+    boost::circular_buffer<uint8_t> rx_fifo_{256};
+    std::vector<uint8_t> tx_buffer_;
+};
+
+class RngBackend {
+   public:
+    RngBackend() : rng_(1337) {}
+
+    void fill_random(std::span<std::byte> dst) {
+        for (auto& byte : dst) {
+            byte = static_cast<std::byte>(dist_(rng_));
+        }
+    }
+
+    void fill_random(std::byte* dst, std::size_t len) {
+        fill_random(std::span<std::byte>(dst, len));
+    }
+
+   private:
+    std::mt19937 rng_;
+    std::uniform_int_distribution<uint16_t> dist_{0, 255};
+};
+
+inline constexpr uint64_t kVirtioNetFMac = (1ULL << 5);
+inline constexpr uint64_t kVirtioNetFStatus = (1ULL << 16);
+
+class NetBackend {
+   public:
+    static constexpr std::size_t kMaxRxQueuePackets = 1024;
+    static constexpr std::size_t kMaxPacketBytes = 65536;
+
+    struct SlirpState;
+
+    enum class Mode : uint8_t {
+        User = 0,  // User-mode NAT through libslirp
+        None = 1,  // Disabled
+    };
+
+    explicit NetBackend(Mode mode = Mode::User);
+    ~NetBackend();
+
+    NetBackend(const NetBackend&) = delete;
+    auto operator=(const NetBackend&) -> NetBackend& = delete;
+    NetBackend(NetBackend&&) noexcept;
+    auto operator=(NetBackend&&) noexcept -> NetBackend&;
+
+    void set_mac(std::array<uint8_t, 6> mac) { mac_ = mac; }
+    [[nodiscard]] auto get_mac() const -> const std::array<uint8_t, 6>& { return mac_; }
+    [[nodiscard]] auto mode() const -> Mode { return mode_; }
+    void set_mode(Mode mode);
+    auto poll_host_rx() -> std::size_t;
+    [[nodiscard]] auto host_backend_available() const noexcept -> bool;
+
+    void push_rx_packet(const std::vector<uint8_t>& packet) {
+        push_rx_packet(std::span<const uint8_t>(packet));
+    }
+    void push_rx_packet(std::span<const uint8_t> packet) {
+        if (packet.empty() || packet.size() > kMaxPacketBytes) return;
+        if (rx_queue_.size() >= kMaxRxQueuePackets) {
+            rx_queue_.pop_front();
+        }
+        rx_queue_.emplace_back(packet.begin(), packet.end());
+        ++pending_rx_packets_;
+    }
+
+    [[nodiscard]] auto has_rx_packet() const -> bool { return !rx_queue_.empty(); }
+    void reset() {
+        rx_queue_.clear();
+        tx_packet_count_ = 0;
+        pending_rx_packets_ = 0;
+    }
+
+    auto pop_rx_packet() -> std::vector<uint8_t> {
+        if (rx_queue_.empty()) return {};
+        auto pkt = std::move(rx_queue_.front());
+        rx_queue_.pop_front();
+        return pkt;
+    }
+
+    void send_tx_packet(std::span<const uint8_t> data);
+
+    void send_tx_packet(const uint8_t* data, std::size_t len) {
+        send_tx_packet(std::span<const uint8_t>(data, len));
+    }
+
+    [[nodiscard]] auto tx_packet_count() const noexcept -> std::size_t { return tx_packet_count_; }
+
+   private:
+    void initialize_user_mode_network();
+
+    Mode mode_{Mode::User};
+    std::array<uint8_t, 6> mac_{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    std::deque<std::vector<uint8_t>> rx_queue_;
+    std::size_t tx_packet_count_{0};
+    std::size_t pending_rx_packets_{0};
+    std::unique_ptr<SlirpState> slirp_;
+};
+
+struct VirtioInputEvent {
+    uint16_t type{0};
+    uint16_t code{0};
+    uint32_t value{0};
+};
+
+struct VirtioInputAbsInfo {
+    uint32_t min{0};
+    uint32_t max{0};
+    uint32_t fuzz{0};
+    uint32_t flat{0};
+    uint32_t res{0};
+};
+
+class InputBackend {
+   public:
+    uint8_t select{0};
+    uint8_t subsel{0};
+    std::deque<VirtioInputEvent> event_queue;
+    std::mutex event_mutex;
+
+    [[nodiscard]] auto read_config(simrv::xlen::Address offset, uint8_t size) const -> uint64_t {
+        uint64_t res = 0;
+        const uint8_t bytes_to_read = std::min<uint8_t>(size, 8);
+        for (uint8_t b = 0; b < bytes_to_read; ++b) {
+            const simrv::xlen::Address off = offset + b;
+            uint8_t val = 0;
+            if (off == 0) {
+                val = select;
+            } else if (off == 1) {
+                val = subsel;
+            } else if (off == 2) {
+                val = get_config_size();
+            } else if (off >= 8) {
+                val = get_config_u_byte(off - 8);
+            }
+            res |= (static_cast<uint64_t>(val) << (b * 8));
+        }
+        return res;
+    }
+
+    void write_config(simrv::xlen::Address offset, uint64_t val, uint8_t size) {
+        for (uint8_t b = 0; b < size; ++b) {
+            const simrv::xlen::Address off = offset + b;
+            const auto byte_val = static_cast<uint8_t>((val >> (b * 8)) & 0xFF);
+            if (off == 0) select = byte_val;
+            if (off == 1) subsel = byte_val;
+        }
+    }
+
+   private:
+    [[nodiscard]] auto get_config_size() const -> uint8_t {
+        switch (select) {
+            case 0x01: {  // VIRTIO_INPUT_CFG_ID_NAME
+                static constexpr std::string_view kName = "SimRV Combined Input";
+                return static_cast<uint8_t>(kName.size());
+            }
+            case 0x02: {  // VIRTIO_INPUT_CFG_ID_SERIAL
+                static constexpr std::string_view kSerial = "simrv-input-0";
+                return static_cast<uint8_t>(kSerial.size());
+            }
+            case 0x03:  // VIRTIO_INPUT_CFG_ID_DEVIDS
+                return 8;
+            case 0x11:                       // VIRTIO_INPUT_CFG_EV_BITS
+                if (subsel == 0) return 1;   // EV_SYN
+                if (subsel == 1) return 48;  // EV_KEY (keys 0..127 + mouse buttons)
+                if (subsel == 2) return 2;   // EV_REL
+                if (subsel == 3) return 1;   // EV_ABS
+                return 0;
+            case 0x12:  // VIRTIO_INPUT_CFG_ABS_INFO
+                if (subsel == 0 || subsel == 1) return sizeof(VirtioInputAbsInfo);
+                return 0;
+            default:
+                return 0;
+        }
+    }
+
+    [[nodiscard]] auto get_config_u_byte(simrv::xlen::Address off) const -> uint8_t {
+        if (select == 0x01) {
+            static constexpr std::string_view kName = "SimRV Combined Input";
+            if (off < kName.size()) return static_cast<uint8_t>(kName[off]);
+        } else if (select == 0x02) {
+            static constexpr std::string_view kSerial = "simrv-input-0";
+            if (off < kSerial.size()) return static_cast<uint8_t>(kSerial[off]);
+        } else if (select == 0x11) {
+            if (subsel == 0 && off == 0) return 0x01;  // SYN_REPORT
+            if (subsel == 1) {
+                if (off < 16) return 0xFF;   // Standard keys (0..127)
+                if (off == 34) return 0x07;  // BTN_LEFT(0x110), BTN_RIGHT(0x111), BTN_MIDDLE(0x112)
+            } else if (subsel == 2) {
+                if (off == 0) return 0x00;  // No REL_X / REL_Y (absolute pointer)
+                if (off == 1) return 0x01;  // REL_WHEEL
+            } else if (subsel == 3 && off == 0) {
+                return 0x03;  // ABS_X | ABS_Y
+            }
+        } else if (select == 0x12 && (subsel == 0 || subsel == 1) &&
+                   off < sizeof(VirtioInputAbsInfo)) {
+            VirtioInputAbsInfo info{};
+            info.min = 0;
+            info.max = (subsel == 0) ? 639 : 479;
+            const auto* p = reinterpret_cast<const uint8_t*>(&info);
+            return p[off];
+        }
+        return 0;
+    }
+};
+
+}  // namespace simrv::device::virtio

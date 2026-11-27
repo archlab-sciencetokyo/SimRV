@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.org/schemas/trace-index.schema.json",
+  "title": "SimRV sparse retirement trace index",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version", "kind", "stream", "stride", "offset_units"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "kind": { "const": "trace_index" },
+        "stream": { "const": "retire" },
+        "stride": { "type": "integer", "minimum": 1 },
+        "offset_units": { "const": "bytes" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema_version", "kind", "record", "byte_offset", "cycle", "hart", "pc", "event"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "kind": { "const": "trace_index_entry" },
+        "record": { "type": "integer", "minimum": 0 },
+        "byte_offset": { "type": "integer", "minimum": 0 },
+        "cycle": { "type": "integer", "minimum": 0 },
+        "hart": { "type": "integer", "minimum": 0 },
+        "pc": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+        "event": { "const": "retire" }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

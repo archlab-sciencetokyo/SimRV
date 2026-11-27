@@ -4,9 +4,50 @@
  */
 #pragma once
 
+#include <algorithm>
+#include <concepts>
 #include <cstdint>
+#include <type_traits>
+#include <utility>
+
+#include "simrv/isa/InstructionFields.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::isa {
+
+/**
+ * @brief Return the natural access size encoded by an A-extension instruction.
+ *
+ * The standard encodes AMO.W with funct3=010 and AMO.D with funct3=011. Other encodings are
+ * reserved and return zero so callers can reject them.
+ */
+constexpr auto amo_operand_bytes(Funct3 funct3) -> unsigned {
+    switch (std::to_underlying(funct3)) {
+        case 0:
+            return 1;
+        case 1:
+            return 2;
+        case 2:
+            return 4;
+        case 3:
+            return 8;
+        case 4:
+            return 16;
+        default:
+            return 0;
+    }
+}
+
+/** Return whether the base A-extension AMO width exists for the build's architectural XLEN. */
+constexpr auto amo_width_supported(Funct3 funct3) -> bool {
+    return funct3 == Funct3::Lw || (simrv::xlen::kIsXLen64 && funct3 == Funct3::Ld);
+}
+
+/** Return whether an LR/SC/AMO effective address meets the A-extension alignment rule. */
+constexpr auto amo_address_aligned(simrv::xlen::VirtAddr address, Funct3 funct3) -> bool {
+    const unsigned bytes = amo_operand_bytes(funct3);
+    return bytes != 0 && (address & static_cast<simrv::xlen::Address>(bytes - 1U)) == 0;
+}
 
 /**
  * @enum AmoStatus
@@ -22,17 +63,78 @@ enum class AmoStatus : uint8_t {
  * @brief Represents the 5-bit atomic operation selector (bits [31:27] of AMO instructions).
  */
 enum class Funct5Amo : uint8_t {
-    Lr = 0x02,    ///< Load-Reserved
-    Sc = 0x03,    ///< Store-Conditional
-    Swap = 0x01,  ///< Atomic Swap
-    Add = 0x00,   ///< Atomic Add
-    And = 0x0c,   ///< Atomic Bitwise AND
-    Or = 0x08,    ///< Atomic Bitwise OR
-    Xor = 0x04,   ///< Atomic Bitwise XOR
-    Min = 0x10,   ///< Atomic Signed Minimum
-    Minu = 0x18,  ///< Atomic Unsigned Minimum
-    Max = 0x14,   ///< Atomic Signed Maximum
-    Maxu = 0x1c,  ///< Atomic Unsigned Maximum
+    Lr = 0x02,         ///< Load-Reserved
+    Sc = 0x03,         ///< Store-Conditional
+    Swap = 0x01,       ///< Atomic Swap
+    Cas = 0x05,        ///< Atomic Compare-and-Swap (Zacas)
+    Ssamoswap = 0x09,  ///< Shadow Stack Atomic Swap (Zicfiss)
+    Add = 0x00,        ///< Atomic Add
+    And = 0x0c,        ///< Atomic Bitwise AND
+    Or = 0x08,         ///< Atomic Bitwise OR
+    Xor = 0x04,        ///< Atomic Bitwise XOR
+    Min = 0x10,        ///< Atomic Signed Minimum
+    Minu = 0x18,       ///< Atomic Unsigned Minimum
+    Max = 0x14,        ///< Atomic Signed Maximum
+    Maxu = 0x1c,       ///< Atomic Unsigned Maximum
 };
+
+/**
+ * @brief Evaluates an AMO arithmetic/logic operation between register operand and memory value.
+ */
+template <typename T>
+constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
+    using SignedT = std::make_signed_t<T>;
+    using UnsignedT = std::make_unsigned_t<T>;
+    switch (funct5) {
+        case Funct5Amo::Swap:
+        case Funct5Amo::Ssamoswap:
+            return reg_val;
+        case Funct5Amo::Add:
+            return mem_val + reg_val;
+        case Funct5Amo::And:
+            return mem_val & reg_val;
+        case Funct5Amo::Or:
+            return mem_val | reg_val;
+        case Funct5Amo::Xor:
+            return mem_val ^ reg_val;
+        case Funct5Amo::Min:
+            return static_cast<T>(
+                std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));
+        case Funct5Amo::Max:
+            return static_cast<T>(
+                std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));
+        case Funct5Amo::Minu:
+            return static_cast<T>(
+                std::min(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val)));
+        case Funct5Amo::Maxu:
+            return static_cast<T>(
+                std::max(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val)));
+        default:
+            return mem_val;
+    }
+}
+
+template <std::integral I>
+constexpr auto operator==(I lhs, Funct5Amo rhs) noexcept -> bool {
+    return lhs == static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator==(Funct5Amo lhs, I rhs) noexcept -> bool {
+    return static_cast<I>(std::to_underlying(lhs)) == rhs;
+}
+template <std::integral I>
+constexpr auto operator!=(I lhs, Funct5Amo rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+template <std::integral I>
+constexpr auto operator!=(Funct5Amo lhs, I rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+
+/// Left-shift operator for Funct5Amo (e.g. funct5 << 27U) to construct instruction words.
+template <std::integral I>
+constexpr auto operator<<(Funct5Amo lhs, I shift) noexcept -> uint32_t {
+    return static_cast<uint32_t>(std::to_underlying(lhs)) << shift;
+}
 
 }  // namespace simrv::isa

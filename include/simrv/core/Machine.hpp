@@ -1,53 +1,135 @@
 #pragma once
-
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
+#include <span>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "simrv/Define.hpp"
-#include "simrv/core/Cpu.hpp"
-#include "simrv/core/Tracer.hpp"
-#include "simrv/debug/BreakpointManager.hpp"
-#include "simrv/debug/GdbStub.hpp"
-#include "simrv/debug/SpikeLockstep.hpp"
-#include "simrv/debug/SymbolTable.hpp"
-#include "simrv/device/Audio.hpp"
-#include "simrv/device/Console.hpp"
-#include "simrv/device/Disk.hpp"
-#include "simrv/device/Framebuffer.hpp"
-#include "simrv/device/Rtc.hpp"
-#include "simrv/device/Uart.hpp"
-#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/CompilerHints.hpp"
+#include "simrv/core/FastBatchPolicy.hpp"
+#include "simrv/core/InterruptController.hpp"
+#include "simrv/core/MachineConfig.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/core/Telemetry.hpp"
+#include "simrv/debug/DebugTypes.hpp"
+#include "simrv/memory/DmaEngine.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
+
+namespace simrv {
+class Rtc;
+}
+
+namespace simrv::debug {
+class BreakpointManager;
+class GdbStub;
+class SpikeLockstep;
+class SymbolTable;
+}  // namespace simrv::debug
+
+namespace simrv::execute {
+class ExecuteUnit;
+}
 
 namespace simrv::device {
+class Uart;
+class SerialDevice;
+class FramebufferDevice;
 class PowerMmio;
-class InputDevice;
+class DmaController;
+class AclintMtimer;
+class AclintMswi;
+class Imsic;
+class Aplic;
+class PcieRootComplex;
+class VirtioPciBlock;
+class VirtioPciConsole;
+class VirtioPciRng;
+class VirtioPciGpu;
+class VirtioPciInput;
+class VirtioPciSound;
+class VirtioPciNet;
+class VirtioMmioBlock;
+class VirtioMmioConsole;
+class VirtioMmioRng;
+class VirtioMmioGpu;
+class VirtioMmioInput;
+class VirtioMmioSound;
+class VirtioMmioNet;
+class PlatformDeviceRegistry;
 }  // namespace simrv::device
 
-namespace simrv::tui {
-class Tui;
-class LeftPane;
-}  // namespace simrv::tui
+namespace simrv::memory {
+class Axi4Bridge;
+class CoherenceHub;
+class MemorySubsystem;
+}  // namespace simrv::memory
 
 namespace simrv::core {
+
+class CPU;
+class IConsoleSink;
+class IExecutionController;
+class ITelemetrySink;
+class Tracer;
+class BaremetalRunner;
+class OsRunner;
+class PlatformBuilder;
+
+struct PlatformStatusSnapshot {
+    PlatformProfile profile = PlatformProfile::Pcie;
+    bool has_pcie = false;
+    bool has_mmio = false;
+    bool disk_loaded = false;
+    uint32_t disk_status = 0;
+    uint32_t disk_isr = 0;
+    uint64_t disk_capacity_sectors = 0;
+    uint32_t network_status = 0;
+    uint64_t network_tx_packets = 0;
+    uint32_t console_status = 0;
+    uint32_t rng_status = 0;
+    uint32_t gpu_status = 0;
+    uint32_t sound_status = 0;
+    bool sound_active = false;
+    uint32_t sound_sample_rate = 0;
+    uint8_t sound_channels = 0;
+    bool dma_busy = false;
+};
+
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-enum class ExecutionState : uint8_t {
+enum class ExecutionState : uint32_t {
     Stopped = 0,
     Running = 1,
     Paused = 2,
     Stepping = 3,
 };
 
-struct PendingRebootState {
-    std::string binary_path;
-    std::optional<bool> appmode;
-    std::optional<std::string> disk_path;
+/// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
+struct TuiExecutionSnapshot {
+    size_t hart = 0;
+    simrv::xlen::VirtAddr pc{};
+    simrv::xlen::Counter cycle_count = 0;
+    simrv::xlen::Counter instruction_count = 0;
+    simrv::xlen::Counter timer_ticks = 0;
+    simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
+    pipeline::PipelineStats ca_stats{};
+    uint64_t icache_hits = 0;
+    uint64_t icache_misses = 0;
+    uint64_t dcache_hits = 0;
+    uint64_t dcache_misses = 0;
+    pipeline::Scoreboard scoreboard{};
+    ExecutionState execution_state = ExecutionState::Stopped;
 };
 
 /**
@@ -57,40 +139,201 @@ struct PendingRebootState {
  * Machine is the simulator root object and drives the pipeline-cycle loop,
  * image loading, device wiring, tracing, and run termination checks.
  */
-class Machine {
+class Machine final : public core::IInterruptController {
    public:
-    /// Construct the simulator root object.
-    Machine();
+    enum class TohostWriteKind : uint8_t { Full, LowWord, HighWord };
+
+   private:
+    class Runtime;
+    struct PendingInputEvent {
+        enum class Type : uint8_t { Key, MouseMotion, MouseButton, MouseWheel };
+
+        Type type;
+        uint16_t code = 0;
+        int32_t x = 0;
+        int32_t y = 0;
+        bool pressed = false;
+    };
+
+    std::unique_ptr<Runtime> runtime_;
+    std::shared_mutex instruction_memory_mutex_;
+    Tracer* tracer_raw_{nullptr};
+    simrv::debug::BreakpointManager* breakpoint_manager_raw_{nullptr};
+    std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
+    simrv::xlen::Counter next_checkpoint_cycle_ = 0;
+
+   public:
+    enum class StopReason : uint8_t {
+        Running,
+        InstructionLimit,
+        TohostPass,
+        TohostFail,
+        GuestPoweroff,
+        GuestCrash,
+        GuestReboot,
+        GuestExit,
+        LockstepDivergence,
+        UnhandledTrap,
+        TrapLoop,
+        ExternalStop,
+    };
+
+    /// Construct the simulator root object from its complete, typed run configuration.
+    explicit Machine(MachineConfig machine_config = {});
     /// Destroy simulator resources.
-    virtual ~Machine();
+    ~Machine();
     Machine(const Machine&) = delete;
     auto operator=(const Machine&) -> Machine& = delete;
     Machine(Machine&&) = delete;
     auto operator=(Machine&&) -> Machine& = delete;
+    [[nodiscard]] auto configuration() const noexcept -> const MachineConfig& { return config; }
+    /** Register platform device providers before initialize(); providers are scoped to this
+     * Machine. */
+    [[nodiscard]] auto device_registry() noexcept -> simrv::device::PlatformDeviceRegistry&;
+    [[nodiscard]] auto tui_enabled() const noexcept -> bool { return config.tui.enabled; }
+    [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
+        return config.tui.high_contrast;
+    }
+    void set_high_contrast_enabled(bool enabled) noexcept { config.tui.high_contrast = enabled; }
+    [[nodiscard]] auto mission_id() const noexcept -> const std::string& {
+        return config.tui.mission;
+    }
+    [[nodiscard]] auto device_log_enabled() const noexcept -> bool {
+        return config.debug.dlog_mode;
+    }
+    [[nodiscard]] auto trap_log_enabled() const noexcept -> bool {
+        return config.debug.traplog_mode;
+    }
+    void set_instruction_mix_enabled(bool enabled) noexcept { config.debug.use_mix = enabled; }
+    void set_branch_trace_enabled(bool enabled) noexcept { config.debug.bp_trace = enabled; }
+    void set_trap_log_enabled(bool enabled) noexcept { config.debug.traplog_mode = enabled; }
+    void set_device_log_enabled(bool enabled) noexcept { config.debug.dlog_mode = enabled; }
+    [[nodiscard]] auto appmode_enabled() const noexcept -> bool { return config.execution.appmode; }
+    [[nodiscard]] auto is_realtime_pacing_enabled() const noexcept -> bool {
+        return config.execution.realtime_pacing;
+    }
+    void set_realtime_pacing_enabled(bool enabled) noexcept;
+    [[nodiscard]] auto binary_path() const noexcept -> const std::string& {
+        return config.files.binary_path;
+    }
+    [[nodiscard]] auto disk_path() const noexcept -> const std::string& {
+        return config.files.disk_path;
+    }
+    [[nodiscard]] auto branch_trace_enabled() const noexcept -> bool {
+        return config.debug.bp_trace;
+    }
+    [[nodiscard]] auto instruction_mix_enabled() const noexcept -> bool {
+        return config.debug.use_mix;
+    }
+    [[nodiscard]] auto debugger_enabled() const noexcept -> bool {
+        return config.debug.gdb_enabled;
+    }
+    [[nodiscard]] auto debugger_port() const noexcept -> uint16_t { return config.debug.gdb_port; }
+    [[nodiscard]] auto lockstep_enabled() const noexcept -> bool {
+        return config.debug.lockstep_enabled;
+    }
+    [[nodiscard]] auto spike_binary() const noexcept -> const std::string& {
+        return config.debug.spike_bin;
+    }
+    [[nodiscard]] auto spike_elf() const noexcept -> const std::string& {
+        return config.debug.spike_elf;
+    }
+    [[nodiscard]] auto isa_test_tohost() const noexcept -> simrv::xlen::Address {
+        return resolved_isatest_tohost_;
+    }
+    [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry { return config.memory; }
+    [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {
+        return config.platform_profile;
+    }
+    [[nodiscard]] auto network_mode() const noexcept -> std::string_view {
+        return config.network.mode;
+    }
+    [[nodiscard]] auto execution_config() const noexcept -> const ExecutionConfig& {
+        return config.execution;
+    }
+    void set_pipeline_type(simrv::pipeline::PipelineType type) noexcept {
+        config.execution.pipeline_type = type;
+    }
+    [[nodiscard]] auto isa_config() const noexcept -> const IsaConfig& { return config.isa; }
+    [[nodiscard]] auto files_config() const noexcept -> const FilesConfig& { return config.files; }
+    /// Stage an architectural reconfiguration. It is validated and only takes effect after reboot.
+    [[nodiscard]] auto stage_reconfiguration(MachineConfig machine_config)
+        -> std::expected<void, std::string>;
+    [[nodiscard]] auto take_staged_reconfiguration() -> std::optional<MachineConfig>;
+    void set_start_time(std::chrono::steady_clock::time_point time) noexcept {
+        start_time_ = time;
+        last_sample_time_ = time;
+        last_sample_instructions_ = retired_instruction_count();
+        peak_mips_ = 0.0;
+    }
+    [[nodiscard]] auto start_time() const noexcept -> std::chrono::steady_clock::time_point {
+        return start_time_;
+    }
+    [[nodiscard]] auto peak_mips() const noexcept -> double { return peak_mips_; }
+    void sample_throughput() noexcept;
+    /// Initialization-only derived boot state; image symbols never rewrite the input config.
+    void set_resolved_boot_state(simrv::xlen::VirtAddr start_pc,
+                                 std::optional<simrv::xlen::Address> tohost_address) noexcept;
+    [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::VirtAddr {
+        return resolved_start_pc_;
+    }
+    [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
     /**
      * @brief Initialize machine state and load runtime images/configuration.
-     * @return 0 on success, non-zero on configuration error.
+     * @return std::expected<void, std::string> on success or diagnostic error string.
      */
-    auto initialize() -> int;
-    /**
-     * @brief Load a program binary image dynamically into simulator DRAM and reset CPU state.
-     * @param filepath Path to the program binary image.
-     * @return true if successfully loaded, false otherwise.
-     */
-    auto load_program_binary(const std::string& filepath) -> bool;
+    auto initialize() -> std::expected<void, std::string>;
+    auto load_program_binary(const std::string& filepath) -> std::expected<void, std::string>;
+    /// Save/restore a versioned architectural snapshot. Device state is not included.
+    [[nodiscard]] auto save_checkpoint(const std::string& filepath) const
+        -> std::expected<void, std::string>;
+    [[nodiscard]] auto load_checkpoint(const std::string& filepath)
+        -> std::expected<void, std::string>;
+    /// Dump the memory range between begin_signature and end_signature symbols to an ACT signature
+    /// file.
+    [[nodiscard]] auto dump_signature(const std::string& filepath) const -> bool;
+    struct LoadedMemorySegment {
+        simrv::xlen::PhysAddr paddr{};
+        size_t size = 0;
+        bool is_executable = false;
+    };
+    void record_loaded_segment(simrv::xlen::PhysAddr paddr, size_t size, bool is_executable) {
+        loaded_segments_.push_back({.paddr = paddr, .size = size, .is_executable = is_executable});
+    }
+    void record_loaded_segment(simrv::xlen::Address, size_t, bool) = delete;
+    void clear_loaded_segments() noexcept { loaded_segments_.clear(); }
+    [[nodiscard]] auto loaded_segments() const noexcept -> const std::vector<LoadedMemorySegment>& {
+        return loaded_segments_;
+    }
+    void prewarm_bram_caches();
+
     /// Load a disk image into the virtio disk device (may be called from TUI modal).
     /// @param filepath Path to the disk image file.
-    /// @return true if successfully loaded, false otherwise.
-    auto load_disk_image(const std::string& filepath) -> bool;
+    /// @return std::expected<void, std::string> on success or diagnostic error string.
+    auto load_disk_image(const std::string& filepath) -> std::expected<void, std::string>;
     /// Execute the main simulation loop until termination criteria are met.
     void run();
+    /// Reset host and virtual time reference points for real-time pacing.
+    void reset_realtime_anchor() noexcept;
+    /// Throttle simulation loop execution to match host wall-clock time.
+    void pace_realtime() noexcept;
+    /// Advance every runnable hart and the shared platform by exactly one CA global cycle.
+    void advance_ca_global_cycle();
+    /// Advance hart 0 and the shared platform while CA secondary workers run independently.
+    void advance_ca_primary_cycle();
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
+    /// Publish an HTIF register write, preserving split 32-bit writes on RV64.
+    void publish_tohost_write(uint64_t value, TohostWriteKind kind,
+                              uint32_t low_word_fallback_cycles = 4) noexcept;
+    [[nodiscard]] auto tohost_low_word_pending() const noexcept -> bool {
+        return tohost_low_word_pending_.load(std::memory_order_acquire);
+    }
     /// Stop the simulation loop.
-    void stop();
+    void stop(StopReason reason = StopReason::ExternalStop);
     /// Get current atomic execution state.
     [[nodiscard]] auto execution_state() const -> ExecutionState {
-        return execution_state_.load(std::memory_order_relaxed);
+        return execution_state_.load(std::memory_order_acquire);
     }
     /// Check if machine execution is currently paused.
     [[nodiscard]] auto is_paused() const -> bool;
@@ -100,7 +343,7 @@ class Machine {
     }
     /// Check if machine execution is in single-stepping state.
     [[nodiscard]] auto is_stepping() const -> bool {
-        return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Stepping;
+        return execution_state() == ExecutionState::Stepping;
     }
     /// Pause machine execution.
     void pause();
@@ -108,135 +351,355 @@ class Machine {
     void resume();
     /// Request execution of a single instruction cycle.
     void step();
+    /// Request execution of a single instruction cycle and synchronously wait for completion.
+    void step_sync(std::chrono::milliseconds timeout = std::chrono::milliseconds(500));
+    /// Begin an all-stop GDB step that completes when the selected hart retires once.
+    [[nodiscard]] auto begin_debug_step(simrv::xlen::HartId hart) -> bool;
+    /// Stop execution for a debugger event and publish an RSP stop reply.
+    void debug_halt(simrv::xlen::HartId hart, GdbSignal signal = GdbSignal::SigTrap,
+                    std::string reason = {});
+    /// Record a memory watchpoint and stop after the modeled access completes.
+    void debug_watch_hit(simrv::xlen::HartId hart, GdbSignal signal, std::string reason,
+                         std::string description);
+    /// Wake simulation and SMP workers after an external control-plane event.
+    void notify_control_event() noexcept;
+    [[nodiscard]] auto debug_pause_requested() const noexcept -> bool;
     /// Check if the simulation loop is running.
     [[nodiscard]] auto is_running() const -> bool {
         return is_running_.load(std::memory_order_relaxed);
+    }
+    /// Total instructions retired by every hart during the current machine run.
+    [[nodiscard]] auto retired_instruction_count() const noexcept -> simrv::xlen::Counter {
+        return retired_instruction_count_.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
+
+    /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
+    SIMRV_ALWAYS_INLINE void record_retired_instructions(simrv::xlen::Counter count) noexcept {
+        if (simrv::compiler::likely(count != 0)) {
+            if (simrv::compiler::likely(!is_smp_enabled_)) {
+                retired_instruction_count_.store(
+                    retired_instruction_count_.load(std::memory_order_relaxed) + count,
+                    std::memory_order_relaxed);
+            } else {
+                retired_instruction_count_.fetch_add(count, std::memory_order_relaxed);
+            }
+        }
     }
     /// Request system reboot.
     void request_reboot();
     /// Request termination of the simulator process with the supplied status.
     void request_exit(int status = 0);
+    [[nodiscard]] auto stop_reason() const noexcept -> StopReason {
+        return stop_reason_.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] static auto stop_reason_name(StopReason reason) noexcept -> std::string_view;
+    /// Subscribe to lifecycle observations at the machine boundary.
+    [[nodiscard]] auto add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId;
+    void remove_lifecycle_observer(LifecycleObserverId observer_id);
+    /// Subscribe to interrupt line and DMA transfer lifecycle observations.
+    [[nodiscard]] auto add_event_observer(MachineEventObserver observer) -> MachineEventObserverId;
+    void remove_event_observer(MachineEventObserverId observer_id);
+    void notify_interrupt_transition(simrv::xlen::HartId hart, uint32_t cause, bool asserted,
+                                     std::string_view source, uint64_t cycle);
     /// Reset runtime state flags and CPU state.
     void reset_state();
-
-    /// Thread-safe getter and setter for pending reboot configuration
-    void set_pending_reboot(const std::string& binary_path,
-                            std::optional<bool> appmode = std::nullopt,
-                            std::optional<std::string> disk_path = std::nullopt);
-    [[nodiscard]] auto get_pending_reboot() const -> PendingRebootState;
-    void clear_pending_reboot();
+    /// Dynamically switch execution engine (e.g. IA <-> CA) without reloading/rebooting.
+    void switch_execution_engine(ExecutionEngine engine);
+    void switch_execution_engine_sync(ExecutionEngine engine);
 
     std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
+    std::atomic<bool> tohost_low_word_pending_{false};
+    std::atomic<uint8_t> tohost_low_word_fallback_cycles_{0};
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
+    std::atomic<StopReason> stop_reason_{StopReason::Running};
+    std::atomic<simrv::xlen::Counter> retired_instruction_count_{0};
 
-    // ========== Simulation Configuration Flags ==========
-    std::atomic<bool> s_appmode{true};          // Baremetal/app mode (default)
-    std::atomic<bool> s_tuimode{false};         // Enable TUI monitor mode
-    std::atomic<bool> s_gui_mode{false};        // Enable GUI graphics window mode
-    std::atomic<bool> s_high_contrast{false};   // Enable high-contrast TUI mode
-    std::atomic<bool> s_debugmode{false};       // Enable debug logging in MMIO paths
-    std::atomic<bool> s_debug_mode{false};      // Enable TUI debug diagnostics mode
-    std::atomic<bool> s_dlog_mode{false};       // Enable device request/response logging
-    std::atomic<bool> s_traplog_mode{false};    // Enable trap/SBI/exception logging
-    std::atomic<bool> s_use_disk{false};        // Enable disk image simulation
-    std::atomic<bool> s_use_mix{false};         // Enable instruction-mix statistics collection
-    std::atomic<bool> s_bp_trace{false};        // Enable branch prediction tracing
-    std::atomic<bool> s_misa_override{false};   // True when CLI explicitly selected MISA profile
-    std::atomic<bool> s_cycle_accurate{false};  // Enable cycle-accurate performance simulation mode
-    std::atomic<bool> s_high_performance{
-        true};  // Enable high-performance optimized simulation mode
+    RuntimeProfile runtime_profile{};  // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
         false};  // Latched true the first time satp enables translation
-    std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
-    std::atomic<bool> s_rollback_enabled{false};  // Enable instruction rollback tracking
-    double s_mouse_sensitivity = 1.0;             // Mouse relative sensitivity factor
+   private:
+    /// Construction/reinitialization boundary; never a live architectural mutation API.
+    void apply_configuration(MachineConfig machine_config);
+    MachineConfig config{};
+    std::chrono::steady_clock::time_point start_time_{};
+    std::chrono::steady_clock::time_point last_sample_time_{};
+    simrv::xlen::Counter last_sample_instructions_{0};
+    double peak_mips_{0.0};
+    simrv::xlen::VirtAddr resolved_start_pc_{};
+    simrv::xlen::Address resolved_isatest_tohost_ = 0;
+    FramebufferConfig framebuffer_geometry_{};
+    bool is_smp_enabled_ = false;
+    simrv::core::timing::DeterministicClockDivider clock_divider_{};
 
-    // ========== Debug / Co-Simulation Flags ==========
-    std::atomic<bool> s_gdb_mode{false};       // Enable GDB RSP stub
-    uint16_t s_gdb_port = 1234;                // GDB stub TCP port
-    std::atomic<bool> s_lockstep_mode{false};  // Enable Spike lockstep co-simulation
-    std::string s_spike_bin = "spike";         // Path to Spike binary
-    std::string s_spike_elf;                   // Path to Spike ELF image
+   public:
+    [[nodiscard]] auto clock_divider() const noexcept
+        -> const simrv::core::timing::DeterministicClockDivider& {
+        return clock_divider_;
+    }
+    [[nodiscard]] auto clock_divider() noexcept -> simrv::core::timing::DeterministicClockDivider& {
+        return clock_divider_;
+    }
+    /// Inspect a simulated hart by index (0 is the primary/boot hart).
+    [[nodiscard]] auto hart(size_t index = 0) -> CPU&;
+    [[nodiscard]] auto hart(size_t index = 0) const -> const CPU&;
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) -> CPU& { return hart(id.raw()); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) const -> const CPU& { return hart(id.raw()); }
+    [[nodiscard]] auto num_harts() const -> size_t;
+    [[nodiscard]] auto primary_hart() noexcept -> CPU&;
+    [[nodiscard]] auto primary_hart() const noexcept -> const CPU&;
+    [[nodiscard]] auto ram_data() noexcept -> simrv::xlen::Byte*;
+    [[nodiscard]] auto ram_data() const noexcept -> const simrv::xlen::Byte*;
+    [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto instruction_memory_mutex() noexcept -> std::shared_mutex& {
+        return instruction_memory_mutex_;
+    }
+    [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto framebuffer_geometry() const noexcept -> FramebufferConfig;
+    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t;
+    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t;
+    void set_framebuffer_resolution_for_testing(uint32_t width, uint32_t height) noexcept {
+        framebuffer_geometry_.width = width;
+        framebuffer_geometry_.height = height;
+    }
+    [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
+        -> TuiExecutionSnapshot;
+    /// Platform capability used by built-in devices to publish an external interrupt level.
+    void set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted = true) override;
+    /// Architectural interrupt signal dispatched to a specific hart.
+    void set_hart_irq(simrv::xlen::HartId hart, InterruptType type,
+                      simrv::xlen::PrivilegeLevel priv, bool asserted) override;
+    [[nodiscard]] auto interrupt_controller() noexcept -> core::IInterruptController& {
+        return *this;
+    }
+    [[nodiscard]] auto interrupt_controller() const noexcept -> const core::IInterruptController& {
+        return *this;
+    }
+    /// Read the shared platform timer without exposing the CPU ownership graph.
+    [[nodiscard]] auto platform_time() const noexcept -> uint64_t;
+    [[nodiscard]] auto rtc_device() noexcept -> simrv::Rtc*;
+    [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
+    [[nodiscard]] auto uart_device() noexcept -> simrv::device::SerialDevice*;
+    [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::SerialDevice*;
+    /// Advance simulation cycles for all registered platform/extension devices (UART, ticked
+    /// MMIOs).
+    void advance_device_cycles(uint64_t cycles);
+    [[nodiscard]] auto framebuffer_device() noexcept -> simrv::device::FramebufferDevice*;
+    [[nodiscard]] auto framebuffer_device() const noexcept
+        -> const simrv::device::FramebufferDevice*;
+    [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;
+    [[nodiscard]] auto dma_controller() const noexcept -> const simrv::device::DmaController*;
+    [[nodiscard]] auto axi_bridge() noexcept -> simrv::memory::Axi4Bridge*;
+    [[nodiscard]] auto axi_bridge() const noexcept -> const simrv::memory::Axi4Bridge*;
+    void send_input_key(uint16_t code, bool pressed);
+    void send_input_mouse_motion(int32_t x, int32_t y);
+    void send_input_mouse_button(uint16_t button, bool pressed);
+    void send_input_mouse_wheel(int32_t delta);
+    [[nodiscard]] auto pcie_root() noexcept -> simrv::device::PcieRootComplex*;
+    [[nodiscard]] auto pcie_root() const noexcept -> const simrv::device::PcieRootComplex*;
+    [[nodiscard]] auto debugger() noexcept -> simrv::debug::GdbStub*;
+    [[nodiscard]] auto debugger() const noexcept -> const simrv::debug::GdbStub*;
+    [[nodiscard]] auto lockstep() noexcept -> simrv::debug::SpikeLockstep*;
+    [[nodiscard]] auto lockstep() const noexcept -> const simrv::debug::SpikeLockstep*;
+    [[nodiscard]] auto breakpoint_manager() noexcept -> simrv::debug::BreakpointManager&;
+    [[nodiscard]] auto breakpoint_manager() const noexcept
+        -> const simrv::debug::BreakpointManager&;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto breakpoint_manager_raw() noexcept
+        -> simrv::debug::BreakpointManager* {
+        return breakpoint_manager_raw_;
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto breakpoint_manager_raw() const noexcept
+        -> const simrv::debug::BreakpointManager* {
+        return breakpoint_manager_raw_;
+    }
+    [[nodiscard]] auto trace() noexcept -> Tracer&;
+    [[nodiscard]] auto trace() const noexcept -> const Tracer&;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto tracer_raw() noexcept -> Tracer* { return tracer_raw_; }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto tracer_raw() const noexcept -> const Tracer* {
+        return tracer_raw_;
+    }
+    [[nodiscard]] auto symbol_table() noexcept -> simrv::debug::SymbolTable&;
+    [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable&;
 
-    // ========== Simulation Control Parameters ==========
-    Address s_start_pc = 0;                                  // Initial PC value
-    Counter s_strace = 0;                                    // Starting cycle for trace generation
-    Counter s_fincnt = std::numeric_limits<Counter>::max();  // Finish cycle count
-    Counter s_trace_begin = std::numeric_limits<Counter>::max();  // Trace begin cycle
-    Counter s_trace_end = std::numeric_limits<Counter>::max();    // Trace end cycle
-    Counter s_enabletimer = std::numeric_limits<Counter>::max();  // Timer enable cycle
-    Counter s_memimg = std::numeric_limits<Counter>::max();       // Memory image dump cycle
+    [[nodiscard]] auto execution_controller() noexcept -> IExecutionController*;
+    [[nodiscard]] auto execution_controller() const noexcept -> const IExecutionController*;
 
-    // ========== ISA/Privilege Configuration ==========
-    Address s_isatest_tohost = 0x80001000;        // ISA-test tohost RAM address
-    CSRValue s_misa_profile = isa::kMisaDefault;  // Selected MISA profile (without MXL)
-    unsigned int s_misa_xlen = 0;                 // Selected MISA XLEN (32 or 64, or 0 if default)
-    unsigned int s_vlen = 0;                      // Selected VLEN (bits, or 0 if default)
+    [[nodiscard]] auto telemetry_sink() noexcept -> std::shared_ptr<ITelemetrySink> {
+        return telemetry_sink_;
+    }
+    [[nodiscard]] auto telemetry_sink() const noexcept -> std::shared_ptr<const ITelemetrySink> {
+        return telemetry_sink_;
+    }
+    // Sink ownership is fixed while runners are active.
+    [[nodiscard]] auto telemetry_sink_raw() const noexcept -> ITelemetrySink* {
+        return telemetry_sink_.get();
+    }
+    void set_telemetry_sink(std::shared_ptr<ITelemetrySink> sink) noexcept {
+        telemetry_sink_ = std::move(sink);
+    }
+    [[nodiscard]] auto console_sink() noexcept -> std::shared_ptr<IConsoleSink> {
+        return console_sink_;
+    }
+    [[nodiscard]] auto console_sink() const noexcept -> std::shared_ptr<const IConsoleSink> {
+        return console_sink_;
+    }
+    void set_console_sink(std::shared_ptr<IConsoleSink> sink) noexcept {
+        console_sink_ = std::move(sink);
+    }
+    void console_write(char ch);
 
-    // ========== I/O and Logging ==========
-    std::string s_fn_memimg;                             // Memory image filename
-    std::string s_fn_dskimg;                             // Disk image filename
-    std::string s_fn_dvtree;                             // Device-tree binary filename
-    std::string s_fn_traplog;                            // Trap/exception log filename
-    std::string s_fn_cpuconfig;                          // CPU config filename
-    std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
+    [[nodiscard]] auto memory() noexcept -> simrv::memory::MemorySubsystem& { return memory_; }
+    [[nodiscard]] auto memory() const noexcept -> const simrv::memory::MemorySubsystem& {
+        return memory_;
+    }
+    simrv::memory::MemorySubsystem& memory_;
 
-    // ========== CPU and Subsystems ==========
-    simrv::core::CPU cpu;
-    std::unique_ptr<simrv::device::Disk> disk;
-    std::unique_ptr<simrv::device::Console> console;
-    std::unique_ptr<simrv::Rtc> rtc;
-    std::unique_ptr<simrv::device::Uart> uart;
-    std::unique_ptr<simrv::tui::Tui> tui;
-    std::unique_ptr<simrv::device::PowerMmio> power;
-    std::unique_ptr<simrv::device::Framebuffer> framebuffer;
-    std::unique_ptr<simrv::device::InputDevice> input_device;
-    std::unique_ptr<simrv::device::Audio> audio;
+    [[nodiscard]] auto dma_engine() noexcept -> simrv::memory::DmaEngine& { return dma_engine_; }
+    [[nodiscard]] auto dma_engine() const noexcept -> const simrv::memory::DmaEngine& {
+        return dma_engine_;
+    }
+    simrv::memory::DmaEngine dma_engine_{};
 
-    // ========== Debug Subsystems (null when disabled) ==========
-    std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
-    std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
-    simrv::debug::BreakpointManager breakpoints;
-
-    // ========== Memory and Interconnect ==========
-    Byte* mmem{};                       // Pointer to main memory buffer
-    Tracer tracer{*this};               // Tracing facility
-    simrv::debug::SymbolTable symbols;  // ELF debugging symbols
+    /// Internal test support for deterministic component fixtures. Not part of the SDK contract.
+    void set_ram_for_testing(simrv::xlen::Byte* ram, size_t size) noexcept;
+    void set_ram_for_testing(std::span<simrv::xlen::Byte> ram) noexcept {
+        set_ram_for_testing(ram.data(), ram.size());
+    }
+    void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
+    void set_smp_parallel_for_testing(bool enabled) noexcept {
+        config.execution.smp_mode = enabled ? SmpMode::MultiThreaded : SmpMode::SingleThreaded;
+        is_smp_enabled_ = enabled;
+    }
+    void set_instruction_limit_for_testing(simrv::xlen::Counter limit) noexcept {
+        config.execution.fincnt = limit;
+    }
+    [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> simrv::xlen::Byte*&;
+    [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool {
+        return allocate_ram(bytes);
+    }
+    void release_ram_for_testing() noexcept { release_ram(); }
+    void add_hart_for_testing(std::unique_ptr<CPU> hart);
+    [[nodiscard]] auto test_secondary_harts() noexcept
+        -> std::vector<std::unique_ptr<simrv::core::CPU>>&;
+    [[nodiscard]] auto mutable_uart_for_testing() noexcept
+        -> std::unique_ptr<simrv::device::SerialDevice>&;
+    void finalize_for_testing() { finalize_runner_cycle(); }
+    void execute_cycle_for_testing() { execute_runner_cycle(); }
+    [[nodiscard]] auto execute_fast_batch_for_testing(uint32_t batch_size) -> bool {
+        return execute_runner_fast_batch(batch_size);
+    }
+    // Commands execute between runner turns, including while paused or stopped in server mode.
+    void post_control(std::function<void(Machine&)> command);
+    void service_control_commands();
+    [[nodiscard]] bool has_control_commands() const noexcept {
+        return controls_pending_.load(std::memory_order_acquire);
+    }
+    void complete_step_with(std::function<void(Machine&)> callback) {
+        step_completion_ = std::move(callback);
+    }
+    [[nodiscard]] bool sampled_instruction_execution() const;
+    void request_tui_sample() noexcept {
+        tui_sample_requested_.fetch_add(1, std::memory_order_release);
+    }
+    void publish_requested_tui_sample(size_t hart) noexcept;
+    void publish_tui_execution_snapshot_for_testing() noexcept { publish_tui_execution_snapshot(); }
+    void start_runner_for_testing() { start_runner(); }
+    void stop_runner_for_testing() { stop_runner(); }
+    void install_debugger_for_testing(std::unique_ptr<simrv::debug::GdbStub> debugger);
 
    protected:
-    std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
-    std::vector<simrv::virtio::QueueState> console_queue_owner_;
-    std::vector<simrv::virtio::QueueState> disk_queue_owner_;
+    [[nodiscard]] auto allocate_ram(size_t bytes) -> bool;
+    void release_ram() noexcept;
     friend class simrv::core::CPU;
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
-    friend class simrv::tui::Tui;
-    friend class simrv::tui::LeftPane;
-    simrv::memory::MemorySubsystem memory_;
+    friend class simrv::memory::CoherenceHub;
 
-    /// Virtual hooks for template method execution loop
-    virtual void execute_cycle() = 0;
-    virtual auto execute_fast_batch(uint32_t batch_size) -> bool {
-        (void)batch_size;
-        return false;
-    }
-    /// Perform per-cycle initialization before CPU stage execution.
-    virtual void prepare_cycle() {}
-    /// Perform per-cycle finalization and completion checks.
-    virtual void finalize_cycle() {}
+    void start_runner();
+    void stop_runner();
+    void wait_for_runner_quiescence();
+    void maybe_save_periodic_checkpoint();
+    void execute_runner_cycle();
+    [[nodiscard]] auto execute_runner_fast_batch(uint32_t batch_size) -> bool;
+    void prepare_runner_cycle();
+    void service_pending_input();
+    void service_network();
+    void update_network_devices_status() noexcept;
+    void finalize_runner_cycle();
+    void publish_tui_execution_snapshot() noexcept;
+    void publish_tui_execution_snapshot_for_hart(size_t hart) noexcept;
+    /// Snapshot all fast-path decisions once at a runner batch boundary.
+    [[nodiscard]] auto fast_batch_policy() const -> std::optional<FastBatchPolicy>;
+    [[nodiscard]] auto ca_batch_quantum() const noexcept -> uint32_t;
+    void advance_ca_platform_cycle(bool synchronize_secondary_harts);
+    void service_debug_halt();
 
-    mutable std::mutex pending_reboot_mutex_;
-    std::string pending_binary_path_;
-    std::optional<bool> pending_appmode_;
-    std::optional<std::string> pending_disk_path_;
+    std::mutex control_mutex_;
+    std::deque<std::function<void(Machine&)>> control_commands_;
+    std::atomic<bool> controls_pending_{false};
+    std::mutex input_mutex_;
+    std::deque<PendingInputEvent> pending_input_events_;
+    std::atomic<bool> has_pending_input_{false};
+    bool has_network_devices_{false};
+    std::function<void(Machine&)> step_completion_;
+    mutable std::mutex staged_configuration_mutex_;
+    std::optional<MachineConfig> staged_configuration_;
+    void publish_lifecycle_event(LifecycleEventKind kind, int exit_status = 0);
+    mutable std::mutex lifecycle_observer_mutex_;
+    std::vector<std::pair<LifecycleObserverId, LifecycleObserver>> lifecycle_observers_;
+    LifecycleObserverId next_lifecycle_observer_id_ = 1;
+    void publish_machine_event(const MachineEvent& event);
+    mutable std::mutex event_observer_mutex_;
+    std::vector<std::pair<MachineEventObserverId, MachineEventObserver>> event_observers_;
+    MachineEventObserverId next_event_observer_id_ = 1;
+    std::mutex platform_irq_state_mutex_;
+    std::unordered_map<uint32_t, bool> platform_irq_state_;
 
     uint64_t last_tui_check_cycles_ = 0;
     std::chrono::steady_clock::time_point last_tui_update_{};
+    std::chrono::steady_clock::time_point realtime_anchor_host_{};
+    uint64_t realtime_anchor_mtime_ = 0;
+    uint64_t last_pace_check_mtime_ = 0;
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
+    std::shared_ptr<ITelemetrySink> telemetry_sink_{};
+    std::shared_ptr<IConsoleSink> console_sink_{};
+    std::atomic<bool> runner_started_{false};
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
+    void acknowledge_step();
+    std::mutex step_mutex_;
+    std::condition_variable step_cv_;
+    uint64_t step_ack_count_ = 0;
+    std::atomic<uint64_t> control_event_generation_{0};
+    std::atomic<uint32_t> runner_in_cycle_{0};
+    std::optional<simrv::xlen::HartId> debug_step_hart_;
+    simrv::xlen::Counter debug_step_target_ = 0;
+    struct PendingDebugHalt {
+        simrv::xlen::HartId hart{0};
+        GdbSignal signal = GdbSignal::SigTrap;
+        std::string reason;
+        std::string description;
+        bool waits_for_memory = false;
+        simrv::xlen::Counter retirement_target = 0;
+    };
+    void enqueue_debug_halt(PendingDebugHalt halt);
+    std::atomic<bool> debug_halt_pending_{false};
+    std::mutex debug_halt_mutex_;
+    std::optional<PendingDebugHalt> pending_debug_halt_;
+    static constexpr size_t kMaxTuiSnapshotHarts = 64;
+    // Immutable snapshots: readers never spin on a running producer or read live registers.
+    std::array<std::atomic<std::shared_ptr<const TuiExecutionSnapshot>>, kMaxTuiSnapshotHarts>
+        tui_snapshots_{};
+    std::atomic<uint64_t> tui_sample_requested_{0};
+    std::array<uint64_t, kMaxTuiSnapshotHarts> tui_sample_published_{};
+    std::vector<LoadedMemorySegment> loaded_segments_{};
+
+    friend class RunnerBase;
+    friend class BaremetalRunner;
+    friend class OsRunner;
+    friend class PlatformBuilder;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 }  // namespace simrv::core

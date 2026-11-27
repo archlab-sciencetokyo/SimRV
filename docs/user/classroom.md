@@ -1,7 +1,8 @@
 # RISC-V Student Reference Manual & SimRV Educational Guide
 
 This document serves as a comprehensive reference manual for students learning
-RISC-V computer architecture (specifically RV32GC / RV64GC) and utilizing the
+RISC-V computer architecture, using SimRV's RVA23 target profile and its RV32/RV64
+compatibility modes, and utilizing the
 educational features of **SimRV**.
 
 ---
@@ -19,7 +20,7 @@ to zero; the others are general read/write registers. In RV32 each register hold
 a 32-bit value; in RV64 each holds a 64-bit value.
 
 | Register | ABI Name | Role / Description | Saver |
-|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- |
 | **`x0`** | `zero` | Hardwired to zero (writes ignored, reads always return 0) | — |
 | **`x1`** | `ra` | Return Address — stores the link address for function calls | Caller |
 | **`x2`** | `sp` | Stack Pointer — points to the current top of the stack | Callee |
@@ -34,13 +35,13 @@ a 32-bit value; in RV64 each holds a 64-bit value.
 | **`x18` – `x27`** | `s2` – `s11` | Saved Registers 2–11 | Callee |
 | **`x28` – `x31`** | `t3` – `t6` | Temporary Registers 3–6 | Caller |
 
-> [!NOTE]
-> - **Caller-saved** registers (`ra`, `t0`–`t6`, `a0`–`a7`) can be overwritten by
->   a called function. The caller must save them on the stack before any call if
->   they are needed afterward.
-> - **Callee-saved** registers (`sp`, `s0`–`s11`) must be preserved by a called
->   function. If the callee modifies them, it must restore their original values
->   before returning.
+!!! note "Register Preservation Convention"
+    - **Caller-saved** registers (`ra`, `t0`–`t6`, `a0`–`a7`) can be overwritten by
+      a called function. The caller must save them on the stack before any call if
+      they are needed afterward.
+    - **Callee-saved** registers (`sp`, `s0`–`s11`) must be preserved by a called
+      function. If the callee modifies them, it must restore their original values
+      before returning.
 
 ### Floating-Point Registers (FPRs)
 
@@ -48,7 +49,7 @@ When the Single (F) or Double (D) precision extensions are enabled, RISC-V
 provides 32 floating-point registers (`f0` through `f31`).
 
 | Register | ABI Name | Role / Description | Saver |
-|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- |
 | **`f0` – `f7`** | `ft0` – `ft7` | FP Temporaries 0–7 | Caller |
 | **`f8` – `f9`** | `fs0` – `fs1` | FP Saved Registers 0–1 | Callee |
 | **`f10` – `f11`** | `fa0` – `fa1` | FP Arguments 0–1 / Return Values 0–1 | Caller |
@@ -65,7 +66,7 @@ decode logic. There are 6 base instruction formats (R, I, S, B, U, J) plus
 the R4 format used by fused floating-point operations, and a family of
 compressed (16-bit) formats under the C extension.
 
-```
+```text
 R-Type:  | funct7 (7b) | rs2 (5b) | rs1 (5b) | funct3 (3b) | rd (5b) | opcode (7b) |
 I-Type:  |         immediate [11:0] (12b)      | rs1 | funct3 | rd | opcode |
 S-Type:  | imm[11:5]   | rs2      | rs1      | funct3 | imm[4:0]    | opcode |
@@ -94,97 +95,73 @@ non-contiguous bit positions. This is a deliberate hardware engineering decision
 
 ## 3. Compilation and Execution Guide
 
-To run custom assembly or C programs on SimRV, compile them to a raw flat binary
-image and load it with `-m`.
-
-### Step 1: Write Your Code
-
-#### Example Assembly (`add.S`)
-```assembly
-.global _start
-.section .text
-
-_start:
-    li a0, 5        # Load immediate 5 into a0 (x10)
-    li a1, 10       # Load immediate 10 into a1 (x11)
-    add a2, a0, a1  # Add a0 and a1, store result in a2 (x12)
-
-loop:
-    j loop          # Infinite loop — pause here for TUI inspection
-```
-
-#### Example C Code (`main.c`)
-```c
-void _start() {
-    int a = 5;
-    int b = 10;
-    volatile int c = a + b;
-    while (1);
-}
-```
-
-### Step 2: Compile to ELF
-
-Use the GNU Toolchain or Clang. Specify `-march=rv32gc -mabi=ilp32` for RV32,
-or `-march=rv64gc -mabi=lp64d` for RV64.
+SimRV loads ELF executables directly, including loadable segments, BSS, entry-point, and symbol
+information. It also accepts raw flat binaries. See the
+[bare-metal guide](baremetal.md) for toolchain, startup, linker-script, C, and assembly setup;
+the reusable programs under [`examples/isa/`](https://github.com/archlab-sciencetokyo/SimRV/tree/dev/examples/isa/) provide compact starting points.
 
 ```bash
-# RV32GC assembly
-riscv64-unknown-elf-gcc -march=rv32gc -mabi=ilp32 \
-    -static -nostdlib -Ttext 0x80000000 \
-    -o program.elf add.S
+# Student-facing mode with a guided lesson and symbol checkpoints
+./build/rv64-release/simrv --tui --baremetal -m program.elf --mission lesson.mission
 
-# RV64GC assembly
-riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d \
-    -static -nostdlib -Ttext 0x80000000 \
-    -o program.elf add.S
+# Headless / CLI-only mode (fast execution)
+./build/rv64-release/simrv --cli --baremetal -m program.elf --mode fast
+
+# Configure a portable report destination, then press x while paused
+./build/rv64-release/simrv --tui --baremetal -m program.elf \
+    --inspection-output inspection.json
 ```
 
-- `-Ttext 0x80000000`: Sets the entry point to `0x80000000` (SimRV's DRAM base).
-- `-nostdlib`: Skips standard startup libs — not present in bare-metal simulation.
+### Teacher-friendly interaction points
 
-### Step 3: Extract Raw Flat Binary
+- Step through execution until the first branch, then inspect the instruction mnemonic, raw hex
+  encoding, and branch target in the instruction explanation.
+- Ask students to determine which architectural register should change before advancing past an
+  ALU instruction, then verify the change in the Register File.
+- Introduce memory operations: observe when memory accesses read or write guest state and how the
+  bus activity panel reflects peripheral transactions.
+- Use `--inspection-output <path>` to capture machine state at key execution milestones;
+  students can submit these JSON snapshots (validated against `schemas/inspection-report.schema.json`) as lab evidence.
 
-SimRV loads raw memory images, not ELF. Convert with `objcopy`:
-
-```bash
-riscv64-unknown-elf-objcopy -O binary program.elf program.bin
-```
-
-### Step 4: Run on SimRV
-
-SimRV 2.0 launches in interactive visual TUI mode by default:
-
-```bash
-# RV32 build (Bare-metal mode)
-./build/rv32-release/SimRV -b -m program.bin
-
-# RV64 build (Bare-metal mode)
-./build/rv64-release/SimRV -b -m program.bin
-
-# Headless / CLI-only mode
-./build/rv64-release/SimRV -b -m program.bin -c
-```
+Guest programs can write to the 16550A UART to place prompts, intermediate values, or questions in
+the TUI virtual terminal. The [`uart-output.S`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/examples/isa/uart-output.S) example is a minimal
+source-only implementation; [`uart-input-echo.S`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/examples/isa/uart-input-echo.S) also accepts
+student input. The example catalog additionally covers load widths, loops, M/A/C/D extensions, and
+architectural counters. Build all of them with `make -C examples/isa XLEN=64` or `XLEN=32`.
 
 ---
 
 ## 4. Using the Educational Explainer Utility
 
 SimRV provides two interfaces for interactive instruction decoding and explanation:
-the `--explain-inst` CLI flag and the interactive TUI EXPLAIN pane.
+the `simrv explain` command and the interactive TUI EXPLAIN pane.
 
 ### Command Line Interface (CLI)
 
-Use `--explain-inst <HEX>` to disassemble, decode, and print the step-by-step
+Use `simrv explain <HEX>` to disassemble, decode, and print the step-by-step
 reconstruction of any instruction hex value.
 
-#### Example: Explaining an ADD instruction
+The same command can look up a mnemonic, registered profile, or ISA extension by name. Add a type
+when you want to make the lookup explicit:
+
 ```bash
-./build/rv32-release/SimRV --explain-inst 0x00B502B3
+simrv explain ADD
+simrv explain profile RVA23S64
+simrv explain extension Zba
+```
+
+Each named result includes its official specification reference and URL. The glossary modal also
+supports `/` search across its topics and ISA entries; select an ISA result to view its explanation.
+
+#### Example: Explaining an ADD instruction
+
+```bash
+./build/rv32-release/simrv explain 0x00B502B3
 ```
 
 **Output:**
-```
+
+```text
 === SimRV Educational Instruction Explainer ===
 
 Standard 32-bit Instruction Word:
@@ -223,32 +200,352 @@ Description (Behavior):
 ### Interactive TUI Mode
 
 1. Run your binary on SimRV:
+
    ```bash
-   ./build/rv32-release/SimRV -b -m program.bin
+   ./build/rv32-release/simrv --tui --baremetal -m program.elf
    ```
-2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
-3. Press `e` to switch directly to the **EXPLAIN** pane, or press `r` to cycle through left pane views (GPRs → FPRs → Pipeline → Cache → TLB → Breakpoints → Hazards → I/O → Stats → Stack → Explain).
+
+2. The simulation starts paused (`[PAUSED]`). Press `C` to unpause and run continuously, or press `S` / `Space` to single-step instructions.
+3. Press `L` to cycle tool views, `R` to cycle register views, or `E` to open the instruction explainer.
 4. The EXPLAIN pane displays:
    - Current PC and symbolic function name.
    - Instruction hex value and disassembled mnemonic.
    - Visual bit-field layout grid identifying opcode, register specifiers, and immediate encodings.
    - Architectural values before and after execution.
-   - Educational prose explaining microarchitectural effects and hazards.
-5. Press `g` to toggle the compact **Guided Inspection** assistant ribbon for contextual advice.
+   - Architectural dataflow and, in cycle-accurate mode, microarchitectural effects and hazards.
+5. A mission can provide step-by-step prompts and automatically focus the relevant inspector view.
+   Press `?` to open the glossary topic associated with the active inspector.
 
-### TUI Keybindings Reference (SimRV 2.0)
+### TUI Keybindings Reference
 
 | Key | Context | Action |
-|:---|:---|:---|
-| `c` | Paused | Unpause / Continue continuous simulation |
-| `p` / `Ctrl-P` | Running | Pause execution and enter interactive inspection mode |
-| `s` / `Space` | Paused | Single-step one instruction |
-| `e` | Paused | Jump directly to EXPLAIN inspection view |
-| `r` | Paused | Cycle left panel view (GPR, FPR, Pipeline, Cache, TLB, BP, Hazard, IO, Stats, Stack, Explain) |
-| `Tab` / `Shift-Tab` | All | Switch between right pane tabs (PTY, Display, Stats, Logs) |
-| `g` | Paused | Toggle Guided Inspection ribbon |
-| `b` | Paused | Open Breakpoint Management modal |
-| `m` | Paused | Open MISA / Extension Configuration modal |
-| `?` | Paused | Open Help & Keybindings reference modal |
-| `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
+| :--- | :--- | :--- |
+| `F1` / `H` | All / Paused | Open Help & Keybindings reference modal |
+| `F2` / `,` / `Alt-S` | Paused | Open Simulator Settings modal (Mode, SMP, Scheduler, Diagnostics) |
+| `F3` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
+| `F4` | All | Open Workbench Layout Presets modal |
+| `F5` / `C` / `Ctrl-P` | Paused / Running | Run / Pause simulation loop |
+| `F6` / `S` / `Space` | Paused | Single-step one instruction |
+| `F7` | Paused | Switch active inspector to Trace & Execution page |
+| `F8` / `K` | Paused | Toggle PC breakpoint at current PC |
+| `F9` / `?` | Paused | Open Architecture Glossary modal at active topic |
+| `F10` / `Q` / `Ctrl-Q` | All | Cleanly terminate simulation |
+| `F12` | Classroom mission | Open or reopen Lesson Tasks / Guide for the current lesson step |
+| `Alt-1` .. `Alt-4` | All | Apply Workbench Layout Presets directly (1..4) |
+| `F11` | Paused | Cycle left inspector tool tabs (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
+| `O` / `Alt-O` | Paused | Open Binary & Disk Image Loader modal |
+| `Alt-M` | Paused | Open MISA CSR / Extensions Configuration modal |
+| `Y` | Paused | Open Cycle-Accurate Microarchitecture & Cache Config modal |
+| `I` | Paused | Open Memory Inspector modal |
+| `M` | Paused | Open Breakpoints & Watchpoints Management modal |
+| `Enter` | Mission modal | Hide the modal and return to the workbench |
+| `Space` | Lesson Guide | Advance to the next lesson step, unless an unreached checkpoint blocks it |
+| `Ctrl-L` | Paused | Show / hide the compact simulator log drawer |
+| `E` | Paused | Open / close the current instruction explanation |
+| `X` | Paused | Export the configured inspection report |
+| `Tab` | All | Focus next workbench column / right pane |
 | `Ctrl-R` | All | Soft-reboot guest simulation |
+
+---
+
+## 5. Instructor Guide: Authoring & Deploying Classroom Missions
+
+SimRV provides a dedicated **Mission Framework** for instructors teaching computer architecture and systems programming. Classroom missions allow instructors to create interactive, checkpoint-based lab assignments where students are guided through assembly and microarchitectural concepts inside the TUI workbench.
+
+### Design Principles
+
+- **Zero-Telemetry & Privacy-Preserving:** Missions collect no student telemetry, personal data, or network activity. Everything executes entirely on the student's local machine.
+- **Scaffolded Guided Exploration:** Missions automatically focus relevant workbench views (Registers, Stack, Explainer, or Trace) as students advance through key program checkpoints.
+- **Non-Locking:** Students retain full control to step, inspect, open modals, or pause at any point. Students can dismiss a mission with `z` to explore freely or restart it with `Z`.
+
+### Classroom Command Line Invocations
+
+To launch classroom guidance, pass a mission file. The mission switch enables the classroom flow:
+
+```bash
+# Student invocation: launch interactive mission with matching ELF
+simrv --mission lessons/control-flow-calls.mission -m control-flow-calls.elf
+
+# Verification / non-interactive check
+simrv --cli -m control-flow-calls.elf --mode fast
+```
+
+!!! tip "Default TUI Execution"
+    TUI mode is SimRV's default execution interface, so passing `--mission <file>` is sufficient. Running `--mission` with headless `--cli` is rejected.
+
+### Mission File Specification (`.mission`)
+
+Missions are simple, declarative configuration files following the version 1 format.
+
+#### Top-level `[mission]` Header
+
+```toml
+# SimRV classroom mission format, version 1
+[mission]
+version = "1"
+id = "control-flow-and-abi"
+program = "control-flow-calls.elf"
+description = "Explore conditional branches, loops, calls, and returns in a small RISC-V program."
+goal = "Explain how control flow and the calling convention work together across a function call."
+```
+
+- `version`: Must be `"1"`.
+- `id`: An identifier for the assignment or lesson.
+- `program`: The exact filename of the ELF binary expected for this mission (e.g. `lab1.elf`). SimRV validates the loaded binary against this name and displays a helpful error if a mismatched binary is loaded.
+- `description`: (Optional) A short lesson introduction shown when the mission opens.
+- `goal`: (Optional) The overall learning outcome shown with each instruction.
+- `speed_hz`: (Optional) Default TUI execution frequency for the mission, from `0` (maximum speed)
+  to `1000000`. Missions default to `30` Hz so students can follow visible state. A step may
+  override this value.
+
+#### Teaching Steps (`[step]`)
+
+Each mission contains sequential teaching steps. Advancing changes the displayed instruction; it
+does not record student completion. Steps do not need to correspond one-to-one with program
+symbols:
+
+```toml
+[step]
+id = "branch-prediction"
+title = "Conditional Branching"
+prompt = "Predict whether bne branches to target, then single-step [F6]."
+learn = "Connect the branch decision to the next PC value."
+why = "Branches compare register values and update PC using a signed immediate offset."
+view = "explain"
+panels = "explain,registers,trace"
+glossary = "0"
+```
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `id` | string | Unique educator-facing step identifier. |
+| `title` | string | Short title rendered in the student guidance header. |
+| `prompt` | string | Actionable prompt directing the student what to observe, predict, or calculate. |
+| `learn` | string | (Optional) The learning target for this step, shown separately from the task prompt. Older missions use the step title for orientation. |
+| `hint` | string | (Optional) Short first hint shown before the fuller `why` explanation. |
+| `why` | string | Pedagogical explanation articulating *why* the architectural behavior occurs. |
+| `view` | string | Fallback workbench view to focus when `panels` is omitted. |
+| `panels` | string | Optional comma-separated workbench pages for this step (one to four), such as `"explain,registers,trace"`. |
+| `glossary` | string (int) | (Optional) Topic index in the Architecture Glossary (`[F9]`) relevant to this concept. |
+| `speed_hz` | string (int) | (Optional) Execution frequency for this step. Overrides the mission default until the next step. `0` selects maximum speed. |
+
+The Lesson Tasks / Guide uses colored labels to separate the scenario, goal, learning target, task,
+checkpoint, and next action. In `description`, `goal`, and step text, wrap register names, symbols,
+instructions, or key names in backticks for inline emphasis; use `**bold**` for a short phrase you
+want students to notice. Both are optional and remain readable as plain text in the mission file.
+
+The **Set Speed** modal (`F`) shows the current frequency and explains the inspector behavior:
+at 60 Hz or slower, detailed values remain visible; above 60 Hz, only fast-changing detail is
+replaced by a running indicator while sampled counters continue updating. Mission speed is applied
+when the mission starts, restarts, and advances to a step with a speed setting.
+
+#### Program Checkpoints (`[checkpoint]`)
+
+Checkpoints are separate from teaching steps. `after_step` names the step boundary that waits for
+the symbol; steps before that boundary can be grouped into one checkpoint interval. A checkpoint
+may include a message shown in the objective modal when its symbol is reached:
+
+```toml
+[checkpoint]
+label = "mission_loop"
+after_step = 2
+message = "The loop reached its back edge. Compare this PC with the earlier iteration."
+```
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `label` | string | Exact symbol name in the ELF symbol table. SimRV pauses when execution reaches it. |
+| `after_step` | integer | One-based step number gated by this checkpoint. |
+| `message` | string | (Optional) Checkpoint-specific text displayed in the modal after it is reached. |
+
+### How Missions Progress in Class
+
+1. **Read one lesson step:** Lesson Tasks / Guide shows the lesson scenario and goal, the current learning target, and one task. Use **Y** to reveal a hint, then the explanation if needed. “Lesson step” means teaching guidance; “instruction” means a CPU instruction shown in the simulator.
+2. **Run and inspect:** Press **F5** to run to the named checkpoint shown in Lesson Tasks / Guide, or **F6** to single-step. When the modal is hidden (and the primary Inspector column is at least 56 columns wide by 15 rows high), a compact 5-line **Mission Drawer** at the bottom of the primary Inspector panel shows the **F12 Tasks** shortcut, step title, short focus summary, checkpoint state, and available controls alongside live registers and trace. Open Lesson Tasks / Guide for the full task, hint, and rationale. Reaching a checkpoint pauses execution and records it without moving the lesson-step cursor. If the checkpoint belongs to a later step, the task panel says it was reached early.
+3. **Continue the lesson:** Press **Space** or **N** in Lesson Tasks / Guide (or **N** on the workbench) to move through lesson steps. You can read earlier steps after reaching a checkpoint early, but cannot advance past its `after_step` boundary before it is reached. F5 never advances a lesson step.
+4. **Review and finish:** Press **F12** to reopen lesson Tasks for the current lesson step and **P** to review the previous step. Completion pauses guest execution and shows reached/total checkpoint counts; the final state stays available for review. **F5** and **F6** cannot run past the end. Use **R** to restart or **Q** to exit. To save TA evidence, press **X** while paused with an inspection report output path configured. The report records the lesson ID, completion status, step and checkpoint counts, and reached checkpoint symbols in encounter order, without identity or grades.
+5. **Workbenches per Step:** `panels` can configure the entire one-to-four panel workbench for a step. If omitted, SimRV focuses or selects the single `view` page.
+
+### Managing Breakpoints and Watchpoints
+
+- Press **W** to add a register or memory watchpoint. Enter a register such as `a1`, then press **Enter**. Execution pauses when that value changes.
+- Press **:** to add a PC breakpoint by address or symbol. Enter a symbol such as `debug_result`, then press **Enter**. **F5** runs to it.
+- Press **M** to review active points. **Up/Down** or the mouse wheel selects an entry; **Enter** or **Backspace** removes the selected entry. The list labels lesson checkpoints separately from user breakpoints.
+- Inside the manager, **A** opens the PC breakpoint form and **W** opens the watchpoint form. **C** clears breakpoints and watchpoints, including lesson checkpoints; hardware triggers are unaffected.
+
+When the terminal is too narrow or short for a requested layout, the status line reports the
+required and current window size. The panel layout remains selected and will fit automatically
+after the terminal is resized. Minimum widths are 40, 80, 144, and 192 columns for one through four
+panels; the minimum terminal height is 10 rows.
+
+### Student Keyboard Controls During a Mission
+
+| Key | Action |
+| :--- | :--- |
+| **`F5`** | Run to the checkpoint named in Tasks / Guide (automatically hides the modal). It does not advance the lesson step and is blocked after that checkpoint is reached. |
+| **`F6`** | Single-step one instruction (automatically hides the mission modal if open). |
+| **`N` / `Space`** | Advance to the next lesson step in Tasks / Guide. The modal offers this only when the current checkpoint boundary allows it. Outside the modal, `N` advances the lesson step and `Space` single-steps the CPU. |
+| **`P`** | Return to the previous lesson step to review or undo a mistaken lesson-step advance. This does not rewind guest execution. |
+| **`F12`** | Open or reopen Lesson Tasks / Guide for the current lesson step. The header keeps the step and checkpoint state visible while temporary notices appear. |
+| **`Y`** | Cycle from hidden to the short hint to the full `why`; without `hint`, toggle `why`. |
+| **`Enter` / `Esc`** | Hide the modal and return to the workbench without advancing. |
+| **`Ctrl-L`** | Show / hide the compact simulator log drawer. |
+| **`R`** | Reset guest state to the entry point and restart the mission from step 1. |
+| **`z`** | Dismiss the active mission and continue in free exploration. |
+| **`Q` / `F10`** (completed lesson) | Exit SimRV after reviewing the final workbench. |
+
+### Creating and Checking a Mission
+
+Use the built-in subcommand to create a starter lesson template, then edit the generated text file as needed:
+
+```bash
+simrv-tools mission create lessons/my-lesson.mission
+```
+
+Check the mission structure before using it. The checker validates steps, speed settings, panel layouts, checkpoint labels, and prints a formatted step preview:
+
+```bash
+simrv-tools mission check lessons/my-lesson.mission
+```
+
+The creator asks for an optional learning target on each step, then prints a grouped lesson-flow
+preview with the student-facing learning target, task, hint, and rationale, followed by the editable
+version-1 mission before saving. The checker reports the same grouped sequence, effective speed,
+panel layout, minimum width, student-facing text, and checkpoint messages. It also catches
+duplicate step IDs, invalid boundaries, duplicate or unsupported panels, and missing ELF symbols.
+Use `--smoke-test` when the simulator binary is available to execute the guest headlessly and check
+that checkpoint symbols are reached in boundary order. By default the checker looks for SimRV in
+`build/rv64-release` or `build/rv32-release`; pass `--simrv <path>` to select another build.
+`--max-instructions` (default 100000) and `--timeout` (default 30 seconds) bound the run. An
+unreached checkpoint reports its boundary and suggests checking guest control flow or increasing
+the instruction cap.
+
+---
+
+### Step-by-Step Instructor Tutorial: Creating a Lab Assignment
+
+Here is how an instructor can author a complete lab assignment:
+
+#### Step 1: Write the Lab Assembly Code with Symbolic Checkpoints
+
+In your assembly code (`lab1_abi.S`), insert symbolic labels where you want students to pause and observe state:
+
+```assembly
+    .global _start
+    .global mission_branch
+    .global mission_call
+    .global mission_done
+    .text
+
+_start:
+    li a0, 5
+    li a1, 10
+
+mission_branch:
+    # Checkpoint 1: Students observe condition before branch
+    beq a0, a1, skip_branch
+    addi a0, a0, 1
+
+mission_call:
+    # Checkpoint 2: Students observe ra and sp before function call
+    call helper_func
+
+mission_done:
+    # Checkpoint 3: Students inspect return value in a0
+    wfi
+
+helper_func:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    add a0, a0, a1
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+```
+
+#### Step 2: Compile with Debug Symbols
+
+Compile the assembly with `-g` so labels are retained in the ELF symbol table:
+
+```bash
+riscv64-unknown-elf-gcc -nostdlib -g -Ttext=0x80000000 lab1_abi.S -o lab1_abi.elf
+```
+
+#### Step 3: Write the `.mission` File
+
+Create `lab1_abi.mission`:
+
+```toml
+[mission]
+version = "1"
+id = "lab1-abi-functions"
+program = "lab1_abi.elf"
+
+[step]
+id = "branch-evaluation"
+title = "Branch Evaluation"
+prompt = "Check a0 and a1 in Registers [F3]; determine if beq will branch."
+why = "Branch decisions depend solely on register operand equality."
+view = "explain"
+glossary = "0"
+
+[checkpoint]
+label = "mission_branch"
+after_step = 1
+message = "The branch point is reached. Compare the operands with the predicted outcome."
+
+[step]
+id = "call-setup"
+title = "Function Call Setup"
+prompt = "Inspect ra and sp before the call instruction executes."
+why = "The call pseudo-instruction (jal) overwrites ra with the return address."
+view = "registers"
+glossary = "0"
+
+[checkpoint]
+label = "mission_call"
+after_step = 2
+message = "The call point is reached. Inspect ra and sp before jal executes."
+
+[step]
+id = "function-return"
+title = "Function Return & ABI Contract"
+prompt = "Observe the computed return value in a0 and verify sp was restored."
+why = "Callee-saved registers like sp must be restored before returning to the caller."
+view = "registers"
+glossary = "0"
+
+[checkpoint]
+label = "mission_done"
+after_step = 3
+message = "The function returned. Verify a0 and sp before reviewing the trace."
+```
+
+#### Step 4: TA Checkpoint Evidence
+
+When a student explicitly exports the paused inspection report with `X`, it includes the mission
+identifier, completion state, current/total step counts, total checkpoint count, and reached
+checkpoint symbols in encounter order. The mission section contains no student identity or grading
+data. Checkpoints show which named program markers were reached; they do not certify that a student
+completed an observation or explanation.
+
+```json
+"mission": {
+  "id": "lab1-abi",
+  "completed": true,
+  "step": 3,
+  "step_count": 3,
+  "checkpoint_count": 3,
+  "reached_checkpoints": ["mission_branch", "mission_call", "mission_done"],
+  "checkpoint_details": [
+    {"symbol": "mission_branch", "message": "Compare the branch PC with its target."},
+    {"symbol": "mission_call", "message": "Inspect ra and sp before jal."},
+    {"symbol": "mission_done", "message": "Verify a0 and sp."}
+  ]
+}
+```
+
+```bash
+# Student exports the paused inspection report; it includes checkpoint evidence when a mission is active:
+simrv --mission lab1_abi.mission -m lab1_abi.elf --inspection-output mission_report.json
+```

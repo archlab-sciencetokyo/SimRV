@@ -74,8 +74,11 @@ enum OperationId : uint16_t {
     URET,
     SRET,
     MRET,
+    MNRET,
     WFI,
     SFENCE_VMA,
+    HFENCE_VVMA,
+    HFENCE_GVMA,
     /* RV32M */
     MUL,
     MULH,
@@ -232,10 +235,16 @@ enum OperationId : uint16_t {
     VLE16_V,
     VLE32_V,
     VLE64_V,
+    VLE8FF_V,
+    VLE16FF_V,
+    VLE32FF_V,
+    VLE64FF_V,
+    VLM_V,
     VSE8_V,
     VSE16_V,
     VSE32_V,
     VSE64_V,
+    VSM_V,
     VADD_VV,
     VADD_VX,
     VADD_VI,
@@ -243,10 +252,20 @@ enum OperationId : uint16_t {
     VSUB_VX,
     VMUL_VV,
     VMUL_VX,
+    VMULH_VV,
+    VMULH_VX,
+    VMULHU_VV,
+    VMULHU_VX,
+    VMULHSU_VV,
+    VMULHSU_VX,
     VDIV_VV,
     VDIV_VX,
     VDIVU_VV,
     VDIVU_VX,
+    VREM_VV,
+    VREM_VX,
+    VREMU_VV,
+    VREMU_VX,
     VAND_VV,
     VAND_VX,
     VAND_VI,
@@ -299,8 +318,8 @@ enum OperationId : uint16_t {
     VMADD_VX,
     VNMSAC_VV,
     VNMSAC_VX,
-    VNSUB_VV,
-    VNSUB_VX,
+    VNMSUB_VV,
+    VNMSUB_VX,
     VWMACCU_VV,
     VWMACCU_VX,
     VWMACC_VV,
@@ -341,9 +360,54 @@ enum OperationId : uint16_t {
     VSOXEI32_V,
     VSOXEI64_V,
     VID_V,
+    VFMADD_VV,
+    VFMADD_VF,
+    VFNMADD_VV,
+    VFNMADD_VF,
+    VFMSUB_VV,
+    VFMSUB_VF,
+    VFNMSUB_VV,
+    VFNMSUB_VF,
     VFMACC_VV,
     VFMACC_VF,
+    VFNMACC_VV,
+    VFNMACC_VF,
+    VFMSAC_VV,
+    VFMSAC_VF,
+    VFNMSAC_VV,
+    VFNMSAC_VF,
     VREDSUM_VS,
+    VREDAND_VS,
+    VREDOR_VS,
+    VREDXOR_VS,
+    VREDMINU_VS,
+    VREDMIN_VS,
+    VREDMAXU_VS,
+    VREDMAX_VS,
+    VFREDUSUM_VS,
+    VFREDOSUM_VS,
+    VFREDMIN_VS,
+    VFREDMAX_VS,
+    VFWREDUSUM_VS,
+    VFWREDOSUM_VS,
+    VFWADD_VV,
+    VFWADD_VF,
+    VFWSUB_VV,
+    VFWSUB_VF,
+    VFWADD_WV,
+    VFWADD_WF,
+    VFWSUB_WV,
+    VFWSUB_WF,
+    VFWMUL_VV,
+    VFWMUL_VF,
+    VFWMACC_VV,
+    VFWMACC_VF,
+    VFWNMACC_VV,
+    VFWNMACC_VF,
+    VFWMSAC_VV,
+    VFWMSAC_VF,
+    VFWNMSAC_VV,
+    VFWNMSAC_VF,
     VWMUL_VV,
     VWMUL_VX,
     VNCLIP_WV,
@@ -360,8 +424,63 @@ enum OperationId : uint16_t {
     VNSRA_WI,
     VSLIDE1UP_VX,
     VSLIDE1DOWN_VX,
+    VFSLIDE1UP_VF,
+    VFSLIDE1DOWN_VF,
     VFADD_VV,
     VFADD_VF,
+    VFSUB_VV,
+    VFSUB_VF,
+    VFRSUB_VF,
+    VFMUL_VV,
+    VFMUL_VF,
+    VFDIV_VV,
+    VFDIV_VF,
+    VFRDIV_VF,
+    VFSQRT_V,
+    VFRSQRT7_V,
+    VFREC7_V,
+    VFCLASS_V,
+    VFCVT_XU_F_V,
+    VFCVT_X_F_V,
+    VFCVT_F_XU_V,
+    VFCVT_F_X_V,
+    VFCVT_RTZ_XU_F_V,
+    VFCVT_RTZ_X_F_V,
+    VFWCVT_XU_F_V,
+    VFWCVT_X_F_V,
+    VFWCVT_F_XU_V,
+    VFWCVT_F_X_V,
+    VFWCVT_F_F_V,
+    VFWCVT_RTZ_XU_F_V,
+    VFWCVT_RTZ_X_F_V,
+    VFNCVT_XU_F_W,
+    VFNCVT_X_F_W,
+    VFNCVT_F_XU_W,
+    VFNCVT_F_X_W,
+    VFNCVT_F_F_W,
+    VFNCVT_ROD_F_F_W,
+    VFNCVT_RTZ_XU_F_W,
+    VFNCVT_RTZ_X_F_W,
+    VFSGNJ_VV,
+    VFSGNJ_VF,
+    VFSGNJN_VV,
+    VFSGNJN_VF,
+    VFSGNJX_VV,
+    VFSGNJX_VF,
+    VFMIN_VV,
+    VFMIN_VF,
+    VFMAX_VV,
+    VFMAX_VF,
+    VMFEQ_VV,
+    VMFEQ_VF,
+    VMFNE_VV,
+    VMFNE_VF,
+    VMFLT_VV,
+    VMFLT_VF,
+    VMFLE_VV,
+    VMFLE_VF,
+    VMFGT_VF,
+    VMFGE_VF,
     VRSUB_VX,
     VRSUB_VI,
     VSADD_VV,
@@ -370,6 +489,14 @@ enum OperationId : uint16_t {
     VSADDU_VV,
     VSADDU_VX,
     VSADDU_VI,
+    VAADDU_VV,
+    VAADDU_VX,
+    VAADD_VV,
+    VAADD_VX,
+    VASUBU_VV,
+    VASUBU_VX,
+    VASUB_VV,
+    VASUB_VX,
     VSBC_VVM,
     VSBC_VXM,
     VSEXT_VF2,
@@ -382,6 +509,10 @@ enum OperationId : uint16_t {
     VSLIDEDOWN_VI,
     VSLIDEUP_VX,
     VSLIDEUP_VI,
+    VRGATHER_VV,
+    VRGATHER_VX,
+    VRGATHER_VI,
+    VRGATHEREI16_VV,
     VSMUL_VV,
     VSMUL_VX,
     VSSRA_VV,
@@ -494,12 +625,199 @@ enum OperationId : uint16_t {
     VFMV_F_S,
     VFMV_S_F,
     VFMERGE_VFM,
+    VFMV_V_F,
     VWSLL_VV,
     VWSLL_VX,
     VWSLL_VI,
     VCHECK,
+    CFU,
+    /* Zicond (Integer Conditional Operations) */
+    CZERO_EQZ,
+    CZERO_NEZ,
+    /* Zicbo (Cache Block Operations) */
+    CBO_ZERO,
+    CBO_CLEAN,
+    CBO_FLUSH,
+    CBO_INVAL,
+    PREFETCH_I,
+    PREFETCH_R,
+    PREFETCH_W,
+    /* Svinval (Fine-Grained Page Table Invalidation) */
+    SINVAL_VMA,
+    SFENCE_W_INVAL,
+    SFENCE_INVAL_IR,
+    HINVAL_VVMA,
+    HINVAL_GVMA,
+    /* Zfhmin (Minimal Half-Precision Floating Point) */
+    FLH,
+    FSH,
+    FMV_X_H,
+    FMV_H_X,
+    FCVT_S_H,
+    FCVT_H_S,
+    FCVT_D_H,
+    FCVT_H_D,
+    /* Zfa (Additional Floating-Point Instructions) */
+    FLI_S,
+    FLI_D,
+    FMINM_S,
+    FMAXM_S,
+    FMINM_D,
+    FMAXM_D,
+    FLEQ_S,
+    FLTQ_S,
+    FLEQ_D,
+    FLTQ_D,
+    FROUND_S,
+    FROUNDNX_S,
+    FROUND_D,
+    FROUNDNX_D,
+    FCVTMOD_W_D,
+    /* Zimop (May-Be-Operations) */
+    MOP,
+    /* Zawrs (Wait-on-Reservation-Set) */
+    WRS_NTO,
+    WRS_STO,
+    /* H virtual-machine explicit memory accesses */
+    HLV_B,
+    HLV_BU,
+    HLV_H,
+    HLV_HU,
+    HLV_W,
+    HLV_WU,
+    HLV_D,
+    HLVX_HU,
+    HLVX_WU,
+    HSV_B,
+    HSV_H,
+    HSV_W,
+    HSV_D,
+    /* Track 1B: Zacas / Zabha */
+    AMOSWAP_B,
+    AMOADD_B,
+    AMOXOR_B,
+    AMOAND_B,
+    AMOOR_B,
+    AMOMIN_B,
+    AMOMAX_B,
+    AMOMINU_B,
+    AMOMAXU_B,
+    AMOSWAP_H,
+    AMOADD_H,
+    AMOXOR_H,
+    AMOAND_H,
+    AMOOR_H,
+    AMOMIN_H,
+    AMOMAX_H,
+    AMOMINU_H,
+    AMOMAXU_H,
+    AMOCAS_B,
+    AMOCAS_H,
+    AMOCAS_W,
+    AMOCAS_D,
+    AMOCAS_Q,
+    /* Track 1C: Zfh / Zvfh / Zfbfmin / Zvfbfmin / Zvfbfwma */
+    FMADD_H,
+    FMSUB_H,
+    FNMSUB_H,
+    FNMADD_H,
+    FADD_H,
+    FSUB_H,
+    FMUL_H,
+    FDIV_H,
+    FSQRT_H,
+    FSGNJ_H,
+    FSGNJN_H,
+    FSGNJX_H,
+    FMIN_H,
+    FMAX_H,
+    FCVT_W_H,
+    FCVT_WU_H,
+    FCVT_L_H,
+    FCVT_LU_H,
+    FCVT_H_W,
+    FCVT_H_WU,
+    FCVT_H_L,
+    FCVT_H_LU,
+    FEQ_H,
+    FLT_H,
+    FLE_H,
+    FCLASS_H,
+    FCVT_S_BF16,
+    FCVT_BF16_S,
+    VFWCVTBF16_F_F_V,
+    VFNCVTBF16_F_F_W,
+    VFWMACCBF16_VV,
+    VFWMACCBF16_VF,
+    /* Track 2A: Vector Cryptography (Zvkn / Zvks / Zvkg / Zvknh*) */
+    VAESEF_VV,
+    VAESEF_VS,
+    VAESDF_VV,
+    VAESDF_VS,
+    VAESEM_VV,
+    VAESEM_VS,
+    VAESDM_VV,
+    VAESDM_VS,
+    VAESZ_VS,
+    VAESKF1_VI,
+    VAESKF2_VI,
+    VGHSH_VV,
+    VGMUL_VV,
+    VSHA2MS_VV,
+    VSHA2CH_VV,
+    VSHA2CL_VV,
+    VSM3ME_VV,
+    VSM3C_VI,
+    VSM4K_VI,
+    VSM4R_VV,
+    VSM4R_VS,
+    /* Track 2B: Scalar Cryptography (Zknd / Zkne / Zknh / Zksed / Zksh) */
+    AES32DSI,
+    AES32DSMI,
+    AES32ESI,
+    AES32ESMI,
+    AES64DS,
+    AES64DSM,
+    AES64ES,
+    AES64ESM,
+    AES64IM,
+    AES64KS1I,
+    AES64KS2,
+    SHA256SIG0,
+    SHA256SIG1,
+    SHA256SUM0,
+    SHA256SUM1,
+    SHA512SIG0,
+    SHA512SIG1,
+    SHA512SUM0,
+    SHA512SUM1,
+    SHA512SIG0L,
+    SHA512SIG0H,
+    SHA512SIG1L,
+    SHA512SIG1H,
+    SHA512SUM0R,
+    SHA512SUM1R,
+    SM4ED,
+    SM4KS,
+    SM3P0,
+    SM3P1,
+    /* Track 2C: Code-Size (Zcmp / Zcmt) */
+    CM_PUSH,
+    CM_POP,
+    CM_POPRET,
+    CM_POPRETZ,
+    CM_MVA01S,
+    CM_MVSA01,
+    CM_JT,
+    CM_JALT,
+    /* Zicfiss (Shadow Stack) */
+    SSPUSH,
+    SSPOPCHK,
+    SSRDP,
+    SSAMOSWAP_W,
+    SSAMOSWAP_D,
     /* Others */
-    UNKNOWN,
+    ILLEGAL,
     OperationIdCount
 };
 
@@ -511,7 +829,7 @@ constexpr OperationId kOpRangeRv32iEnd = CSRRCI;
 /// @brief Start of privileged instruction IDs
 constexpr OperationId kOpRangePrivBegin = URET;
 /// @brief End of privileged instruction IDs
-constexpr OperationId kOpRangePrivEnd = SFENCE_VMA;
+constexpr OperationId kOpRangePrivEnd = HFENCE_GVMA;
 
 /// @brief Start of RV32M/RV64M multiply-divide instruction IDs
 constexpr OperationId kOpRangeRv32mBegin = MUL;
@@ -533,7 +851,129 @@ constexpr OperationId kOpRangeRv32dBegin = FLD;
 /// @brief End of RV32D double-precision float instruction IDs
 constexpr OperationId kOpRangeRv32dEnd = FCVT_D_LU;
 
+/// @brief Start of Bitmanip (Zb: Zba, Zbb, Zbc, Zbs) instruction IDs
+constexpr OperationId kOpRangeZbBegin = SH1ADD;
+/// @brief End of Bitmanip (Zb: Zba, Zbb, Zbc, Zbs) instruction IDs
+constexpr OperationId kOpRangeZbEnd = PACKW;
+
+/// @brief Start of RVV 1.0 vector instruction IDs
+constexpr OperationId kOpRangeVectorBegin = VSETVLI;
+/// @brief End of RVV 1.0 vector instruction IDs
+constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
+
+[[nodiscard]] constexpr auto is_privileged_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangePrivBegin && op_id <= kOpRangePrivEnd;
+}
+
+[[nodiscard]] constexpr auto is_m_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeRv32mBegin && op_id <= kOpRangeRv32mEnd;
+}
+
+[[nodiscard]] constexpr auto is_a_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeRv32aBegin && op_id <= kOpRangeRv32aEnd;
+}
+
+[[nodiscard]] constexpr auto is_f_op(OperationId op_id) noexcept -> bool {
+    if (op_id >= kOpRangeRv32fBegin && op_id <= kOpRangeRv32fEnd) return true;
+    switch (op_id) {
+        case FLI_S:
+        case FMINM_S:
+        case FMAXM_S:
+        case FLEQ_S:
+        case FLTQ_S:
+        case FROUND_S:
+        case FROUNDNX_S:
+            return true;
+        default:
+            return false;
+    }
+}
+
+[[nodiscard]] constexpr auto is_d_op(OperationId op_id) noexcept -> bool {
+    if (op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd) return true;
+    switch (op_id) {
+        case FLI_D:
+        case FMINM_D:
+        case FMAXM_D:
+        case FLEQ_D:
+        case FLTQ_D:
+        case FROUND_D:
+        case FROUNDNX_D:
+        case FCVTMOD_W_D:
+            return true;
+        default:
+            return false;
+    }
+}
+
+[[nodiscard]] constexpr auto is_zfhmin_op(OperationId op_id) noexcept -> bool {
+    return op_id >= FLH && op_id <= FCVT_H_D;
+}
+
+[[nodiscard]] constexpr auto is_zb_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeZbBegin && op_id <= kOpRangeZbEnd;
+}
+
+[[nodiscard]] constexpr auto is_b_op(OperationId op_id) noexcept -> bool { return is_zb_op(op_id); }
+
+constexpr OperationId kOpRangeVectorCryptoBegin = VAESEF_VV;
+constexpr OperationId kOpRangeVectorCryptoEnd = VSM4R_VS;
+
+constexpr OperationId kOpRangeScalarCryptoBegin = AES32DSI;
+constexpr OperationId kOpRangeScalarCryptoEnd = SM3P1;
+
+constexpr OperationId kOpRangeCodeSizeBegin = CM_PUSH;
+constexpr OperationId kOpRangeCodeSizeEnd = CM_JALT;
+
+[[nodiscard]] constexpr auto is_vector_op(OperationId op_id) noexcept -> bool {
+    return (op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd) ||
+           (op_id >= VFWCVTBF16_F_F_V && op_id <= VFWMACCBF16_VF) ||
+           (op_id >= kOpRangeVectorCryptoBegin && op_id <= kOpRangeVectorCryptoEnd);
+}
+
+[[nodiscard]] constexpr auto is_vector_crypto_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeVectorCryptoBegin && op_id <= kOpRangeVectorCryptoEnd;
+}
+
+[[nodiscard]] constexpr auto is_zk_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeScalarCryptoBegin && op_id <= kOpRangeScalarCryptoEnd;
+}
+
+[[nodiscard]] constexpr auto is_code_size_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeCodeSizeBegin && op_id <= kOpRangeCodeSizeEnd;
+}
+
+[[nodiscard]] constexpr auto is_cfu_op(OperationId op_id) noexcept -> bool { return op_id == CFU; }
+
+[[nodiscard]] constexpr auto is_zicond_op(OperationId op_id) noexcept -> bool {
+    return op_id == CZERO_EQZ || op_id == CZERO_NEZ;
+}
+
+[[nodiscard]] constexpr auto is_cmo_op(OperationId op_id) noexcept -> bool {
+    return op_id >= CBO_ZERO && op_id <= PREFETCH_W;
+}
+
+[[nodiscard]] constexpr auto is_svinval_op(OperationId op_id) noexcept -> bool {
+    return op_id >= SINVAL_VMA && op_id <= HINVAL_GVMA;
+}
+
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
+
+[[nodiscard]] constexpr auto is_hlv_op(OperationId op) noexcept -> bool {
+    return op >= HLV_B && op <= HLVX_WU;
+}
+
+[[nodiscard]] constexpr auto is_hlvx_op(OperationId op) noexcept -> bool {
+    return op == HLVX_HU || op == HLVX_WU;
+}
+
+[[nodiscard]] constexpr auto is_hsv_op(OperationId op) noexcept -> bool {
+    return op >= HSV_B && op <= HSV_D;
+}
+
+[[nodiscard]] constexpr auto is_hypervisor_memory_op(OperationId op) noexcept -> bool {
+    return is_hlv_op(op) || is_hsv_op(op);
+}
 
 }  // namespace simrv::isa

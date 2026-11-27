@@ -1,243 +1,355 @@
 # SimRV Architecture
 
-**Version:** 2.0.0 · **Targets:** RV32GC, RV64GC, qualified Vector subset, and Bitmanip
+SimRV is a C++23 RISC-V simulator for RV32 and RV64 targets. It runs baremetal
+images and full Linux OS configurations through fast functional instruction execution,
+detailed state simulation, or cycle-accurate microarchitectural modeling. ISA qualification
+claims and known gaps are maintained in [RISC-V compliance scope](compliance.md).
 
-## Scope
+## Runtime Structure
 
-This document describes the current high-level structure of SimRV. The simulator
-is a cycle-oriented RISC-V functional simulator written in C++23, supporting bare-metal
-applications, real-time operating systems (e.g., μT-Kernel 3.0), and full Linux OS execution.
+`Machine` orchestrates the virtual platform: CPU harts, memory subsystem, TileLink-C
+interconnect, PCIe root complex, platform interrupt controllers, and device endpoints.
+The diagram shows how those main parts relate at runtime.
 
----
-
-## Core Runtime Components
-
-### Top-Level Orchestration
-
-- **`Machine`** (`include/simrv/core/Machine.hpp`): Root simulator object. Owns
-  and wires the CPU, memory subsystem, and all MMIO devices. Drives the pipeline
-  cycle loop, handles image loading, device tickling, tohost termination checks,
-  and simulation shutdown/reboot.
-
-- **`CPU`** (`include/simrv/core/Cpu.hpp`): Architectural state and all pipeline
-  stage methods. Owns `ArchState` (GPRs, FPRs, CSRs, privilege level, PC), the
-  soft TLB, instruction/data caches, decode cache, pipeline context, SBI handler,
-  and execution metrics.
-
-### Peripheral Devices
-
-All devices are MMIO-backed and attached through `Machine`:
-
-| Component | Header | Description |
-| :--- | :--- | :--- |
-| `Console` | `device/Console.hpp` | VirtIO-style console (MMIO ring buffer) |
-| `Disk` | `device/Disk.hpp` | VirtIO block device for root filesystem |
-| `Uart` | `device/Uart.hpp` | 16550-compatible UART serial port |
-| `Rtc` | `device/Rtc.hpp` | Real-time clock MMIO |
-| `PowerMmio` | `device/Power.hpp` | Power/reset control MMIO |
-
-Interrupt routing is handled by embedded `PlicMmio` and `ClintMmio` inside `CPU`,
-plus `InterruptController` helpers for PLIC line bookkeeping.
-
-### Memory Subsystem
-
-- **`MemorySubsystem`** (`memory/MemorySubsystem.hpp`): Central DRAM access and
-  MMIO dispatch hub. Configurable size via `SIMRV_DRAM_SIZE_MB` (default: 256 MB).
-- **`Mmu`** / **`TileLinkBus`**: SV32/SV39 page-table walk helpers and the
-  TileLink-style interconnect fabric.
-- **`ICache`** / **`DCache`**: Instruction and data cache models, configurable at
-  build time.
-
----
-
-## Execution Helpers (Thin Wrappers)
-
-| Class | Source | Role |
-| :--- | :--- | :--- |
-| `CsrFile` | `core/CsrFile.cpp` | CSR read/write, access control, mstatus side effects |
-| `Tlb` | `core/Tlb.cpp` | Hardware TLB state and flush behavior |
-| `Sbi` | `core/Sbi.cpp` | Optional direct supervisor-ECALL SBI environment when guest M-mode firmware is absent |
-| `ExecuteUnit` | `execute/ExecuteUnit.cpp` | Integer ALU, branch, AMO, CSR value helpers |
-| `ExecuteUnitInt` | `execute/ExecuteUnitInt.cpp` | Integer arithmetic execute |
-| `ExecuteUnitFloat` | `execute/ExecuteUnitFloat.cpp` | Floating-point execute |
-| `DecodeCache` | `core/DecodeCache.hpp` | Fast-path decode result caching |
-
-These helpers are intentionally thin — they preserve behavioral parity while
-making class boundaries explicit.
-
----
-
-## Pipeline Stages
-
-The CPU pipeline is a 6-stage in-order functional model:
-
-| # | Stage | Method | Description |
-| :--- | :--- | :--- | :--- |
-| 1 | **IF** | `run_fetch_stage` | Address translation (SV32/SV39), I-cache lookup, decompression (RVC) |
-| 2 | **ID** | `run_decode_stage` | Instruction field decode (opcode, rd/rs, funct, imm), operand capture |
-| 3 | **EX** | `run_execute_stage` | ALU, branch, CSR, FP operations |
-| 4 | **MEM** | `run_memory_stage` | Load/store/AMO memory access, D-cache lookup |
-| 5 | **WB** | `run_writeback_stage` | Integer and FP register file writeback |
-| 6 | **Commit** | `run_commit_stage` | Control-flow updates, trap/interrupt handling, tohost checks |
-
-**Execution paths:**
-
-- **Standard path**: Full pipeline via `CPU::run_cycle()`.
-- **Baremetal path**: Optimized hot path (`run_cycle_baremetal`) bypassing TUI
-  overhead, used when TUI is inactive.
-- **Coroutine path**: C++20 coroutine-based `PipelineTask` for persistent
-  zero-allocation pipeline simulation (`PipelineSim`).
-- **Cached op path**: `execute_cached_op_fast` for decode-cache hits in IA mode.
-
----
-
-## Debug and Co-Simulation
-
-| Component | Source | Description |
-| :--- | :--- | :--- |
-| `GdbStub` | `debug/GdbStub.cpp` | GDB RSP server (TCP, port 1234 default) |
-| `SpikeLockstep` | `debug/SpikeLockstep.cpp` | Instruction-level lockstep co-simulation vs. Spike |
-| `SymbolTable` | `debug/SymbolTable.cpp` | ELF symbol lookup for PC→symbol name resolution |
-| `Tracer` | `core/Tracer.cpp` | Instruction mix, branch prediction, and cycle tracing |
-
----
-
-## TUI (Terminal User Interface)
-
-The TUI provides an ANSI-based split-screen monitor during simulation.
-
-**Component files** (`src/tui/`, `include/simrv/tui/`):
-
-| File | Role |
-| :--- | :--- |
-| `Tui.cpp` | Top-level TUI orchestrator, layout management, keybindings, rendering loop |
-| `LeftPane.cpp` | Left panel container managing registers, stack, pipeline state, stats, and explainer (EXPLAIN page) |
-| `LeftPanePipeline.cpp` | Cycle-accurate & functional pipeline stages rendering |
-| `LeftPaneRegs.cpp` | GPR/FPR/Vector register file rendering |
-| `RightPane.cpp` | Right panel: Virtual terminal (VT) output passthrough & console |
-| `TuiModal.cpp` | Interactive modal windows (Speed Hz config, Breakpoints, Help) |
-| `StatusBar.cpp` | Bottom status bar: cycle/IPS counters, badges, mode indicators |
-| `TuiTheme.cpp` | Theme system: Adaptive (ANSI default), Sakura, HighContrast palettes |
-| `VirtualTerminal.hpp` | Full VT100/VT220 escape sequence parser and screen buffer |
-
-**Layouts:** Split (default), FullConsole, FullRegister — cycled with `L`.
-
-**Register pages:** GPR → FPR → PIPELINE, cycled with `R`; `E` toggles EXPLAIN directly.
-
-**Themes** (toggled with `H`/`T`):
-
-- `Adaptive` (default): Standard ANSI SGR codes, adapts to terminal theme.
-- `Sakura`: 256-color pastel palette.
-- `HighContrast`: Bold ANSI primary colors.
-
----
-
-## ISA Support
-
-| Extension | Status |
-| :--- | :--- |
-| RV32I / RV64I | ✅ Full |
-| M (Multiply/Divide) | ✅ Full |
-| A (Atomics) | ✅ Full |
-| F (Single FP) | ✅ Full |
-| D (Double FP) | ✅ Full |
-| C (Compressed) | ✅ Full |
-| V (Vector) | ✅ Full |
-| B (Bitmanip) | ✅ Full |
-| Zicsr / Zifencei | ✅ Full |
-| SV32 / SV39 MMU | ✅ Full |
-| M/S/U privilege | ✅ Full |
-
-XLEN is a **compile-time** selection via `SIMRV_XLEN` (32 or 64). There is no runtime XLEN switching — each build targets a single XLEN.
-
----
-
-## Build and Validation
-
-**CMake presets** (`CMakePresets.json`):
-
-| Preset | Target | Build Dir |
-| :--- | :--- | :--- |
-| `rv32-release` | RV32GC Release | `build/rv32-release/` |
-| `rv64-release` | RV64GC Release | `build/rv64-release/` |
-| `rv32-debug` | RV32GC Debug | `build/rv32-debug/` |
-| `rv64-debug` | RV64GC Debug | `build/rv64-debug/` |
-
-**Validation gates** (CMake targets):
-
-| Target | Covers |
-| :--- | :--- |
-| `isa-gate` | Full RV32/64GC ISA test suite |
-| `integration-gate` | All gate-labeled tests (regression, app, linux, ISA) |
-| `lockstep-gate` | Spike instruction-level lockstep (requires `spike` in PATH) |
-
----
-
-## Repository Layout
-
-```
-include/simrv/         Public/internal headers
-  core/                Machine, CPU, CSR, registers, tracer, build info
-  cache/               ICache, DCache
-  memory/              MMU, TileLink, memory subsystem
-  device/              Console, Disk, UART, RTC, Power, VirtIO
-  pipeline/            PipelineContext, PipelineTask, PipelineSim, Decoder
-  execute/             ExecuteUnit, ExecuteUnitInt, ExecuteUnitFloat
-  debug/               GdbStub, SpikeLockstep, SymbolTable
-  tui/                 Tui, LeftPane, LeftPanePipeline, LeftPaneRegs, LeftPaneStack,
-                       LeftPaneStats, LeftPaneExplain, RightPane, TuiModal,
-                       StatusBar, TuiTheme, TuiKey, VirtualTerminal
-  util/                InstructionExplainer
-  xlen/                XLEN traits and type aliases
-
-src/                   Implementation units (mirrors include layout)
-scripts/               Build, ISA test, and benchmark helpers
-docs/                  Architecture, extension, build, and education guides
+```mermaid
+flowchart LR
+    M[Machine]
+    subgraph H[CPU harts]
+      C[CPU / ArchState]
+      X[Decoder, ExecuteUnit, PipelineSim]
+      TLB[MMU and TLB]
+      L1[L1 instruction and data caches]
+      C --> X
+      X --> TLB
+      X --> L1
+    end
+    M --> H
+    L1 <--> BUS[TileLink-C fabric]
+    BUS <--> DIR[Coherence directory / MESI]
+    DIR <--> RAM[Main memory]
+    BUS <--> DEV[MMIO and PCIe devices]
+    DEV --> IRQ[PLIC / AIA / ACLINT]
+    IRQ --> C
+    M --> DBG[Tracer, GDB, breakpoints, Spike]
+    M --> UI[TUI and terminal]
 ```
 
----
+The `CPU` hart owns architectural state, translation structures, caches, branch prediction,
+and execution policy. The platform registry connects MMIO devices and interrupt controllers to
+the machine; tracing and presentation observe machine state without changing guest-visible
+architectural behavior.
 
-## Current Development Status
+## Execution Policies & Microarchitectures
 
-- **Stable:** RV32GC and RV64GC full feature sets (including Vector and Bitmanip extensions), with support for Linux boot on both targets.
-- **Compile-time XLEN:** Select the target with the appropriate CMake preset
-  (`rv32-release` / `rv64-release`). XLEN cannot be changed at runtime.
-- **Planned:** Further ISA extension coverage (e.g., Cryptographic extensions).
+Execution is configured via `--mode <name>` and resolved into runtime profiles:
 
----
+```mermaid
+flowchart TD
+    MODE{Execution mode}
+    MODE -->|fast| IF[InstructionFast<br/>batched functional execution]
+    MODE -->|detailed| IO[InstructionObservable<br/>instruction-level telemetry]
+    MODE -->|cycle-accurate| PIPE{Pipeline selection}
+    PIPE -->|three-stage| P3[Fetch → Decode/Execute → Memory/Writeback]
+    PIPE -->|five-stage| P5[Fetch → Decode → Execute → Memory → Writeback]
+    PIPE -->|dual-issue| P2[Dual-issue cycle model]
+    P3 --> CF[CycleFast or CycleObservable]
+    P5 --> CF
+    P2 --> CF
+```
 
-## Codebase Statistics and Complexity
+The `CycleFast` and `CycleObservable` policies share the selected pipeline timing model; observable
+execution retains telemetry for inspection. Fast instruction mode instead uses decode caching and
+quantum batching where the active debug and tracing features allow it.
 
-SimRV codebase metrics are monitored using static analysis tools (`lizard`). The following statistics represent the current snapshot of the C++23 source code (extracted via `scripts/code_metrics.py`):
+In cycle-accurate and pipeline modes, instruction slots traverse stages with explicit data forwarding,
+structural hazard stalls, and branch-prediction redirection. Architectural effects commit strictly
+at the retirement boundary.
 
-### Global Metrics
+### Counters, clocks, and virtual time
 
-- **Total C++ Source & Header Files:** 168
-- **Total Non-Comment Code Lines (NLOC):** 35,429
-- **Average Function NLOC:** 26.56
-- **Average Cyclomatic Complexity (CCN):** 7.14
-- **Function Count:** 1,334
+The virtual platform models a nominal CPU clock (default: 160 MHz) and an architectural timer timebase (default: 10 MHz), configurable via `--cpu-clock` and `--timebase-hz`.
+Timing progression is governed by `DeterministicClockDivider` in `PlatformTiming.hpp`; by default, `mtime` advances once per
+16 modeled CPU cycles (100 ns per tick). Exact integer dividers eliminate fractional drift, while arbitrary frequency pairings
+use a 64-bit phase accumulator to guarantee cycle-exact timer progression across multi-billion-cycle runs.
 
-### Subsystem Breakdown
+Counter interpretation depends on the execution policy:
 
-| Subsystem / Directory | Description | Files | NLOC | Functions | Avg CCN | Avg NLOC |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `src/tui` / `include/simrv/tui` | Modular TUI panes, modals, Sixel rendering & Virtual Terminal | 50 | 10,207 | 350 | 7.91 | 29.2 |
-| `src/execute` / `include/simrv/execute` | Vector, floating-point, integer execution units & ISA headers | 21 | 6,355 | 213 | 8.65 | 29.8 |
-| `src/core` / `include/simrv/core` | Architectural state, CPU, SBI, CSRs & Machine orchestration | 30 | 5,825 | 239 | 6.35 | 24.4 |
-| `src/pipeline` / `include/simrv/pipeline` | Instruction fetch/decode stages, decoder dispatch & pipeline logic | 11 | 4,049 | 166 | 8.37 | 24.4 |
-| `src/util` / `include/simrv/util` | Instruction explainer routines, CLI parser & system helpers | 5 | 3,391 | 86 | 7.49 | 39.4 |
-| `src/device` / `include/simrv/device` | VirtIO Console, Disk, Framebuffer, Audio, UART, RTC & Power models | 21 | 2,080 | 118 | 4.12 | 17.6 |
-| `src/memory` / `include/simrv/memory` | Sv32/Sv39/Sv48 MMU, TileLink bus interconnect & memory hierarchy | 18 | 1,584 | 79 | 4.97 | 20.1 |
-| `src/debug` / `include/simrv/debug` | GDB stub, Lockstep comparison, SymbolTable, BreakpointManager | 8 | 1,508 | 73 | 5.38 | 20.7 |
-| Top-Level Entrypoint | Main simulation runner and CLI interface (`src/Main.cpp`) | 4 | 430 | 10 | 9.00 | 43.0 |
+- In cycle-accurate mode, `mcycle`/`cycle` advances for every modeled clock cycle, including stalls,
+  bubbles, cache/interconnect waits, and recovery cycles. Cycle-based device and memory delays can
+  therefore be converted to virtual seconds using the active CPU clock frequency.
+- In fast and detailed instruction-accurate modes, one execution step is assigned one virtual CPU
+  cycle. `mcycle` and `mtime` remain deterministic and useful to guest software, but elapsed virtual
+  time is not a prediction of physical hardware time or workload latency.
+- In every mode, `minstret`/`instret` counts successfully retired instructions. Instructions that
+  trap before retirement do not increment it.
 
-### Top Complexity Hotspots
+The TUI labels the instruction-accurate value as `virt` and the cycle-accurate value as `sim` to
+make this distinction explicit. Host elapsed time and execution speed are separate measurements.
 
-The cyclomatic complexity (CCN) hot-spots in the simulator correspond to flat declarative dispatch tables:
+!!! info "Interpreting virtual time"
+    Treat cycle counts as a hardware timing model only in cycle-accurate mode, and only when the
+    configured pipeline and device latencies are calibrated to a reference implementation. Fast
+    and detailed modes keep guest timers deterministic; they do not estimate real execution time.
 
-1. `simrv::pipeline::decode_ext_v_range2` (in `Decoder.cpp`) - **CCN: 124**, NLOC: 161 (Vector range 2 opcode decoder)
-2. `simrv::execute::ExecuteUnit::execute_vector` (in `ExecuteUnitVector.cpp`) - **CCN: 118**, NLOC: 159 (Vector operation execution dispatcher)
-3. `simrv::util::get_operand_hazard_info` (in `InstructionExplainer.cpp`) - **CCN: 108**, NLOC: 145 (Instruction operand dependency analysis)
-4. `simrv::pipeline::decode_ext_v_range1` (in `Decoder.cpp`) - **CCN: 105**, NLOC: 140 (Vector range 1 opcode decoder)
-5. `simrv::tui::VirtualTerminal::execute_csi_command` (in `VirtualTerminal.hpp`) - **CCN: 92**, NLOC: 146 (TUI virtual terminal CSI escape sequence parser)
+### Fast-Batch Execution Engine & Debug Fallbacks
+
+In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal applications run via the
+`run_fast_os_batch` / `run_fast_baremetal_batch` acceleration engines:
+
+- **Batched Retirement & Telemetry**: Eliminates per-instruction atomic operations on machine-wide retirement
+  counters, synchronizing only at chunk, decode miss, or batch boundaries.
+- **Clock Accounting**: The OS engine flushes virtual clock and retirement accounting at bounded
+  chunk and fallback boundaries; the bare-metal engine accounts cached cycles at its batch boundary.
+- **Inlined Cached Helpers**: Load, store, branch, and jump operations inline directly into the opcode dispatcher
+  without function call frames.
+- **Batch Eligibility**: `Machine::fast_batch_policy()` declines batching for SMP, stepping,
+  lockstep, branch tracing, breakpoints or watchpoints, architectural triggers, and an active TUI
+  trace or step delay, the CFU console redirect model, and registered extension devices that
+  require cycle ticks, including serial plugins with device-level tick callbacks. The latter use
+  the per-instruction path to observe instruction boundaries.
+  The scheduler otherwise services controls and publishes batch-level state at its boundaries.
+
+Fast shortcuts must preserve the effects of their general paths. Cached execution must stop or
+fall back at control, trap, and observation boundaries. Direct RAM access requires a valid range
+and the applicable translation and protection checks; stores must preserve `tohost`, triggers,
+and reservation effects. Vector bulk access falls back when an element needs individual checks.
+Fetch shortcuts still check execute permission before decoding. Cache MRU lookup verifies the tag,
+valid bit, and coherence state before returning a line. Typed device accesses retain their device
+and bus side effects. MMIO routing checks device ownership even for MRU hits and rejects a transfer
+if any addressed byte falls outside the selected device. Device registration and range queries
+scan ambiguous sparse overlaps up to 4096 bytes and conservatively report larger ambiguous overlaps
+as occupied. The decode cache uses 64-byte-aligned sets; this is a layout choice, not a claim that
+every supported host has a 64-byte cache line.
+
+Checked RAM lookups reject addresses below the mapping and accesses that wrap the physical address
+space. The unchecked fast lookup is used only with non-null, nonwrapping RAM and an access size no
+larger than the mapping; other configurations take the checked fallback.
+
+#### Fast-path contract inventory
+
+| Shortcut | Eligibility and required state | Observable contract and fallback |
+| --- | --- | --- |
+| Instruction batches | `Machine::fast_batch_policy()` requires a single hart and disables batching for stepping, lockstep, branch tracing, breakpoints/watchpoints, active triggers, redirecting consoles, and extension devices that need instruction ticks. | Retire and account at batch boundaries; poll controls there. Counter reads and non-direct memory fallbacks end the current segment so CSR and device observations see preceding cycles. Instrumented paths end a segment at memory accesses. Ineligible runs use the ordinary runner. Cached execution exits on control, trap, and observation boundaries. |
+| WFI timer fast-forward | Instruction-accurate app mode, a single hart, and no currently enabled pending interrupt. | Advances shared `mtime` to the earliest eligible timer deadline and reevaluates timer interrupts; cycle mode and SMP use ordinary clock progression. |
+| Bare-metal block chains | The direct chain requires machine-mode flat, valid nonwrapping RAM without locked PMP, active reservations, or SMP; only supported compact operations are admitted. | It preserves guest-width register/PC behavior and checks taken-target alignment. Unsupported operations, misses, and misaligned taken branches return to the precise cached/scalar path. |
+| OS cached memory | A host pointer requires a matching soft-TLB context/epoch and page range, with PMP checked for the full access; direct physical RAM also requires a valid RAM range. | Translation, privilege, faults, `tohost`, triggers, and reservation behavior are retained. TLB misses and accesses needing per-element checks use `MemoryAccess`; address-space changes invalidate the TLB. |
+| Instruction fetch | The direct-RAM shortcut requires that translation has never been used and that the current guest state needs no G-stage walk. A non-Bare HGATP requires translation even when VSATP is Bare. | Execute PMP checks run before decode; stage-one/stage-two page walks and bus fetch remain the fallback. Fetch faults report the guest PC. |
+| Cycle-mode decode cache | A hit is keyed by virtual PC and the active decode context (privilege, translation state, XLEN, FS, and VS); only successfully decoded instructions are inserted. | Fetch translation, execute permission, and instruction reads happen before lookup. A hit skips decompression and decode only. `FENCE.I`, translation invalidation, and address-space changes flush affected entries; misses use normal decode and exceptions are not cached. |
+| Vector bulk copies | Direct copies require machine effective privilege, canonical pointers, a valid page-bounded range, suitable PMP permissions, no breakpoints/triggers, and no store-side reservation checks. | Stores retain `tohost` and reservation effects. Unit-stride/whole-register operations split at page boundaries; chunks that fail eligibility, masked/strided accesses needing individual checks, and fault-only-first loads use element-wise memory operations and preserve `vstart`/fault ordering. |
+| Cache lookup | The MRU hint is only a candidate way; the line is rechecked for tag, validity, and non-invalid coherence state. | A failed hint scans the set, preserving normal replacement and coherence handling. |
+| MMIO, DMA, and device polling | MMIO MRU hits recheck ownership and every addressed byte; DMA validates the physical range and wire-width conversion. Network polling retains libslirp callbacks for the stack lifetime and supplies no-op poll-registration hooks because SimRV polls synchronously. | Invalid or ambiguous mappings are rejected through normal routing. Device and bus side effects remain in their ordinary handlers; network frames are delivered through the backend queue. |
+
+#### Audit evidence and remaining coverage
+
+The following findings describe guest correctness, rather than security severity:
+
+| Finding | Severity | Evidence and resolution |
+| --- | --- | --- |
+| A reservation invalidation range could truncate on native RV32. | High | The reservation table now accepts a host-sized length and saturates at the physical address limit. `CoreSemanticsTests` covers ranges exceeding the guest address width. |
+| A wrapping RAM mapping could make an unchecked host pointer lookup invalid. | High | Fast lookup now requires a nonwrapping mapping; checked lookups reject wrapped accesses. `CoreSemanticsTests` covers the boundary. |
+| VirtIO DMA addresses could be truncated to native RV32 width and alias low RAM. | High | MMIO and PCI transports reject unrepresentable addresses before conversion; platform integration tests cover direct DMA and queue-ring accesses. |
+| Cycle-mode workers could fail to acknowledge an in-flight cycle during a pause or engine change. | High | Workers complete the cycle barrier before parking, and engine changes restart workers. The multi-hart regression tests exercise pause and switching. |
+| A guest system may use a serial register layout that differs from the built-in UART. | Medium | Define a platform-specific external UART plugin with the expected status registers; generic device plugin tests cover loading and lifecycle behavior. |
+| A compact block could bypass misaligned taken-branch exceptions when compressed instructions were disabled. | High | Bare-metal fast execution falls back to scalar execution for IALIGN=32; `CoreSemanticsTests` checks jumps and branches on RV64, hosted RV32, and native RV32. |
+| Virtual instruction fetches skipped G-stage translation when VSATP was Bare. | High | Fetch eligibility now includes an active HGATP in guest mode, including the bare-metal RAM shortcut and second-half fetch path. `PlatformIntegrationTests::test_guest_fetch_uses_g_stage_when_vsatp_is_bare` requires an unmapped GPA to raise a guest instruction page fault. |
+| The compact soft-TLB tag truncated VPNs, so a high guest physical page could alias a cached low page and form an invalid host pointer. | High | The tag now retains its 46-bit VPN domain and rejects wider VPNs from the compact cache. `MemoryProtectionTests::test_soft_tlb_rejects_vpns_outside_compact_tag` covers alias rejection; ACT4 `Ssnpm_H_pmm10_guest` passes under Valgrind after the fix. |
+| HLVX rejected a VS-stage U page even when VS SUM permitted the virtualized load. | Medium | HLVX still checks execute permission, while its U-page privilege rule follows load/SUM handling. `SimulatorStandardsTests` checks SUM on/off, and ACT4 `Sv_H_sv39x4_hlv` passes. |
+| A UART receive overrun in a later device tick could leave the line interrupt unpublished. | Medium | Overrun transitions now schedule an interrupt update; `PlatformIntegrationTests` exercises an overrun after a full FIFO was established in an earlier tick. |
+| Batched execution could expose stale `cycle`/`time` CSR values or ACLINT `mtime` through MMIO. | Medium | Bare-metal execution commits pending cycles before a subsequent counter CSR or non-direct memory fallback. Instrumented paths end their segment before a memory access; OS execution flushes its cycle chunk before counter reads and general memory fallbacks. RVA23 regressions compare counter and ACLINT `mtime` observations with instruction-at-a-time execution, including warmed decode-cache paths. |
+| DHCP could advertise a working-looking DNS proxy while guest DNS requests timed out. | Medium | The libslirp callback table must outlive its stack, and its poll-registration callbacks must be present even when SimRV polls synchronously. `PlatformIntegrationTests::test_user_network_external_dns` verifies an upstream response when explicitly enabled. |
+| WFI could advance a shared timer in SMP, or wrap a due virtual timer deadline into a far-future `mtime`. | Medium | Fast-forward is now single-hart-only, and virtual deadlines are converted only when `vstimecmp > htimedelta`. `PlatformIntegrationTests::test_wfi_fast_forward_is_single_hart_only` covers both boundaries. |
+
+This inventory records the major first-party execution, memory, cache, and device shortcuts; it is
+not a machine-checked proof or an exhaustive review of every optimization. The RV64 and RV32
+architecture gates and the latest upstream ACT4 RVA23S64 suite pass in full.
+
+Address-domain types protect the architectural and platform interfaces where the distinction affects
+correctness. Architectural PCs, decode and block cache keys, pipeline stage records and fetch
+cursors, branch prediction, traces, symbols, breakpoints, and instruction-explainer PCs use
+`VirtAddr`. Physical SoC regions, device bases, PCIe windows and BARs, DRAM and `tohost`
+configuration, DMA, MMIO routing, cache tags, coherence, and reservation tracking use `PhysAddr`.
+The instruction timing cache keys virtual PCs rather than memory bus addresses. The TUI backend
+request carries an explicit virtual or physical address alternative for its command. C plugin ABI
+and serialized formats retain scalar representations, with explicit typed adapters at those
+boundaries. Scalar range arithmetic remains in widened RAM and PMP helpers, AXI message records,
+protocol register fields, and parsers until they validate the input width and establish its domain.
+First-party MMIO register accessors use `MmioOffset`, distinct from `PhysAddr`; routing constructs the
+offset after it establishes the device-relative address. Explicit `.raw()` extraction is used at scalar
+decoding, host-indexing, and external-interface boundaries.
+The explainer distinguishes effective virtual addresses from translated physical addresses; its
+register base and offsets remain scalar arithmetic values. Its public explanation and disassembly
+entry points accept virtual PCs. Branch prediction feedback, BTB targets, and return-address stack
+entries also use `VirtAddr`. Trace PC filter bounds use `VirtAddr` after command-line parsing; their
+serialized values are unchanged.
+Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their
+separate cause-dependent representation.
+Breakpoint hits report `location` as either a virtual address or a register type and identifier;
+C++ callers should inspect the variant instead of interpreting a scalar as both domains.
+These are remaining C++ interface boundaries to review; their presence does not by itself establish
+a guest-visible bug.
+
+The trace regression exercises lockstep parsing and comparison with a native commit-log fixture.
+The ISA tests labelled `lockstep` use bare-metal mode, while the comparison hook currently runs
+only in OS mode; a passing labelled ISA test therefore does not establish instruction comparison.
+
+Symbol and function lookups take `VirtAddr`; callers interpreting a raw address as an ELF virtual
+address must construct it explicitly. Symbol storage, function bases, symbol-name results, and ELF
+entry points also use `VirtAddr`, while symbol offsets remain scalar displacements. Legacy boot and
+signature paths explicitly extract raw values where they interpret ELF addresses as physical locations.
+
+MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
+physical addresses from platform configuration or translate virtual addresses before routing or
+DMA. Loaded segment records used for cache prewarming also require `PhysAddr`.
+VirtIO descriptor and ring addresses remain 64-bit through the transport adapter; an address
+that does not fit the simulator's physical-address type is rejected before DMA.
+Queue processing requires a nonzero supported queue size, nonwrapping split-ring ranges, and
+descriptor indices within the configured table.
+Deferred block and network completions are valid only for the queue configuration that scheduled
+them; resetting or reconfiguring that queue invalidates older completions.
+PMP access checks require `PhysAddr`; callers must translate virtual addresses before protection
+checks, including page-table accesses.
+`TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device
+implementations must update their overrides. An override of `contains()` should also declare
+`using TileLinkNode::contains;` so the base class's deleted raw-integer overload stays visible. The C
+plugin ABI retains its existing scalar fields; the plugin adapter constructs a physical address
+when importing a base address. TLB lookup, inspection, and selective flush filters require
+`VirtAddr`, while insertion requires both `VirtAddr` and `PhysAddr`. Full TLB entries keep virtual
+and physical pages in their respective types.
+
+Reservation-range invalidation takes a physical address and a host-sized byte count. An empty
+range changes nothing; a range extending beyond the guest physical-address representation saturates
+at its maximum address without wrapping or truncating the count.
+
+Instruction-cache reads, data-cache accesses, cache-line insertion and probes, shared-cache line
+operations, and the coherence directory use `PhysAddr`. Cache tags and eviction addresses represent
+aligned physical line bases. Data-cache accesses also use the typed `Funct3` operation; callers
+must convert raw decoded fields explicitly. Coherence inputs are aligned to the cache line before
+lookup or invalidation. A data-cache access wider than native `Word` misses;
+RV32 floating-point and vector paths split wider accesses into word operations. Cache-block zero
+discards the initiating cached copy when removing its directory entry and invalidates reservations
+throughout the block. DMA writes invalidate reservations over their actual byte range.
+Reservation-table LR, SC, and invalidation operations also require `PhysAddr`; translation must
+be complete before recording or checking a reservation.
+When execution engines change, multi-hart workers stop before per-hart state is reset and restart
+after the new engine is installed, so no worker remains parked on the previous engine's barrier.
+The G-stage page-table walker accepts `GuestPhysAddr`, which denotes a VS-stage result. It returns
+a host `PhysAddr`; guest fault addresses retain the guest-physical type until conversion to an
+architectural scalar value for trap reporting.
+VS-stage table roots and next-level pointers also remain `GuestPhysAddr` until the G-stage walk
+returns; the page-directory cache holds host-physical table addresses only for non-virtualized walks.
+
+Compact execution keeps integer register operands as `RegId` until indexing the register file;
+its on-disk and plugin interfaces are not affected by that internal representation.
+
+## Multi-Hart SMP & TileLink-C Coherence
+
+Multi-hart configurations (`--smp <N>`, `N` from 1 through 16) simulate symmetric multiprocessing:
+
+1. **Directory Coherence**: L1 caches participate in directory-based cache coherence implementing the MESI (Modified, Exclusive, Shared, Invalid) protocol over TileLink-C channels.
+2. **Interrupt Routing**: Core local interrupts (software/timer) are managed via CLINT or ACLINT (MTIME/MSWI). External platform interrupts are handled by PLIC or AIA (APLIC wire interrupts and IMSIC message-signaled interrupts).
+3. **Synchronization**: Atomic operations (LR/SC and AMOs) use a global reservation table and coherent bus transactions across harts.
+
+`--steps` / `-e` applies to the machine-wide retired-instruction total, not just hart 0. In
+deterministic instruction mode, harts advance in round-robin order within each scheduler quantum;
+MT-SMP may retire a small number of additional instructions while workers observe the stop request.
+
+## Debugger ownership and synchronization
+
+Debugger instruction breakpoints and memory watchpoints use virtual addresses; memory watchpoints
+match effective addresses before translation. Their C++ interfaces require `VirtAddr`; GDB and TUI
+adapters explicitly convert the addresses they parse.
+
+The TUI and GDB are mutually exclusive frontends over machine-owned debug primitives. TUI debug
+actions are always available; GDB runs its blocking TCP accept/read loop on one `std::jthread` and
+passes parsed requests through a synchronized command/reply channel. Machine-facing debugger
+requests inspect or mutate architectural state, devices, execution state, and logical
+break/watchpoints only on the simulation thread after quiescing execution workers.
+Packet handlers return an explicit optional reply and connection disposition; only the transport
+worker frames and sends replies, including asynchronous stops while awaiting packet bytes.
+
+GDB uses all-stop semantics. Attach and startup hold all harts paused, stop events quiesce SMP
+workers, and a selected-hart single-step runs the normal execution model until that hart retires
+one instruction. An atomic control-event generation counter wakes paused simulation and dormant SMP
+workers without periodic sleeps. Fast IA execution observes control requests at bounded 256-
+instruction safe points; detailed and CA execution observe them every retirement or cycle.
+Bare-metal and OS runners share worker lifecycle coordination but retain their execution kernels.
+Step requests use a release/acquire handoff. Completion is acknowledged after worker quiescence and
+snapshot publication; synchronous callers use a predicate-based condition-variable wait with a real
+deadline. Parallel harts evaluate their own timer interrupt state instead of hart 0 mutating it.
+
+Breakpoint records have stable IDs and frontend ownership. Debugger disconnect removes only GDB-owned
+logical breakpoints and watchpoints without rewriting guest instructions or disturbing TUI state.
+Detaching resumes guest execution and retains the listener socket; an unexpected client disconnect
+cleans GDB-owned state, leaves the target paused, and re-listens for new connections.
+
+## CA timing and ordering
+
+In `cycle-accurate` mode, CA uses deterministic global cycles. On each cycle SimRV:
+
+1. Advances hart 0, then started secondary harts in ascending order.
+2. Advances the shared TileLink/coherence fabric once.
+3. Updates shared timer and interrupt-pending state.
+4. Performs termination and presentation work outside the architectural step.
+
+The SMP synchronization quantum batches complete global cycles before host-side UART and TUI
+presentation work. It does not give one hart a longer modeled time slice: all started harts still
+advance exactly once per global cycle. Debugging, tracing, breakpoints, delayed execution, and
+single-step reduce the batch to one cycle.
+
+In `multi-threaded` SMP mode (configured via SoC profile), harts execute each global cycle on separate
+worker threads and synchronize at the cycle boundary before the shared fabric and timers advance.
+Requests from that cycle are ordered by logical cycle, hart ID, and per-hart issue order. Interrupt
+lines and hart lifecycle changes are applied at hart boundaries. The synchronization quantum groups
+complete global cycles into one host-side runner turn; cycle ordering remains synchronized within
+the batch. Pause, reboot, reconfiguration, shutdown, and single-step first quiesce the workers.
+
+!!! warning "Use deterministic single-threaded for cycle parity"
+    Use `single-threaded` (lockstep) mode for cycle traces and cycle-by-cycle RTL comparisons.
+    `multi-threaded` mode keeps global cycle counts and shared-request ordering deterministic while
+    executing hart work in parallel; synchronization overhead can outweigh the parallel work on short workloads.
+
+The CPU model controls pipeline, cache, and interconnect timing. Cache hit/miss
+latencies and TileLink request/response latencies are positive whole-cycle
+values. A transport latency of one is the default baseline: a request completes
+on the next bus step and its response is visible in that completion cycle.
+Squashed fetch and data requests are cancelled by hart/port source identity.
+
+CA page walks are resumable transactions. PTE reads and accessed/dirty updates
+share the bus ordering model; A/D updates use an atomic OR. This preserves a
+single translation behavior while allowing CA to expose latency.
+
+## Source layout
+
+```text
+include/simrv/  Interfaces and inline implementation
+src/            Implementation units mirroring include/
+tests/          Native semantic, pipeline, UI, platform, and CLI tests
+scripts/        Build, benchmark, release, and reproduction helpers
+docs/           User, contributor, compliance, and release documentation
+```
+
+Useful entry points are `src/Main.cpp`, `src/core/Machine.cpp`,
+`src/core/Cpu.cpp`, and `src/pipeline/CycleKernel.cpp`. See
+[TUI architecture](../user/tui.md), [bare-metal development](../user/baremetal.md),
+[Linux image building](../user/linux.md), and
+[extension development](../hardware/extensions.md) for focused workflows.
+
+## Build and validation
+
+Use the `rv32-release` or `rv64-release` CMake preset. The focused native gate
+is `ctest --test-dir build/rv64-release --output-on-failure -L gate`; some gate
+tests require external images or tools. Record CA performance with
+`scripts/benchmark.sh --ca`. Compare reports only on equivalent hosts, compilers,
+guest binaries, and instruction limits. On Linux laptops, set
+`SIMRV_CA_BENCH_AFFINITY=<cpu>` to pin the benchmark and reduce scheduling and
+thermal-frequency noise; allow a cooldown between long comparison runs.
+
+## Local performance reference host
+
+The current development measurements are recorded on an Intel Core Ultra X7 358H
+(16 logical CPUs, 48 MiB L2, 18 MiB L3), with 31.1 GiB available memory, under
+Linux 6.18.33.2-microsoft-standard-WSL2. Benchmarks pin to logical CPU 0. WSL2
+does not expose the host governor or frequency telemetry here, so these results
+are local regression evidence only—not portable performance claims. Use the
+`rv64-native-release` Clang preset for local tuning; release artifacts continue to
+use the portable `rv64-release` x86-64-v3 configuration.

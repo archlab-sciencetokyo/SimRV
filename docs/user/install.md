@@ -1,57 +1,257 @@
 # Install SimRV
 
-For normal use, download the latest release archive from
-[GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). The release provides
-RV32 and RV64 simulator binaries for an x86-64 Linux host.
+SimRV publishes Linux x86-64 and AArch64 simulator builds. The installed `simrv` executable runs RV64
+guests and provides RV32 guest compatibility. Native RV32 builds remain a source-level validation
+target and are not distributed separately.
+
+Linux release archives target x86-64 and AArch64. The AArch64 archive uses a generic ARMv8-A
+baseline and is intended for 64-bit Raspberry Pi OS, including Raspberry Pi 5; Pi hardware testing
+is still pending. Native macOS source builds are smoke-tested on macOS 26 for Apple silicon and
+Intel; macOS packages are not published yet. VirtIO-FS directory sharing is Linux-only. User-mode
+networking uses libslirp on Linux and macOS. SimRV also uses POSIX terminal I/O, file descriptors,
+polling, and process APIs that Windows does not provide natively, so a native Windows port would
+need substantial rework. [WSL2](https://learn.microsoft.com/windows/wsl/) is the practical
+compatibility option: it runs a real Linux kernel and userland and is readily available on Windows.
+
+Download the newest package bundle or portable archive from
+[GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). Beta releases are marked
+as prereleases.
+
+## Build from source on macOS
+
+Install libslirp with the platform package manager before configuring: `brew install libslirp` on
+macOS, `dnf install libslirp-devel` on Fedora, or `apt install libslirp-dev` on Debian and Ubuntu.
+
+The macOS build is an experimental source-build target, validated on macOS 26 with GCC 16 on both
+Apple silicon and Intel. The regular CI runs `simrv --help` as a startup smoke test. It does not
+qualify every TUI feature or provide a macOS installer. Successful non-PR CI runs publish
+architecture-specific test binaries as workflow artifacts; those are not release packages.
+
+Install the build tools with Homebrew, then configure and build using the same compiler settings as
+the compatibility job:
+
+```bash
+brew install cmake ninja gcc
+cmake -S . -B build/macos -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=gcc-16 \
+  -DCMAKE_CXX_COMPILER=g++-16 \
+  -DSIMRV_XLEN=64 \
+  -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+  -DSIMRV_ENABLE_LTO=OFF
+cmake --build build/macos --target SimRV --parallel 2
+build/macos/SimRV --help
+```
+
+The [Build and Test workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml)
+uploads separate `arm64` and `x86_64` artifacts after successful non-PR builds and smoke tests.
+Graphical guest display uses Kitty graphics when detected, then SIXEL when available; support
+depends on the terminal emulator, not just the host OS. The TUI falls back to text when neither is
+available.
 
 ## Portable archive
 
-The portable archive contains a fully static musl-linked binary. It does not need the host's
-glibc or libstdc++ runtime and is intended for Ubuntu 22.04+ and comparable current Linux
-distributions.
+Portable archives contain the runtime component only and are fully statically linked against musl.
+Use the `x86_64` archive for x86-64 Linux and the `aarch64` archive for 64-bit ARM Linux; neither
+needs host glibc or SimRV runtime libraries. Extract the matching archive into
+`/usr/local` while removing the archive's leading `usr/` directory:
 
 ```bash
-tar -xzf SimRV-rv64-linux-x86_64-vVERSION.tar.gz
-./SimRV --version
+ARCH=aarch64 # use x86_64 on x86-64 Linux
+tar -tzf "SimRV-linux-${ARCH}-vVERSION.tar.gz"
+sudo tar -xzf "SimRV-linux-${ARCH}-vVERSION.tar.gz" \
+  --strip-components=1 -C /usr/local
+simrv --version
 ```
 
-Use the RV32 archive when the simulator itself must model XLEN=32. The host is still x86-64;
-RV32 and RV64 describe the guest architecture.
+This is the recommended option for older distributions, containers, and compute servers.
 
-## Hello samples
-
-The release also includes `SimRV-hello-samples-vVERSION.tar.gz`. It contains prebuilt RV32 and
-RV64 hello images plus the assembly source, linker script, and Makefile used to build them:
+For a per-user install without administrator rights, extract it under `~/.local` instead:
 
 ```bash
-tar -xzf SimRV-hello-samples-vVERSION.tar.gz
-./SimRV-rv64-linux-x86_64-vVERSION.bin --cli \
-  -b -m SimRV-hello-samples-vVERSION/build-rv64/hello.bin
+mkdir -p "$HOME/.local"
+ARCH=aarch64 # use x86_64 on x86-64 Linux
+tar -xzf "SimRV-linux-${ARCH}-vVERSION.tar.gz" \
+  --strip-components=1 -C "$HOME/.local"
+"$HOME/.local/bin/simrv" --version
 ```
 
-The RV32 image is at `SimRV-hello-samples-vVERSION/build-rv32/hello.bin`. These paths match
-the output directories produced by the sample Makefile.
+Add `~/.local/bin` to `PATH` if it is not already there. The archive does not register with the
+system package manager; native `.deb` and `.rpm` installs normally need administrator rights.
 
-The same archive can be rebuilt from `examples/hello/` in the source tree.
+Remove the installed files using the archive's file list, or replace them by extracting a newer
+archive at the same prefix. Use a native package when managed upgrades and removal matter.
+
+## Fedora and RPM systems
+
+The RPM bundle contains a standard repository index and five packages. For a normal simulator
+installation, install only the runtime package:
+
+```bash
+mkdir simrv-rpm && tar -xzf SimRV-rpm-packages-vVERSION.tar.gz -C simrv-rpm
+sudo dnf install ./simrv-rpm/simrv-[0-9]*.rpm
+simrv --version
+```
+
+Install `simrv-devel-*.rpm` to develop C++ applications against SimRV, `simrv-tools-*.rpm` for
+the configuration wizard, generic parity/benchmark utilities, and Linux/Buildroot image builder,
+`simrv-tests-*.rpm` for the compliance test runners, or
+Upgrade by
+installing the corresponding packages from a newer bundle. Remove them with
+`sudo dnf remove simrv simrv-devel simrv-tools simrv-tests`.
+
+To install the runtime and SDK together from the downloaded bundle:
+
+```bash
+sudo dnf install ./simrv-rpm/simrv-[0-9]*.rpm ./simrv-rpm/simrv-devel-[0-9]*.rpm
+```
+
+## Debian and Ubuntu
+
+The DEB bundle includes a `Packages` dependency manifest. Install the runtime package with APT so
+host-library dependencies are resolved normally:
+
+```bash
+mkdir simrv-deb && tar -xzf SimRV-deb-packages-vVERSION.tar.gz -C simrv-deb
+sudo apt install ./simrv-deb/simrv_*_amd64.deb
+simrv --version
+```
+
+The optional `simrv-devel` package provides the C++ SDK; the `simrv-tools` and `simrv-tests`
+packages also depend on the matching `simrv` version. Install the needed `.deb` files with the
+same command.
+Upgrade from a newer bundle or remove packages with
+`sudo apt remove simrv simrv-devel simrv-tools simrv-tests`.
+
+To install the runtime and SDK together from the downloaded bundle:
+
+```bash
+sudo apt install ./simrv-deb/simrv_*_amd64.deb ./simrv-deb/simrv-devel_*_amd64.deb
+```
+
+## C++ development package
+
+The native `simrv-devel` package contains SimRV's public C++ headers, the static runtime library,
+and the CMake package that exports `SimRV::runtime`. It is optional and is not part of the portable
+TGZ. Native SDK packages are qualified on Ubuntu 24.04 and RHEL 10-compatible systems; the SDK
+expects a C++23-capable compiler. Source installs also provide the CMake package and do not require
+a native development package.
+
+Link the exported target from a CMake project:
+
+```cmake
+find_package(SimRV 3.0 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE SimRV::runtime)
+```
+
+The target supplies the C++23 compile requirement and required system link dependencies. A
+consumer can then include public headers such as `simrv/core/MachineConfig.hpp`.
+
+The native package puts the CMake config in the system search path. A full source install also
+installs the SDK under its chosen prefix; for the default `/usr/local/simrv` source prefix, pass
+`-DCMAKE_PREFIX_PATH=/usr/local/simrv` when configuring the consumer. The runtime-only TGZ has no
+headers, library, or CMake package and cannot serve as an SDK.
+
+## Supported Linux distributions
+
+Native RPM and DEB packages are qualified in release CI on these x86-64 distributions. Portable
+TGZ archives are published for x86-64 and AArch64 Linux:
+
+!!! info "Choose an install format"
+    Use the RPM or DEB bundle for OS-managed installation and removal. Choose the static TGZ for
+    older distributions, containers, or servers where you want to avoid host C++ runtime
+    dependencies.
+
+| Package | Tested distributions | Notes |
+| --- | --- | --- |
+| RPM | Rocky Linux 10 and Fedora 44 | Built against the RHEL 10 glibc baseline; the simulator statically links its C++ runtime. |
+| DEB | Ubuntu 24.04 and Debian sid | Built against Ubuntu 24.04; the simulator statically links its C++ runtime. |
+| Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 or AArch64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
+
+The native packages are tested rather than promised for every derivative. Use the static TGZ when a
+distribution is outside this matrix or when package-manager integration is unavailable.
+
+## What the packages include
+
+| Package | Included content | Compatibility notes |
+| --- | --- | --- |
+| `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 or AArch64 Linux host; RV64 guests and RV32 guest compatibility |
+| `simrv-devel` | Public C++ headers, static runtime library, and `SimRV::runtime` CMake package | Optional native SDK; C++23 compiler and host-compatible C++ standard library |
+| `simrv-tools` | CPU configuration wizard, generic parity/tuning, benchmarking, and optional Linux/Buildroot image builder with its templates and profiles | Standalone utilities; image building requires Linux host build dependencies, and RTL parity also needs the selected external RTL/toolchain environment |
+| `simrv-tests` | Architectural compliance test drivers (ACT4 and Vector test runners) | Standalone test execution drivers; requires separately prepared test suites |
+
+Packages do not include a RISC-V cross compiler, generated guest ELF files, Linux images, or
+external test suites. The example Makefiles build into `/tmp` by default; install a RISC-V ELF
+toolchain to build them. The sample mission and its source are installed under
+`/usr/share/doc/SimRV/examples/isa`. Copy that tree to a writable directory before building an
+installed example. For example, with a RISC-V GCC toolchain whose executable is named
+`riscv64-unknown-elf-gcc`:
+
+```bash
+example_dir="$(mktemp -d)"
+cp -a /usr/share/doc/SimRV/examples/isa "$example_dir/"
+cd "$example_dir/isa"
+make XLEN=64 RISCV_PREFIX=riscv64-unknown-elf-
+simrv --tui --baremetal \
+  -m /tmp/simrv-isa-rv64/control-flow-calls.elf \
+  --mission lessons/control-flow-calls.mission
+```
+
+To use another cross toolchain, set `RISCV_PREFIX` to its compiler prefix and ensure it targets
+the selected XLEN and ABI. The generated ELF stays in `/tmp`; the mission path is relative to the
+copied source tree. The side-by-side mission layout needs a terminal at least 144 columns wide.
 
 ## Build from source
 
-Source builds require a C++23 compiler, CMake, and Ninja. Configure the target width explicitly:
+Source builds require a C++23 compiler, CMake 3.31 or newer, and Ninja:
 
 ```bash
+git clone https://github.com/archlab-sciencetokyo/SimRV.git
+cd SimRV
 cmake --preset rv64-release
-cmake --build --preset rv64-release
-
-# Or build the strict RV32 target:
-cmake --preset rv32-release
-cmake --build --preset rv32-release
+cmake --build --preset rv64-release -j"$(nproc)"
+./build/rv64-release/simrv --version
 ```
 
-The executable is `build/rv64-release/SimRV` or `build/rv32-release/SimRV`.
+By default, source installs keep SimRV's files separate from other applications under
+`/usr/local/simrv`. The executable is `/usr/local/simrv/bin/simrv`; add that `bin` directory to
+your `PATH` to invoke it as `simrv`:
 
-## Choose the next guide
+```bash
+sudo cmake --install build/rv64-release --prefix /usr/local/simrv
+export PATH="/usr/local/simrv/bin:$PATH"
+simrv --version
+```
 
-- [CLI and TUI quickstart](index.md)
-- [Bare-metal programs](baremetal.md)
-- [Linux images](linux.md)
-- [Architecture overview](../architecture/overview.md)
+Put the `export PATH=...` line in your shell's startup file if you want it in future sessions. To
+choose another prefix, configure with `-DCMAKE_INSTALL_PREFIX=/path/to/prefix` or override it for
+one install with `cmake --install build/rv64-release --prefix /path/to/prefix`. In either case,
+the executable is installed under `<prefix>/bin` and SimRV data under `<prefix>/share/SimRV`.
+
+The install also includes
+`/usr/local/simrv/share/SimRV/SimRVBuildMetadata.json`. It records the SimRV version, source Git
+revision, target XLEN, compiler, generator, host platform, and optional `SOURCE_DATE_EPOCH` used
+for reproducible builds. Its schema is installed at
+`/usr/local/simrv/share/SimRV/schemas/simrv-build-metadata.schema.json`.
+
+The tools package provides shell autocompletion for Bash, Zsh, and Fish via `simrv-tools completion`:
+
+```bash
+# Bash (add to ~/.bashrc for persistence):
+eval "$(simrv-tools completion bash)"
+
+# Zsh (add to ~/.zshrc before compinit):
+eval "$(simrv-tools completion zsh)"
+
+# Fish (run once to install for future sessions):
+simrv-tools completion fish > ~/.config/fish/completions/simrv.fish
+```
+
+Build `rv32-release` only when a native RV32 strict-width implementation is required for
+verification. Normal users should use the RV64-capable build.
+
+## Next steps
+
+- Follow the [CLI quickstart](index.md) to run a bare-metal image.
+- Read [Bare-Metal and Embedded](baremetal.md) for physical-memory and platform details.
+- Read [Full-System Linux](linux.md) to build and boot a Linux image.

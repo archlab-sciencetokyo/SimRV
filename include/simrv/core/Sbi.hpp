@@ -4,8 +4,8 @@
  */
 #pragma once
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class CPU;
@@ -15,27 +15,26 @@ namespace simrv::sbi {
 
 namespace detail {
 
-enum class HartMaskSelection : std::uint8_t { Empty, Local, Invalid };
-
 /** Direct SBI handles only supervisor ECALLs; M-mode ECALL remains an architectural trap. */
-constexpr auto is_direct_sbi_ecall(TrapCause cause) -> bool {
-    return cause == enum_mask(ExceptionCode::SupervisorEcall);
+constexpr auto is_direct_sbi_ecall(simrv::xlen::TrapCause cause) -> bool {
+    return cause == ExceptionCode::SupervisorEcall;
+}
+constexpr auto is_direct_sbi_ecall(ExceptionCode code) -> bool {
+    return code == ExceptionCode::SupervisorEcall;
 }
 
-/** Interpret an SBI hart-mask pair for SimRV's single supervisor-visible hart. */
-constexpr auto select_local_hart(Word hart_mask, Word hart_mask_base, Word hart_id)
-    -> HartMaskSelection {
-    if (hart_mask_base == static_cast<Word>(-1)) {
-        return HartMaskSelection::Local;
+/** Determine whether a target hart is selected by an SBI (hart_mask, hart_mask_base) pair. */
+constexpr auto is_hart_selected(simrv::xlen::Word hart_mask, simrv::xlen::Word hart_mask_base,
+                                size_t hart_id) -> bool {
+    if (hart_mask_base == static_cast<simrv::xlen::Word>(-1)) {
+        return true;
     }
-    if (hart_mask == 0) {
-        return HartMaskSelection::Empty;
+    if (hart_id < static_cast<size_t>(hart_mask_base) ||
+        (hart_id - static_cast<size_t>(hart_mask_base)) >= simrv::xlen::kXLenBits) {
+        return false;
     }
-    if (hart_id < hart_mask_base || (hart_id - hart_mask_base) >= simrv::xlen::kXLenBits) {
-        return HartMaskSelection::Invalid;
-    }
-    const Word local_bit = static_cast<Word>(1) << (hart_id - hart_mask_base);
-    return hart_mask == local_bit ? HartMaskSelection::Local : HartMaskSelection::Invalid;
+    const auto shift = hart_id - static_cast<size_t>(hart_mask_base);
+    return ((hart_mask >> shift) & simrv::xlen::Word{1}) != 0;
 }
 
 }  // namespace detail
@@ -50,18 +49,24 @@ class Sbi {
    public:
     explicit Sbi(core::CPU& cpu);
 
-    auto handle_ecall(TrapCause cause) -> bool;
+    auto handle_ecall(simrv::xlen::TrapCause cause) -> bool;
+    auto handle_ecall(ExceptionCode code) -> bool { return handle_ecall(to_trap_cause(code)); }
 
    private:
     // Modular sub-handlers for extensions
-    auto handle_base(Word func_id) -> bool;
-    auto handle_time(Word func_id) -> bool;
-    auto handle_rfence(Word func_id) -> bool;
-    auto handle_ipi(Word func_id) -> bool;
-    auto handle_system_reset(Word func_id) -> bool;
+    auto handle_base(simrv::xlen::Word func_id) -> bool;
+    auto handle_time(simrv::xlen::Word func_id) -> bool;
+    auto handle_rfence(simrv::xlen::Word func_id) -> bool;
+    auto handle_ipi(simrv::xlen::Word func_id) -> bool;
+    auto handle_hsm(simrv::xlen::Word func_id) -> bool;
+    auto handle_system_reset(simrv::xlen::Word func_id) -> bool;
+    auto handle_dbcn(simrv::xlen::Word func_id) -> bool;
+    auto handle_pmu(simrv::xlen::Word func_id) -> bool;
+    auto handle_cppc(simrv::xlen::Word func_id) -> bool;
+    auto handle_susp(simrv::xlen::Word func_id) -> bool;
 
-    [[nodiscard]] auto timer_value() const -> Counter;
-    void sbi_return(SignedWord error, Word value);
+    [[nodiscard]] auto timer_value() const -> simrv::xlen::Counter;
+    void sbi_return(simrv::xlen::SignedWord error, simrv::xlen::Word value);
 
    private:
     core::CPU& cpu_;

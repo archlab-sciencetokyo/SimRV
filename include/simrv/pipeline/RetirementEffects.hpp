@@ -1,0 +1,100 @@
+#pragma once
+
+#include "simrv/CompilerHints.hpp"
+#include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
+
+namespace simrv::pipeline {
+
+template <simrv::xlen::RegisterIdentifier RegisterId, typename ValueType = simrv::xlen::Register>
+struct RegisterWriteEffect {
+    RegisterId destination = static_cast<RegisterId>(0);
+    ValueType value = 0;
+    bool enabled = false;
+};
+
+/// Architectural changes produced by the writeback stage, before they are applied.
+struct WritebackEffects {
+    RegisterWriteEffect<simrv::xlen::RegId, simrv::xlen::Register> integer_write{};
+    RegisterWriteEffect<simrv::xlen::RegId, simrv::xlen::Register> integer_write_hi{};
+    RegisterWriteEffect<simrv::xlen::FpRegId, simrv::xlen::FloatingRegister> floating_write{};
+    bool increments_instruction_count = false;
+    bool marks_floating_point_dirty = false;
+};
+
+// Called once for every retired instruction.  Keeping the small classification in the caller
+// avoids a hot out-of-line call in both IA and CA writeback paths.
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto build_writeback_effects(
+    const PipelineContext& context) -> WritebackEffects {
+    WritebackEffects effects{};
+    if (context.pending_exception.has_value()) return effects;
+
+    effects.increments_instruction_count = true;
+    if (isa::is_vector_op(context.op_id)) {
+        return effects;
+    }
+
+    const auto opcode = context.opcode;
+    const auto funct5 = context.funct5;
+    const auto funct3 = context.funct3;
+
+    auto& integer = effects.integer_write;
+    integer.destination = context.rd;
+    if (opcode == isa::Opcode::Load || isa::is_hlv_op(context.op_id) ||
+        (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc)) {
+        integer.value = context.mem_rdata;
+        integer.enabled = true;
+        if (context.int_wb_pair && context.rd != simrv::xlen::RegId::Zero) {
+            effects.integer_write_hi.destination =
+                static_cast<simrv::xlen::RegId>(std::to_underlying(context.rd) + 1U);
+            effects.integer_write_hi.value = context.mem_rdata_hi;
+            effects.integer_write_hi.enabled = true;
+        }
+    } else if (opcode == isa::Opcode::System && (context.op_id == isa::OperationId::MOP ||
+                                                 context.op_id == isa::OperationId::SSRDP)) {
+        integer.value = context.wb_data;
+        integer.enabled = true;
+    } else if (opcode == isa::Opcode::System && (context.op_id == isa::OperationId::SSPUSH ||
+                                                 context.op_id == isa::OperationId::SSPOPCHK)) {
+        integer.enabled = false;
+    } else if (opcode == isa::Opcode::System && funct3 != isa::Funct3::Priv) {
+        integer.value = context.rcsr;
+        integer.enabled = true;
+    } else if ((opcode == isa::Opcode::Amo && funct5 == isa::Funct5Amo::Sc) ||
+               opcode == isa::Opcode::Lui || opcode == isa::Opcode::Auipc ||
+               opcode == isa::Opcode::Jal || opcode == isa::Opcode::Jalr ||
+               opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
+               opcode == isa::Opcode::Op32 || opcode == isa::Opcode::OpImm32 ||
+               opcode == isa::Opcode::Custom0 ||
+               ((opcode == isa::Opcode::OpFp || opcode == isa::Opcode::MAdd ||
+                 opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||
+                 opcode == isa::Opcode::NMSub) &&
+                context.int_wb_from_fp)) {
+        integer.value = context.wb_data;
+        integer.enabled = true;
+        if (context.int_wb_from_fp && context.int_wb_pair &&
+            context.rd != simrv::xlen::RegId::Zero) {
+            effects.integer_write_hi.destination =
+                static_cast<simrv::xlen::RegId>(std::to_underlying(context.rd) + 1U);
+            effects.integer_write_hi.value = context.mem_rdata_hi;
+            effects.integer_write_hi.enabled = true;
+        }
+    }
+
+    auto& floating = effects.floating_write;
+    floating.destination = simrv::xlen::to_fp_reg_id(context.rd);
+    if (opcode == isa::Opcode::LoadFp) {
+        floating.value = context.fp_mem_rdata;
+        floating.enabled = true;
+    } else if ((opcode == isa::Opcode::OpFp || opcode == isa::Opcode::MAdd ||
+                opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||
+                opcode == isa::Opcode::NMSub) &&
+               context.fp_wb_enable) {
+        floating.value = context.fp_wb_data;
+        floating.enabled = true;
+    }
+    effects.marks_floating_point_dirty = floating.enabled;
+    return effects;
+}
+
+}  // namespace simrv::pipeline

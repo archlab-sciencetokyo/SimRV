@@ -1,0 +1,41 @@
+simrv_add_component(simrv-platform
+  Plic.cpp
+  Clint.cpp
+  Aclint.cpp
+  AIA.cpp
+  Rtc.cpp
+  Uart.cpp
+  Power.cpp
+  ResetControlMmio.cpp
+  RingBufferEthernetMmio.cpp
+  ExternalDevicePlugin.cpp
+  DummyMmio.cpp
+  DmaController.cpp
+  pflash/PFlash.cpp
+  pci/PciDevice.cpp
+  pci/PcieRootComplex.cpp
+  pci/VirtioPciDevice.cpp
+  pci/VirtioPciBlock.cpp
+  pci/VirtioPciConsole.cpp
+  pci/VirtioPciGpu.cpp
+  pci/VirtioPciInput.cpp
+  pci/VirtioPciRng.cpp
+  pci/VirtioPciSound.cpp
+  pci/VirtioPciNet.cpp
+  pci/VirtioPciFs.cpp
+  mmio/VirtioMmioDevice.cpp
+  mmio/VirtioMmioBlock.cpp
+  mmio/VirtioMmioConsole.cpp
+  mmio/VirtioMmioGpu.cpp
+  mmio/VirtioMmioInput.cpp
+  mmio/VirtioMmioRng.cpp
+  mmio/VirtioMmioSound.cpp
+  mmio/VirtioMmioNet.cpp
+  mmio/VirtioMmioFs.cpp
+  virtio/VirtioFsBackend.cpp
+  virtio/HostAudioSink.cpp
+  virtio/VirtioSoundBackend.cpp
+  virtio/VirtioBlockBackend.cpp
+)
+target_link_libraries(simrv-platform PRIVATE PkgConfig::LIBSLIRP PUBLIC ${CMAKE_DL_LIBS})
+add_library(simrv::platform ALIAS simrv-platform)

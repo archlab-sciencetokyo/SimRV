@@ -11,6 +11,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
+#include "simrv/tui/framework/Layout.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -18,9 +19,12 @@ class Machine;
 
 namespace simrv::tui {
 
+class Tui;
+
 class StatusBar : public TuiWidget {
    public:
-    explicit StatusBar(simrv::core::Machine& machine);
+    explicit StatusBar(simrv::core::Machine& machine, Tui* tui = nullptr);
+    void set_tui(Tui* tui) noexcept { tui_ = tui; }
 
     void set_paused(bool paused) { paused_ = paused; }
     void set_status_override(const std::string& status) { status_override_ = status; }
@@ -33,20 +37,25 @@ class StatusBar : public TuiWidget {
         left_width_ = left;
         right_width_ = right;
     }
+    void set_column_width_overrides(framework::ColumnWidthOverrides widths) {
+        column_width_overrides_ = widths;
+    }
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
-    void set_trace_enabled(bool enabled) { trace_enabled_ = enabled; }
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
+    [[nodiscard]] auto is_pos_on_mode_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_attached(int x) const -> bool;
+    [[nodiscard]] auto get_header_action_at_col(int col, int terminal_width) const
+        -> HeaderHitResult;
     [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx, int terminal_width) const
         -> std::optional<TuiFooterAction>;
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
    private:
     simrv::core::Machine& machine_;
+    Tui* tui_ = nullptr;
     bool paused_ = true;
-    bool trace_enabled_ = false;
     std::string status_override_;
     TuiRegPage active_page_ = TuiRegPage::GPR;
     TuiLayout layout_ = TuiLayout::Split;
@@ -54,8 +63,8 @@ class StatusBar : public TuiWidget {
     int scroll_offset_ = 0;
     int left_width_ = 0;
     int right_width_ = 0;
+    framework::ColumnWidthOverrides column_width_overrides_ = framework::kNoColumnWidthOverrides;
 
-    [[maybe_unused]] uint64_t last_icount_ = 0;
     uint64_t kips_ = 0;
 };
 

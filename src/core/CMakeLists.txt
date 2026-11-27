@@ -1,0 +1,82 @@
+simrv_add_component(simrv-foundation
+  Logger.cpp
+  SoCConfig.cpp
+  XlenHelpers.cpp
+  ../util/FdtGenerator.cpp
+  ../util/FdtPatcher.cpp
+  ../util/SoCManifest.cpp
+)
+add_library(simrv::foundation ALIAS simrv-foundation)
+
+simrv_add_component(simrv-core
+  Machine.cpp
+  MachineInit.cpp
+  PlatformBuilder.cpp
+  TrapController.cpp
+  CsrFile.cpp
+  PerformanceCounters.cpp
+  SimulationStats.cpp
+  Tracer.cpp
+  Sbi.cpp
+  Tlb.cpp
+  Cpu.cpp
+  CpuCycle.cpp
+  CpuFastExecution.cpp
+  CpuFastBaremetal.cpp
+  CpuFastOs.cpp
+  BlockCache.cpp
+  ../util/CliParser.cpp
+  ../util/ThirdPartyNotices.cpp
+  ../util/HostCache.cpp
+  ../explain/CsrCatalog.cpp
+  ../explain/ScalarSpecCatalog.cpp
+  ../explain/VectorSpecCatalog.cpp
+  ../explain/InstructionExplainer.cpp
+  ../explain/ExplainCliPrinter.cpp
+  ../explain/ExplainQuery.cpp
+)
+add_library(simrv::core ALIAS simrv-core)
+
+add_library(simrv-runtime STATIC
+  $<TARGET_OBJECTS:simrv-foundation>
+  $<TARGET_OBJECTS:simrv-isa>
+  $<TARGET_OBJECTS:simrv-execution>
+  $<TARGET_OBJECTS:simrv-pipeline>
+  $<TARGET_OBJECTS:simrv-memory>
+  $<TARGET_OBJECTS:simrv-platform>
+  $<TARGET_OBJECTS:simrv-debug>
+  $<TARGET_OBJECTS:simrv-tui-framework>
+  $<TARGET_OBJECTS:simrv-tui>
+  $<TARGET_OBJECTS:simrv-core>
+)
+add_library(simrv::runtime ALIAS simrv-runtime)
+add_library(SimRV::runtime ALIAS simrv-runtime)
+target_include_directories(simrv-runtime PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/generated>
+  $<INSTALL_INTERFACE:include>
+)
+target_compile_features(simrv-runtime PUBLIC cxx_std_23)
+set_target_properties(simrv-runtime PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  EXPORT_NAME runtime
+)
+simrv_apply_options(simrv-runtime)
+set_property(TARGET simrv-runtime PROPERTY INTERFACE_LINK_LIBRARIES "")
+if(CMAKE_DL_LIBS)
+  target_link_libraries(simrv-runtime INTERFACE ${CMAKE_DL_LIBS})
+endif()
+target_link_libraries(simrv-runtime INTERFACE PkgConfig::LIBSLIRP)
+
+add_library(simrv-devel INTERFACE)
+add_library(simrv::devel ALIAS simrv-devel)
+add_library(SimRV::devel ALIAS simrv-devel)
+add_library(SimRV::simrv-devel ALIAS simrv-devel)
+target_include_directories(simrv-devel INTERFACE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/generated>
+  $<INSTALL_INTERFACE:include>
+)
+set_target_properties(simrv-devel PROPERTIES
+  EXPORT_NAME simrv-devel
+)

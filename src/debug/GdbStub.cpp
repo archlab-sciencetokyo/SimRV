@@ -20,90 +20,224 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <charconv>
 #include <cstring>
 #include <format>
-#include <print>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/xlen/Types.hpp"
-
-// EBREAK encoding (RV32 uncompressed: 0x00100073)
-static constexpr uint32_t kEbreak32 = 0x00100073U;
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/isa/RegisterNames.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/pipeline/Decoder.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::debug {
+
+namespace {
+
+constexpr int kGdbSocketType =
+#ifdef SOCK_CLOEXEC
+    SOCK_STREAM | SOCK_CLOEXEC;
+#else
+    SOCK_STREAM;
+#endif
+
+constexpr int kGdbSendFlags =
+#ifdef MSG_NOSIGNAL
+    MSG_NOSIGNAL;
+#else
+    0;
+#endif
+
+void configure_socket(int fd) noexcept {
+    const int flags = ::fcntl(fd, F_GETFD, 0);
+    if (flags >= 0) static_cast<void>(::fcntl(fd, F_SETFD, flags | FD_CLOEXEC));
+#ifdef SO_NOSIGPIPE
+    int enabled = 1;
+    static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)));
+#endif
+}
+auto valid_hex(std::string_view text) -> bool {
+    return !text.empty() && std::ranges::all_of(text, [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    });
+}
+auto parse_hex(std::string_view text) -> std::optional<uint64_t> {
+    if (!valid_hex(text)) return std::nullopt;
+    uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value, 16);
+    if (error != std::errc{} || end != text.data() + text.size()) return std::nullopt;
+    return value;
+}
+
+auto decode_hex(std::string_view text) -> std::optional<std::string> {
+    if (text.size() % 2 != 0 || (!text.empty() && !valid_hex(text))) return std::nullopt;
+    std::string decoded;
+    decoded.reserve(text.size() / 2);
+    for (size_t i = 0; i < text.size(); i += 2) {
+        decoded.push_back(static_cast<char>(*parse_hex(text.substr(i, 2))));
+    }
+    return decoded;
+}
+
+auto encode_hex(std::string_view text) -> std::string {
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string encoded;
+    encoded.reserve(text.size() * 2);
+    for (const auto byte : text) {
+        const auto value = static_cast<unsigned char>(byte);
+        encoded.push_back(digits[value >> 4]);
+        encoded.push_back(digits[value & 0x0f]);
+    }
+    return encoded;
+}
+
+void invalidate_debug_state(simrv::core::Machine& machine, simrv::core::CPU& cpu) {
+    const auto hart = simrv::xlen::HartId{static_cast<uint32_t>(cpu.state().mhartid)};
+    machine.memory().system_bus().cancel_source(
+        simrv::memory::make_tl_source(hart, simrv::memory::TlPort::Instruction));
+    machine.memory().system_bus().cancel_source(
+        simrv::memory::make_tl_source(hart, simrv::memory::TlPort::Data));
+    cpu.ca_pipeline.reset();
+    cpu.ca_state.reset_instruction();
+    cpu.TLB_flush();
+    cpu.icache.flush();
+}
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-GdbStub::GdbStub(uint16_t port) : listen_fd_(::socket(AF_INET, SOCK_STREAM, 0)), port_(port) {
-    if (listen_fd_ < 0) {
+GdbStub::GdbStub(uint16_t port) : listen_fd_(::socket(AF_INET, kGdbSocketType, 0)), port_(port) {
+    if (listen_fd_.get() < 0) {
         throw std::runtime_error(std::format("GdbStub: socket() failed: {}", std::strerror(errno)));
     }
+    configure_socket(listen_fd_.get());
+    if (!wake_fd_.open()) throw std::runtime_error("GdbStub: cannot create wake channel");
 
     int opt = 1;
-    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    ::setsockopt(listen_fd_, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    ::setsockopt(listen_fd_.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    ::setsockopt(listen_fd_.get(), IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
+    if (::bind(listen_fd_.get(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
         0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        ::close(listen_fd_);
-        listen_fd_ = -1;
+        listen_fd_.reset();
         throw std::runtime_error(
             std::format("GdbStub: bind() on port {} failed: {}", port_, std::strerror(errno)));
     }
 
-    if (::listen(listen_fd_, 1) < 0) {
-        ::close(listen_fd_);
-        listen_fd_ = -1;
+    if (::listen(listen_fd_.get(), 1) < 0) {
+        listen_fd_.reset();
         throw std::runtime_error(std::format("GdbStub: listen() failed: {}", std::strerror(errno)));
     }
+
+    sockaddr_in bound{};
+    socklen_t bound_len = sizeof(bound);
+    if (::getsockname(listen_fd_.get(), reinterpret_cast<sockaddr*>(&bound), &bound_len) < 0) {
+        throw std::runtime_error(
+            std::format("GdbStub: getsockname() failed: {}", std::strerror(errno)));
+    }
+    port_ = ntohs(bound.sin_port);
 }
 
-GdbStub::~GdbStub() {
-    close_connection();
-    if (listen_fd_ >= 0) {
-        ::close(listen_fd_);
-        listen_fd_ = -1;
-    }
-}
+GdbStub::~GdbStub() { stop(); }
 
 // ---------------------------------------------------------------------------
 // Connection management
 // ---------------------------------------------------------------------------
 
-void GdbStub::wait_for_connection() {
-    sockaddr_in peer{};
-    socklen_t peer_len = sizeof(peer);
-    conn_fd_ = ::accept(listen_fd_, reinterpret_cast<sockaddr*>(&peer),
-                        &peer_len);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (conn_fd_ < 0) {
-        throw std::runtime_error(std::format("GdbStub: accept() failed: {}", std::strerror(errno)));
-    }
-    int opt = 1;
-    ::setsockopt(conn_fd_, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+void GdbStub::start(std::function<void()> wake_machine) {
+    if (running_.exchange(true, std::memory_order_acq_rel)) return;
+    wake_machine_ = std::move(wake_machine);
+    state_.store(GdbConnectionState::Listening, std::memory_order_release);
+    worker_ = std::jthread([this](const std::stop_token& stop_token) { worker_loop(stop_token); });
+}
 
-    std::array<char, INET_ADDRSTRLEN> peer_ip{};
-    ::inet_ntop(AF_INET, &peer.sin_addr, peer_ip.data(), peer_ip.size());
-    simrv::log::info("GDB connected from {}:{}", peer_ip.data(), ntohs(peer.sin_port));
+void GdbStub::stop() {
+    if (!running_.exchange(false, std::memory_order_acq_rel) && !worker_.joinable()) return;
+    worker_.request_stop();
+    if (const int fd = connected_fd_.load(std::memory_order_acquire); fd >= 0) {
+        ::shutdown(fd, SHUT_RDWR);
+    }
+    signal_worker();
+    command_cv_.notify_all();
+    if (wake_machine_) wake_machine_();
+    if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id()) worker_.join();
+    close_connection();
+    state_.store(GdbConnectionState::Stopped, std::memory_order_release);
+    simrv::log::info("GDB server shut down");
+}
+
+void GdbStub::signal_worker() noexcept { wake_fd_.signal(); }
+
+void GdbStub::drain_worker_signal() noexcept { wake_fd_.drain(); }
+
+auto GdbStub::wait_for_client(const std::stop_token& stop_token) -> bool {
+    pollfd fds[2]{{.fd = listen_fd_.get(), .events = POLLIN, .revents = 0},
+                  {.fd = wake_fd_.fd(), .events = POLLIN, .revents = 0}};
+    while (running_.load(std::memory_order_acquire) && !stop_token.stop_requested()) {
+        const int ready = ::poll(fds, 2, -1);
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        if ((fds[1].revents & POLLIN) != 0) {
+            drain_worker_signal();
+            if (!running_.load(std::memory_order_acquire)) return false;
+        }
+        if ((fds[0].revents & POLLIN) == 0) continue;
+
+        sockaddr_in peer{};
+        socklen_t peer_len = sizeof(peer);
+        conn_fd_ = util::UniqueFd(
+            ::accept(listen_fd_.get(), reinterpret_cast<sockaddr*>(&peer),
+                     &peer_len));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (conn_fd_.get() < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        configure_socket(conn_fd_.get());
+        int opt = 1;
+        ::setsockopt(conn_fd_.get(), IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+        std::array<char, INET_ADDRSTRLEN> peer_ip{};
+        ::inet_ntop(AF_INET, &peer.sin_addr, peer_ip.data(), peer_ip.size());
+        simrv::log::debug("GDB connected from {}:{}", peer_ip.data(), ntohs(peer.sin_port));
+        connected_fd_.store(conn_fd_.get(), std::memory_order_release);
+        state_.store(GdbConnectionState::Connected, std::memory_order_release);
+        no_ack_mode_.store(false, std::memory_order_release);
+        request_pause();
+        static_cast<void>(submit_command(CommandKind::Attach));
+        return running_.load(std::memory_order_acquire);
+    }
+    return false;
 }
 
 void GdbStub::close_connection() {
-    if (conn_fd_ >= 0) {
-        ::close(conn_fd_);
-        conn_fd_ = -1;
+    connected_fd_.store(-1, std::memory_order_release);
+    if (conn_fd_) ::shutdown(conn_fd_.get(), SHUT_RDWR);
+    conn_fd_.reset();
+    no_ack_mode_.store(false, std::memory_order_release);
+    {
+        const std::lock_guard lock(outbound_mutex_);
+        outbound_packets_.clear();
     }
-    single_step_ = false;
-    no_ack_mode_ = false;
+    if (running_.load(std::memory_order_acquire)) {
+        state_.store(GdbConnectionState::Listening, std::memory_order_release);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,12 +246,26 @@ void GdbStub::close_connection() {
 
 auto GdbStub::recv_char() -> int {
     char c = 0;
-    const ssize_t n = ::read(conn_fd_, &c, 1);
-    if (n <= 0) {
-        close_connection();
-        return -1;
+    while (running_.load(std::memory_order_acquire)) {
+        pollfd fds[2]{{.fd = conn_fd_.get(), .events = POLLIN, .revents = 0},
+                      {.fd = wake_fd_.fd(), .events = POLLIN, .revents = 0}};
+        if (::poll(fds, 2, -1) < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if ((fds[1].revents & POLLIN) != 0) {
+            drain_worker_signal();
+            if (!running_.load(std::memory_order_acquire)) return -1;
+            flush_outbound_packets();
+        }
+        if ((fds[0].revents & POLLIN) != 0) {
+            const auto n = ::read(conn_fd_.get(), &c, 1);
+            if (n < 0 && errno == EINTR) continue;
+            return n == 1 ? static_cast<unsigned char>(c) : -1;
+        }
+        if ((fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) return -1;
     }
-    return static_cast<unsigned char>(c);
+    return -1;
 }
 
 auto GdbStub::recv_packet(std::string& out) -> bool {
@@ -150,6 +298,10 @@ auto GdbStub::recv_packet(std::string& out) -> bool {
         if (c == '#') {
             break;
         }
+        if (out.size() >= 16384) {
+            errno = EMSGSIZE;
+            return false;
+        }
         out += static_cast<char>(c);
         sum += static_cast<uint8_t>(c);
     }
@@ -168,14 +320,20 @@ auto GdbStub::recv_packet(std::string& out) -> bool {
         return 0;
     };
 
+    const bool valid_checksum =
+        valid_hex(std::string{static_cast<char>(hi), static_cast<char>(lo)});
     const auto recv_sum = static_cast<uint8_t>((hex_digit(hi) << 4) | hex_digit(lo));
 
-    if (!no_ack_mode_) {
-        const char ack = (recv_sum == sum) ? '+' : '-';
-        ::write(conn_fd_, &ack, 1);
+    if (!no_ack_mode_.load(std::memory_order_acquire)) {
+        const char ack = (valid_checksum && recv_sum == sum) ? '+' : '-';
+        if (!send_raw(std::string(1, ack))) return false;
     }
 
-    return recv_sum == sum;
+    if (!valid_checksum || recv_sum != sum) {
+        errno = EBADMSG;
+        return false;
+    }
+    return true;
 }
 
 auto GdbStub::checksum(const std::string& data) -> uint8_t {
@@ -186,72 +344,119 @@ auto GdbStub::checksum(const std::string& data) -> uint8_t {
     return s;
 }
 
-void GdbStub::send_raw(const std::string& s) {
+auto GdbStub::send_raw(const std::string& s) -> bool {
     std::size_t sent = 0;
     while (sent < s.size()) {
-        const ssize_t n = ::write(conn_fd_, s.data() + sent, s.size() - sent);
+        const ssize_t n = ::send(conn_fd_.get(), s.data() + sent, s.size() - sent, kGdbSendFlags);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) {
-            close_connection();
-            return;
+            return false;
         }
         sent += static_cast<std::size_t>(n);
     }
+    return true;
 }
 
-void GdbStub::send_packet(const std::string& data) {
+auto GdbStub::send_packet_wire(const std::string& data) -> bool {
     const uint8_t cs = checksum(data);
     const std::string pkt = std::format("${}#{:02x}", data, cs);
-    send_raw(pkt);
+    return send_raw(pkt);
 }
 
 // ---------------------------------------------------------------------------
 // Register encoding helpers (little-endian hex)
 // ---------------------------------------------------------------------------
 
-auto GdbStub::reg_to_hex(uint32_t val) -> std::string {
-    // Little-endian: LSB first
-    return std::format("{:02x}{:02x}{:02x}{:02x}", val & 0xFFU, (val >> 8U) & 0xFFU,
-                       (val >> 16U) & 0xFFU, (val >> 24U) & 0xFFU);
-}
-
-// For 64-bit FP registers in little-endian
-static auto fp_to_hex(uint64_t val) -> std::string {
+template <typename T>
+[[nodiscard]] auto to_le_hex(T val) -> std::string {
     std::string s;
-    s.reserve(16);
-    for (int b = 0; b < 8; ++b) {
+    s.reserve(sizeof(T) * 2);
+    for (std::size_t b = 0; b < sizeof(T); ++b) {
         s += std::format("{:02x}", static_cast<uint8_t>(val >> (b * 8)));
     }
     return s;
 }
 
-auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> uint32_t {
-    auto hd = [&](std::size_t i) -> uint32_t {
+auto GdbStub::reg_to_hex(simrv::xlen::Register val) -> std::string { return to_le_hex(val); }
+
+static auto fp_to_hex(uint64_t val) -> std::string { return to_le_hex(val); }
+
+struct GdbCsr {
+    const char* name;
+    simrv::core::Csr csr;
+};
+
+static constexpr std::array<GdbCsr, 11> kGdbCsrs = {{
+    {.name = "mstatus", .csr = simrv::core::Csr::Mstatus},
+    {.name = "mtvec", .csr = simrv::core::Csr::Mtvec},
+    {.name = "mcause", .csr = simrv::core::Csr::Mcause},
+    {.name = "mepc", .csr = simrv::core::Csr::Mepc},
+    {.name = "mtval", .csr = simrv::core::Csr::Mtval},
+    {.name = "mie", .csr = simrv::core::Csr::Mie},
+    {.name = "mip", .csr = simrv::core::Csr::Mip},
+    {.name = "mcycle", .csr = simrv::core::Csr::Mcycle},
+    {.name = "minstret", .csr = simrv::core::Csr::Minstret},
+    {.name = "cycle", .csr = simrv::core::Csr::Cycle},
+    {.name = "instret", .csr = simrv::core::Csr::Instret},
+}};
+static constexpr std::size_t kFirstCsrReg = 65;
+
+auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> simrv::xlen::Register {
+    auto hd = [&](std::size_t i) -> simrv::xlen::Register {
+        if (offset + i >= s.size()) return 0;
         const char c = s.at(offset + i);
-        if (c >= '0' && c <= '9') return static_cast<uint32_t>(c - '0');
-        if (c >= 'a' && c <= 'f') return static_cast<uint32_t>(c - 'a' + 10);
-        if (c >= 'A' && c <= 'F') return static_cast<uint32_t>(c - 'A' + 10);
-        return 0U;
+        if (c >= '0' && c <= '9') return static_cast<simrv::xlen::Register>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<simrv::xlen::Register>(c - 'a' + 10);
+        if (c >= 'A' && c <= 'F') return static_cast<simrv::xlen::Register>(c - 'A' + 10);
+        return 0;
     };
-    return (hd(0) << 4U | hd(1)) | ((hd(2) << 4U | hd(3)) << 8U) | ((hd(4) << 4U | hd(5)) << 16U) |
-           ((hd(6) << 4U | hd(7)) << 24U);
+    simrv::xlen::Register val = 0;
+    for (size_t b = 0; b < sizeof(simrv::xlen::Register); ++b) {
+        const simrv::xlen::Register byte_val = (hd(b * 2) << 4) | hd(b * 2 + 1);
+        val |= (byte_val << (b * 8));
+    }
+    return val;
+}
+
+static auto hex_to_fp(const std::string& s, std::size_t offset) -> uint64_t {
+    auto hd = [&](std::size_t i) -> uint64_t {
+        if (offset + i >= s.size()) return 0;
+        const char c = s.at(offset + i);
+        if (c >= '0' && c <= '9') return static_cast<uint64_t>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<uint64_t>(c - 'a' + 10);
+        if (c >= 'A' && c <= 'F') return static_cast<uint64_t>(c - 'A' + 10);
+        return 0;
+    };
+    uint64_t val = 0;
+    for (size_t b = 0; b < sizeof(uint64_t); ++b) {
+        const uint64_t byte_val = (hd(b * 2) << 4) | hd(b * 2 + 1);
+        val |= (byte_val << (b * 8));
+    }
+    return val;
 }
 
 // ---------------------------------------------------------------------------
 // Register read/write helpers
 // ---------------------------------------------------------------------------
 
-// GDB register index -> value from ArchState
-static auto read_gdb_reg(std::size_t idx, const simrv::core::ArchState& state)
+// GDB register index -> value from the selected hart.
+static auto read_gdb_reg(std::size_t idx, const simrv::core::CPU& cpu)
     -> std::optional<std::string> {
+    const auto& state = cpu.state();
     if (idx < 32) {
-        return GdbStub::reg_to_hex(state.regs.read(static_cast<RegId>(idx)));
+        return GdbStub::reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(idx)));
     }
     if (idx == 32) {
-        return GdbStub::reg_to_hex(static_cast<uint32_t>(state.pc));
+        return GdbStub::reg_to_hex(state.pc.raw());
     }
     if (idx >= 33 && idx < 65) {
         // FP registers: 64-bit, little-endian
-        return fp_to_hex(state.regs.read_fp(static_cast<RegId>(idx - 33)));
+        return fp_to_hex(state.regs.read_fp(
+            simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(idx - 33))));
+    }
+    if (idx >= kFirstCsrReg && idx < kFirstCsrReg + kGdbCsrs.size()) {
+        const auto value = cpu.read_csr(simrv::core::csr_num(kGdbCsrs[idx - kFirstCsrReg].csr));
+        if (value) return GdbStub::reg_to_hex(static_cast<simrv::xlen::Register>(*value));
     }
     return std::nullopt;
 }
@@ -259,116 +464,168 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::ArchState& state)
 static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t hex_off,
                           simrv::core::ArchState& state) {
     if (idx < 32) {
-        const uint32_t val = GdbStub::hex_to_reg(hex, hex_off);
-        state.regs.write(static_cast<RegId>(idx), static_cast<Register>(val));
+        const simrv::xlen::Register val = GdbStub::hex_to_reg(hex, hex_off);
+        state.regs.write(static_cast<simrv::xlen::RegId>(idx), val);
     } else if (idx == 32) {
-        state.pc = static_cast<Address>(GdbStub::hex_to_reg(hex, hex_off));
+        state.pc = simrv::xlen::VirtAddr{GdbStub::hex_to_reg(hex, hex_off)};
+    } else if (idx >= 33 && idx < 65) {
+        const uint64_t val = hex_to_fp(hex, hex_off);
+        state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(idx - 33)),
+                            val);
     }
-    // FP write not yet implemented
 }
 
 // ---------------------------------------------------------------------------
 // RSP command handlers
 // ---------------------------------------------------------------------------
 
-void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
-    const auto& state = machine.cpu.state();
+auto GdbStub::cmd_read_registers(simrv::core::Machine& machine) -> std::string {
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
+    const auto& state = target_cpu.state();
     std::string resp;
-    // x0-x31 (4 bytes each, little-endian)
+    // x0-x31 (XLEN bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
-        resp += reg_to_hex(state.regs.read(static_cast<RegId>(i)));
+        resp += reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(i)));
     }
-    // pc
-    resp += reg_to_hex(static_cast<uint32_t>(state.pc));
+    // pc (XLEN bytes, little-endian)
+    resp += reg_to_hex(state.pc.raw());
     // f0-f31 (8 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
-        resp += fp_to_hex(state.regs.read_fp(static_cast<RegId>(i)));
+        resp += fp_to_hex(
+            state.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
     }
-    send_packet(resp);
+    for (const auto& csr : kGdbCsrs) {
+        const auto value = target_cpu.read_csr(simrv::core::csr_num(csr.csr));
+        resp += value ? reg_to_hex(static_cast<simrv::xlen::Register>(*value))
+                      : std::string(sizeof(simrv::xlen::Register) * 2, 'x');
+    }
+    return resp;
 }
 
-void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine) {
+auto GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine)
+    -> std::string {
+    if (pkt.size() != 1 + (33 + kGdbCsrs.size()) * sizeof(simrv::xlen::Register) * 2 + 32 * 16 ||
+        !valid_hex(std::string_view(pkt).substr(1))) {
+        return "E01";
+    }
     // G<hex data>
-    auto& state = machine.cpu.state();
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
+    auto& state = target_cpu.state();
+    const size_t hex_per_int = sizeof(simrv::xlen::Register) * 2;
     std::size_t off = 1;
-    for (std::size_t i = 0; i < 33 && off + 8 <= pkt.size(); ++i, off += 8) {
+    // x0..x31 + pc
+    for (std::size_t i = 0; i < 33 && off + hex_per_int <= pkt.size(); ++i, off += hex_per_int) {
         write_gdb_reg(i, pkt, off, state);
     }
-    send_packet("OK");
+    // f0..f31 (8 bytes each = 16 hex chars)
+    constexpr size_t hex_per_fp = sizeof(uint64_t) * 2;
+    for (std::size_t i = 33; i < 65 && off + hex_per_fp <= pkt.size(); ++i, off += hex_per_fp) {
+        write_gdb_reg(i, pkt, off, state);
+    }
+    invalidate_debug_state(machine, target_cpu);
+    return "OK";
 }
 
-void GdbStub::cmd_read_register(const std::string& pkt, simrv::core::Machine& machine) {
+auto GdbStub::cmd_read_register(const std::string& pkt, simrv::core::Machine& machine)
+    -> std::string {
     // p n
-    const std::size_t idx = std::stoul(pkt.substr(1), nullptr, 16);
-    const auto result = read_gdb_reg(idx, machine.cpu.state());
+    const auto parsed = parse_hex(std::string_view(pkt).substr(1));
+    if (!parsed) {
+        return "E01";
+    }
+    const auto idx = *parsed;
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
+    const auto result = read_gdb_reg(idx, target_cpu);
     if (result) {
-        send_packet(*result);
+        return *result;
     } else {
-        send_packet("E01");
+        return "E01";
     }
 }
 
-void GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& machine) {
+auto GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& machine)
+    -> std::string {
     // P n=v
     const std::size_t eq = pkt.find('=');
     if (eq == std::string::npos || eq + 1 >= pkt.size()) {
-        send_packet("E01");
-        return;
+        return "E01";
     }
-    const std::size_t idx = std::stoul(pkt.substr(1, eq - 1), nullptr, 16);
-    write_gdb_reg(idx, pkt, eq + 1, machine.cpu.state());
-    send_packet("OK");
+    const auto parsed = parse_hex(std::string_view(pkt).substr(1, eq - 1));
+    if (!parsed || *parsed >= kFirstCsrReg ||
+        pkt.size() - eq - 1 != (*parsed < 33 ? sizeof(simrv::xlen::Register) * 2 : 16) ||
+        !valid_hex(std::string_view(pkt).substr(eq + 1))) {
+        return "E01";
+    }
+    const auto idx = *parsed;
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
+    write_gdb_reg(idx, pkt, eq + 1, target_cpu.state());
+    invalidate_debug_state(machine, target_cpu);
+    return "OK";
 }
 
-void GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& machine) {
+auto GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& machine)
+    -> std::string {
     // m addr,len
     const std::size_t comma = pkt.find(',');
     if (comma == std::string::npos) {
-        send_packet("E01");
-        return;
+        return "E01";
     }
-    const uint32_t addr = static_cast<uint32_t>(std::stoul(pkt.substr(1, comma - 1), nullptr, 16));
-    const uint32_t len = static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1), nullptr, 16));
+    const auto address = parse_hex(std::string_view(pkt).substr(1, comma - 1));
+    const auto length = parse_hex(std::string_view(pkt).substr(comma + 1));
+    if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
+        *length > 4096 ||
+        !machine.ram_view().contains(
+            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*address)}, *length)) {
+        return "E01";
+    }
+    const auto addr = static_cast<simrv::xlen::Address>(*address);
+    const auto len = static_cast<size_t>(*length);
 
     // Clamp to a safe maximum
-    const uint32_t safe_len = std::min(len, uint32_t{4096});
+    const size_t safe_len = std::min(len, size_t{4096});
 
     std::string resp;
-    resp.reserve(static_cast<std::size_t>(safe_len) * 2);
+    resp.reserve(safe_len * 2);
 
     // Direct physical memory read (bypasses MMU)
-    const auto* base = reinterpret_cast<const uint8_t*>(
-        machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
-    constexpr uint32_t kDramBase = 0x80000000U;
+    const auto ram = machine.ram_view();
 
-    for (uint32_t i = 0; i < safe_len; ++i) {
-        const auto phys = static_cast<uint64_t>(addr) + i;
+    for (size_t i = 0; i < safe_len; ++i) {
+        const simrv::xlen::PhysAddr phys{
+            static_cast<simrv::xlen::Address>(static_cast<uint64_t>(addr) + i)};
         uint8_t byte_val = 0;
-        if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            byte_val = static_cast<uint8_t>(base[phys - kDramBase]);
+        if (ram.contains(phys)) {
+            byte_val = static_cast<uint8_t>(*ram.unchecked_ptr(phys));
         }
         resp += std::format("{:02x}", byte_val);
     }
-    send_packet(resp);
+    return resp;
 }
 
-void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& machine) {
+auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& machine)
+    -> std::string {
     // M addr,len:data
     const std::size_t comma = pkt.find(',');
     const std::size_t colon = pkt.find(':');
-    if (comma == std::string::npos || colon == std::string::npos) {
-        send_packet("E01");
-        return;
+    if (comma == std::string::npos || colon == std::string::npos || colon <= comma) {
+        return "E01";
     }
-    const uint32_t addr = static_cast<uint32_t>(std::stoul(pkt.substr(1, comma - 1), nullptr, 16));
-    const uint32_t len =
-        static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
-
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
-    auto* base = reinterpret_cast<uint8_t*>(
-        machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto address = parse_hex(std::string_view(pkt).substr(1, comma - 1));
+    const auto length = parse_hex(std::string_view(pkt).substr(comma + 1, colon - comma - 1));
+    if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
+        *length > 4096 || pkt.size() - colon - 1 != *length * 2 ||
+        (*length != 0 && !valid_hex(std::string_view(pkt).substr(colon + 1))) ||
+        !machine.ram_view().contains(
+            simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(*address)}, *length)) {
+        return "E01";
+    }
+    const auto addr = static_cast<simrv::xlen::Address>(*address);
+    const auto len = static_cast<size_t>(*length);
+    if (len == 0) return "OK";
 
     auto hd = [](char c) -> uint8_t {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
@@ -377,283 +634,582 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         return 0;
     };
 
-    for (uint32_t i = 0; i < len; ++i) {
-        const auto hex_off = colon + 1 + static_cast<std::size_t>(i) * 2;
+    std::vector<simrv::xlen::Byte> bytes;
+    bytes.reserve(len);
+    for (size_t i = 0; i < len; ++i) {
+        const auto hex_off = colon + 1 + i * 2;
         if (hex_off + 1 >= pkt.size()) break;
         const auto byte_val =
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
-        const auto phys = static_cast<uint64_t>(addr) + i;
-        if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            base[phys - kDramBase] = byte_val;
+        bytes.push_back(static_cast<simrv::xlen::Byte>(byte_val));
+    }
+    if (bytes.size() != len ||
+        !machine.memory().dma_write(simrv::xlen::PhysAddr{addr}, bytes.data(), bytes.size()))
+        return "E01";
+    for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
+        invalidate_debug_state(machine, machine.hart(hart));
+    }
+    return "OK";
+}
+
+auto GdbStub::cmd_breakpoint(const std::string& pkt, simrv::core::Machine& machine) -> std::string {
+    const bool insert = pkt.front() == 'Z';
+    const auto c1 = pkt.find(',');
+    if (c1 == std::string::npos) return "E01";
+    const auto c2 = pkt.find(',', c1 + 1);
+    if (c2 == std::string::npos) return "E01";
+    const auto type = parse_hex(std::string_view(pkt).substr(1, c1 - 1));
+    const auto address = parse_hex(std::string_view(pkt).substr(c1 + 1, c2 - c1 - 1));
+    const auto length = parse_hex(std::string_view(pkt).substr(c2 + 1));
+    if (!type || !address || !length || *length == 0 ||
+        *address > std::numeric_limits<simrv::xlen::Address>::max() ||
+        (insert && *length - 1 > std::numeric_limits<simrv::xlen::Address>::max() - *address))
+        return "E01";
+
+    auto& breakpoints = machine.breakpoint_manager();
+    const auto addr = static_cast<simrv::xlen::Address>(*address);
+    if (*type == std::to_underlying(GdbBreakpointType::Software) ||
+        *type == std::to_underlying(GdbBreakpointType::Hardware)) {
+        if (insert)
+            breakpoints.add_pc_breakpoint(simrv::xlen::VirtAddr{addr}, BreakpointOwner::Gdb);
+        else
+            breakpoints.remove_pc_breakpoint(simrv::xlen::VirtAddr{addr}, BreakpointOwner::Gdb);
+        return "OK";
+    }
+
+    WatchType watch;
+    switch (*type) {
+        case std::to_underlying(GdbBreakpointType::WriteWatch):
+            watch = WatchType::Write;
+            break;
+        case std::to_underlying(GdbBreakpointType::ReadWatch):
+            watch = WatchType::Read;
+            break;
+        case std::to_underlying(GdbBreakpointType::AccessWatch):
+            watch = WatchType::Access;
+            break;
+        default:
+            return "";
+    }
+    if (insert)
+        breakpoints.add_watchpoint(simrv::xlen::VirtAddr{addr}, *length, watch, "gdb",
+                                   BreakpointOwner::Gdb);
+    else
+        breakpoints.remove_watchpoint(simrv::xlen::VirtAddr{addr}, *length, watch,
+                                      BreakpointOwner::Gdb);
+    return "OK";
+}
+
+namespace {
+auto get_target_xml() -> const std::string& {
+    static const std::string xml = []() {
+        std::string s;
+        s.reserve(4096);
+        s += "<?xml version=\"1.0\"?>\n";
+        s += "<!DOCTYPE target SYSTEM \"gdb-target.dtd\">\n";
+        s += "<target version=\"1.0\">\n";
+        if constexpr (simrv::xlen::kIsXLen64) {
+            s += "  <architecture>riscv:rv64</architecture>\n";
+        } else {
+            s += "  <architecture>riscv:rv32</architecture>\n";
         }
+        s += "  <feature name=\"org.gnu.gdb.riscv.cpu\">\n";
+        const int bits = simrv::xlen::kIsXLen64 ? 64 : 32;
+        for (const auto [i, name] : std::views::enumerate(simrv::isa::kGprAbiNames)) {
+            s += std::format(
+                "    <reg name=\"{}\" bitsize=\"{}\" type=\"code_ptr\" regnum=\"{}\"/>\n", name,
+                bits, i);
+        }
+        s += std::format("    <reg name=\"pc\" bitsize=\"{}\" type=\"code_ptr\" regnum=\"32\"/>\n",
+                         bits);
+        s += "  </feature>\n";
+        s += "  <feature name=\"org.gnu.gdb.riscv.fpu\">\n";
+        for (const auto i : std::views::iota(0u, 32u)) {
+            s += std::format(
+                "    <reg name=\"f{}\" bitsize=\"64\" type=\"ieee_double\" regnum=\"{}\"/>\n", i,
+                33 + i);
+        }
+        s += "  </feature>\n";
+        s += "  <feature name=\"org.gnu.gdb.riscv.csr\">\n";
+        for (const auto [i, csr] : std::views::enumerate(kGdbCsrs)) {
+            s +=
+                std::format("    <reg name=\"{}\" bitsize=\"{}\" type=\"uint{}\" regnum=\"{}\"/>\n",
+                            csr.name, bits, bits, kFirstCsrReg + i);
+        }
+        s += "  </feature>\n";
+        s += "</target>\n";
+        return s;
+    }();
+    return xml;
+}
+}  // namespace
+
+auto GdbStub::handle_qxfer(const std::string& pkt) -> std::string {
+    // qXfer:features:read:target.xml:offset,length
+    static constexpr std::string_view kPrefix = "qXfer:features:read:target.xml:";
+    if (!pkt.starts_with(kPrefix)) {
+        return "";
     }
-    send_packet("OK");
+
+    const std::string params = pkt.substr(kPrefix.size());
+    const auto comma = params.find(',');
+    if (comma == std::string::npos) {
+        return "E01";
+    }
+
+    const auto parsed_offset = parse_hex(std::string_view(params).substr(0, comma));
+    const auto parsed_length = parse_hex(std::string_view(params).substr(comma + 1));
+    if (!parsed_offset || !parsed_length || *parsed_length == 0) {
+        return "E01";
+    }
+    const size_t offset = *parsed_offset;
+    const size_t length = std::min<uint64_t>(*parsed_length, 16383);
+
+    const auto& xml = get_target_xml();
+    if (offset >= xml.size()) {
+        return "l";
+    }
+
+    const size_t chunk_len = std::min(length, xml.size() - offset);
+    const std::string chunk = xml.substr(offset, chunk_len);
+    const bool is_last = (offset + chunk_len >= xml.size());
+    return (is_last ? "l" : "m") + chunk;
 }
 
-void GdbStub::cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine& machine) {
-    // Z0,addr,4
-    const std::size_t c1 = pkt.find(',');
-    if (c1 == std::string::npos) {
-        send_packet("E01");
-        return;
-    }
-    const std::size_t c2 = pkt.find(',', c1 + 1);
-    if (c2 == std::string::npos) {
-        send_packet("E01");
-        return;
-    }
-
-    const uint32_t type = static_cast<uint32_t>(std::stoul(pkt.substr(1, c1 - 1), nullptr, 16));
-    if (type != 0) {
-        send_packet("");
-        return;
-    }  // only sw breakpoints
-
-    const uint32_t addr =
-        static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
-
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
-    const auto phys = static_cast<uint64_t>(addr);
-
-    if (phys < kDramBase || (phys - kDramBase + 4) > dram_size) {
-        send_packet("E02");
-        return;
-    }
-    auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +
-                (phys - kDramBase);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-
-    // Save original word
-    uint32_t orig = 0;
-    std::memcpy(&orig, ptr, 4);
-    sw_breakpoints_[addr] = orig;
-
-    // Write EBREAK
-    const uint32_t ebrk = kEbreak32;
-    std::memcpy(ptr, &ebrk, 4);
-
-    send_packet("OK");
-}
-
-void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine& machine) {
-    // z0,addr,4
-    const std::size_t c1 = pkt.find(',');
-    if (c1 == std::string::npos) {
-        send_packet("E01");
-        return;
-    }
-    const std::size_t c2 = pkt.find(',', c1 + 1);
-    if (c2 == std::string::npos) {
-        send_packet("E01");
-        return;
-    }
-
-    const uint32_t type = static_cast<uint32_t>(std::stoul(pkt.substr(1, c1 - 1), nullptr, 16));
-    if (type != 0) {
-        send_packet("");
-        return;
-    }
-
-    const uint32_t addr =
-        static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
-
-    auto it = sw_breakpoints_.find(addr);
-    if (it == sw_breakpoints_.end()) {
-        send_packet("E03");
-        return;
-    }
-
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
-    const auto phys = static_cast<uint64_t>(addr);
-    if (phys >= kDramBase && (phys - kDramBase + 4) <= dram_size) {
-        auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +
-                    (phys - kDramBase);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        std::memcpy(ptr, &it->second, 4);
-    }
-    sw_breakpoints_.erase(it);
-    send_packet("OK");
-}
-
-// ---------------------------------------------------------------------------
-// Query packet handler
-// ---------------------------------------------------------------------------
-
-void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& /*machine*/) {
-    if (pkt == "qSupported") {
-        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+");
-        return;
+auto GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& machine) -> std::string {
+    if (pkt == "qSupported" || pkt.starts_with("qSupported:")) {
+        return "PacketSize=4000;QStartNoAckMode+;swbreak+;hwbreak+;qXfer:features:read+";
     }
     if (pkt == "QStartNoAckMode") {
-        no_ack_mode_ = true;
-        send_packet("OK");
-        return;
+        no_ack_mode_.store(true, std::memory_order_release);
+        return "OK";
     }
     if (pkt == "qAttached") {
-        send_packet("1");
-        return;
+        return "1";
     }
-    if (pkt.starts_with("qSupported:")) {
-        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+");
-        return;
+    if (pkt.starts_with("qRcmd,")) {
+        const auto command = decode_hex(std::string_view(pkt).substr(6));
+        return command ? encode_hex(cmd_monitor(*command, machine)) : "E01";
+    }
+    if (pkt.starts_with("qXfer:")) {
+        return handle_qxfer(pkt);
     }
     if (pkt == "qC") {
-        send_packet("QC1");
-        return;
+        return std::format("QC{:x}", current_hart_.raw() + 1);
+    }
+    if (pkt == "qfThreadInfo") {
+        std::string threads = "m";
+        for (size_t i = 1; i <= machine.num_harts(); ++i) {
+            if (i > 1) threads += ",";
+            threads += std::format("{:x}", i);
+        }
+        return threads;
+    }
+    if (pkt == "qsThreadInfo") {
+        return "l";
     }
     if (pkt == "qOffsets") {
-        send_packet("Text=0;Data=0;Bss=0");
-        return;
+        return "Text=0;Data=0;Bss=0";
     }
     if (pkt == "qSymbol::") {
-        send_packet("OK");
-        return;
+        return "OK";
     }
     // Unrecognised query
-    send_packet("");
+    return "";
+}
+
+auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machine) -> std::string {
+    if (command == "help" || command == "") {
+        return "SimRV monitor commands:\n"
+               "  info hart(s)\n"
+               "  info breakpoints\n"
+               "  info watchpoints\n"
+               "  info pipeline\n";
+    }
+    if (command == "info hart" || command == "info harts") {
+        std::string response = std::format("execution: {}\n", [state = machine.execution_state()] {
+            switch (state) {
+                case simrv::core::ExecutionState::Stopped:
+                    return "stopped";
+                case simrv::core::ExecutionState::Running:
+                    return "running";
+                case simrv::core::ExecutionState::Paused:
+                    return "paused";
+                case simrv::core::ExecutionState::Stepping:
+                    return "stepping";
+            }
+            return "unknown";
+        }());
+        for (size_t i = 0; i < machine.num_harts(); ++i) {
+            const auto& hart = machine.hart(i);
+            response += std::format(
+                "hart {}: pc=0x{:x} instructions={} status={}\n", i, hart.state().pc.raw(),
+                hart.e_icount,
+                hart.hart_status.load(std::memory_order_relaxed) == simrv::core::HartStatus::Started
+                    ? "started"
+                    : "stopped");
+        }
+        return response;
+    }
+    if (command == "info breakpoints") {
+        const auto& records = machine.breakpoint_manager().get_pc_breakpoint_records();
+        if (records.empty()) return "No instruction breakpoints.\n";
+        std::string response;
+        for (const auto& breakpoint : records) {
+            response +=
+                std::format("breakpoint {}: 0x{:x}\n", breakpoint.id, breakpoint.addr.raw());
+        }
+        return response;
+    }
+    if (command == "info watchpoints") {
+        const auto& watchpoints = machine.breakpoint_manager().get_watchpoints();
+        if (watchpoints.empty()) return "No watchpoints.\n";
+        std::string response;
+        for (const auto& watchpoint : watchpoints) {
+            const auto type = watchpoint.type == WatchType::Read     ? "read"
+                              : watchpoint.type == WatchType::Access ? "access"
+                                                                     : "write";
+            response += std::format("watchpoint {}: 0x{:x}, {} byte(s), {}\n", watchpoint.id,
+                                    watchpoint.addr.raw(), watchpoint.size, type);
+        }
+        return response;
+    }
+    if (command == "info pipeline") {
+        if (!machine.runtime_profile.is_cycle_mode()) {
+            return "pipeline: unavailable (cycle-accurate mode is disabled)\n";
+        }
+        const auto hart_id =
+            current_hart_.raw() < machine.num_harts() ? current_hart_ : simrv::xlen::HartId{0};
+        const auto& hart = machine.hart(hart_id.raw());
+        const std::array<std::pair<std::string_view, const simrv::pipeline::CycleInstructionSlot*>,
+                         5>
+            stages{{{"fetch", hart.ca_pipeline.fetch},
+                    {"decode", hart.ca_pipeline.decode},
+                    {"execute", hart.ca_pipeline.execute},
+                    {"memory", hart.ca_pipeline.memory},
+                    {"writeback", hart.ca_pipeline.writeback}}};
+        std::string response = std::format("pipeline: {} cycle(s), hart {}\n",
+                                           hart.pipeline_sim.cycle_count(), hart_id.raw());
+        for (const auto& [name, slot] : stages) {
+            if (!slot->valid) {
+                response += std::format("{}: bubble\n", name);
+            } else {
+                response += std::format(
+                    "{}: 0x{:x} {}{}\n", name, slot->context.cpc.raw(),
+                    simrv::pipeline::operation_name(slot->context.op_id),
+                    slot->remaining_latency == 0
+                        ? ""
+                        : std::format(" ({} cycle(s) remaining)", slot->remaining_latency));
+            }
+        }
+        response += std::format("stalls: data_hazard={} control_flush={} frontend_blocked={}\n",
+                                hart.ca_pipeline.data_hazard_stall, hart.ca_pipeline.control_flush,
+                                hart.ca_pipeline.frontend_blocked);
+
+        auto history_stage = [](const auto& stage) {
+            if (!stage.valid) return std::string{"bubble"};
+            return std::format("0x{:x} {}{}", stage.pc.raw(),
+                               simrv::pipeline::operation_name(stage.op_id),
+                               stage.stalled ? " (stalled)" : "");
+        };
+        const auto history = hart.pipeline_sim.cycle_history();
+        constexpr size_t kDisplayedHistory = 14;
+        const size_t first =
+            history.size() > kDisplayedHistory ? history.size() - kDisplayedHistory : 0;
+        response += std::format("history: {} cycle(s)\n", history.size() - first);
+        for (size_t i = first; i < history.size(); ++i) {
+            const auto& snapshot = history.at(i);
+            response += std::format(
+                "history {}: fetch={} | decode={} | execute={} | memory={} | writeback={}\n",
+                snapshot.cycle, history_stage(snapshot.f), history_stage(snapshot.d),
+                history_stage(snapshot.e), history_stage(snapshot.m), history_stage(snapshot.w));
+        }
+        return response;
+    }
+    return std::format("Unknown SimRV monitor command: {}\n", command);
 }
 
 // ---------------------------------------------------------------------------
 // Main packet dispatcher
 // ---------------------------------------------------------------------------
 
-auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machine) -> bool {
+auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machine)
+    -> CommandResult {
     if (pkt.empty()) {
-        send_packet("");
-        return false;
+        return {.response = ""};
     }
 
     // Ctrl-C interrupt
     if (pkt.front() == '\x03') {
-        send_packet("S05");  // SIGTRAP
-        return false;
+        machine.pause();
+        pause_requested_.store(false, std::memory_order_release);
+        last_stop_reply_ = std::format("T02thread:{:x};", current_hart_.raw() + 1);
+        return {.response = last_stop_reply_};
     }
 
     switch (pkt.front()) {
         case '?':
-            send_packet("S05");  // SIGTRAP
-            return false;
+            return {.response = last_stop_reply_};
 
         case 'g':
-            cmd_read_registers(machine);
-            return false;
+            return {.response = cmd_read_registers(machine)};
 
         case 'G':
-            cmd_write_registers(pkt, machine);
-            return false;
+            return {.response = cmd_write_registers(pkt, machine)};
 
         case 'p':
-            cmd_read_register(pkt, machine);
-            return false;
+            return {.response = cmd_read_register(pkt, machine)};
 
         case 'P':
-            cmd_write_register(pkt, machine);
-            return false;
+            return {.response = cmd_write_register(pkt, machine)};
 
         case 'm':
-            cmd_read_memory(pkt, machine);
-            return false;
+            return {.response = cmd_read_memory(pkt, machine)};
 
         case 'M':
-            cmd_write_memory(pkt, machine);
-            return false;
+            return {.response = cmd_write_memory(pkt, machine)};
 
         case 'Z':
-            cmd_insert_breakpoint(pkt, machine);
-            return false;
+            return {.response = cmd_breakpoint(pkt, machine)};
 
         case 'z':
-            cmd_remove_breakpoint(pkt, machine);
-            return false;
+            return {.response = cmd_breakpoint(pkt, machine)};
 
         case 'c':
-            // Continue: resume simulation
-            single_step_ = false;
-            return true;  // signal caller to resume
+            if (pkt != "c") {
+                return {.response = "E01"};
+            }
+            machine.resume();
+            return {};
 
         case 's':
-            // Single step: execute one instruction then halt again
-            single_step_ = true;
-            return true;
+            if (pkt != "s") {
+                return {.response = "E01"};
+            }
+            if (!machine.begin_debug_step(current_hart_)) return {.response = "E01"};
+            return {};
 
         case 'D':
-            // Detach
-            send_packet("OK");
-            close_connection();
-            return true;
+            machine.breakpoint_manager().clear_owner(BreakpointOwner::Gdb);
+            machine.resume();
+            simrv::log::info("GDB detached; target resumed and listener retained");
+            return {.response = "OK", .connection = ConnectionDisposition::Close};
 
         case 'k':
-            // Kill
+            machine.breakpoint_manager().clear_owner(BreakpointOwner::Gdb);
             machine.stop();
-            close_connection();
-            return true;
+            return {.response = std::nullopt, .connection = ConnectionDisposition::Close};
 
-        case 'H':
-        case 'T':
-            // Set thread / Thread alive check – only one hart, always OK
-            send_packet("OK");
-            return false;
+        case 'H': {
+            if (pkt.size() < 3 || (pkt[1] != 'g' && pkt[1] != 'c')) {
+                return {.response = "E01"};
+            }
+            const auto text = std::string_view(pkt).substr(2);
+            const auto tid = text == "-1" ? std::optional<uint64_t>{0} : parse_hex(text);
+            if (!tid || *tid > machine.num_harts()) {
+                return {.response = "E01"};
+            }
+            current_hart_ = simrv::xlen::HartId{static_cast<uint32_t>(*tid == 0 ? 0 : *tid - 1)};
+            return {.response = "OK"};
+        }
+
+        case 'T': {
+            if (const auto tid = parse_hex(std::string_view(pkt).substr(1)); tid) {
+                if (*tid > 0 && *tid <= machine.num_harts()) {
+                    return {.response = "OK"};
+                }
+            }
+            return {.response = "E01"};
+        }
 
         case 'v':
             if (pkt == "vCont?") {
-                send_packet("vCont;c;C;s;S");
-                return false;
+                return {.response = "vCont;c;s"};
             }
-            if (pkt.starts_with("vCont;c")) {
-                single_step_ = false;
-                return true;
+            if (pkt.starts_with("vCont;")) {
+                std::string_view actions = std::string_view(pkt).substr(6);
+                std::optional<simrv::xlen::HartId> stepping;
+                bool seen = false;
+                while (!actions.empty()) {
+                    const auto end = actions.find(';');
+                    const auto action = actions.substr(0, end);
+                    if (action.empty() || (action[0] != 'c' && action[0] != 's') ||
+                        (action.size() > 1 && action[1] != ':')) {
+                        return {.response = "E01"};
+                    }
+                    simrv::xlen::HartId target = current_hart_;
+                    if (action.size() > 1) {
+                        const auto tid = parse_hex(action.substr(2));
+                        if (!tid || *tid == 0 || *tid > machine.num_harts()) {
+                            return {.response = "E01"};
+                        }
+                        target = simrv::xlen::HartId{static_cast<uint32_t>(*tid - 1)};
+                    }
+                    if (action[0] == 's') {
+                        if (stepping) {
+                            return {.response = "E01"};
+                        }
+                        stepping = target;
+                    }
+                    seen = true;
+                    if (end == std::string_view::npos) break;
+                    actions.remove_prefix(end + 1);
+                    if (actions.empty()) {
+                        return {.response = "E01"};
+                    }
+                }
+                if (!seen) {
+                    return {.response = "E01"};
+                }
+                if (stepping) {
+                    if (!machine.begin_debug_step(*stepping)) return {.response = "E01"};
+                } else
+                    machine.resume();
+                return {};
             }
-            if (pkt.starts_with("vCont;s")) {
-                single_step_ = true;
-                return true;
-            }
-            send_packet("");
-            return false;
+            return {.response = ""};
 
         case 'q':
         case 'Q':
-            handle_query(pkt, machine);
-            return false;
+            return {.response = handle_query(pkt, machine)};
 
         default:
-            send_packet("");
-            return false;
+            return {.response = ""};
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public interface: poll (non-blocking) and notify_breakpoint (blocking)
-// ---------------------------------------------------------------------------
-
-void GdbStub::poll(simrv::core::Machine& machine) {
-    if (!is_connected()) return;
-
-    // Non-blocking check using poll(2)
-    struct pollfd pfd{};
-    pfd.fd = conn_fd_;
-    pfd.events = POLLIN;
-    const int rc = ::poll(&pfd, 1, 0);
-    if (rc <= 0) return;
-
-    std::string pkt;
-    if (!recv_packet(pkt)) return;
-
-    static_cast<void>(handle_packet(pkt, machine));
+void GdbStub::request_pause() noexcept {
+    pause_requested_.store(true, std::memory_order_release);
+    if (wake_machine_) wake_machine_();
 }
 
-void GdbStub::notify_breakpoint(simrv::core::Machine& machine) {
-    if (!is_connected()) return;
-
-    // Notify GDB that we stopped
-    send_packet("S05");  // SIGTRAP
-
-    // Block in the command loop until 'c' or 's'
-    while (is_connected()) {
-        std::string pkt;
-        if (!recv_packet(pkt)) break;
-        const bool resume = handle_packet(pkt, machine);
-        if (resume) break;
+auto GdbStub::submit_command(CommandKind kind, std::string packet) -> CommandResult {
+    auto command = std::make_shared<Command>();
+    command->kind = kind;
+    command->packet = std::move(packet);
+    {
+        const std::lock_guard lock(command_mutex_);
+        commands_.push_back(command);
+        pending_commands_.fetch_add(1, std::memory_order_release);
     }
+    if (wake_machine_) wake_machine_();
+
+    std::unique_lock lock(command_mutex_);
+    command_cv_.wait(lock, [this, &command]() {
+        return command->done || !running_.load(std::memory_order_acquire);
+    });
+    return command->result;
+}
+
+void GdbStub::service_pending(simrv::core::Machine& machine) {
+    while (true) {
+        std::shared_ptr<Command> command;
+        {
+            const std::lock_guard lock(command_mutex_);
+            if (commands_.empty()) break;
+            command = commands_.front();
+            commands_.pop_front();
+        }
+
+        CommandResult result;
+        try {
+            switch (command->kind) {
+                case CommandKind::Attach:
+                    machine.pause();
+                    last_stop_reply_ = std::format("T05thread:{:x};", current_hart_.raw() + 1);
+                    pause_requested_.store(false, std::memory_order_release);
+                    break;
+                case CommandKind::Disconnect:
+                    machine.pause();
+                    machine.breakpoint_manager().clear_owner(BreakpointOwner::Gdb);
+                    current_hart_ = simrv::xlen::HartId{0};
+                    pause_requested_.store(false, std::memory_order_release);
+                    break;
+                case CommandKind::Packet:
+                    if (machine.execution_state() != simrv::core::ExecutionState::Paused &&
+                        machine.execution_state() != simrv::core::ExecutionState::Stopped) {
+                        machine.pause();
+                    }
+                    pause_requested_.store(false, std::memory_order_release);
+                    result = handle_packet(command->packet, machine);
+                    break;
+            }
+        } catch (const std::exception& ex) {
+            simrv::log::warn("GDB rejected malformed packet '{}': {}", command->packet, ex.what());
+            result.response = "E01";
+        }
+
+        {
+            const std::lock_guard lock(command_mutex_);
+            command->result = std::move(result);
+            command->done = true;
+            pending_commands_.fetch_sub(1, std::memory_order_release);
+        }
+        command_cv_.notify_all();
+    }
+}
+
+void GdbStub::notify_stop(simrv::xlen::HartId hart, GdbSignal signal, std::string reason) {
+    if (!is_connected()) return;
+    current_hart_ = hart;
+    std::string reply =
+        std::format("T{:02x}thread:{:x};", std::to_underlying(signal), hart.raw() + 1);
+    reply += reason;
+    last_stop_reply_ = reply;
+    simrv::log::debug("GDB target stopped on hart {}: signal {}{}", hart.raw(),
+                      std::to_underlying(signal),
+                      reason.empty() ? "" : std::format(", {}", reason));
+    {
+        const std::lock_guard lock(outbound_mutex_);
+        outbound_packets_.push_back(std::move(reply));
+    }
+    signal_worker();
+}
+
+void GdbStub::flush_outbound_packets() {
+    std::deque<std::string> packets;
+    {
+        const std::lock_guard lock(outbound_mutex_);
+        packets.swap(outbound_packets_);
+    }
+    for (const auto& packet : packets) {
+        if (!send_packet_wire(packet)) break;
+    }
+}
+
+void GdbStub::connection_loop(const std::stop_token& stop_token) {
+    bool explicit_close = false;
+    while (running_.load(std::memory_order_acquire) && !stop_token.stop_requested()) {
+        std::string packet;
+        errno = 0;
+        if (!recv_packet(packet)) {
+            if (errno == EBADMSG) continue;
+            break;
+        }
+        request_pause();
+        const auto result = submit_command(CommandKind::Packet, packet);
+        if (result.response && !send_packet_wire(*result.response)) break;
+        if (result.connection == ConnectionDisposition::Close) {
+            explicit_close = true;
+            break;
+        }
+    }
+
+    if (!explicit_close && running_.load(std::memory_order_acquire)) {
+        request_pause();
+        static_cast<void>(submit_command(CommandKind::Disconnect));
+        simrv::log::warn("GDB client disconnected; target paused and listener restarted");
+    }
+}
+
+void GdbStub::worker_loop(const std::stop_token& stop_token) {
+    while (running_.load(std::memory_order_acquire) && !stop_token.stop_requested()) {
+        state_.store(GdbConnectionState::Listening, std::memory_order_release);
+        if (!wait_for_client(stop_token)) break;
+        connection_loop(stop_token);
+        close_connection();
+    }
+    state_.store(GdbConnectionState::Stopped, std::memory_order_release);
 }
 
 }  // namespace simrv::debug

@@ -1,0 +1,756 @@
+#include "simrv/util/FdtPatcher.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <format>
+#include <limits>
+#include <map>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <string_view>
+#include <utility>
+
+#include "simrv/core/GuestCapabilityCatalog.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::util {
+namespace {
+constexpr uint32_t kMagic = 0xd00dfeed;
+constexpr uint32_t kBeginNode = 1, kEndNode = 2, kProp = 3, kNop = 4, kEnd = 9;
+struct Prop {
+    std::string name{};
+    std::vector<uint8_t> data{};
+};
+struct Node {
+    std::string name{};
+    std::vector<Prop> props{};
+    std::vector<Node> children{};
+};
+auto be32(std::span<const uint8_t> b, size_t p) -> uint32_t {
+    return (uint32_t{b[p]} << 24) | (uint32_t{b[p + 1]} << 16) | (uint32_t{b[p + 2]} << 8) |
+           b[p + 3];
+}
+auto be64(std::span<const uint8_t> b, size_t p) -> uint64_t {
+    return (uint64_t{be32(b, p)} << 32) | be32(b, p + 4);
+}
+void put32(std::vector<uint8_t>& b, uint32_t v) {
+    b.push_back(v >> 24);
+    b.push_back(v >> 16);
+    b.push_back(v >> 8);
+    b.push_back(v);
+}
+void put64(std::vector<uint8_t>& b, uint64_t v) {
+    put32(b, v >> 32);
+    put32(b, v);
+}
+auto align4(size_t n) -> size_t { return (n + 3) & ~size_t{3}; }
+auto align8(size_t n) -> size_t { return (n + 7) & ~size_t{7}; }
+
+struct Parser {
+    std::span<const uint8_t> data, strings;
+    size_t pos = 0;
+    auto node() -> Node {
+        while (pos + 4 <= data.size() && be32(data, pos) == kNop) {
+            pos += 4;
+        }
+        if (pos + 4 > data.size() || be32(data, pos) != kBeginNode)
+            throw std::runtime_error("invalid FDT node token");
+        pos += 4;
+        const size_t start = pos;
+        while (pos < data.size() && data[pos]) ++pos;
+        if (pos == data.size()) throw std::runtime_error("unterminated FDT node name");
+        Node n;
+        n.name.assign(reinterpret_cast<const char*>(data.data() + start), pos - start);
+        pos = align4(pos + 1);
+        while (pos + 4 <= data.size()) {
+            auto tok = be32(data, pos);
+            pos += 4;
+            if (tok == kNop) continue;
+            if (tok == kEndNode) return n;
+            if (tok == kBeginNode) {
+                pos -= 4;
+                n.children.push_back(node());
+                continue;
+            }
+            if (tok != kProp || pos + 8 > data.size())
+                throw std::runtime_error("unsupported FDT structure token");
+            const auto len = be32(data, pos), nameoff = be32(data, pos + 4);
+            pos += 8;
+            if (nameoff >= strings.size() || len > data.size() - pos)
+                throw std::runtime_error("invalid FDT property bounds");
+            size_t end = nameoff;
+            while (end < strings.size() && strings[end]) ++end;
+            if (end == strings.size()) throw std::runtime_error("invalid FDT property name");
+            Prop p;
+            p.name.assign(reinterpret_cast<const char*>(strings.data() + nameoff), end - nameoff);
+            p.data.assign(data.begin() + pos, data.begin() + pos + len);
+            n.props.push_back(std::move(p));
+            pos = align4(pos + len);
+        }
+        throw std::runtime_error("unterminated FDT node");
+    }
+};
+auto prop(const Node& n, std::string_view name) -> const Prop* {
+    for (const auto& p : n.props)
+        if (p.name == name) return &p;
+    return nullptr;
+}
+auto prop(Node& n, std::string_view name) -> Prop* {
+    for (auto& p : n.props)
+        if (p.name == name) return &p;
+    return nullptr;
+}
+auto child(Node& n, std::string_view name) -> Node* {
+    for (auto& c : n.children)
+        if (c.name == name) return &c;
+    return nullptr;
+}
+auto cells(const Node& n, std::string_view name, uint32_t fallback) -> uint32_t {
+    const auto* p = prop(n, name);
+    return p && p->data.size() == 4 ? be32(p->data, 0) : fallback;
+}
+auto encode_cells(uint64_t v, uint32_t count) -> std::vector<uint8_t> {
+    std::vector<uint8_t> out;
+    if (count == 1)
+        put32(out, static_cast<uint32_t>(v));
+    else
+        put64(out, v);
+    return out;
+}
+void set_prop(Node& n, std::string name, std::vector<uint8_t> value) {
+    if (auto* p = prop(n, name))
+        p->data = std::move(value);
+    else
+        n.props.push_back({std::move(name), std::move(value)});
+}
+auto is_memory(Node& n) -> bool {
+    if (n.name.starts_with("memory@")) return true;
+    auto* type = prop(n, "device_type");
+    return type &&
+           std::string_view(reinterpret_cast<const char*>(type->data.data()), type->data.size())
+               .starts_with("memory");
+}
+auto misa_extension_for_letter(char letter) -> std::optional<unsigned> {
+    switch (letter) {
+        case 'a':
+            return 0;
+        case 'b':
+            return 1;
+        case 'c':
+            return 2;
+        case 'd':
+            return 3;
+        case 'f':
+            return 5;
+        case 'h':
+            return 7;
+        case 'i':
+            return 8;
+        case 'm':
+            return 12;
+        case 's':
+            return 18;
+        case 'u':
+            return 20;
+        case 'v':
+            return 21;
+        default:
+            return std::nullopt;
+    }
+}
+
+auto string_prop(const Node& node, std::string_view name) -> std::string {
+    const auto* value = prop(node, name);
+    if (value == nullptr || value->data.empty()) return {};
+    const auto end = std::ranges::find(value->data, uint8_t{0});
+    return std::string(reinterpret_cast<const char*>(value->data.data()),
+                       static_cast<size_t>(end - value->data.begin()));
+}
+
+auto read_reg(const Prop* reg, uint32_t address_cells, uint32_t size_cells)
+    -> std::optional<std::pair<uint64_t, uint64_t>> {
+    if (reg == nullptr || (address_cells != 1 && address_cells != 2) ||
+        (size_cells != 1 && size_cells != 2))
+        return std::nullopt;
+    const size_t tuple_cells = address_cells + size_cells;
+    if (reg->data.size() < tuple_cells * 4) return std::nullopt;
+    uint64_t base = be32(reg->data, 0);
+    if (address_cells == 2) base = (base << 32U) | be32(reg->data, 4);
+    size_t offset = address_cells * 4;
+    uint64_t size = be32(reg->data, offset);
+    if (size_cells == 2) size = (size << 32U) | be32(reg->data, offset + 4);
+    return std::pair{base, size};
+}
+
+auto parse_blob(std::span<const uint8_t> blob) -> std::expected<Node, std::string> {
+    if (blob.size() < 40 || be32(blob, 0) != kMagic)
+        return std::unexpected("invalid device tree header");
+    const uint32_t total = be32(blob, 4), structure_offset = be32(blob, 8),
+                   strings_offset = be32(blob, 12), version = be32(blob, 20),
+                   structure_size = be32(blob, 36), strings_size = be32(blob, 32);
+    if (total > blob.size() || total < 40 || structure_offset >= total || strings_offset >= total ||
+        version < 17 || structure_size > total - structure_offset ||
+        strings_size > total - strings_offset)
+        return std::unexpected("unsupported or truncated device tree");
+    try {
+        Parser parser{blob.subspan(structure_offset, structure_size),
+                      blob.subspan(strings_offset, strings_size)};
+        return parser.node();
+    } catch (const std::exception& error) {
+        return std::unexpected(std::string("invalid device tree: ") + error.what());
+    }
+}
+}  // namespace
+
+auto read_fdt_platform(std::span<const uint8_t> blob)
+    -> std::expected<FdtPlatformDescription, std::string> {
+    auto parsed = parse_blob(blob);
+    if (!parsed) return std::unexpected(parsed.error());
+    const Node& root = *parsed;
+    FdtPlatformDescription result{};
+    const uint32_t root_address_cells = cells(root, "#address-cells", 2);
+    const uint32_t root_size_cells = cells(root, "#size-cells", 1);
+
+    const Node* cpus = child(const_cast<Node&>(root), "cpus");
+    if (cpus != nullptr) {
+        result.timebase_hz = cells(*cpus, "timebase-frequency", 0);
+        result.hart_count = 0;
+        for (const auto& cpu : cpus->children) {
+            if (!cpu.name.starts_with("cpu@") || string_prop(cpu, "status") == "disabled") continue;
+            ++result.hart_count;
+            if (result.cpu_clock_hz == 0) result.cpu_clock_hz = cells(cpu, "clock-frequency", 0);
+            if (result.cpu_isa.empty()) {
+                result.cpu_isa = string_prop(cpu, "riscv,isa-base");
+                if (result.cpu_isa.empty()) result.cpu_isa = string_prop(cpu, "riscv,isa");
+                if (const auto* extensions = prop(cpu, "riscv,isa-extensions");
+                    extensions != nullptr) {
+                    const auto extension_count =
+                        static_cast<size_t>(std::ranges::count(extensions->data, uint8_t{0}));
+                    result.cpu_isa += std::format(" (+{} extensions)", extension_count);
+                }
+            }
+        }
+        if (result.hart_count == 0) result.hart_count = 1;
+    } else {
+        result.warnings.emplace_back("No /cpus node was found; using one hart.");
+    }
+
+    for (const auto& node : root.children) {
+        if (is_memory(const_cast<Node&>(node))) {
+            if (auto range = read_reg(prop(node, "reg"), root_address_cells, root_size_cells)) {
+                if (range->first > std::numeric_limits<simrv::xlen::Address>::max()) {
+                    result.warnings.emplace_back(
+                        "The RAM base is outside this build's physical address width.");
+                    continue;
+                }
+                result.dram_base = simrv::xlen::PhysAddr{range->first};
+                result.dram_size = range->second;
+                break;
+            }
+        }
+        if (node.name == "chosen") result.bootargs = string_prop(node, "bootargs");
+    }
+    if (result.dram_size == 0)
+        result.warnings.emplace_back("No readable root-level memory range was found.");
+
+    const Node* soc = child(const_cast<Node&>(root), "soc");
+    if (soc != nullptr) {
+        const uint32_t address_cells = cells(*soc, "#address-cells", root_address_cells);
+        const uint32_t size_cells = cells(*soc, "#size-cells", root_size_cells);
+        const auto* bus_ranges = prop(*soc, "ranges");
+        const bool translated_bus = bus_ranges != nullptr && !bus_ranges->data.empty();
+        if (translated_bus)
+            result.warnings.emplace_back(
+                "The /soc bus has translated ranges; device addresses need manual review.");
+        for (const auto& node : soc->children) {
+            if (string_prop(node, "status") == "disabled") continue;
+            if (!node.children.empty()) {
+                result.warnings.emplace_back("Nested bus/device node '" + node.name +
+                                             "' and its children were not imported.");
+                continue;
+            }
+            const auto compatible = string_prop(node, "compatible");
+            if (compatible.empty()) {
+                if (prop(node, "reg") != nullptr)
+                    result.warnings.emplace_back("Skipped device node '" + node.name +
+                                                 "' because it has no compatible string.");
+                continue;
+            }
+            if (translated_bus) continue;
+            const auto* reg = prop(node, "reg");
+            const auto range = read_reg(reg, address_cells, size_cells);
+            if (!range || range->second == 0) {
+                result.warnings.emplace_back("Skipped device node '" + node.name +
+                                             "' without a supported reg range.");
+                continue;
+            }
+            if (reg != nullptr && reg->data.size() > (address_cells + size_cells) * 4U)
+                result.warnings.emplace_back(
+                    "Device '" + node.name +
+                    "' has multiple reg ranges; only the first was imported.");
+            if (range->first > std::numeric_limits<simrv::xlen::Address>::max()) {
+                result.warnings.emplace_back("Skipped device '" + node.name +
+                                             "' outside this build's physical address width.");
+                continue;
+            }
+            FdtImportedDevice device{};
+            device.name = node.name.substr(0, node.name.find('@'));
+            device.compatible = compatible;
+            device.base = simrv::xlen::PhysAddr{range->first};
+            device.size = range->second;
+            if (const auto* interrupts = prop(node, "interrupts"); interrupts != nullptr) {
+                if (interrupts->data.size() == 4) {
+                    device.irq = be32(interrupts->data, 0);
+                } else if (!interrupts->data.empty()) {
+                    result.warnings.emplace_back("Device '" + node.name +
+                                                 "' has a multi-cell interrupt specifier; IRQ "
+                                                 "was left unset for review.");
+                }
+            } else if (prop(node, "interrupts-extended") != nullptr) {
+                result.warnings.emplace_back("Device '" + node.name +
+                                             "' uses interrupts-extended; IRQ was left unset.");
+            }
+            if (const auto* clock = prop(node, "clock-frequency"); clock != nullptr) {
+                if (clock->data.size() == 4) device.clock_hz = be32(clock->data, 0);
+                if (clock->data.size() == 8) device.clock_hz = be64(clock->data, 0);
+            }
+            result.devices.push_back(std::move(device));
+        }
+    } else {
+        result.warnings.emplace_back("No /soc node was found; no MMIO devices were imported.");
+    }
+    return result;
+}
+
+auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
+    -> std::expected<void, std::string> {
+    try {
+        if (blob.size() < 40 || be32(blob, 0) != kMagic)
+            return std::unexpected("invalid device tree header");
+        const auto total = be32(blob, 4), struct_off = be32(blob, 8), strings_off = be32(blob, 12),
+                   version = be32(blob, 20);
+        if (total > blob.size() || total < 40 || struct_off >= total || strings_off >= total ||
+            version < 17)
+            return std::unexpected("unsupported or truncated device tree");
+        const auto struct_size = be32(blob, 36), strings_size = be32(blob, 32);
+        if (struct_off + struct_size > total || strings_off + strings_size > total)
+            return std::unexpected("invalid device tree block sizes");
+        Parser parser{blob.subspan(struct_off, struct_size),
+                      blob.subspan(strings_off, strings_size)};
+        const auto root = parser.node();
+        const Node* cpus = nullptr;
+        for (const auto& node : root.children) {
+            if (node.name == "cpus") {
+                cpus = &node;
+                break;
+            }
+        }
+        if (cpus == nullptr) return {};
+        for (const auto& cpu : cpus->children) {
+            if (!cpu.name.starts_with("cpu@")) continue;
+            const auto check_letter = [&](char letter) -> std::expected<void, std::string> {
+                if (const auto bit = misa_extension_for_letter(letter);
+                    bit && (selected_misa & (uint64_t{1} << *bit)) == 0) {
+                    return std::unexpected(std::format(
+                        "CPU node '/cpus/{}' advertises ISA extension '{}' that is disabled "
+                        "in the selected ISA",
+                        cpu.name, letter));
+                }
+                return {};
+            };
+            const auto* legacy_isa = prop(cpu, "riscv,isa");
+            if (legacy_isa != nullptr) {
+                const std::string_view isa(reinterpret_cast<const char*>(legacy_isa->data.data()),
+                                           legacy_isa->data.size());
+                if (isa.starts_with("rv64") && ((selected_misa >> 62U) & 3U) != 2U)
+                    return std::unexpected(std::format(
+                        "CPU node '/cpus/{}' requires RV64 but the selected ISA is RV32",
+                        cpu.name));
+                size_t pos = isa.starts_with("rv32") || isa.starts_with("rv64") ? 4 : 0;
+                while (pos < isa.size() && isa[pos] >= 'a' && isa[pos] <= 'z') {
+                    if (isa[pos] == 'g') {
+                        for (const char implied : std::string_view("imafd"))
+                            if (auto result = check_letter(implied); !result) return result;
+                    } else if (auto result = check_letter(isa[pos]); !result) {
+                        return result;
+                    }
+                    ++pos;
+                }
+            }
+            const auto* extensions = prop(cpu, "riscv,isa-extensions");
+            if (extensions == nullptr) continue;
+            size_t offset = 0;
+            while (offset < extensions->data.size()) {
+                const auto end = std::find(extensions->data.begin() + offset,
+                                           extensions->data.end(), uint8_t{0});
+                if (end == extensions->data.end())
+                    return std::unexpected("unterminated riscv,isa-extensions property");
+                const auto length = static_cast<size_t>(end - (extensions->data.begin() + offset));
+                if (length == 1) {
+                    const char letter = static_cast<char>(extensions->data[offset]);
+                    if (auto result = check_letter(letter); !result) return result;
+                }
+                offset += length + 1;
+            }
+        }
+        return {};
+    } catch (const std::exception& error) {
+        return std::unexpected(std::format("invalid device tree: {}", error.what()));
+    }
+}
+
+auto patch_fdt(std::span<const uint8_t> blob, simrv::xlen::PhysAddr dram_base, uint64_t dram_size,
+               uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
+               uint64_t cpu_clock_hz, std::vector<FdtCustomDevice>* out_devices,
+               std::string_view bootargs) -> std::expected<std::vector<uint8_t>, std::string> {
+    if (timebase_hz > std::numeric_limits<uint32_t>::max()) {
+        return std::unexpected("timebase frequency does not fit the FDT 32-bit property");
+    }
+    if (cpu_clock_hz > std::numeric_limits<uint32_t>::max()) {
+        return std::unexpected("CPU clock frequency does not fit the FDT 32-bit property");
+    }
+    try {
+        if (blob.size() < 40 || be32(blob, 0) != kMagic)
+            return std::unexpected("invalid device tree header");
+        const auto total = be32(blob, 4), struct_off = be32(blob, 8), strings_off = be32(blob, 12),
+                   reserve_off = be32(blob, 16), version = be32(blob, 20),
+                   boot_cpuid_phys = be32(blob, 28);
+        if (total > blob.size() || total < 40 || struct_off >= total || strings_off >= total ||
+            reserve_off >= total || version < 17)
+            return std::unexpected("unsupported or truncated device tree");
+        const auto struct_size = be32(blob, 36), strings_size = be32(blob, 32);
+        if (struct_off + struct_size > total || strings_off + strings_size > total)
+            return std::unexpected("invalid device tree block sizes");
+        Parser parser{blob.subspan(struct_off, struct_size),
+                      blob.subspan(strings_off, strings_size)};
+        auto root = parser.node();
+        if (!bootargs.empty()) {
+            auto* chosen = child(root, "chosen");
+            if (chosen == nullptr) {
+                root.children.push_back(Node{.name = "chosen", .props = {}, .children = {}});
+                chosen = &root.children.back();
+            }
+            std::vector<uint8_t> ba(bootargs.begin(), bootargs.end());
+            ba.push_back('\0');
+            set_prop(*chosen, "bootargs", std::move(ba));
+        }
+        if (out_fb != nullptr) {
+            *out_fb = {};
+            for (const auto& c : root.children) {
+                if (c.name.starts_with("framebuffer@") || c.name == "framebuffer") {
+                    const auto* wp = prop(c, "width");
+                    const auto* hp = prop(c, "height");
+                    const auto* sp = prop(c, "stride");
+                    const auto* rp = prop(c, "reg");
+                    const auto* fp = prop(c, "format");
+                    if (wp != nullptr && wp->data.size() >= 4) out_fb->width = be32(wp->data, 0);
+                    if (hp != nullptr && hp->data.size() >= 4) out_fb->height = be32(hp->data, 0);
+                    if (sp != nullptr && sp->data.size() >= 4) out_fb->stride = be32(sp->data, 0);
+                    std::string_view fmt_str;
+                    if (fp != nullptr && !fp->data.empty()) {
+                        fmt_str = std::string_view(reinterpret_cast<const char*>(fp->data.data()));
+                        if (!fmt_str.empty() && fmt_str.back() == '\0') {
+                            fmt_str.remove_suffix(1);
+                        }
+                    }
+                    if (fmt_str == "r5g6b5" || (out_fb->stride != 0 && out_fb->width != 0 &&
+                                                out_fb->stride / out_fb->width == 2)) {
+                        out_fb->bpp = 2;
+                        out_fb->format = FdtFramebufferFormat::R5G6B5;
+                    } else {
+                        out_fb->bpp = 4;
+                        out_fb->format = FdtFramebufferFormat::A8R8G8B8;
+                    }
+                    if (rp != nullptr && rp->data.size() >= 4) {
+                        const auto ac = cells(root, "#address-cells", 2);
+                        const auto sc = cells(root, "#size-cells", 1);
+                        if (ac == 2 && rp->data.size() >= 8 + sc * 4) {
+                            const auto raw_base = be64(rp->data, 0);
+                            if (!std::in_range<simrv::xlen::Word>(raw_base))
+                                return std::unexpected(
+                                    "framebuffer physical address exceeds the configured word "
+                                    "width");
+                            out_fb->base =
+                                simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(raw_base)};
+                            out_fb->size = (sc == 2) ? be64(rp->data, 8) : be32(rp->data, 8);
+                        } else if (ac == 1 && rp->data.size() >= 4 + sc * 4) {
+                            out_fb->base = simrv::xlen::PhysAddr{be32(rp->data, 0)};
+                            out_fb->size = (sc == 2) ? be64(rp->data, 4) : be32(rp->data, 4);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        if (out_devices != nullptr) {
+            out_devices->clear();
+            const auto ac = cells(root, "#address-cells", 2);
+            const auto sc = cells(root, "#size-cells", 1);
+            for (const auto& c : root.children) {
+                if (c.name == "soc" || c.name.starts_with("soc@")) {
+                    const auto soc_ac = cells(c, "#address-cells", ac);
+                    const auto soc_sc = cells(c, "#size-cells", sc);
+                    for (const auto& dev_node : c.children) {
+                        const auto* comp = prop(dev_node, "compatible");
+                        const auto* rp = prop(dev_node, "reg");
+                        const auto* st = prop(dev_node, "status");
+                        if (st != nullptr && !st->data.empty() &&
+                            std::string_view(reinterpret_cast<const char*>(st->data.data())) ==
+                                "disabled") {
+                            continue;
+                        }
+                        if (rp != nullptr && rp->data.size() >= (soc_ac + soc_sc) * 4) {
+                            FdtCustomDevice dev{};
+                            dev.name = dev_node.name;
+                            if (comp != nullptr && !comp->data.empty()) {
+                                dev.compatible = reinterpret_cast<const char*>(comp->data.data());
+                            }
+                            if (soc_ac == 2) {
+                                const auto raw_base = be64(rp->data, 0);
+                                if (!std::in_range<simrv::xlen::Word>(raw_base))
+                                    return std::unexpected(
+                                        "device physical address exceeds the configured word "
+                                        "width");
+                                dev.base =
+                                    simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(raw_base)};
+                                dev.size = (soc_sc == 2) ? be64(rp->data, 8) : be32(rp->data, 8);
+                            } else {
+                                dev.base = simrv::xlen::PhysAddr{be32(rp->data, 0)};
+                                dev.size = (soc_sc == 2) ? be64(rp->data, 4) : be32(rp->data, 4);
+                            }
+                            out_devices->push_back(std::move(dev));
+                        }
+                    }
+                }
+            }
+        }
+        std::vector<Node*> memory_nodes;
+        for (auto& c : root.children)
+            if (is_memory(c)) memory_nodes.push_back(&c);
+        if (memory_nodes.empty()) return std::unexpected("device tree has no memory node");
+        if (memory_nodes.size() != 1)
+            return std::unexpected(
+                "device tree must describe SimRV RAM with exactly one memory node");
+        auto* memory = memory_nodes.front();
+        memory->name = std::format("memory@{:x}", dram_base.raw());
+        set_prop(*memory, "device_type", {'m', 'e', 'm', 'o', 'r', 'y', '\0'});
+        const auto ac = cells(root, "#address-cells", 2), sc = cells(root, "#size-cells", 1);
+        if ((ac != 1 && ac != 2) || (sc != 1 && sc != 2))
+            return std::unexpected("memory node uses unsupported address/size cells");
+        if ((ac == 1 && dram_base.raw() > UINT32_MAX) || (sc == 1 && dram_size > UINT32_MAX))
+            return std::unexpected("configured DRAM range does not fit the device tree cells");
+        std::vector<uint8_t> reg = encode_cells(dram_base.raw(), ac),
+                             size = encode_cells(dram_size, sc);
+        reg.insert(reg.end(), size.begin(), size.end());
+        set_prop(*memory, "reg", std::move(reg));
+        auto* cpus = child(root, "cpus");
+        if (!cpus) return std::unexpected("device tree has no /cpus node");
+        const auto cpu_ac = cells(*cpus, "#address-cells", 1);
+        if (cpu_ac != 1 && cpu_ac != 2)
+            return std::unexpected("CPU nodes use unsupported hart ID cells");
+        std::set<uint64_t> ids;
+        std::vector<Node*> cpu_nodes;
+        for (auto& c : cpus->children) {
+            if (!c.name.starts_with("cpu@")) continue;
+            auto* rp = prop(c, "reg");
+            if (!rp || rp->data.size() != cpu_ac * 4)
+                return std::unexpected("CPU node is missing a valid reg hart ID");
+            const auto id = cpu_ac == 1 ? be32(rp->data, 0) : be64(rp->data, 0);
+            if (!ids.insert(id).second)
+                return std::unexpected("duplicate CPU hart ID in device tree");
+            cpu_nodes.push_back(&c);
+        }
+        for (uint32_t i = 0; i < num_harts; ++i)
+            if (!ids.contains(i))
+                return std::unexpected(
+                    "device tree must contain CPU nodes for every configured hart (missing hart " +
+                    std::to_string(i) + ")");
+        if (timebase_hz != 0) {
+            std::vector<uint8_t> tb_data;
+            put32(tb_data, static_cast<uint32_t>(timebase_hz));
+            set_prop(*cpus, "timebase-frequency", std::move(tb_data));
+        }
+        for (auto* c : cpu_nodes) {
+            auto* rp = prop(*c, "reg");
+            const auto id = cpu_ac == 1 ? be32(rp->data, 0) : be64(rp->data, 0);
+            const std::string status = id < num_harts ? "okay" : "disabled";
+            set_prop(*c, "status", std::vector<uint8_t>(status.begin(), status.end()));
+            prop(*c, "status")->data.push_back(0);
+            if (cpu_clock_hz != 0) {
+                std::vector<uint8_t> clk_data;
+                put32(clk_data, static_cast<uint32_t>(cpu_clock_hz));
+                set_prop(*c, "clock-frequency", std::move(clk_data));
+            }
+            std::vector<uint8_t> cbom_sz;
+            put32(cbom_sz, core::kGuestCacheBlockBytes);
+            set_prop(*c, "riscv,cbom-block-size", cbom_sz);
+            std::vector<uint8_t> cbop_sz;
+            put32(cbop_sz, core::kGuestCacheBlockBytes);
+            set_prop(*c, "riscv,cbop-block-size", std::move(cbop_sz));
+            std::vector<uint8_t> cboz_sz;
+            put32(cboz_sz, core::kGuestCacheBlockBytes);
+            set_prop(*c, "riscv,cboz-block-size", std::move(cboz_sz));
+            auto* isa_ext_prop = prop(*c, "riscv,isa-extensions");
+            if (isa_ext_prop == nullptr) {
+                set_prop(*c, "riscv,isa-extensions", {});
+                isa_ext_prop = prop(*c, "riscv,isa-extensions");
+            }
+            if (isa_ext_prop != nullptr) {
+                // Advertise only supported additions; this is not the complete RVA23 set.
+                const auto has_extension = [&](std::string_view extension) {
+                    size_t offset = 0;
+                    while (offset < isa_ext_prop->data.size()) {
+                        const auto remaining = isa_ext_prop->data.size() - offset;
+                        const auto* token = isa_ext_prop->data.data() + offset;
+                        const auto* terminator =
+                            static_cast<const uint8_t*>(std::memchr(token, 0, remaining));
+                        if (terminator == nullptr) break;
+                        const auto length = static_cast<size_t>(terminator - token);
+                        const auto* begin = reinterpret_cast<const char*>(token);
+                        if (std::string_view(begin, length) == extension) return true;
+                        offset += length + 1;
+                    }
+                    return false;
+                };
+                const auto append_extension = [&](std::string_view extension) {
+                    if (has_extension(extension)) return;
+                    isa_ext_prop->data.insert(isa_ext_prop->data.end(), extension.begin(),
+                                              extension.end());
+                    isa_ext_prop->data.push_back('\0');
+                };
+                const bool has_hypervisor = has_extension("h");
+                const bool has_vector = has_extension("v");
+                const bool has_bitmanip = has_extension("b") || has_extension("zba") ||
+                                          has_extension("zbb") || has_extension("zbs");
+                const bool has_compressed = has_extension("c") || has_extension("zca");
+                const auto* base_prop = prop(*c, "riscv,isa-base");
+                const auto* isa_prop = prop(*c, "riscv,isa");
+                const bool is_guest_rv32 =
+                    (base_prop != nullptr && !base_prop->data.empty() &&
+                     std::string_view(reinterpret_cast<const char*>(base_prop->data.data()))
+                         .starts_with("rv32")) ||
+                    (isa_prop != nullptr && !isa_prop->data.empty() &&
+                     std::string_view(reinterpret_cast<const char*>(isa_prop->data.data()))
+                         .starts_with("rv32"));
+                for (const auto ext : core::kPatchableGuestExtensions) {
+                    if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
+                        (!simrv::xlen::kIsXLen64 || is_guest_rv32))
+                        continue;
+                    bool present = false;
+                    size_t offset = 0;
+                    while (offset < isa_ext_prop->data.size()) {
+                        const auto remaining = isa_ext_prop->data.size() - offset;
+                        const auto* token = isa_ext_prop->data.data() + offset;
+                        const auto* terminator =
+                            static_cast<const uint8_t*>(std::memchr(token, 0, remaining));
+                        if (terminator == nullptr) break;
+                        const auto length = static_cast<size_t>(terminator - token);
+                        const auto* begin = reinterpret_cast<const char*>(token);
+                        if (std::string_view(begin, length) == ext) {
+                            present = true;
+                            break;
+                        }
+                        offset += length + 1;
+                    }
+                    if (!present) {
+                        isa_ext_prop->data.insert(isa_ext_prop->data.end(), ext.begin(), ext.end());
+                        isa_ext_prop->data.push_back('\0');
+                    }
+                }
+                if (has_extension("m")) append_extension("zmmul");
+                if (has_extension("a")) {
+                    append_extension("zaamo");
+                    append_extension("zalrsc");
+                    append_extension("za128rs");
+                }
+                if (has_bitmanip) {
+                    append_extension("zba");
+                    append_extension("zbb");
+                    append_extension("zbs");
+                }
+                if (has_compressed) {
+                    append_extension("zca");
+                    append_extension("zcb");
+                    append_extension("zcmop");
+                    if (has_extension("d")) append_extension("zcd");
+                }
+                if (has_vector && has_bitmanip) append_extension("zvkb");
+                if (has_hypervisor) {
+                    static constexpr std::string_view kShaExtensions[] = {
+                        "ssstateen", "shcounterenw", "shvstvala", "shtvala",
+                        "shvstvecd", "shvsatpa",     "shgatpa"};
+                    for (const auto ext : kShaExtensions) append_extension(ext);
+                }
+            }
+        }
+        std::set<std::string> property_names;
+        auto gather = [&](auto&& self, const Node& n) -> void {
+            for (const auto& p : n.props) property_names.insert(p.name);
+            for (const auto& c : n.children) self(self, c);
+        };
+        gather(gather, root);
+        std::vector<uint8_t> structure, strings;
+        std::map<std::string, uint32_t> offsets;
+        for (const auto& name : property_names) {
+            offsets[name] = static_cast<uint32_t>(strings.size());
+            strings.insert(strings.end(), name.begin(), name.end());
+            strings.push_back(0);
+        }
+        auto emit = [&](auto&& self, const Node& n) -> void {
+            put32(structure, kBeginNode);
+            structure.insert(structure.end(), n.name.begin(), n.name.end());
+            structure.push_back(0);
+            structure.resize(align4(structure.size()), 0);
+            for (const auto& p : n.props) {
+                put32(structure, kProp);
+                put32(structure, p.data.size());
+                put32(structure, offsets[p.name]);
+                structure.insert(structure.end(), p.data.begin(), p.data.end());
+                structure.resize(align4(structure.size()), 0);
+            }
+            for (const auto& c : n.children) self(self, c);
+            put32(structure, kEndNode);
+        };
+        emit(emit, root);
+        put32(structure, kEnd);
+        size_t r = reserve_off;
+        while (r + 16 <= total) {
+            auto a = be64(blob, r), s = be64(blob, r + 8);
+            r += 16;
+            if (a == 0 && s == 0) break;
+        }
+        if (r > total) return std::unexpected("invalid FDT reservation map");
+        const uint32_t new_reserve = 40,
+                       new_struct = static_cast<uint32_t>(align4(new_reserve + (r - reserve_off))),
+                       new_strings = new_struct + structure.size(),
+                       new_total = static_cast<uint32_t>(align8(new_strings + strings.size()));
+        std::vector<uint8_t> out(40, 0);
+        auto write_header = [&](size_t off, uint32_t v) {
+            out[off] = v >> 24;
+            out[off + 1] = v >> 16;
+            out[off + 2] = v >> 8;
+            out[off + 3] = v;
+        };
+        out.insert(out.end(), blob.begin() + reserve_off, blob.begin() + r);
+        out.resize(new_struct, 0);
+        out.insert(out.end(), structure.begin(), structure.end());
+        out.insert(out.end(), strings.begin(), strings.end());
+        out.resize(new_total, 0);
+        write_header(0, kMagic);
+        write_header(4, new_total);
+        write_header(8, new_struct);
+        write_header(12, new_strings);
+        write_header(16, new_reserve);
+        write_header(20, 17);
+        write_header(24, 16);
+        write_header(28, boot_cpuid_phys);
+        write_header(32, strings.size());
+        write_header(36, structure.size());
+        return out;
+    } catch (const std::exception& e) {
+        return std::unexpected(std::string("failed to patch device tree: ") + e.what());
+    }
+}
+}  // namespace simrv::util

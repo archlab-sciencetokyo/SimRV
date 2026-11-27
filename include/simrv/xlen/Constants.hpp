@@ -4,7 +4,8 @@
  */
 #pragma once
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/CompilerHints.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::xlen {
 
@@ -70,7 +71,7 @@ template <unsigned XLen = kXLenBits>
 [[nodiscard]] inline constexpr auto satp_mode_supported(Word mode) -> bool {
     if constexpr (XLen == 64) {
         // RV64 MODE=1 is reserved; Sv32 is an RV32 translation scheme.
-        return mode == 0 || mode == 8 || mode == 9;  // Bare, Sv39, Sv48
+        return mode == 0 || mode == 8;  // Bare, Sv39
     } else {
         return mode == 0 || mode == 1;  // Bare, SV32
     }
@@ -95,7 +96,8 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_mode(Word satp, unsigned xlen) -> Word {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_mode(Word satp, unsigned xlen) noexcept
+    -> Word {
     if constexpr (kXLenBits == 32) {
         return satp_mode<32>(satp);
     } else {
@@ -103,7 +105,9 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_translation_enabled(Word satp, unsigned xlen) -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_translation_enabled(Word satp,
+                                                                          unsigned xlen) noexcept
+    -> bool {
     if constexpr (kXLenBits == 32) {
         return satp_translation_enabled<32>(satp);
     } else {
@@ -112,7 +116,9 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_mode_supported(Word mode, unsigned xlen) -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_mode_supported(Word mode,
+                                                                     unsigned xlen) noexcept
+    -> bool {
     if constexpr (kXLenBits == 32) {
         return satp_mode_supported<32>(mode);
     } else {
@@ -120,7 +126,8 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_asid(Word satp, unsigned xlen) -> Word {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_asid(Word satp, unsigned xlen) noexcept
+    -> Word {
     if constexpr (kXLenBits == 32) {
         return satp_asid<32>(satp);
     } else {
@@ -128,7 +135,8 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_root_ppn(Word satp, unsigned xlen) -> Word {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_root_ppn(Word satp, unsigned xlen) noexcept
+    -> Word {
     if constexpr (kXLenBits == 32) {
         return satp_root_ppn<32>(satp);
     } else {
@@ -137,10 +145,3 @@ template <unsigned XLen = kXLenBits>
 }
 
 }  // namespace simrv::xlen
-
-using simrv::xlen::kF32BoxerBits;
-using simrv::xlen::kLower32Mask;
-using simrv::xlen::kWordAllOnes;
-using simrv::xlen::kXLenMask;
-using simrv::xlen::make_mask;
-using simrv::xlen::xlen_shift_mask;

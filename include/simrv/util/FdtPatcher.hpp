@@ -1,0 +1,72 @@
+#pragma once
+
+#include <cstdint>
+#include <expected>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "simrv/xlen/AddressTypes.hpp"
+
+namespace simrv::util {
+
+enum class FdtFramebufferFormat : uint8_t {
+    A8R8G8B8 = 0,
+    R5G6B5 = 1,
+};
+
+struct FdtFramebufferInfo {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t stride = 0;
+    simrv::xlen::PhysAddr base{};
+    uint64_t size = 0;
+    FdtFramebufferFormat format = FdtFramebufferFormat::A8R8G8B8;
+    uint32_t bpp = 4;
+};
+
+struct FdtCustomDevice {
+    std::string name;
+    std::string compatible;
+    simrv::xlen::PhysAddr base{};
+    uint64_t size = 0;
+};
+
+struct FdtImportedDevice {
+    std::string name;
+    std::string compatible;
+    simrv::xlen::PhysAddr base{};
+    uint64_t size = 0;
+    uint32_t irq = 0;
+    uint64_t clock_hz = 0;
+    bool included = true;
+};
+
+struct FdtPlatformDescription {
+    simrv::xlen::PhysAddr dram_base{};
+    uint64_t dram_size = 0;
+    uint32_t hart_count = 1;
+    uint64_t cpu_clock_hz = 0;
+    uint64_t timebase_hz = 0;
+    std::string cpu_isa;
+    std::string bootargs;
+    std::vector<FdtImportedDevice> devices;
+    std::vector<std::string> warnings;
+};
+
+/** Read the subset of a DTB that can seed a SimRV platform configuration. */
+auto read_fdt_platform(std::span<const uint8_t> blob)
+    -> std::expected<FdtPlatformDescription, std::string>;
+
+/** Reject CPU ISA extensions advertised by an FDT when they are disabled in the selected MISA. */
+auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
+    -> std::expected<void, std::string>;
+
+/** Patch a supplied flattened device tree to match the active SimRV RAM and hart count. */
+auto patch_fdt(std::span<const uint8_t> blob, simrv::xlen::PhysAddr dram_base, uint64_t dram_size,
+               uint32_t num_harts, FdtFramebufferInfo* out_fb = nullptr, uint64_t timebase_hz = 0,
+               uint64_t cpu_clock_hz = 0, std::vector<FdtCustomDevice>* out_devices = nullptr,
+               std::string_view bootargs = {}) -> std::expected<std::vector<uint8_t>, std::string>;
+
+}  // namespace simrv::util

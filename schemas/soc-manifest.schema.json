@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.dev/schemas/v3/soc-manifest.schema.json",
+  "title": "SimRV SoC Manifest",
+  "type": "object",
+  "required": ["schema_version", "manifest_version", "generator", "name", "cpu_model", "smp", "platform", "device_policy", "memory", "boot", "devices"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "manifest_version": { "const": "3.0" },
+    "generator": { "type": "string", "pattern": "^simrv [0-9]+\\.[0-9]+\\.[0-9]+" },
+    "name": { "type": "string" },
+    "cpu_model": { "type": "string" },
+    "smp": {
+      "type": "object",
+      "required": ["hart_count", "mode", "synchronization_quantum", "l3", "clusters"],
+      "properties": {
+        "hart_count": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "mode": { "enum": ["single-threaded", "multi-threaded"] },
+        "synchronization_quantum": { "type": "integer", "minimum": 1 },
+        "l3": { "$ref": "#/$defs/cache" },
+        "clusters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "harts", "l2"],
+            "properties": {
+              "id": { "type": "integer", "minimum": 0 },
+              "harts": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 15 } },
+              "l2": { "$ref": "#/$defs/cache" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "cpu": {
+      "type": "object",
+      "required": ["name", "xlen", "misa", "extensions", "cfu"],
+      "properties": {
+        "name": { "type": "string" },
+        "xlen": { "type": "integer", "minimum": 0 },
+        "misa": { "type": "string" },
+        "extensions": { "type": "array", "items": { "type": "string" } },
+        "cfu": {
+          "type": "object",
+          "required": ["enabled", "opcode", "default_latency", "rtl_module", "interface"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "opcode": { "type": "string" },
+            "default_latency": { "type": "integer", "minimum": 1 },
+            "rtl_module": { "type": "string" },
+            "interface": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "platform": { "enum": ["pcie", "mmio", "none"] },
+    "device_policy": { "enum": ["implicit", "explicit"] },
+    "pcie": {
+      "type": "object",
+      "required": ["ecam_base", "ecam_size", "mmio_base", "mmio_size", "first_bus", "last_bus"],
+      "properties": {
+        "ecam_base": { "type": "integer", "minimum": 0 },
+        "ecam_size": { "type": "integer", "minimum": 0 },
+        "mmio_base": { "type": "integer", "minimum": 0 },
+        "mmio_size": { "type": "integer", "minimum": 0 },
+        "first_bus": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "last_bus": { "type": "integer", "minimum": 0, "maximum": 255 }
+      },
+      "additionalProperties": false
+    },
+    "memory": {
+      "type": "object",
+      "required": ["dram_base", "dram_size"],
+      "properties": {
+        "dram_base": { "type": "integer", "minimum": 0 },
+        "dram_size": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "boot": {
+      "type": "object",
+      "required": ["reset_pc", "tohost"],
+      "properties": {
+        "reset_pc": { "type": "integer", "minimum": 0 },
+        "tohost": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name", "transport", "base", "size", "irq", "enabled"],
+        "properties": {
+          "kind": { "type": "string" },
+          "name": { "type": "string" },
+          "transport": { "enum": ["mmio", "pci"] },
+          "base": { "type": "integer", "minimum": 0 },
+          "size": { "type": "integer", "minimum": 0 },
+          "irq": { "type": "integer", "minimum": 0 },
+          "clock_hz": { "type": "integer", "minimum": 1 },
+          "pci_bdf": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "integer", "minimum": 0, "maximum": 255 },
+              { "type": "integer", "minimum": 0, "maximum": 31 },
+              { "type": "integer", "minimum": 0, "maximum": 7 }
+            ],
+            "items": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "pci_intx_source": { "type": "integer", "minimum": 1, "maximum": 31 },
+          "compatible": { "type": "string" },
+          "read_value": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "mac_address": { "type": "string", "pattern": "^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$" },
+          "regions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "base", "size"],
+              "properties": {
+                "name": { "type": "string" },
+                "base": { "type": "integer", "minimum": 0 },
+                "size": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "enabled": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "cache": {
+      "type": "object",
+      "required": ["enabled", "capacity_bytes", "associativity", "line_bytes", "hit_latency", "miss_latency"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "capacity_bytes": { "type": "integer", "minimum": 0 },
+        "associativity": { "type": "integer", "minimum": 1 },
+        "line_bytes": { "type": "integer", "minimum": 16 },
+        "hit_latency": { "type": "integer", "minimum": 1 },
+        "miss_latency": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

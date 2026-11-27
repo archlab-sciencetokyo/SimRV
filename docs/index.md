@@ -1,48 +1,61 @@
-# SimRV: Dual-Width Explainable RISC-V System Simulator
+<section class="simrv-hero" markdown>
 
-<p align="center">
-  <strong>A practical RISC-V simulator for running programs, inspecting architecture, and teaching computer systems.</strong>
-</p>
+<p class="simrv-eyebrow">RISC-V simulation, from instruction to system</p>
 
-<p align="center">
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs CI"/></a>
+# SimRV
+
+<p class="simrv-hero-copy">Explore RV32 and RV64 systems with fast architectural simulation, cycle-accurate pipelines, custom SoCs, and full-system Linux.</p>
+
+<div class="simrv-hero-actions">
+  <a class="md-button md-button--primary" href="user/install/">Get started</a>
+  <a class="md-button" href="architecture/overview/">Explore the architecture</a>
+</div>
+
+</section>
+
+<div class="simrv-badges" aria-label="Project status">
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/build-and-test.yml/badge.svg?branch=dev" alt="Build and Test"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
-</p>
+  <a href="architecture/compliance/"><img src="https://img.shields.io/badge/profile-RVA23%20Target-blue.svg" alt="Profile RVA23 Target"/></a>
+  <img src="https://img.shields.io/badge/ACT%20Suite-Passing-success.svg" alt="ACT Suite"/>
+</div>
 
 ---
 
 ## Key Highlights
 
-=== "Explainable Dual-Width Architecture"
-    SimRV provides compile-time fixed 32-bit and 64-bit simulator targets (**RV32GCBV** and **RV64GCBV**). It supports Base Integer (`I`/`E`), Multiply/Divide (`M`), Atomics (`A`), Single/Double Floating Point (`F`/`D`), Compressed (`C`), Bit Manipulation (`B`), and Vector 1.0 (`V`) extensions with Sv32/Sv39 virtual memory translation.
+=== "Full-System Linux SMP"
+    SimRV boots unmodified RISC-V Linux kernels and OpenSBI using a supplied Flattened Device Tree (FDT), patched for the configured RAM size and hart count. It features VirtIO block storage, 16550A UART, CLINT/ACLINT timers, PLIC/AIA interrupt controllers, and an Alpine/JWM graphical path with an idempotent Games menu.
 
-=== "Cycle-Accurate Pipeline Timing"
-    Features a cycle-accurate in-order pipeline execution kernel modeling instruction latency, data hazard stalls, forwarding paths, branch prediction (Bimodal, 2-level adaptive, RAS, and BTB), and multi-way L1 instruction and data cache hierarchies.
+=== "Cycle-Accurate Modeling"
+    Features inlined per-cycle transition kernels for **3-stage** and **5-stage** pipelines with an authoritative hardware register scoreboard (tracking INT, FP, and Vector dependencies), configurable branch predictors (Bimodal, GShare, Tournament), and multi-level L1/L2/L3 MESI directory cache coherence.
 
-=== "Interactive TUI Workbench"
-    A rich terminal user interface (TUI) providing live split-screen inspection of integer, floating-point, and vector register banks, pipeline slots, cache set tags, hazard indicators, instruction decoding explainers, memory viewers, and guest terminal PTY interaction.
+=== "Hardware RTL Parity"
+    Supports optional parity target plugins through a versioned C ABI, with editable platform models and trace comparison.
 
-=== "Full-System Linux Emulation"
-    Boots un-modified RISC-V Linux kernels with OpenSBI/BBL, featuring a 16550A UART serial console, VirtIO block storage, CLINT timer interrupts, and PLIC interrupt controller routing.
+=== "Interactive TUI & Education"
+    Interactive split-screen terminal monitor displaying live register files, pipeline stages, cache tags, hazard graphs, disassembly explainers, and an interactive Linux PTY console. Includes student guidance and instruction-level explanation.
 
 ---
 
 ## Quickstart
 
-Choose the shortest path for your goal:
-
-- **Install a release:** use the [installation guide](user/install.md), including the hello samples.
-- **Build from source:** follow the build steps below.
-- **Run a program:** start with the [CLI and TUI guide](user/index.md).
-- **Study the machine:** read the [architecture overview](architecture/overview.md).
+Download the portable archive or native package bundle from
+[GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases), then follow the
+[installation guide](user/install.md). Build from source when developing SimRV itself.
 
 ### 1. Build from Source
 
-SimRV supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
-distribution; native Windows builds are not currently supported.
+Linux release archives target x86-64 and AArch64, including 64-bit Raspberry Pi OS. Native macOS
+source builds are smoke-tested on macOS 26 for Apple silicon and Intel, but macOS packages are not
+published yet. VirtIO-FS directory sharing remains Linux-only. User-mode networking uses libslirp
+on Linux and macOS. SimRV relies on POSIX terminal I/O, file-descriptor, polling, and process APIs
+that Windows does not provide natively, so a native Windows port would require substantial rework.
+WSL2 is the practical compatibility option: it runs a real Linux kernel and userland and is readily
+available on Windows.
 
-SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3.25+**, and **Ninja**.
+SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3.31+**, and **Ninja**.
 
 === "RV64 Target (Default)"
     ```bash
@@ -68,63 +81,58 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 
 === "Interactive TUI Mode (Default)"
     ```bash
-    # Launch interactive terminal workbench with a baremetal binary
-    make -C examples/hello XLEN=64
-    ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin
+    # Launch interactive terminal workbench
+    ./build/rv64-release/simrv -m examples/isa/bin/demo.elf
     ```
 
-=== "Headless Fast CLI Execution"
+=== "Headless CLI Execution"
     ```bash
-    # Fast functional execution without TUI
-    ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --cli
+    # Fast instruction simulation
+    ./build/rv64-release/simrv --cli -m examples/isa/bin/demo.elf -b
+
+    # Cycle-accurate simulation with 5-stage pipeline
+    ./build/rv64-release/simrv --cli --mode cycle-accurate --pipeline 5stage -m examples/isa/bin/demo.elf
     ```
 
-=== "Cycle-Accurate Simulation"
+=== "Boot Linux"
     ```bash
-    # Run in cycle-accurate mode with step limit
-    ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --ca --cli -s 1000000
-    ```
-
-=== "Full-System Linux Boot"
-    ```bash
-    # Boot Linux kernel with root filesystem and devicetree
-    ./scripts/build-linux-image.sh --arch rv64
-    source linux-images/rv64/setup.sh
-    ./build/rv64-release/SimRV --os \
-      -m linux-images/rv64/fw_payload.bin \
-      -D linux-images/rv64/root.bin \
-      -f linux-images/rv64/devicetree.dtb
+    # Boot Linux with its supplied device tree
+    ./build/rv64-release/simrv --cli \
+      -m images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      --dtb images/rv64/alpine-gui/devicetree.dtb \
+      -D images/rv64/alpine-gui/rootfs.img \
+      -s 20000000
     ```
 
 ---
 
-## Documentation
+## Documentation Navigation
 
 <div class="grid cards" markdown>
 
-- :material-book-open-page-variant:{ .lg .middle } **[User Guide](user/index.md)**
+- :material-download:{ .lg .middle } **[Install SimRV](user/install.md)**
 
     ---
 
-    Quickstart, CLI flags, interactive TUI controls, hotkeys, and execution modes.
+    Pick a package, install SimRV, and run your first program.
 
-- :material-chip:{ .lg .middle } **[Architecture & Compliance](architecture/overview.md)**
-
-    ---
-
-    Core execution units, pipeline modeling, cache hierarchy, MMU, and [ISA compliance scope](architecture/compliance.md).
-
-- :material-memory:{ .lg .middle } **[Bare-Metal & Linux](user/baremetal.md)**
+- :material-linux:{ .lg .middle } **[Boot a Linux guest](user/linux.md)**
 
     ---
 
-    [Bare-metal development](user/baremetal.md), memory map, peripheral MMIO, and [booting full-system Linux](user/linux.md).
+    Buildroot and Alpine images, firmware handoff, root filesystems, and SMP boot.
 
-- :material-code-braces:{ .lg .middle } **[Development & Verification](development/contributing.md)**
+- :material-memory:{ .lg .middle } **[Extend a CPU or SoC](hardware/extending-platforms.md)**
 
     ---
 
-    Contributing standards and CTest gate suites for simulator development.
+    Configure CPU presets, add MMIO devices, or map custom hardware ranges.
+
+- :material-chart-timeline-variant:{ .lg .middle } **[Validate a model](hardware/rtl_parity.md)**
+
+    ---
+
+    Compare architectural or cycle behavior, then tune latency and predictor settings.
 
 </div>
 
@@ -132,14 +140,6 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 
 ## Citation
 
-If you use SimRV in your academic research, please cite:
-
-```bibtex
-@software{simrv,
-  title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
-  author = {{SimRV Contributors}},
-  url = {https://github.com/archlab-sciencetokyo/SimRV},
-  version = {2.0.4},
-  year = {2026}
-}
-```
+If you use SimRV in academic work, use GitHub’s **Cite this repository** option to generate a
+citation from [`CITATION.cff`](https://github.com/archlab-sciencetokyo/SimRV/blob/main/CITATION.cff).
+Cite the exact release tag used for your work so readers can identify the version.

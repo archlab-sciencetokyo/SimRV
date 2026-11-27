@@ -6,140 +6,102 @@ Bit-Manipulation `Zb*`, Crypto `K`) into the SimRV architecture.
 The simulator uses a decode-and-dispatch pipeline model, so new extensions follow a
 linear integration path through define → decode → execute → state → TUI.
 
----
+Extension-family policy is kept in canonical modules: `isa/Zb.hpp`/`Zb.cpp` for bit manipulation,
+`isa/Zk.hpp`/`Zk.cpp` for scalar cryptography, and `execute/ExecuteUnitZb.cpp` for Zb execution.
+The central decoder remains the dispatcher; extension-specific classification should live in the
+corresponding ISA module.
 
-## 1. Register the Extension and Opcodes
+## Preset-level CFU and crypto declarations
 
-All core ISA definitions and shared constants live in
-`include/simrv/Define.hpp`.
+CPU presets can describe integration requirements before the RTL implementation is connected.
+This keeps the simulator, RTL wrapper generator, and software build using one source of truth:
 
-1. **Extension Bit:** Add your extension to the `IsaExtension` enum
-   (e.g., `V = 21` for Vector).
+```ini
+[isa]
+extensions = "zkn,zkr,zkt"
 
-2. **`misa` Profiles:** Ensure the extension bit is included in the appropriate
-   `misa_profile_bits()` entries if it belongs to a standard profile.
+[cfu]
+enabled = true
+opcode = "custom-0"
+default_latency = 1
+rtl_module = "my_cfu"
+interface = "rs1-rs2-rd"
+```
 
-3. **Opcodes and Funct fields:**
-   - Add new major opcodes to the `Opcode` enum.
-   - Add sub-operation discriminants to `Funct3`, `Funct7`, or create a dedicated
-     enum (e.g., `Funct6Vector`) for dense sub-encoding spaces.
+`zk` is accepted as shorthand for `zkn,zkr,zkt`. These are multi-letter extensions and are
+reported separately from the canonical `isa_preset`; they do not consume individual MISA bits.
+The current implementation executes the available `Zbkb`/`Zbkc` building blocks (`pack*` and
+`clmul*`) through the existing integer B unit when `zkn` is enabled. AES/SHA instructions and
+the `seed` CSR are added incrementally.
 
-4. **Operation ID (Profiling and Instruction Mix):**
-   - Add every new instruction to the `OperationId` enum.
-   - Define range sentinels at the bottom of the enum
-     (e.g., `kOpRangeRv32vBegin` / `kOpRangeRv32vEnd`) so that `Tracer` and
-     instruction-mix stats can bucket your extension correctly.
+CFUs use the existing `custom-0` execution path. A simulator plugin can be supplied with
+`--cfu-plugin`; the preset's `default_latency` controls the built-in CFU model and
+`rtl_module`/`interface` provide the information needed by an HDL wrapper or hand-written RTL.
+CFU/plugin latency values count total cycles including the issue cycle; pipeline `*_latency`
+settings instead count additional stall cycles after issue.
+The current decoder intentionally reserves the complete `custom-0` opcode for the configured CFU.
 
-5. **Requirements Check:** Update `required_extension_for_instruction()` so the
-   core raises `IllegalInstruction` when the extension is disabled in `misa`.
+### Compiling and Loading a Dynamic CFU Plugin
 
----
+CFU plugins interface with SimRV via a lightweight C ABI defined in `simrv/execute/CfuUnit.hpp`.
+To build a custom accelerator shared library:
 
-## 2. Decode the Instruction
+```c
+// my_cfu.c
+#include <stdint.h>
 
-Instruction decoding logic lives in:
-- `include/simrv/pipeline/Decoder.hpp` — field extraction helpers
-- `src/pipeline/Decoder.cpp` — master decode switch
+struct SimRvCfuPlugin {
+    uint32_t (*execute)(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
+                        uint32_t* latency_cycles);
+    void (*reset)(void);
+};
 
-Steps:
+static uint32_t my_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
+                           uint32_t* latency_cycles) {
+    if (latency_cycles) {
+        // Report execution latency in cycles (total cycles, including issue)
+        *latency_cycles = (funct3 == 1) ? 3 : 1;
+    }
+    // Custom arithmetic / bitwise accelerator operation
+    return (src1 ^ src2) + funct7;
+}
 
-1. **Decoder Helpers:** If the extension introduces new instruction formats
-   (e.g., Vector `vtype`, `vm` mask fields), add extraction methods to the
-   `Decoder` class.
+static void my_reset(void) {}
 
-2. **Operation Identification:** Update the `simrv::pipeline::decoder()` function.
-   This is the master lookup using `switch/case` over `Opcode` and `Funct3`/`Funct7`
-   to map raw instruction bits to your new `OperationId` values.
+static const struct SimRvCfuPlugin kPlugin = {
+    .execute = my_execute,
+    .reset = my_reset,
+};
 
-3. **Compressed (RVC) variants:** If your extension includes 16-bit forms, handle
-   them in the decompression path before the main decode switch.
+const struct SimRvCfuPlugin* simrv_cfu_init(void) {
+    return &kPlugin;
+}
+```
 
----
+Compile the plugin into a position-independent shared object (`.so`):
 
-## 3. Implement Execution Logic
+```bash
+# Using GCC
+gcc -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
 
-Execution routing happens in the Execute stage:
-- `src/execute/ExecuteUnit.cpp` — routing hub
-- `src/execute/ExecuteUnitInt.cpp` — integer ops
-- `src/execute/ExecuteUnitFloat.cpp` — FP ops
+# Using Clang
+clang -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
+```
 
-Steps:
+Run SimRV with the compiled accelerator plugin:
 
-1. **Routing:** Inside the execute dispatch, add a case for your `OperationId` range
-   or individual operations, delegating to a new execute unit if warranted.
+```bash
+simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=balanced target_program.elf
+```
 
-2. **Execution Context:**
-   - Fetch operands from `PipelineContext` (populated during the ID stage).
-   - For non-standard state (e.g., vector registers), route to a new dedicated unit
-     (e.g., `VectorUnit::execute()`).
+### Dual Extension Architecture: CFU vs. External Device Plugins
 
-3. **Writeback:** Store results back into `PipelineContext` writeback fields so
-   `CPU::writeback_registers()` can commit them to architectural state during WB stage.
+SimRV follows a unified plugin philosophy across both execution pipeline and SoC bus domains:
 
----
+| Extension Type | CLI Flag | Target Subsystem | C ABI Entry Point | C Descriptor Struct | Primary Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **CFU Plugin** | `--cfu-plugin=<lib.so>` | Execute Stage (`custom-0`) | `simrv_cfu_init` | `SimRvCfuPlugin` | Tightly-coupled instruction accelerators (SIMD, Galois field, crypto, TPU ALU) |
+| **Device Plugin** | `--plugin <name>[=args]` | TileLink Interconnect / Memory | `simrv_device_plugin_init` | `SimRvExternalDevice` | Loosely-coupled peripherals (MMC, Ethernet, reset controller, FPGA MMIO) |
 
-## 4. Add Architectural State (Registers / CSRs)
+Both plugin interfaces use stable, versioned C ABIs loaded at runtime without modifying or rebuilding the core simulator. For complete documentation on authoring and auto-discovering memory-mapped external device plugins, see [Extending Platforms: Dynamic External Device Plugins](extending-platforms.md#dynamic-external-device-plugins-c-abi).
 
-If the extension requires new architectural state (e.g., 32 vector registers of
-variable length):
-
-1. **Types:** Define new register identifiers and associated types in
-   `include/simrv/xlen/Types.hpp`.
-
-2. **State Storage:** Add state arrays or structs to `ArchState` inside
-   `include/simrv/core/Cpu.hpp` (embedded in `CPU`
-   via `state_`).
-
-3. **Control and Status Registers (CSRs):**
-   - Add new CSR addresses to the `Csr` enum in `Define.hpp`.
-   - Implement read/write behavior, access control, and illegal-instruction guards in
-     `src/core/CsrFile.cpp`.
-
----
-
-## 5. Instruction Explainer Integration
-
-SimRV's interactive educational explainer (`InstructionExplainer`) shows per-instruction
-descriptions in the TUI EXPLAIN pane and via `--explain-inst` CLI. Ensure new instructions
-appear correctly:
-
-1. **Mnemonic and Assembly Rep:** Add entries to `InstructionExplainer::get_mnemonic()`
-   and `get_assembly_repr()` in
-   `src/util/InstructionExplainer.cpp`.
-
-2. **Description:** Add a short educational description to `get_description()`.
-   Include the ISA extension name in the description so users can identify which
-   extension an instruction belongs to.
-
-3. **Format:** Set the correct `InstructionFormat` (R, I, S, B, U, J, R4, CR, CI,
-   CSS, CIW, CL, CS, CB, CJ) returned by `get_format()`.
-
----
-
-## 6. TUI and Tracer Integration
-
-To maintain full observability:
-
-1. **Tracer:** Ensure `OPERATION_NAME` strings are populated for all new `OperationId`
-   values so instruction-mix output and trace files work correctly.
-
-2. **TUI Register & Subsystem Panes:** The TUI is split into modular components under `src/tui/panels/`:
-   - If you add new architectural state (e.g., vector registers), update
-     `src/tui/panels/LeftPaneRegs.cpp` or create a dedicated panel view. Add a new view type in
-     `include/simrv/tui/panels/LeftPane.hpp` and wire it into the pane cycler.
-   - Use the centralized theme helpers from `TuiTheme.hpp` — never hardcode raw ANSI escape sequences.
-
----
-
-## 7. Testing and Validation
-
-1. **ISA Tests:** Set `RISCV_TESTS_DIR=/path/to/riscv-tests` at CMake configuration time. ISA tests and lockstep checks will automatically register matching targets.
-
-2. **Vector Tests:** For vector extensions, set `SIMRV_VECTOR_TESTS_DIR=/path/to/riscv-vector-tests` or `--vector-tests-dir`.
-
-3. **Gate Suite:** Run the CTest gate suite to validate regression coverage across both architectures:
-
-   ```bash
-   ctest --test-dir build/rv64-release --output-on-failure -L gate
-   ctest --test-dir build/rv32-release --output-on-failure -L gate
-   ```

@@ -1,59 +1,192 @@
-# Terminal UI architecture
+# Interactive TUI Workbench
 
-The TUI is divided into four layers:
+SimRV features an interactive split-screen Terminal User Interface (TUI) workbench designed for computer architecture research, hardware verification, and education. It provides real-time visibility into register files, pipeline stages, memory hierarchies, and virtual peripherals alongside a live guest serial console.
 
-1. `TuiInputRouter.hpp` classifies each input byte using only modal, pause, and terminal-focus state.
-2. `Tui.cpp` performs the selected action and owns terminal lifecycle and rendering orchestration.
-3. Panels and modals render domain-specific state without reading terminal input directly.
-4. `VirtualTerminal.hpp` parses guest ANSI/UTF-8 output into a bounded screen and scrollback model.
+---
 
-## Input and focus
+## 1. Quick Start
 
-When the guest terminal is focused and running, ordinary bytes—including carriage return and
-newline—are delivered directly to the platform UART (`ttyS0`). `Ctrl-P` pauses and `Ctrl-Q` quits.
-While paused, keys control TUI navigation. An active modal
-receives input before navigation, except global `Ctrl-R` reboot and `Ctrl-Q` quit. These controls
-remain available after guest shutdown and wake the stopped simulation loop for clean teardown or
-restart. The optional VirtIO console is a separate device and does not
-receive copies of UART keystrokes.
-
-The host terminal's carriage-return Enter byte is normalized to newline at the virtual-terminal
-boundary, matching PTY line input and shells that read the UART without enabling `ICRNL` themselves.
-
-Sessions start paused with TUI navigation owning the keyboard. Starting the simulator with `c`
-also attaches the guest terminal; pausing detaches it. There is no independent focus state, so a
-paused-but-attached or running-but-detached combination cannot occur. The terminal badge remains a
-clickable state indicator.
-
-Educational guidance is hidden by default. While paused, press `g` to toggle the compact guided
-inspection strip. It remains hidden in short terminals so architectural state keeps priority.
-
-Frame and modal geometry share one resize policy across split and full-pane layouts. Modal borders
-remain closed at the 40×10 minimum; when content cannot fit, the last visible row reports that the
-terminal should be resized instead of silently rendering an open or torn overlay.
-
-Clickable footer labels and the action portion of online help are generated from the canonical
-keybinding registry. Rendering and hit-testing use the same captured terminal dimensions, avoiding
-stale labels or mouse targets after a resize.
-
-Full-screen border composition is a pure render step shared by the live TUI and native tests.
-Representative 40×10, 80×24, 120×32, and 160×48 split/full layouts assert exact row width, row
-count, outer borders, and center-divider presence.
-
-Escape starts ANSI/control-sequence parsing in every state. A standalone Escape closes a modal when
-that modal permits cancellation.
-
-## Tests
-
-`tui-framework` is a native CTest covering input routing, CR/LF, cursor movement, SGR attributes,
-cursor visibility, scrollback, selection, resize/reset behavior, UTF-8 cells, themes, and keybinding
-registry integrity. It is part of the `gate`, `regress`, and `tui` labels and runs under sanitizer
-configurations.
-
-`linux-boot-pty` is the end-to-end test for Linux boot and TUI/PTY/UART interaction. It runs the TUI
-under a pseudo-terminal, waits for getty, sends Enter, and verifies a command executed by the guest
-shell. Run the focused tests with:
+The TUI is the default interface when running `simrv` without the `--cli` flag:
 
 ```bash
-ctest --test-dir build/rv64-release --output-on-failure -R 'tui-framework|linux-boot-pty'
+# Launch interactive TUI workbench with a guest binary
+simrv -m examples/isa/bin/demo.elf
+
+# Launch in cycle-accurate mode with a 5-stage pipeline
+simrv --ca --pipeline 5stage -m examples/isa/bin/demo.elf
+
+# Boot Linux interactively with graphical/serial console
+simrv --os -m images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      -D images/rv64/alpine-gui/rootfs.img
 ```
+
+---
+
+## 2. Workbench Layout
+
+The workbench layout dynamically adapts to your terminal dimensions (minimum 80×24, recommended 120×36 or larger):
+
+```text
+┌─ SimRV 3.0 ─────────────────────────────────────────── [Hart 0: RUNNING] ─┐
+│ [Regs] [Pipeline] [Cache] [TLB] [Hazards] [Explainer] │ Guest Console PTY │
+│                                                      │                    │
+│ PC: 0x80000000   ra: 0x00000000   sp: 0x80010000     │ Linux version 7.2  │
+│ IF: [0x80000020] addi a0, a0, 1                      │ simrv login:       │
+│ ID: [0x8000001c] lw   a1, 0(sp)                      │                    │
+│ EX: [0x80000018] mul  a2, a1, a0                     │                    │
+│ MEM:[0x80000014] sw   s0, 4(sp)                      │                    │
+│ WB: [0x80000010] addi sp, sp, -16                    │                    │
+├──────────────────────────────────────────────────────┴────────────────────┤
+│ [F1:Help] [F2:Load] [F5:Run] [F6:Step] [F8:Break] [Alt-M:MISA] [F10:Quit] │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+The interface is structured into three primary sections:
+
+1. **Header & Status Bar**: Displays current hart ID, machine state (`RUNNING`, `PAUSED`, `STOPPED`), simulated clock cycles, retired instruction count, CPI/IPC, and simulation speed (MIPS).
+2. **Left Subsystem Inspector**: Tabbed multi-view panel inspecting hardware state:
+   - **`Regs`**: Live values of integer (`x0`–`x31`), floating-point (`f0`–`f31`), and vector registers (`v0`–`v31`).
+   - **`Pipeline`**: In-flight pipeline slots across `IF`, `ID`, `EX`, `MEM`, and `WB` stages with data hazard stalls and branch mispredict bubbles.
+   - **`Cache`**: Set-associative visualizer for L1 ICache, L1 DCache, L2, and L3 caches showing line tags, hit/miss rates, and MESI coherence states (`[M]`, `[E]`, `[S]`, `[I]`).
+   - **`TLB`**: Page translation visualizer displaying virtual-to-physical address mappings, ASIDs, and page table walk states.
+   - **`Hazards`**: Dependency hazard graph tracking RAW, WAR, and WAW scoreboard interlocks.
+   - **`Explainer`**: Architectural decoder breaking down current instruction opcode, register operands, sign-extended split immediates, and privilege permissions.
+   - **`Memory & Stack`**: Hex memory dump and stack frame unwind view.
+3. **Right Guest Terminal**: Interactive virtual terminal connected directly to the guest platform's 16550A UART (`ttyS0`), VirtIO console, or Sixel graphical framebuffer.
+
+Guest framebuffer display is separate from the host terminal. SimRV prefers the Kitty graphics
+protocol when the terminal answers its capability query, then falls back to SIXEL when detected.
+The **Guest Display** tool appears in the tool picker only when one of those protocols is
+available. A display panel already saved in a layout shows a text notice if neither is detected.
+Terminal graphics support varies by emulator on every host OS, including macOS; the rest of the TUI
+remains available without it.
+
+### Slow execution mode
+
+At configured execution frequencies of 60 Hz or slower, visible pipeline and detailed register,
+memory, bus, and predictor views capture per-instruction state. At higher frequencies, only the
+fast-changing detail group in those panels is replaced with a running indicator; sampled performance
+counters remain visible and continue updating. Console, display, trace, and log panels stay available
+while running. Paused inspection and active trace capture retain detailed state at every speed.
+
+---
+
+## 3. Keyboard Navigation & Shortcuts
+
+The TUI provides responsive hotkeys for simulation control and state inspection:
+
+### Simulation Control
+
+| Key | Action | Description |
+| :--- | :--- | :--- |
+| **`Ctrl-P`** / **`F5`** / **`C`** | Run / Pause | Toggle between continuous execution and paused inspection. |
+| **`S`** / **`F6`** / **`Space`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
+| **`Ctrl-R`** | Reboot | Reset architectural state, reload images, and restart simulation. |
+| **`Ctrl-Q`** / **`F10`** / **`Q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
+| **`F`** | Set Frequency | Set the requested simulation frequency. |
+| **`V`** | Toggle Precision | Switch between IA and CA execution modes. |
+
+### Navigation & Focus
+
+| Key | Action | Description |
+| :--- | :--- | :--- |
+| **`Tab`** / **`Shift-Tab`** | Change Focus | Move between workbench columns. |
+| **`F3`** | Cycle Register Pages | Cycle the tabs in the Registers group. |
+| **`F11`** | Cycle Tool Pages | Cycle the tabs in the Tools group. |
+| **`Ctrl-W`** | Choose Column View | Open the tool picker for the focused workbench column. |
+| **`F4`** / **`Alt-1`**–**`Alt-4`** | Layout Presets | Open or directly select a workbench layout preset. |
+| **`[`** / **`]`** | Resize Split | Adjust the relative width between inspector and console columns. |
+| **`Up`** / **`Down`** | Scroll | Scroll active panel line by line. |
+| **`PageUp`** / **`PageDown`** | Page Scroll | Scroll active panel by page. |
+| **`Home`** / **`End`** | Jump Boundary | Jump to the top or bottom of the active panel. |
+
+### File & Search Operations
+
+| Key | Action | Description |
+| :--- | :--- | :--- |
+| **`O`** | Load | Open the binary, disk, or CPU model workflow. |
+| **`Ctrl-O`** (in a load modal) | Browse | Open the file picker for the active load workflow. |
+| **`F2`** / **`,`** | Settings | Open simulator settings. |
+| **`T`** | Cycle Theme | Cycle Modern Unicode, Classic ANSI, and Sakura Pastel themes. |
+| **`Ctrl-F`** / **`/`** | Search Console | Search UART terminal history (available when paused). |
+| **`n`** / **`N`** | Next / Prev Match | Move to the next or previous search match in console scrollback. |
+| **`Esc`** | Cancel / Close | Close active modal dialog or cancel active search query. |
+| **`F1`** / **`H`** | Help | Open the keyboard shortcut reference. |
+| **`F9`** / **`?`** | Glossary | Open the architectural glossary. |
+
+---
+
+### Panel Density
+
+The Settings modal includes **Panel Density** with three choices:
+
+- **Auto** uses compact presentation when a panel is narrower than 60 columns or shorter than 24 rows. Each workbench panel is evaluated independently.
+- **Compact** uses abbreviated labels, tighter spacing, and reflowed content wherever space allows.
+- **Comfortable** keeps the fuller labels and spacing wherever the available panel size allows.
+
+Density changes presentation only. Values remain available in compact panels by scrolling, and the guest console text is not rewritten. The choice is saved with the other TUI preferences; preference files created before this setting default to Auto.
+
+The same **General / UI** tab also contains **Theme** and **High Contrast Colors**. These three
+presentation choices are saved when you apply Settings; **T** remains a shortcut for cycling the
+theme. Machine settings such as hart count, memory size, and platform devices are applied through
+machine reconfiguration and may require a restart.
+
+The **Settings** modal groups controls into **General / UI**, **MISA Extensions**, and
+**Microarchitecture**. General / UI includes execution precision and presentation preferences;
+MISA controls which guest ISA extensions are enabled, while Microarchitecture configures the CPU
+model. Changes that require machine reconfiguration ask before restarting the guest.
+
+---
+
+## 4. Input Routing & Terminal Focus
+
+To avoid dropping keystrokes or clashing between simulator commands and guest shell commands, SimRV enforces an intuitive, state-dependent input routing model:
+
+```mermaid
+flowchart TD
+    KEY[User keystroke] --> STATE{Simulator state}
+    STATE -->|Running| GUEST[Route to Guest UART / Console]
+    STATE -->|Paused| MODAL{Modal active?}
+    MODAL -->|Yes| DIALOG[Route to active dialog frame]
+    MODAL -->|No| WORKBENCH[Route to TUI Inspector Navigation]
+    KEY -.->|Ctrl-P / Ctrl-R / Ctrl-Q| OVERRIDE[Global Override: Pause / Reboot / Quit]
+```
+
+- **Running State**: Keystrokes are delivered directly to the guest platform UART (`ttyS0`). Characters, arrow keys, and Control combinations (like `Ctrl-C`) go straight to the guest shell (e.g., BusyBox or Linux).
+- **Paused State**: Keystrokes route to the TUI workbench controls for inspection, stepping, pane switching, and modal navigation.
+- **Global Hotkeys**: `Ctrl-P` (pause/run), `Ctrl-R` (reboot), and `Ctrl-Q` (quit) always trigger simulator actions regardless of execution state.
+
+!!! tip "Pause before inspecting or scrolling"
+    To scroll through past console output or inspect registers, press `Ctrl-P` to pause execution. Once paused, `Tab` focuses the pane you wish to inspect. Press `Ctrl-P` again when ready to resume running.
+
+---
+
+## 5. Classroom Missions
+
+Classroom guidance is provided by an editable mission file. `--mission` enables the classroom flow
+and opens its first step; no separate class switch is needed:
+
+```bash
+simrv --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-calls.elf
+```
+
+- **Structured Missions (`--mission`)**: Load instructional steps and independent named checkpoints that focus relevant inspector panels. See the [Instructor Guide](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions).
+- **Mission Controls**: The modal keeps the student view focused on the lesson goal, current learning target, task, checkpoint state, and controls available in that state. Press `F12` to open or reopen Lesson Tasks / Guide. `F5` runs to the named checkpoint, even when its boundary follows a later lesson step; reaching it records progress without moving the lesson-step cursor. `F5` never advances a lesson step and is blocked once the checkpoint is reached. Press `Space` / `N` in Lesson Tasks / Guide to advance steps; an unreached checkpoint blocks only its own boundary, and the modal shows Next when advancing is allowed. `P` returns to the previous lesson step if you advance by mistake; it does not rewind guest execution. Use `R` to restart guest execution. `F6` single-steps a CPU instruction, and `Y` cycles hidden → hint → `why`. `Enter` / `Esc` hide Lesson Tasks and `z` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts; TAs can export checkpoint evidence with `X` from the paused workbench.
+- **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
+
+---
+
+## 6. Architecture & Customization (For Developers)
+
+The TUI subsystem is modularly partitioned under `include/simrv/tui/`:
+
+- **Framework Core (`tui/framework/`)**:
+  - `Layout.hpp` & `Terminal.hpp`: Cell-based geometry calculations, box borders, clipping, and multi-column split sizing.
+  - `Theme.hpp` & `Text.hpp`: Semantic ANSI palette mapping, word wrapping, padding, and cell-width measurement.
+  - `ScrollView.hpp`: Reusable 2D viewports with boundary clamping and scroll indicator calculations.
+  - `Modal.hpp` & `Components.hpp`: Reusable modal dialogue boxes, buttons, lists, and sliders.
+- **Input & Terminal (`tui/TuiInputRouter.hpp`, `tui/VirtualTerminal.hpp`)**:
+  - `TuiInputRouter.hpp`: State machine classifying input bytes based on modal, pause, and focus state.
+  - `VirtualTerminal.hpp`: ANSI/VT100 escape parser maintaining guest screen buffers and history.
+- **Panels & Telemetry (`tui/panels/`)**:
+  - Specialized view renderers (`InspectorPaneRegs.cpp`, `InspectorPanePipeline.cpp`, `InspectorPaneCache.cpp`, `InspectorPaneTlb.cpp`, `InspectorPaneHazard.cpp`).

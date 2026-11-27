@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+# Keep this quiet when the guest is launched without a network device.
+if ! ip link show eth0 >/dev/null 2>&1; then
+    exit 0
+fi
+ip link set eth0 up 2>/dev/null || true
+udhcpc -i eth0 -q -n -t 3 -T 1 >/dev/null 2>&1 || true
+echo '[NET] DHCP configuration requested for eth0' > /dev/ttyS0
