@@ -312,6 +312,33 @@ auto write_json(const BenchmarkReport& report, const std::string& path,
     out << "      \"max\": " << report.ipc_stats.max << ",\n";
     out << "      \"stddev\": " << report.ipc_stats.stddev << ",\n";
     out << "      \"cv_percent\": " << report.ipc_stats.cv_percent << "\n";
+    out << "    },\n";
+    out << "    \"cache\": {\n";
+    out << "      \"sample\": \"first_measured_run\",\n";
+    const uint64_t icache_accesses = report.icache_stats.hits + report.icache_stats.misses;
+    const double icache_miss_rate_pct =
+        icache_accesses == 0 ? 0.0
+                             : 100.0 * static_cast<double>(report.icache_stats.misses) /
+                                   static_cast<double>(icache_accesses);
+    const uint64_t dcache_accesses = report.dcache_stats.hits + report.dcache_stats.misses;
+    const double dcache_miss_rate_pct =
+        dcache_accesses == 0 ? 0.0
+                             : 100.0 * static_cast<double>(report.dcache_stats.misses) /
+                                   static_cast<double>(dcache_accesses);
+    out << "      \"icache\": {\n";
+    out << "        \"hits\": " << report.icache_stats.hits << ",\n";
+    out << "        \"misses\": " << report.icache_stats.misses << ",\n";
+    out << "        \"accesses\": " << icache_accesses << ",\n";
+    out << "        \"miss_rate_pct\": " << icache_miss_rate_pct << ",\n";
+    out << "        \"replacements\": " << report.icache_stats.replacements << "\n";
+    out << "      },\n";
+    out << "      \"dcache\": {\n";
+    out << "        \"hits\": " << report.dcache_stats.hits << ",\n";
+    out << "        \"misses\": " << report.dcache_stats.misses << ",\n";
+    out << "        \"accesses\": " << dcache_accesses << ",\n";
+    out << "        \"miss_rate_pct\": " << dcache_miss_rate_pct << ",\n";
+    out << "        \"replacements\": " << report.dcache_stats.replacements << "\n";
+    out << "      }\n";
     out << "    }\n";
     out << "  }";
 
